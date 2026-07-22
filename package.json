@@ -1,0 +1,283 @@
+{
+  "name": "unmess",
+  "displayName": "Unmess",
+  "description": "Run parallel AI coding agents (Claude Code, opencode) across git worktrees, each in its own tmux session.",
+  "version": "0.1.0",
+  "publisher": "unmess",
+  "license": "MIT",
+  "icon": "assets/icon.png",
+  "galleryBanner": {
+    "color": "#0a0a0a",
+    "theme": "dark"
+  },
+  "homepage": "https://github.com/ricardomoratomateos/unmess#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ricardomoratomateos/unmess.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ricardomoratomateos/unmess/issues"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "keywords": [
+    "git worktree",
+    "worktree",
+    "ai agent",
+    "claude code",
+    "opencode",
+    "tmux",
+    "parallel"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "unmess-container",
+          "title": "Unmess",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "unmess-container": [
+        {
+          "id": "unmess-sidebar",
+          "name": "",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "unmess.createWorktree",
+        "title": "Unmess: Create Worktree",
+        "icon": "$(add)"
+      },
+      {
+        "command": "unmess.deleteWorktree",
+        "title": "Unmess: Delete Worktree",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "unmess.launchAgent",
+        "title": "Unmess: Launch Agent",
+        "icon": "$(hubot)"
+      },
+      {
+        "command": "unmess.openTerminal",
+        "title": "Unmess: Open Terminal",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "unmess.initWorktree",
+        "title": "Unmess: Init Worktree",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "unmess.renameWorktree",
+        "title": "Unmess: Set Alias",
+        "icon": "$(tag)"
+      },
+      {
+        "command": "unmess.focusSession",
+        "title": "Unmess: Focus Session"
+      },
+      {
+        "command": "unmess.focusNextWorktree",
+        "title": "Unmess: Focus Next Worktree"
+      },
+      {
+        "command": "unmess.focusPrevWorktree",
+        "title": "Unmess: Focus Previous Worktree"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "unmess.focusNextWorktree",
+        "key": "ctrl+shift+]",
+        "mac": "cmd+shift+]"
+      },
+      {
+        "command": "unmess.focusPrevWorktree",
+        "key": "ctrl+shift+[",
+        "mac": "cmd+shift+["
+      }
+    ],
+    "menus": {
+      "view/title": [],
+      "view/item/context": [
+        {
+          "command": "unmess.initWorktree",
+          "when": "view == unmess-sidebar && viewItem == worktree",
+          "group": "inline"
+        },
+        {
+          "command": "unmess.launchAgent",
+          "when": "view == unmess-sidebar && (viewItem == worktree || viewItem == worktree-main)",
+          "group": "inline"
+        },
+        {
+          "command": "unmess.openTerminal",
+          "when": "view == unmess-sidebar && (viewItem == worktree || viewItem == worktree-main)",
+          "group": "inline"
+        },
+        {
+          "command": "unmess.deleteWorktree",
+          "when": "view == unmess-sidebar && viewItem == worktree",
+          "group": "inline"
+        },
+        {
+          "command": "unmess.renameWorktree",
+          "when": "view == unmess-sidebar && viewItem == worktree"
+        }
+      ]
+    },
+    "themes": [
+      {
+        "label": "Unmess Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/unmess-dark-color-theme.json"
+      }
+    ],
+    "configuration": {
+      "title": "Unmess",
+      "properties": {
+        "unmess.worktreesDirectory": {
+          "type": "string",
+          "default": ".worktrees",
+          "description": "Directory where worktrees are created (relative to the workspace root)"
+        },
+        "unmess.setupScript": {
+          "type": "string",
+          "default": "",
+          "description": "Script to run after creating a worktree"
+        },
+        "unmess.teardownScript": {
+          "type": "string",
+          "default": "",
+          "description": "Script to run before deleting a worktree"
+        },
+        "unmess.defaultProvider": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "opencode"
+          ],
+          "default": "claude",
+          "description": "Agent launched when no explicit provider is chosen"
+        },
+        "unmess.claudeCommand": {
+          "type": "string",
+          "default": "claude",
+          "description": "Command to launch Claude Code"
+        },
+        "unmess.opencodeCommand": {
+          "type": "string",
+          "default": "opencode",
+          "description": "Command to launch opencode"
+        },
+        "unmess.notifyOnAttention": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a native OS notification when an agent finishes or asks for permission while VS Code is in the background. The sidebar attention badge is always shown regardless."
+        },
+        "unmess.scopeSearchToActiveWorktree": {
+          "type": "boolean",
+          "default": true,
+          "description": "Hide non-active worktree folders from text search and Quick Open (writes search.exclude to each worktree's .vscode/settings.json)"
+        },
+        "unmess.docker": {
+          "type": "object",
+          "default": {
+            "composeFile": "docker-compose.yml",
+            "overrideFile": "docker-compose.worktree.yml",
+            "ports": [],
+            "basePort": 20000,
+            "portStride": 100
+          },
+          "properties": {
+            "composeFile": {
+              "type": "string",
+              "description": "Base compose file (relative to each worktree)"
+            },
+            "overrideFile": {
+              "type": "string",
+              "description": "Worktree-only override merged on top; use ${HTTP_PORT} etc. for the auto-generated ports"
+            },
+            "ports": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Env var names to auto-generate a per-worktree port for (e.g. HTTP_PORT). Configuring at least one enables the Docker start/stop button. XDEBUG_PORT reuses the worktree's Xdebug port."
+            },
+            "basePort": {
+              "type": "number",
+              "description": "First port of the docker range"
+            },
+            "portStride": {
+              "type": "number",
+              "description": "Size of the port block each worktree owns"
+            }
+          },
+          "description": "Per-worktree docker orchestration: compose files and auto-generated ports"
+        },
+        "unmess.xdebugBasePort": {
+          "type": "number",
+          "default": 9898,
+          "description": "Base port for Xdebug. Each worktree gets base+N"
+        },
+        "unmess.debugTemplate": {
+          "type": "object",
+          "default": {
+            "type": "php",
+            "request": "launch",
+            "name": "Unmess: Xdebug",
+            "port": "{{PORT}}",
+            "pathMappings": {}
+          },
+          "description": "launch.json template for each worktree. Use {{PORT}} and {{WORKTREE_PATH}} as placeholders"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "vsce package",
+    "lint": "eslint src --ext ts,tsx",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@vitest/coverage-v8": "^3.2.7",
+    "@vscode/vsce": "^2.0.0",
+    "esbuild": "^0.20.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^3.2.7"
+  },
+  "dependencies": {
+    "@vscode/codicons": "^0.0.45",
+    "diff2html": "^3.4.56",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  }
+}

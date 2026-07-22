@@ -1,0 +1,343 @@
+import React, { useState } from 'react';
+import { T } from '../tokens';
+import { StateDot, ThinkingDots } from './StateDot';
+import { send } from '../vscode';
+import type { SessionItem, WorktreeItem } from '../types';
+
+const STATE_LABEL: Record<string, string> = {
+  active:     'thinking',
+  waiting:    'waiting',
+  permission: 'needs attention',
+  idle:       'idle',
+  terminated: 'terminated',
+};
+
+const STATE_COLOR: Record<string, string> = {
+  active:     T.purple,
+  waiting:    T.green,
+  permission: T.amber,
+  idle:       T.textMuted,
+  terminated: T.red,
+};
+
+interface Props {
+  wt: WorktreeItem;
+  isSelected: boolean;
+  onSelect: () => void;
+  defaultProvider?: string;
+  dockerEnabled?: boolean;
+}
+
+export function WorktreeCard({ wt, isSelected, onSelect, defaultProvider, dockerEnabled }: Props) {
+  const [hovered, setHovered] = useState(false);
+  const hasPerm = wt.agent === 'permission';
+  const hasSession = wt.agent !== 'idle';
+  const dockerRunning = wt.docker.some((c) => c.state === 'running');
+  const deleting = wt.deleting;
+
+  const cardStyle: React.CSSProperties = {
+    borderRadius: 6,
+    border: `1px solid ${hasPerm ? `color-mix(in srgb, ${T.amber} 35%, transparent)` : isSelected ? T.borderStrong : 'transparent'}`,
+    padding: '9px 10px',
+    cursor: deleting ? 'default' : 'pointer',
+    background: hasPerm
+      ? `color-mix(in srgb, ${T.amber} 5%, transparent)`
+      : isSelected
+      ? T.surface3
+      : hovered
+      ? T.surface2
+      : 'transparent',
+    transition: 'background .12s, border-color .12s',
+    animation: 'unmess-fadein .15s ease',
+    // While tearing down: fade it out and block every interaction.
+    ...(deleting ? { opacity: 0.45, pointerEvents: 'none' } : {}),
+  };
+
+  const gitMeta: Array<{ text: string; color: string }> = [];
+  if (wt.git.hasChanges) gitMeta.push({ text: `~${wt.git.unstaged + wt.git.staged}`, color: T.green });
+  if (wt.git.untracked > 0) gitMeta.push({ text: `?${wt.git.untracked}`, color: T.amber });
+  if (wt.git.ahead > 0) gitMeta.push({ text: `↑${wt.git.ahead}`, color: T.green });
+  if (wt.git.behind > 0) gitMeta.push({ text: `↓${wt.git.behind}`, color: T.red });
+
+  return (
+    <div
+      style={cardStyle}
+      onClick={onSelect}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {/* Row 1: state dot + name + git meta */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 3 }}>
+        <StateDot state={wt.agent} />
+        <span style={{
+          fontSize: T.fontSize,
+          fontWeight: 500,
+          color: T.textStrong,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          flex: 1,
+          minWidth: 0,
+        }}>
+          {wt.alias ?? wt.branch}
+        </span>
+        {deleting ? (
+          <span style={{ fontFamily: T.mono, fontSize: 11, color: T.textMuted, flexShrink: 0 }}>
+            deleting…
+          </span>
+        ) : gitMeta.length > 0 && (
+          <span style={{ fontFamily: T.mono, fontSize: 11, display: 'flex', gap: 6, flexShrink: 0 }}>
+            {gitMeta.map((m) => (
+              <span key={m.text} style={{ color: m.color }}>{m.text}</span>
+            ))}
+          </span>
+        )}
+      </div>
+
+      {/* Sessions list */}
+      {wt.sessions.length > 0 && (
+        <div style={{ marginLeft: 14, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {wt.sessions.map((s) => (
+            <SessionRow key={`${s.kind}-${s.index}`} session={s} worktreeId={wt.id} onSelect={onSelect} />
+          ))}
+        </div>
+      )}
+
+      {/* Actions row — always visible */}
+      <div style={{
+        marginTop: 7, marginLeft: 14,
+        display: 'flex', alignItems: 'center', gap: 2,
+      }}>
+        {/* Split button: launch the default provider, chevron picks any other. */}
+        <IconActionBtn
+          title={hasSession ? `New ${defaultProvider ?? 'agent'} session` : `Launch ${defaultProvider ?? 'agent'}`}
+          onClick={(e) => { e.stopPropagation(); send({ type: 'launchAgent', worktreeId: wt.id }); }}
+        >
+          <DefaultProviderIcon provider={defaultProvider} />
+        </IconActionBtn>
+        <IconActionBtn
+          title="Launch another agent…"
+          narrow
+          onClick={(e) => { e.stopPropagation(); send({ type: 'pickAgent', worktreeId: wt.id }); }}
+        >
+          <i className="codicon codicon-chevron-down" style={{ fontSize: 12 }} />
+        </IconActionBtn>
+        <IconActionBtn
+          title="Open terminal"
+          onClick={(e) => { e.stopPropagation(); send({ type: 'openTerminal', worktreeId: wt.id }); }}
+        >
+          <i className="codicon codicon-terminal" />
+        </IconActionBtn>
+        <IconActionBtn
+          title="Review diff & comment"
+          onClick={(e) => { e.stopPropagation(); send({ type: 'openDiff', worktreeId: wt.id }); }}
+        >
+          <i className="codicon codicon-git-compare" />
+        </IconActionBtn>
+        {dockerEnabled && (
+          dockerRunning ? (
+            <IconActionBtn
+              title="Stop containers"
+              onClick={(e) => { e.stopPropagation(); send({ type: 'dockerDown', worktreeId: wt.id }); }}
+              danger
+            >
+              <i className="codicon codicon-debug-stop" />
+            </IconActionBtn>
+          ) : (
+            <IconActionBtn
+              title="Start containers"
+              onClick={(e) => { e.stopPropagation(); send({ type: 'dockerUp', worktreeId: wt.id }); }}
+            >
+              <i className="codicon codicon-play" />
+            </IconActionBtn>
+          )
+        )}
+        <IconActionBtn
+          title="Rename / set title"
+          onClick={(e) => { e.stopPropagation(); send({ type: 'renameWorktree', worktreeId: wt.id }); }}
+        >
+          <i className="codicon codicon-edit" />
+        </IconActionBtn>
+        <IconActionBtn
+          title="Delete worktree"
+          onClick={(e) => { e.stopPropagation(); send({ type: 'deleteWorktree', worktreeId: wt.id }); }}
+          danger
+        >
+          <i className="codicon codicon-trash" />
+        </IconActionBtn>
+      </div>
+
+    </div>
+  );
+}
+
+/** Claude's coral sunburst, approximated as an 8-ray asterisk. */
+function ClaudeSpark({ size = 10 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <path
+        d="M8 1.5v13M1.5 8h13M3.4 3.4l9.2 9.2M12.6 3.4l-9.2 9.2"
+        stroke="#D97757" strokeWidth="1.8" strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** opencode's terminal block: rounded square with a prompt chevron. */
+function OpenCodeMark({ size = 10 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <rect x="1.5" y="1.5" width="13" height="13" rx="3.5" stroke="#9DA5B4" strokeWidth="1.6" />
+      <path d="M5.2 5.8 8 8 5.2 10.2M9 10.5h2" stroke="#9DA5B4" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** Brand icon + tint per provider (agents launched pre-provider default to claude). */
+const PROVIDER_VISUAL: Record<string, { icon: (props: { size?: number }) => React.ReactElement; tint: string }> = {
+  claude:   { icon: ClaudeSpark,  tint: 'color-mix(in srgb, #D97757 16%, transparent)' },
+  opencode: { icon: OpenCodeMark, tint: 'color-mix(in srgb, #9DA5B4 14%, transparent)' },
+};
+
+/** Brand icon of the configured default provider, sized to match the codicons beside it. */
+function DefaultProviderIcon({ provider }: { provider?: string }) {
+  const visual = PROVIDER_VISUAL[provider ?? 'claude'] ?? PROVIDER_VISUAL.claude;
+  return <visual.icon size={13} />;
+}
+
+/** Warp-style avatar: brand icon in a tinted circle + state badge overlaid bottom-right. */
+function SessionAvatar({ session }: { session: SessionItem }) {
+  const isAgent = session.kind === 'agent';
+  const visual = PROVIDER_VISUAL[session.provider ?? 'claude'] ?? PROVIDER_VISUAL.claude;
+  const badgeColor = STATE_COLOR[session.state] ?? T.textMuted;
+  const badgeCls = session.state === 'active' ? 'u-dot-active' : session.state === 'permission' ? 'u-dot-perm' : '';
+  return (
+    <span style={{ position: 'relative', width: 18, height: 18, flexShrink: 0 }}>
+      <span style={{
+        width: 18, height: 18, borderRadius: '50%',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: isAgent ? visual.tint : T.surface2,
+      }}>
+        {isAgent
+          ? <visual.icon />
+          : <i className="codicon codicon-terminal" style={{ fontSize: 11, color: T.textDim }} />}
+      </span>
+      {isAgent && (
+        <span
+          className={badgeCls}
+          style={{
+            position: 'absolute', right: -1, bottom: -1,
+            width: 7, height: 7, borderRadius: '50%',
+            background: badgeColor,
+            boxShadow: `0 0 0 2px ${T.bg}`,
+          }}
+        />
+      )}
+    </span>
+  );
+}
+
+function SessionRow({ session, worktreeId, onSelect }: { session: SessionItem; worktreeId: string; onSelect: () => void }) {
+  const [hov, setHov] = useState(false);
+
+  const isAgent = session.kind === 'agent';
+  const dotColor = isAgent ? STATE_COLOR[session.state] : T.textMuted;
+
+  return (
+    <div
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect();
+        send({ type: 'focusSession', worktreeId, kind: session.kind, index: session.index });
+      }}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 7,
+        padding: '4px 6px', borderRadius: 4,
+        background: hov ? T.surface4 : 'transparent',
+        transition: 'background .1s',
+        cursor: 'pointer',
+      }}
+    >
+      <SessionAvatar session={session} />
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+        {/* Line 1: window name + state label / kill button */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{
+            fontFamily: T.mono, fontSize: 11,
+            color: hov ? T.textDim : T.textMuted,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            flex: 1, minWidth: 0,
+          }}>
+            {session.name}
+          </span>
+          {/* right slot: state label always visible; kill X fades in BESIDE it (fixed width, no reflow) */}
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+            {isAgent && (
+              <span style={{ fontFamily: T.mono, fontSize: 10, color: dotColor, whiteSpace: 'nowrap' }}>
+                {STATE_LABEL[session.state]}
+              </span>
+            )}
+            <button
+              title="Kill session"
+              onClick={(e) => { e.stopPropagation(); send({ type: 'killSession', worktreeId, index: session.index }); }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 12, height: 12, border: 'none', background: 'transparent', color: T.textMuted,
+                cursor: 'pointer', padding: 0,
+                opacity: hov ? 1 : 0, transition: 'opacity .1s', pointerEvents: hov ? 'auto' : 'none',
+              }}
+            >
+              <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor">
+                <path d="M1 1l6 6M7 1L1 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+            </button>
+          </span>
+        </div>
+        {/* Line 2: live task subtitle (from the agent's terminal title) */}
+        {session.title && (
+          <span
+            title={session.title}
+            style={{
+              fontSize: 11, color: T.textDim,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}
+          >
+            {session.title}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function IconActionBtn({ children, title, onClick, danger, narrow }: {
+  children: React.ReactNode;
+  title: string;
+  onClick: React.MouseEventHandler;
+  danger?: boolean;
+  /** Half-width — visually attaches to the button on its left (split button). */
+  narrow?: boolean;
+}) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button
+      title={title}
+      onClick={onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: narrow ? 13 : 22, height: 22, borderRadius: 4, border: 'none',
+        background: hov ? (danger ? T.redBg : T.surface4) : 'transparent',
+        color: danger ? (hov ? T.red : T.textMuted) : (hov ? T.textBody : T.textMuted),
+        transition: 'background .1s, color .1s',
+        cursor: 'pointer',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+

@@ -1,0 +1,457 @@
+import * as vscode from 'vscode';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import { AgentSessionState, Worktree } from '../types';
+import { TmuxManager } from './TmuxManager';
+import type { ISessionManager } from '../ports/ISessionManager';
+import type { ProviderId } from '../ports/IAgentProvider';
+import { isAgentWindowName, providerForWindowName } from '../ports/IAgentProvider';
+import type { ProviderFactory } from '../providers/ProviderFactory';
+import type { SessionItem } from '../webview/types';
+
+type WindowMeta = {
+  kind: 'agent' | 'shell';
+  /** Which agent runs in this window (only for kind 'agent'). */
+  provider?: ProviderId;
+  state: AgentSessionState;
+  name: string;
+  /** Live task title published by the agent through the terminal title (OSC → tmux pane_title). */
+  title?: string;
+};
+
+export class AgentSessionManager {
+  // worktreeId → (tmux window index → metadata)
+  private windows = new Map<string, Map<number, WindowMeta>>();
+  // worktreeId → the single VSCode "viewer" terminal attached to that tmux session
+  private viewers = new Map<string, vscode.Terminal>();
+
+  private stateChangeEmitter = new vscode.EventEmitter<{
+    worktreeId: string;
+    state: AgentSessionState;
+    /** tmux window that triggered the change (hook events only). */
+    windowIndex?: number;
+  }>();
+  private terminalsChangeEmitter = new vscode.EventEmitter<void>();
+  // worktreeId → pending debounced title refresh
+  private titleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  readonly onStateChange = this.stateChangeEmitter.event;
+  readonly onTerminalsChange = this.terminalsChangeEmitter.event;
+
+  // Persists the last-known aggregate state per worktree so a VSCode reload can
+  // restore "needs attention" / "waiting" instead of blindly defaulting to waiting.
+  private static readonly STATE_KEY = 'unmess.claudeStates';
+
+  constructor(
+    private providers: ProviderFactory,
+    private globalState: vscode.Memento,
+    private tmux: ISessionManager = new TmuxManager(),
+    private pathExists: (p: string) => boolean = (p) => fs.existsSync(p),
+    private hostname: string = os.hostname(),
+  ) {
+    vscode.window.onDidCloseTerminal(terminal => {
+      for (const [id, viewer] of this.viewers.entries()) {
+        if (viewer === terminal) { this.viewers.delete(id); break; }
+      }
+    });
+  }
+
+  // ── Private helpers ──────────────────────────────────────────────────────
+
+  /** Persist the per-window agent states for a worktree (survives reload). */
+  private persistState(worktreeId: string): void {
+    const stored = this.globalState.get<Record<string, unknown>>(AgentSessionManager.STATE_KEY, {});
+    const states: Record<number, AgentSessionState> = {};
+    for (const [idx, meta] of this.windows.get(worktreeId) ?? new Map<number, WindowMeta>()) {
+      if (meta.kind === 'agent') states[idx] = meta.state;
+    }
+    stored[worktreeId] = states;
+    this.globalState.update(AgentSessionManager.STATE_KEY, stored);
+  }
+
+  /**
+   * Read the persisted state for one window of a worktree. Pre-per-window
+   * versions stored a single aggregate string — apply it to every window.
+   */
+  private persistedState(worktreeId: string, windowIndex: number): AgentSessionState | undefined {
+    const entry = this.globalState.get<Record<string, unknown>>(AgentSessionManager.STATE_KEY, {})[worktreeId];
+    if (typeof entry === 'string') return entry as AgentSessionState;
+    return (entry as Record<number, AgentSessionState> | undefined)?.[windowIndex];
+  }
+
+  private label(worktree: Worktree): string {
+    return worktree.alias ?? worktree.branch;
+  }
+
+  private windowMap(worktreeId: string): Map<number, WindowMeta> {
+    if (!this.windows.has(worktreeId)) this.windows.set(worktreeId, new Map());
+    return this.windows.get(worktreeId)!;
+  }
+
+  /**
+   * Normalize a tmux pane title into a displayable session title. Claude Code
+   * prefixes its live status with spinner glyphs (braille dots, ✳, ·) — strip
+   * them, and drop titles that carry no information (empty, the window name,
+   * or the default hostname a fresh shell reports).
+   */
+  private cleanTitle(raw: string | undefined, windowName: string): string | undefined {
+    if (!raw) return undefined;
+    const title = raw.replace(/^[\s✳✻✶·•*⠀-⣿]+/u, '').trim();
+    if (!title) return undefined;
+    if (title === windowName) return undefined;
+    if (title === 'Claude Code') return undefined; // product default before a task summary exists
+    if (title.toLowerCase() === this.hostname.toLowerCase()) return undefined;
+    return title;
+  }
+
+  /** Re-read tmux pane titles for a worktree's tracked agent windows. */
+  async refreshTitles(worktreeId: string): Promise<void> {
+    const map = this.windows.get(worktreeId);
+    if (!map || map.size === 0) return;
+    const tmuxWindows = await this.tmux.listWindows(TmuxManager.sessionName(worktreeId));
+    let changed = false;
+    for (const w of tmuxWindows) {
+      const meta = map.get(w.index);
+      if (!meta || meta.kind !== 'agent') continue;
+      const title = this.cleanTitle(w.title, meta.name);
+      if (title !== meta.title) {
+        map.set(w.index, { ...meta, title });
+        changed = true;
+      }
+    }
+    if (changed) this.terminalsChangeEmitter.fire();
+  }
+
+  /**
+   * Debounced second look at the pane titles — Claude Code often rewrites the
+   * title (e.g. "Wants to run Bash: …") right AFTER the hook event arrives, so
+   * the immediate refresh in updateState can be one beat too early.
+   */
+  private scheduleTitleRefresh(worktreeId: string): void {
+    const pending = this.titleTimers.get(worktreeId);
+    if (pending) clearTimeout(pending);
+    this.titleTimers.set(worktreeId, setTimeout(() => {
+      this.titleTimers.delete(worktreeId);
+      this.refreshTitles(worktreeId).catch(() => {});
+    }, 800));
+  }
+
+  private aggregateState(worktreeId: string): AgentSessionState {
+    const states = [...(this.windows.get(worktreeId) ?? new Map()).values()]
+      .filter(w => w.kind === 'agent')
+      .map(w => w.state);
+    if (states.length === 0) return 'idle';
+    for (const p of ['permission', 'active', 'waiting', 'terminated', 'idle'] as AgentSessionState[]) {
+      if (states.includes(p)) return p;
+    }
+    return 'idle';
+  }
+
+  /**
+   * Returns the single VSCode terminal that is `tmux attach`-ed to the
+   * worktree's tmux session. Creates one if the previous one was closed.
+   * Assumes the tmux session already exists.
+   */
+  async getOrCreateViewer(worktree: Worktree, windowName?: string): Promise<vscode.Terminal> {
+    const existing = this.viewers.get(worktree.id);
+    if (existing && existing.exitStatus === undefined) return existing;
+
+    const sessionName = TmuxManager.sessionName(worktree.id);
+    const base = this.label(worktree);
+    const name = windowName ? `${base} — ${windowName}` : base;
+    // If the worktree directory is gone, launch WITHOUT a cwd so the terminal
+    // can still `tmux attach` to a running session instead of failing to launch
+    // with "Starting directory (cwd) does not exist".
+    const exists = this.pathExists(worktree.path);
+    console.log(`[unmess] open viewer id=${worktree.id} name="${name}" path=${worktree.path} exists=${exists}`);
+    const cwd = exists ? worktree.path : undefined;
+    if (!exists) {
+      console.warn(`[unmess] worktree directory missing, attaching viewer without cwd: ${worktree.path}`);
+    }
+    const terminal = vscode.window.createTerminal({
+      name,
+      cwd,
+      location: vscode.TerminalLocation.Editor,
+      shellPath: '/bin/sh',
+      // No `exec $SHELL` fallback — when tmux detaches the sh exits cleanly,
+      // which lets us dispose the terminal without the "terminate processes?" dialog.
+      shellArgs: ['-c', `tmux attach -t "${sessionName}"`],
+    });
+    this.viewers.set(worktree.id, terminal);
+    return terminal;
+  }
+
+  /** Reverse lookup: which worktree owns this viewer terminal. */
+  getWorktreeIdForTerminal(terminal: vscode.Terminal): string | undefined {
+    for (const [id, viewer] of this.viewers) {
+      if (viewer === terminal) return id;
+    }
+    return undefined;
+  }
+
+  // ── Public API ────────────────────────────────────────────────────────────
+
+  async launch(worktree: Worktree, opts?: { provider?: ProviderId; prompt?: string }): Promise<vscode.Terminal> {
+    const provider = opts?.provider ? this.providers.create(opts.provider) : this.providers.defaultProvider();
+    const sessionName = TmuxManager.sessionName(worktree.id);
+    console.log(`[unmess] launch id=${worktree.id} provider=${provider.id} path=${worktree.path} exists=${this.pathExists(worktree.path)}`);
+    await this.tmux.ensureSession(sessionName, worktree.path);
+
+    // Window is named after the provider id so reconnect() can restore ownership.
+    const windowIndex = await this.tmux.newWindow(sessionName, provider.id, worktree.path);
+    // UNMESS_WINDOW_INDEX lets hook events target THIS window's state instead
+    // of lighting up every agent window of the worktree.
+    // Respawn (not send-keys): typing the command into the shell flashes the
+    // env-var soup at the user until the agent clears the screen. The trailing
+    // exec keeps a shell in the window after the agent exits, like before.
+    await this.tmux.respawnWindow(
+      sessionName,
+      windowIndex,
+      `UNMESS_WINDOW_INDEX="${windowIndex}" ${provider.buildCommand(worktree.id, opts?.prompt)}; exec "\${SHELL:-/bin/sh}"`,
+    );
+
+    this.windowMap(worktree.id).set(windowIndex, { kind: 'agent', provider: provider.id, state: 'waiting', name: provider.id });
+
+    await this.tmux.selectWindow(sessionName, windowIndex);
+    const viewer = await this.getOrCreateViewer(worktree);
+    viewer.show();
+
+    this.persistState(worktree.id);
+    this.stateChangeEmitter.fire({ worktreeId: worktree.id, state: 'waiting' });
+    this.terminalsChangeEmitter.fire();
+    return viewer;
+  }
+
+  launchWithPrompt(worktree: Worktree, prompt: string): Promise<vscode.Terminal> {
+    return this.launch(worktree, { prompt });
+  }
+
+  /**
+   * Paste a prompt into a worktree's live agent window and bring it to the front.
+   * Picks a window that is ready for input (waiting/idle/permission) when one
+   * exists, else the first agent window. Returns false if the worktree has no
+   * agent window at all — the caller then decides to launch a fresh agent.
+   */
+  async sendPromptToAgent(worktree: Worktree, prompt: string): Promise<boolean> {
+    const map = this.windows.get(worktree.id);
+    if (!map) return false;
+    const agents = [...map.entries()].filter(([, m]) => m.kind === 'agent');
+    if (agents.length === 0) return false;
+
+    const ready = agents.find(([, m]) => m.state === 'waiting' || m.state === 'idle' || m.state === 'permission');
+    const [windowIndex] = ready ?? agents[0];
+
+    const sessionName = TmuxManager.sessionName(worktree.id);
+    await this.tmux.selectWindow(sessionName, windowIndex);
+    await this.tmux.paste(`${sessionName}:${windowIndex}`, prompt);
+
+    const viewer = await this.getOrCreateViewer(worktree).catch(() => undefined);
+    viewer?.show();
+    return true;
+  }
+
+  async openTerminal(worktree: Worktree): Promise<vscode.Terminal> {
+    const sessionName = TmuxManager.sessionName(worktree.id);
+    console.log(`[unmess] openTerminal id=${worktree.id} path=${worktree.path} exists=${this.pathExists(worktree.path)}`);
+    await this.tmux.ensureSession(sessionName, worktree.path);
+
+    const windowIndex = await this.tmux.newWindow(sessionName, 'shell', worktree.path);
+    this.windowMap(worktree.id).set(windowIndex, { kind: 'shell', state: 'idle', name: 'shell' });
+
+    await this.tmux.selectWindow(sessionName, windowIndex);
+    const viewer = await this.getOrCreateViewer(worktree);
+    viewer.show();
+
+    this.terminalsChangeEmitter.fire();
+    return viewer;
+  }
+
+  /** Switch the viewer terminal to a specific tmux window, updating the title. */
+  async focusWindow(worktree: Worktree, windowIndex: number): Promise<void> {
+    const sessionName = TmuxManager.sessionName(worktree.id);
+    await this.tmux.selectWindow(sessionName, windowIndex);
+
+    // Dispose old viewer so we recreate it with the new window's name in the title
+    const meta = this.windows.get(worktree.id)?.get(windowIndex);
+    const windowName = meta?.name;
+    const old = this.viewers.get(worktree.id);
+    if (old && old.exitStatus === undefined) {
+      this.viewers.delete(worktree.id);
+      old.dispose();
+    }
+
+    const viewer = await this.getOrCreateViewer(worktree, windowName);
+    viewer.show();
+  }
+
+  getState(worktreeId: string): AgentSessionState {
+    return this.aggregateState(worktreeId);
+  }
+
+  updateState(workspaceId: string, state: AgentSessionState, windowIndex?: number): void {
+    const map = this.windows.get(workspaceId);
+    if (!map) return;
+    if (windowIndex !== undefined) {
+      // Target exactly the window the hook came from. An untracked index means
+      // the window was just killed and this is its dying event (e.g. SessionEnd)
+      // — drop it, or it would repaint every other session in the worktree.
+      const meta = map.get(windowIndex);
+      if (!meta || meta.kind !== 'agent') return;
+      map.set(windowIndex, { ...meta, state });
+    } else {
+      // Agents launched before UNMESS_WINDOW_INDEX existed: no way to know the
+      // source window — apply to all agent windows (pre-per-session behavior).
+      for (const [idx, meta] of map.entries()) {
+        if (meta.kind === 'agent') map.set(idx, { ...meta, state });
+      }
+    }
+    this.persistState(workspaceId);
+    this.stateChangeEmitter.fire({ worktreeId: workspaceId, state: this.aggregateState(workspaceId), windowIndex });
+    // Hook events are the heartbeat of a session — piggyback title syncing on them.
+    this.refreshTitles(workspaceId).catch(() => {});
+    this.scheduleTitleRefresh(workspaceId);
+  }
+
+  getSessions(worktreeId: string): SessionItem[] {
+    const map = this.windows.get(worktreeId);
+    if (!map) return [];
+    return [...map.entries()].map(([index, meta]) => ({
+      name: meta.name,
+      kind: meta.kind,
+      provider: meta.provider,
+      state: meta.state,
+      title: meta.title,
+      index,
+    }));
+  }
+
+  getAgentCount(worktreeId: string): number {
+    return [...(this.windows.get(worktreeId) ?? new Map()).values()]
+      .filter(w => w.kind === 'agent').length;
+  }
+
+  getShellCount(worktreeId: string): number {
+    return [...(this.windows.get(worktreeId) ?? new Map()).values()]
+      .filter(w => w.kind === 'shell').length;
+  }
+
+  hasTerminals(worktreeId: string): boolean {
+    return (this.windows.get(worktreeId)?.size ?? 0) > 0;
+  }
+
+  getViewer(worktreeId: string): vscode.Terminal | undefined {
+    const v = this.viewers.get(worktreeId);
+    return v && v.exitStatus === undefined ? v : undefined;
+  }
+
+  /** Legacy compat — returns viewer terminal. */
+  getTerminal(worktreeId: string): vscode.Terminal | undefined {
+    return this.getViewer(worktreeId);
+  }
+
+  getPlainTerminal(worktreeId: string): vscode.Terminal | undefined {
+    return this.getViewer(worktreeId);
+  }
+
+  focus(worktreeId: string): void {
+    this.viewers.get(worktreeId)?.show();
+  }
+
+  async killWindow(worktreeId: string, windowIndex: number): Promise<void> {
+    const sessionName = TmuxManager.sessionName(worktreeId);
+    await this.tmux.killWindow(sessionName, windowIndex);
+    this.windows.get(worktreeId)?.delete(windowIndex);
+    this.persistState(worktreeId);
+    this.stateChangeEmitter.fire({ worktreeId, state: this.aggregateState(worktreeId) });
+    this.terminalsChangeEmitter.fire();
+  }
+
+  /**
+   * Detach all tmux clients from a worktree's session, then dispose the viewer.
+   * The tmux SESSION keeps running. The sh process exits cleanly after detach,
+   * so VSCode won't show the "terminate running processes?" dialog.
+   */
+  async closeViewer(worktreeId: string): Promise<void> {
+    const viewer = this.viewers.get(worktreeId);
+    if (!viewer || viewer.exitStatus !== undefined) return;
+    const sessionName = TmuxManager.sessionName(worktreeId);
+    await this.tmux.detachClients(sessionName);
+    // Wait for the sh process to exit (up to 400ms)
+    await new Promise<void>(resolve => {
+      const deadline = Date.now() + 400;
+      const poll = () => {
+        if (viewer.exitStatus !== undefined || Date.now() > deadline) resolve();
+        else setTimeout(poll, 30);
+      };
+      poll();
+    });
+    viewer.dispose();
+    this.viewers.delete(worktreeId);
+  }
+
+  async killWorktreeSession(worktreeId: string): Promise<void> {
+    const sessionName = TmuxManager.sessionName(worktreeId);
+    await this.tmux.killSession(sessionName);
+    this.windows.delete(worktreeId);
+    this.viewers.get(worktreeId)?.dispose();
+    this.viewers.delete(worktreeId);
+    this.persistState(worktreeId);
+    this.stateChangeEmitter.fire({ worktreeId, state: 'idle' });
+    this.terminalsChangeEmitter.fire();
+  }
+
+  terminateSession(worktreeId: string): void {
+    this.killWorktreeSession(worktreeId).catch(() => {});
+  }
+
+  /** Kept for extension.ts compat (setup/teardown scripts). No-op with tmux. */
+  register(_worktreeId: string, _terminal: vscode.Terminal): void {}
+
+  /** On extension reload, scan tmux sessions to restore tracked windows. */
+  async reconnect(worktrees: Worktree[]): Promise<void> {
+    for (const wt of worktrees) {
+      const sessionName = TmuxManager.sessionName(wt.id);
+      if (!(await this.tmux.hasSession(sessionName))) continue;
+
+      const tmuxWindows = await this.tmux.listWindows(sessionName);
+      const wm = this.windowMap(wt.id);
+      for (const w of tmuxWindows) {
+        // Skip the default session window (index 0, named after the shell)
+        if (w.index === 0 && w.name !== 'shell' && !isAgentWindowName(w.name)) continue;
+        const provider = providerForWindowName(w.name);
+        const kind: 'agent' | 'shell' = provider ? 'agent' : 'shell';
+        const title = kind === 'agent' ? this.cleanTitle(w.title, w.name) : undefined;
+        // Restore each window's own pre-reload state (e.g. "permission"),
+        // falling back to "waiting" when nothing was persisted for it.
+        const restoredState = kind === 'agent' ? (this.persistedState(wt.id, w.index) ?? 'waiting') : 'idle';
+        wm.set(w.index, { kind, provider, state: restoredState, name: w.name, title });
+        if (kind === 'agent') {
+          this.stateChangeEmitter.fire({ worktreeId: wt.id, state: restoredState });
+        }
+      }
+    }
+
+    // Claim any viewer terminals VSCode auto-restored after reload.
+    // Without this, closeViewer() can't find them and switching leaves phantom
+    // terminals open, then creates duplicates on the next getOrCreateViewer().
+    for (const terminal of vscode.window.terminals) {
+      if (terminal.exitStatus !== undefined) continue;
+      for (const wt of worktrees) {
+        if (this.viewers.has(wt.id)) continue;
+        if (terminal.name.startsWith(this.label(wt))) {
+          this.viewers.set(wt.id, terminal);
+          break;
+        }
+      }
+    }
+
+    this.terminalsChangeEmitter.fire();
+  }
+
+  dispose(): void {
+    for (const timer of this.titleTimers.values()) clearTimeout(timer);
+    this.titleTimers.clear();
+    this.stateChangeEmitter.dispose();
+    this.terminalsChangeEmitter.dispose();
+  }
+}

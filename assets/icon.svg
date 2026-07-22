@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#0a0a0a"/>
+  <rect x="8" y="8" width="48" height="48" rx="10" fill="#c8ff00"/>
+  <text x="32" y="44"
+        font-family="Geist, ui-sans-serif, system-ui"
+        font-size="34"
+        font-weight="600"
+        letter-spacing="-1.5"
+        text-anchor="middle"
+        fill="#0a0a0a">u</text>
+</svg>

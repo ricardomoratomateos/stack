@@ -1,0 +1,17 @@
+.vscode/**
+.github/**
+src/**
+test/**
+coverage/**
+design/**
+plans/**
+.claude/**
+node_modules/**
+.eslintrc.json
+tsconfig*.json
+vitest.config.ts
+esbuild.js
+package-lock.json
+*.vsix
+**/*.map
+**/.DS_Store

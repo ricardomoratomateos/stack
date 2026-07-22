@@ -1,0 +1,198 @@
+import React, { useCallback, useEffect, useReducer, useState } from 'react';
+import { SECTION_TITLE_STYLE, T } from './tokens';
+import { WorktreeCard } from './components/WorktreeCard';
+import { NewTaskModal } from './components/NewTaskModal';
+import { StatusPanel } from './components/StatusPanel';
+import { send } from './vscode';
+import type { ExtMessage, UnmessState, WorktreeItem } from './types';
+
+const EMPTY: UnmessState = { worktrees: [] };
+
+function reducer(_: UnmessState, msg: ExtMessage): UnmessState {
+  if (msg.type === 'state') return msg.payload;
+  return _;
+}
+
+export function App() {
+  const [state, dispatch] = useReducer(reducer, EMPTY);
+  const [loaded, setLoaded] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [newTask, setNewTask] = useState(false);
+
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      try {
+        dispatch(e.data as ExtMessage);
+        setLoaded(true);
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, []);
+
+
+  // When the extension tells us the active worktree, always follow it (reload / terminal focus)
+  useEffect(() => {
+    if (state.activeWorktreeId && state.worktrees.length > 0) {
+      setSelected(state.activeWorktreeId);
+    }
+  }, [state.activeWorktreeId, state.worktrees.length]);
+
+  // Fallback: select the first worktree only when nothing is selected yet
+  useEffect(() => {
+    if (!selected && state.worktrees.length > 0 && !state.activeWorktreeId) {
+      setSelected(state.worktrees[0].id);
+    }
+  }, [state.worktrees, selected, state.activeWorktreeId]);
+
+  const handleSelect = useCallback((id: string) => {
+    setSelected(id);
+    send({ type: 'selectWorktree', worktreeId: id });
+  }, []);
+
+  // Permission count for badge
+  const permCount = state.worktrees.filter(w => w.agent === 'permission').length;
+  const activeCount = state.worktrees.filter(w => w.agent === 'active').length;
+
+  const selectedWt: WorktreeItem | undefined = state.worktrees.find(w => w.id === selected);
+
+  return (
+    <div
+      style={{ display: 'flex', flexDirection: 'column', height: '100%', background: T.bg, position: 'relative' }}
+    >
+
+      {/* Top bar */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '8px 10px 6px',
+        borderBottom: `1px solid ${T.border}`,
+        flexShrink: 0,
+      }}>
+        <span style={{ ...SECTION_TITLE_STYLE, color: T.titleFg }}>
+          worktrees
+        </span>
+
+        {/* Live indicators */}
+        {activeCount > 0 && (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 3,
+            fontFamily: T.mono, fontSize: 10, color: T.purple,
+          }}>
+            <span className="u-dot-active" style={{ width: 5, height: 5, borderRadius: '50%', background: T.purple, display: 'inline-block' }} />
+            {activeCount}
+          </span>
+        )}
+        {permCount > 0 && (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 3,
+            fontFamily: T.mono, fontSize: 10, color: T.amber,
+          }}>
+            <span className="u-dot-perm" style={{ width: 5, height: 5, borderRadius: '50%', background: T.amber, display: 'inline-block' }} />
+            {permCount}
+          </span>
+        )}
+
+        <span style={{ flex: 1 }} />
+
+        {/* New task */}
+        <IconBtn title="New task" onClick={() => setNewTask(true)}>
+          <i className="codicon codicon-add" />
+        </IconBtn>
+      </div>
+
+      {/* Body */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          {/* Worktree list — scrollable, shrinks if status panel needs space */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px 12px', display: 'flex', flexDirection: 'column', gap: 2, minHeight: 0 }}>
+            {!loaded ? (
+              <LoadingState />
+            ) : state.worktrees.length === 0 ? (
+              <EmptyState onNew={() => setNewTask(true)} />
+            ) : (
+              state.worktrees.map(wt => (
+                <WorktreeCard
+                  key={wt.id}
+                  wt={wt}
+                  isSelected={selected === wt.id}
+                  onSelect={() => handleSelect(wt.id)}
+                  defaultProvider={state.defaultProvider}
+                  dockerEnabled={state.dockerEnabled}
+                />
+              ))
+            )}
+          </div>
+
+          {/* Status panel for selected worktree */}
+          {selectedWt && <StatusPanel wt={selectedWt} />}
+      </div>
+
+      {/* New task modal */}
+      {newTask && (
+        <NewTaskModal
+          branch={selectedWt?.branch}
+          onClose={() => setNewTask(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      flex: 1, gap: 5, padding: 24,
+    }}>
+      <span className="u-dot-1" style={{ width: 4, height: 4, borderRadius: '50%', background: T.textMuted, display: 'inline-block' }} />
+      <span className="u-dot-2" style={{ width: 4, height: 4, borderRadius: '50%', background: T.textMuted, display: 'inline-block' }} />
+      <span className="u-dot-3" style={{ width: 4, height: 4, borderRadius: '50%', background: T.textMuted, display: 'inline-block' }} />
+    </div>
+  );
+}
+
+function EmptyState({ onNew }: { onNew: () => void }) {
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      flex: 1, gap: 12, padding: 24, textAlign: 'center',
+    }}>
+      <span style={{ fontSize: T.fontSize, color: T.textDim }}>No worktrees yet</span>
+      <button
+        onClick={onNew}
+        style={{
+          padding: '6px 14px', borderRadius: 2, border: `1px solid ${T.border}`,
+          background: 'transparent', color: T.textDim, fontSize: T.fontSize,
+        }}
+      >
+        + New task
+      </button>
+    </div>
+  );
+}
+
+function IconBtn({ children, title, onClick, active }: {
+  children: React.ReactNode;
+  title: string;
+  onClick: () => void;
+  active?: boolean;
+}) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button
+      title={title}
+      onClick={onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 22, height: 22, borderRadius: 4, border: 'none',
+        background: active ? T.accentBg : hov ? T.surface3 : 'transparent',
+        color: active ? T.accent : hov ? T.textBody : T.textDim,
+        transition: 'background .1s, color .1s',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
