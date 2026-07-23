@@ -58,7 +58,7 @@ export class TmuxManager implements ISessionManager {
     await this.run(`tmux send-keys -t "${target}" '${escaped}' Enter`);
   }
 
-  async paste(target: string, text: string): Promise<void> {
+  async paste(target: string, text: string, submit = true): Promise<void> {
     // Route the text through a tmux buffer loaded from a temp file: this avoids
     // shell-escaping a large multi-line payload, and paste-buffer -p wraps it in
     // bracketed-paste markers so the receiving app (e.g. Claude Code) treats the
@@ -69,8 +69,9 @@ export class TmuxManager implements ISessionManager {
     try {
       await this.run(`tmux load-buffer -b "${bufferName}" "${tmpFile}"`);
       await this.run(`tmux paste-buffer -d -p -b "${bufferName}" -t "${target}"`);
-      // Submit once, after the paste has landed as a single block.
-      await this.run(`tmux send-keys -t "${target}" Enter`);
+      // Submit once, after the paste has landed — unless the caller wants to
+      // leave the text unsent (e.g. an image path the user still adds a prompt to).
+      if (submit) await this.run(`tmux send-keys -t "${target}" Enter`);
     } finally {
       await fs.promises.unlink(tmpFile).catch(() => {});
     }

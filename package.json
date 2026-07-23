@@ -99,6 +99,11 @@
       {
         "command": "unmess.focusPrevWorktree",
         "title": "Unmess: Focus Previous Worktree"
+      },
+      {
+        "command": "unmess.attachLatestScreenshot",
+        "title": "Unmess: Attach Latest Screenshot to Agent",
+        "icon": "$(file-media)"
       }
     ],
     "keybindings": [
@@ -111,6 +116,12 @@
         "command": "unmess.focusPrevWorktree",
         "key": "ctrl+shift+[",
         "mac": "cmd+shift+["
+      },
+      {
+        "command": "unmess.attachLatestScreenshot",
+        "key": "ctrl+alt+v",
+        "mac": "cmd+alt+v",
+        "when": "terminalFocus"
       }
     ],
     "menus": {

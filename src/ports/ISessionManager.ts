@@ -17,7 +17,7 @@ export interface ISessionManager {
    * per-line Enter), then submit once. Used to hand a review prompt to a live
    * agent without each newline triggering a submit.
    */
-  paste(target: string, text: string): Promise<void>;
+  paste(target: string, text: string, submit?: boolean): Promise<void>;
   /** Replace the window's process with a command run directly (nothing typed or echoed in the pane). */
   respawnWindow(session: string, windowIndex: number, command: string): Promise<void>;
   selectWindow(session: string, windowIndex: number): Promise<void>;

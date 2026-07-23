@@ -626,6 +626,12 @@ describe('sendPromptToAgent', () => {
     await mgr.sendPromptToAgent(wt, 'x');
     expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:4`, 'x');
   });
+
+  it('pasteToActiveWindow pastes to the session (active pane) without submitting', async () => {
+    const { mgr, stub } = create();
+    await mgr.pasteToActiveWindow('wt-1', "'/x/shot.png' ");
+    expect(stub.paste).toHaveBeenCalledWith(SESSION, "'/x/shot.png' ", false);
+  });
 });
 
 // ── reconnect ─────────────────────────────────────────────────────────────────

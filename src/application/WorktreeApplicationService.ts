@@ -45,6 +45,8 @@ export interface IWorkspaceHost {
   writeClipboard(text: string): Promise<void>;
   /** Open a file in the editor, optionally revealing a 1-based line. */
   openFileInEditor(absPath: string, line?: number): Promise<void>;
+  /** Absolute path of the most recent screenshot/image in the OS screenshot folder. */
+  findLatestScreenshot(): Promise<string | undefined>;
 }
 
 /** Bridge to the VSCode UI surfaces (webview + explorer dimming). */
@@ -235,6 +237,21 @@ export class WorktreeApplicationService implements DiffPanelHost {
         'Kill',
       );
       if (confirm === 'Kill') this.deps.agentManager.killWindow(msg.worktreeId, msg.index).catch(() => {});
+    },
+    attachScreenshot: async (msg) => {
+      const wt = this.findWorktree(msg.worktreeId);
+      if (!wt) return;
+      const shot = await this.deps.host.findLatestScreenshot();
+      if (!shot) {
+        this.deps.notify.showWarning('Unmess: no screenshot found in your screenshot folder.');
+        return;
+      }
+      // Reveal the target window, then paste the path (single-quoted, as a
+      // terminal file-drop does) unsent so the agent picks up the image and the
+      // user can still add prompt text.
+      await this.switchToWorktree(msg.worktreeId);
+      await this.deps.agentManager.focusWindow(wt, msg.index).catch(() => {});
+      await this.deps.agentManager.pasteToActiveWindow(msg.worktreeId, `'${shot}' `);
     },
     dockerUp: (msg) => {
       const wt = this.findWorktree(msg.worktreeId);

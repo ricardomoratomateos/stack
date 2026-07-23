@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { exec } from 'node:child_process';
 import { WorktreeStore } from './worktree/WorktreeStore';
 import { WorktreeManager } from './worktree/WorktreeManager';
@@ -35,6 +37,33 @@ function detectBinaries(bins: readonly string[]): Promise<Set<string>> {
       res();
     }))),
   ).then(() => present);
+}
+
+/** The folder macOS saves screenshots to (custom location, else ~/Desktop). */
+function screenshotDir(): Promise<string> {
+  return new Promise((resolve) => {
+    exec('defaults read com.apple.screencapture location', (err, stdout) => {
+      const loc = !err && stdout.trim() ? stdout.trim() : path.join(os.homedir(), 'Desktop');
+      resolve(loc.replace(/^~(?=\/|$)/, os.homedir()));
+    });
+  });
+}
+
+/** Absolute path of the most-recently-modified image in the screenshot folder. */
+async function findLatestScreenshot(): Promise<string | undefined> {
+  const dir = await screenshotDir();
+  let entries: string[];
+  try { entries = await fs.promises.readdir(dir); } catch { return undefined; }
+  const images = entries.filter((f) => /\.(png|jpe?g)$/i.test(f)).map((f) => path.join(dir, f));
+  let latest: string | undefined;
+  let latestMs = 0;
+  for (const f of images) {
+    try {
+      const ms = (await fs.promises.stat(f)).mtimeMs;
+      if (ms > latestMs) { latestMs = ms; latest = f; }
+    } catch { /* skip unreadable */ }
+  }
+  return latest;
 }
 
 /** IWorkspaceHost implemented over the live VSCode workspace/window APIs. */
@@ -105,6 +134,10 @@ class VsCodeWorkspaceHost implements IWorkspaceHost {
     } catch {
       vscode.window.showWarningMessage(`Unmess: could not open ${absPath}`);
     }
+  }
+
+  findLatestScreenshot(): Promise<string | undefined> {
+    return findLatestScreenshot();
   }
 }
 
@@ -258,6 +291,22 @@ export async function activate(ctx: vscode.ExtensionContext) {
     vscode.commands.registerCommand('unmess.focusNextWorktree', () => service.focusNextWorktree()),
     vscode.commands.registerCommand('unmess.focusPrevWorktree', () => service.focusPrevWorktree()),
     vscode.commands.registerCommand('unmess.focusSession', (terminal: vscode.Terminal | undefined) => terminal?.show()),
+    vscode.commands.registerCommand('unmess.attachLatestScreenshot', async () => {
+      const term = vscode.window.activeTerminal;
+      const worktreeId = term ? agentManager.getWorktreeIdForTerminal(term) : undefined;
+      if (!worktreeId) {
+        vscode.window.showWarningMessage('Unmess: focus an agent terminal first, then attach the screenshot.');
+        return;
+      }
+      const shot = await findLatestScreenshot();
+      if (!shot) {
+        vscode.window.showWarningMessage('Unmess: no screenshot found in your screenshot folder.');
+        return;
+      }
+      // Paste the path single-quoted (as a terminal file-drop does), unsent, so
+      // the agent picks up the image and you can still add prompt text.
+      await agentManager.pasteToActiveWindow(worktreeId, `'${shot}' `);
+    }),
   );
 
   ctx.subscriptions.push({

@@ -58,6 +58,8 @@ interface HarnessOpts {
   diffOutput?: string;
   /** what agentManager.sendPromptToAgent resolves to (a live agent existed) */
   liveAgentAccepts?: boolean;
+  /** path returned by host.findLatestScreenshot */
+  latestScreenshot?: string;
 }
 
 function makeHarness(o: HarnessOpts = {}) {
@@ -104,6 +106,7 @@ function makeHarness(o: HarnessOpts = {}) {
     focusWindow: vi.fn(async (w: Worktree, i: number) => { calls.push(`claude.focusWindow:${w.id}:${i}`); }),
     getSessions: vi.fn((_id: string) => o.sessions ?? []),
     killWindow: vi.fn(async (id: string, i: number) => { calls.push(`claude.killWindow:${id}:${i}`); }),
+    pasteToActiveWindow: vi.fn(async (id: string, text: string) => { calls.push(`claude.pasteToActiveWindow:${id}:${text}`); }),
     getViewer: vi.fn((id: string) => viewers.get(id)),
     getState: vi.fn(() => 'idle'),
     getAgentCount: vi.fn(() => 2),
@@ -164,6 +167,7 @@ function makeHarness(o: HarnessOpts = {}) {
     isDirectory: vi.fn((p: string) => (o.gitDirs ?? []).includes(p)),
     writeClipboard: vi.fn(async (text: string) => { calls.push(`host.writeClipboard:${text}`); }),
     openFileInEditor: vi.fn(async (p: string, line?: number) => { calls.push(`host.openFileInEditor:${p}:${line ?? ''}`); }),
+    findLatestScreenshot: vi.fn(async (): Promise<string | undefined> => o.latestScreenshot),
   };
 
   const notify = {
@@ -458,6 +462,39 @@ describe('handleMessage killSession', () => {
     h.claude.killWindow.mockRejectedValue(new Error('boom'));
     await expect(h.service.handleMessage({ type: 'killSession', worktreeId: 'a', index: 1 })).resolves.toBeUndefined();
     await flushMicrotasks();
+  });
+});
+
+describe('handleMessage attachScreenshot', () => {
+  it('focuses the target window and pastes the single-quoted screenshot path unsent', async () => {
+    const h = makeHarness({
+      worktrees: [makeWorktree({ id: 'a' })],
+      latestScreenshot: '/Users/me/Screenshots/shot.png',
+    });
+    await h.service.handleMessage({ type: 'attachScreenshot', worktreeId: 'a', index: 1 });
+    expect(h.claude.focusWindow).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }), 1);
+    expect(h.claude.pasteToActiveWindow).toHaveBeenCalledWith('a', "'/Users/me/Screenshots/shot.png' ");
+  });
+
+  it('warns and pastes nothing when no screenshot is found', async () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], latestScreenshot: undefined });
+    await h.service.handleMessage({ type: 'attachScreenshot', worktreeId: 'a', index: 1 });
+    expect(h.notify.showWarning).toHaveBeenCalledWith('Unmess: no screenshot found in your screenshot folder.');
+    expect(h.claude.pasteToActiveWindow).not.toHaveBeenCalled();
+  });
+
+  it('does nothing for an unknown worktree', async () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], latestScreenshot: '/x/shot.png' });
+    await h.service.handleMessage({ type: 'attachScreenshot', worktreeId: 'nope', index: 1 });
+    expect(h.host.findLatestScreenshot).not.toHaveBeenCalled();
+    expect(h.claude.pasteToActiveWindow).not.toHaveBeenCalled();
+  });
+
+  it('swallows focusWindow failure and still pastes', async () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], latestScreenshot: '/x/shot.png' });
+    h.claude.focusWindow.mockRejectedValue(new Error('boom'));
+    await h.service.handleMessage({ type: 'attachScreenshot', worktreeId: 'a', index: 1 });
+    expect(h.claude.pasteToActiveWindow).toHaveBeenCalledWith('a', "'/x/shot.png' ");
   });
 });
 

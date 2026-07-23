@@ -284,6 +284,11 @@ export class AgentSessionManager {
     viewer.show();
   }
 
+  /** Paste text (e.g. a screenshot path) into the worktree's active pane, unsent. */
+  async pasteToActiveWindow(worktreeId: string, text: string): Promise<void> {
+    await this.tmux.paste(TmuxManager.sessionName(worktreeId), text, false);
+  }
+
   getState(worktreeId: string): AgentSessionState {
     return this.aggregateState(worktreeId);
   }
