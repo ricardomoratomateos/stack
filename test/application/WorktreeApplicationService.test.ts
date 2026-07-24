@@ -107,6 +107,7 @@ function makeHarness(o: HarnessOpts = {}) {
     getSessions: vi.fn((_id: string) => o.sessions ?? []),
     killWindow: vi.fn(async (id: string, i: number) => { calls.push(`claude.killWindow:${id}:${i}`); }),
     pasteToActiveWindow: vi.fn(async (id: string, text: string) => { calls.push(`claude.pasteToActiveWindow:${id}:${text}`); }),
+    setSessionOrder: vi.fn((id: string, order: number[]) => { calls.push(`claude.setSessionOrder:${id}:${order.join(',')}`); }),
     getViewer: vi.fn((id: string) => viewers.get(id)),
     getState: vi.fn(() => 'idle'),
     getAgentCount: vi.fn(() => 2),
@@ -495,6 +496,15 @@ describe('handleMessage attachScreenshot', () => {
     h.claude.focusWindow.mockRejectedValue(new Error('boom'));
     await h.service.handleMessage({ type: 'attachScreenshot', worktreeId: 'a', index: 1 });
     expect(h.claude.pasteToActiveWindow).toHaveBeenCalledWith('a', "'/x/shot.png' ");
+  });
+});
+
+describe('handleMessage reorderSessions', () => {
+  it('persists the new session order and re-renders the webview', async () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], withUi: true });
+    await h.service.handleMessage({ type: 'reorderSessions', worktreeId: 'a', orderedIndexes: [3, 1, 2] });
+    expect(h.claude.setSessionOrder).toHaveBeenCalledWith('a', [3, 1, 2]);
+    expect(h.ui.pushWebview).toHaveBeenCalled();
   });
 });
 

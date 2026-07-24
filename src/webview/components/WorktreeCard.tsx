@@ -30,6 +30,20 @@ interface Props {
 
 export function WorktreeCard({ wt, isSelected, onSelect, defaultProvider, dockerEnabled }: Props) {
   const [hovered, setHovered] = useState(false);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+
+  // Move window `from` to the slot occupied by window `to`, and persist the
+  // resulting order of tmux window indexes.
+  const commitReorder = (from: number, to: number) => {
+    const indexes = wt.sessions.map((s) => s.index);
+    const fromPos = indexes.indexOf(from);
+    const toPos = indexes.indexOf(to);
+    if (fromPos === -1 || toPos === -1 || fromPos === toPos) return;
+    const next = [...indexes];
+    next.splice(toPos, 0, next.splice(fromPos, 1)[0]);
+    send({ type: 'reorderSessions', worktreeId: wt.id, orderedIndexes: next });
+  };
   const hasPerm = wt.agent === 'permission';
   const hasSession = wt.agent !== 'idle';
   const dockerRunning = wt.docker.some((c) => c.state === 'running');
@@ -94,11 +108,22 @@ export function WorktreeCard({ wt, isSelected, onSelect, defaultProvider, docker
         )}
       </div>
 
-      {/* Sessions list */}
+      {/* Sessions list (drag rows to reorder within the worktree) */}
       {wt.sessions.length > 0 && (
         <div style={{ marginLeft: 14, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
           {wt.sessions.map((s) => (
-            <SessionRow key={`${s.kind}-${s.index}`} session={s} worktreeId={wt.id} onSelect={onSelect} />
+            <SessionRow
+              key={`${s.kind}-${s.index}`}
+              session={s}
+              worktreeId={wt.id}
+              onSelect={onSelect}
+              dragging={dragIndex === s.index}
+              dragOver={overIndex === s.index && dragIndex !== null && dragIndex !== s.index}
+              onDragStart={() => setDragIndex(s.index)}
+              onDragEnter={() => setOverIndex(s.index)}
+              onDrop={() => { if (dragIndex !== null) commitReorder(dragIndex, s.index); setDragIndex(null); setOverIndex(null); }}
+              onDragEnd={() => { setDragIndex(null); setOverIndex(null); }}
+            />
           ))}
         </div>
       )}
@@ -237,7 +262,20 @@ function SessionAvatar({ session }: { session: SessionItem }) {
   );
 }
 
-function SessionRow({ session, worktreeId, onSelect }: { session: SessionItem; worktreeId: string; onSelect: () => void }) {
+function SessionRow({
+  session, worktreeId, onSelect,
+  dragging, dragOver, onDragStart, onDragEnter, onDrop, onDragEnd,
+}: {
+  session: SessionItem;
+  worktreeId: string;
+  onSelect: () => void;
+  dragging: boolean;
+  dragOver: boolean;
+  onDragStart: () => void;
+  onDragEnter: () => void;
+  onDrop: () => void;
+  onDragEnd: () => void;
+}) {
   const [hov, setHov] = useState(false);
 
   const isAgent = session.kind === 'agent';
@@ -245,6 +283,12 @@ function SessionRow({ session, worktreeId, onSelect }: { session: SessionItem; w
 
   return (
     <div
+      draggable
+      onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart(); }}
+      onDragEnter={(e) => { e.preventDefault(); onDragEnter(); }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+      onDrop={(e) => { e.preventDefault(); onDrop(); }}
+      onDragEnd={onDragEnd}
       onClick={(e) => {
         e.stopPropagation();
         onSelect();
@@ -258,6 +302,8 @@ function SessionRow({ session, worktreeId, onSelect }: { session: SessionItem; w
         background: hov ? T.surface4 : 'transparent',
         transition: 'background .1s',
         cursor: 'pointer',
+        opacity: dragging ? 0.4 : 1,
+        boxShadow: dragOver ? `inset 0 2px 0 ${T.borderStrong}` : 'none',
       }}
     >
       <SessionAvatar session={session} />

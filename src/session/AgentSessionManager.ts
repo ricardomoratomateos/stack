@@ -41,6 +41,12 @@ export class AgentSessionManager {
   // Persists the last-known aggregate state per worktree so a VSCode reload can
   // restore "needs attention" / "waiting" instead of blindly defaulting to waiting.
   private static readonly STATE_KEY = 'unmess.claudeStates';
+  // Persists a user-chosen display order (list of tmux window indexes) per
+  // worktree. Purely cosmetic — tmux window indexes stay put so state tracking,
+  // kill and focus keep working; only getSessions() sorts by this.
+  private static readonly ORDER_KEY = 'unmess.sessionOrder';
+  // worktreeId → ordered tmux window indexes (display order)
+  private orders = new Map<string, number[]>();
 
   constructor(
     private providers: ProviderFactory,
@@ -54,6 +60,9 @@ export class AgentSessionManager {
         if (viewer === terminal) { this.viewers.delete(id); break; }
       }
     });
+
+    const savedOrders = this.globalState.get<Record<string, number[]>>(AgentSessionManager.ORDER_KEY, {});
+    for (const [id, arr] of Object.entries(savedOrders)) this.orders.set(id, arr);
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────
@@ -320,7 +329,7 @@ export class AgentSessionManager {
   getSessions(worktreeId: string): SessionItem[] {
     const map = this.windows.get(worktreeId);
     if (!map) return [];
-    return [...map.entries()].map(([index, meta]) => ({
+    const items = [...map.entries()].map(([index, meta]) => ({
       name: meta.name,
       kind: meta.kind,
       provider: meta.provider,
@@ -328,6 +337,23 @@ export class AgentSessionManager {
       title: meta.title,
       index,
     }));
+    const order = this.orders.get(worktreeId);
+    if (order) {
+      // Sort by the saved display order; windows not in it (newly created) fall
+      // to the end, keeping their natural order (Array.sort is stable).
+      const rank = (i: number) => { const p = order.indexOf(i); return p === -1 ? Number.MAX_SAFE_INTEGER : p; };
+      items.sort((a, b) => rank(a.index) - rank(b.index));
+    }
+    return items;
+  }
+
+  /** Persist a user-chosen display order (list of window indexes) for a worktree. */
+  setSessionOrder(worktreeId: string, orderedIndexes: number[]): void {
+    this.orders.set(worktreeId, orderedIndexes);
+    const stored = this.globalState.get<Record<string, number[]>>(AgentSessionManager.ORDER_KEY, {});
+    stored[worktreeId] = orderedIndexes;
+    this.globalState.update(AgentSessionManager.ORDER_KEY, stored);
+    this.terminalsChangeEmitter.fire();
   }
 
   getAgentCount(worktreeId: string): number {
@@ -366,6 +392,10 @@ export class AgentSessionManager {
     const sessionName = TmuxManager.sessionName(worktreeId);
     await this.tmux.killWindow(sessionName, windowIndex);
     this.windows.get(worktreeId)?.delete(windowIndex);
+    const order = this.orders.get(worktreeId);
+    if (order?.includes(windowIndex)) {
+      this.setSessionOrder(worktreeId, order.filter((i) => i !== windowIndex));
+    }
     this.persistState(worktreeId);
     this.stateChangeEmitter.fire({ worktreeId, state: this.aggregateState(worktreeId) });
     this.terminalsChangeEmitter.fire();

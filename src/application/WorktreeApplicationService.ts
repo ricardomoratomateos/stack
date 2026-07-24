@@ -261,6 +261,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
       const wt = this.findWorktree(msg.worktreeId);
       if (wt) void this.dockerDown(wt);
     },
+    reorderSessions: (msg) => {
+      this.deps.agentManager.setSessionOrder(msg.worktreeId, msg.orderedIndexes);
+      this.ui.pushWebview();
+    },
     deleteWorktree: (msg) => this.deleteWorktree(this.findWorktree(msg.worktreeId)),
     renameWorktree: (msg) => this.renameWorktree(this.findWorktree(msg.worktreeId)),
     initWorktree: (msg) => this.initWorktree(this.findWorktree(msg.worktreeId)),

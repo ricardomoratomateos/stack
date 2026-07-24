@@ -71,6 +71,7 @@ export type WebMessage =
   | { type: 'focusSession'; worktreeId: string; kind: 'agent' | 'shell'; index: number }
   | { type: 'killSession'; worktreeId: string; index: number }
   | { type: 'attachScreenshot'; worktreeId: string; index: number }
+  | { type: 'reorderSessions'; worktreeId: string; orderedIndexes: number[] }
   | { type: 'dockerUp'; worktreeId: string }
   | { type: 'dockerDown'; worktreeId: string }
   | { type: 'deleteWorktree'; worktreeId: string }

@@ -228,6 +228,43 @@ describe('getSessions', () => {
       { name: 'shell', kind: 'shell', state: 'idle', index: 1 },
     ]);
   });
+
+  it('sorts by a saved display order; windows not in the order fall to the end (stable)', () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [
+      [1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
+      [2, { kind: 'shell', state: 'idle', name: 'shell' }],
+      [3, { kind: 'shell', state: 'idle', name: 'shell' }],
+    ]);
+    // Order puts 3 first, 1 second; window 2 is not listed → goes last.
+    mgr.setSessionOrder('wt-1', [3, 1]);
+    expect(mgr.getSessions('wt-1').map(s => s.index)).toEqual([3, 1, 2]);
+  });
+});
+
+describe('setSessionOrder', () => {
+  it('persists the order, applies it, and fires terminalsChange', () => {
+    const { mgr, getTerminalsChanges, memento } = create();
+    seed(mgr, 'wt-1', [
+      [1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
+      [2, { kind: 'shell', state: 'idle', name: 'shell' }],
+    ]);
+    mgr.setSessionOrder('wt-1', [2, 1]);
+    expect(mgr.getSessions('wt-1').map(s => s.index)).toEqual([2, 1]);
+    expect(getTerminalsChanges()).toBe(1);
+    expect(memento.get('unmess.sessionOrder')).toEqual({ 'wt-1': [2, 1] });
+  });
+
+  it('restores a persisted order from the memento on construction', () => {
+    const memento = new FakeMemento() as unknown as vscode.Memento;
+    memento.update('unmess.sessionOrder', { 'wt-1': [2, 1] });
+    const { mgr } = create('claude', memento);
+    seed(mgr, 'wt-1', [
+      [1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
+      [2, { kind: 'shell', state: 'idle', name: 'shell' }],
+    ]);
+    expect(mgr.getSessions('wt-1').map(s => s.index)).toEqual([2, 1]);
+  });
 });
 
 describe('counts', () => {
@@ -494,6 +531,29 @@ describe('killWindow', () => {
     await mgr.killWindow('wt-1', 4);
     expect(stateEvents).toEqual([{ worktreeId: 'wt-1', state: 'idle' }]);
     expect(getTerminalsChanges()).toBe(before + 1);
+  });
+
+  it('prunes the killed window from the saved display order', async () => {
+    const { mgr, memento } = create();
+    seed(mgr, 'wt-1', [
+      [1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
+      [2, { kind: 'shell', state: 'idle', name: 'shell' }],
+    ]);
+    mgr.setSessionOrder('wt-1', [2, 1]);
+    await mgr.killWindow('wt-1', 2);
+    expect(mgr.getSessions('wt-1').map(s => s.index)).toEqual([1]);
+    expect(memento.get('unmess.sessionOrder')).toEqual({ 'wt-1': [1] });
+  });
+
+  it('leaves the saved order untouched when the killed window was not in it', async () => {
+    const { mgr, memento } = create();
+    seed(mgr, 'wt-1', [
+      [1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
+      [2, { kind: 'shell', state: 'idle', name: 'shell' }],
+    ]);
+    mgr.setSessionOrder('wt-1', [1]); // 2 not listed
+    await mgr.killWindow('wt-1', 2);
+    expect(memento.get('unmess.sessionOrder')).toEqual({ 'wt-1': [1] });
   });
 });
 
