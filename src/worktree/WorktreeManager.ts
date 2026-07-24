@@ -100,6 +100,21 @@ export class WorktreeManager {
   }
 
   async create(branch: string, repoRoot: string, alias?: string): Promise<Worktree> {
+    // If the branch is already checked out in an existing git worktree, don't run
+    // `git worktree add` (it would fail with "already checked out"). Attach Unmess
+    // to the existing worktree instead.
+    const existingGit = this.git.listWorktrees(repoRoot).find((wt) => wt.branch === branch);
+    if (existingGit) {
+      if (path.normalize(existingGit.path) === path.normalize(repoRoot)) {
+        throw new Error(`Branch "${branch}" is checked out in the main repository — can't attach it as a worktree.`);
+      }
+      const alreadyTracked = this.store.getAll().find(
+        (w) => path.normalize(w.path) === path.normalize(existingGit.path),
+      );
+      if (alreadyTracked) return alreadyTracked;
+      return this.attach(existingGit.path, branch, repoRoot, alias);
+    }
+
     const worktreesDir = this.resolveWorktreesDir(repoRoot);
     this.fs.mkdir(worktreesDir);
 
@@ -132,6 +147,28 @@ export class WorktreeManager {
     this.generateSettingsJson(worktree);
     await this.store.add(worktree);
 
+    return worktree;
+  }
+
+  /** Register a Unmess entry for a git worktree that already exists on disk. */
+  private async attach(worktreePath: string, branch: string, repoRoot: string, alias?: string): Promise<Worktree> {
+    const worktree: Worktree = {
+      id: randomUUID(),
+      branch,
+      alias: alias || undefined,
+      path: worktreePath,
+      repoRoot,
+      xdebugPort: this.portAllocator.allocate(),
+      dockerProjectName: branch.replace(/[^a-z0-9-]/gi, '-').toLowerCase(),
+      createdAt: Date.now(),
+    };
+
+    // The worktree may have been created outside Unmess — only add our config
+    // files if they're missing, never clobber existing ones.
+    if (!this.fs.exists(path.join(worktreePath, LAUNCH_JSON_PATH))) this.generateLaunchJson(worktree);
+    if (!this.fs.exists(path.join(worktreePath, SETTINGS_JSON_PATH))) this.generateSettingsJson(worktree);
+
+    await this.store.add(worktree);
     return worktree;
   }
 

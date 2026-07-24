@@ -253,6 +253,49 @@ describe('create', () => {
     expect(store.calls).toEqual([]); // nothing registered
   });
 
+  describe('branch already checked out in an existing worktree', () => {
+    it('attaches to the existing worktree instead of running git worktree add', async () => {
+      const existingPath = path.join(REPO, 'zer', 'feat-x');
+      git.listWorktrees.mockReturnValue([{ path: existingPath, branch: 'feat/x', head: 'abc' }]);
+      const wt = await mgr().create('feat/x', REPO, 'Reuse it');
+      expect(git.createWorktree).not.toHaveBeenCalled();
+      expect(wt.path).toBe(existingPath);
+      expect(wt.branch).toBe('feat/x');
+      expect(wt.alias).toBe('Reuse it');
+      expect(store.getAll()).toHaveLength(1);
+    });
+
+    it('generates launch/settings on attach only when missing (never clobbers)', async () => {
+      const existingPath = path.join(REPO, 'zer', 'feat-x');
+      git.listWorktrees.mockReturnValue([{ path: existingPath, branch: 'feat/x', head: 'abc' }]);
+      // Pre-seed an existing settings.json → must be left untouched.
+      fsStub.files.set(path.join(existingPath, '.vscode/settings.json'), '{"pre":"existing"}');
+      await mgr().create('feat/x', REPO);
+      expect(fsStub.files.get(path.join(existingPath, '.vscode/settings.json'))).toBe('{"pre":"existing"}');
+      expect(fsStub.files.has(path.join(existingPath, '.vscode/launch.json'))).toBe(true);
+    });
+
+    it('returns the already-tracked entry without registering a duplicate', async () => {
+      const existingPath = path.join(REPO, 'zer', 'feat-x');
+      const tracked: Worktree = {
+        id: 'existing-id', branch: 'feat/x', path: existingPath, repoRoot: REPO,
+        xdebugPort: 9950, dockerProjectName: 'feat-x', createdAt: 1,
+      };
+      store = makeStoreStub([tracked]);
+      git.listWorktrees.mockReturnValue([{ path: existingPath, branch: 'feat/x', head: 'abc' }]);
+      const wt = await mgr().create('feat/x', REPO);
+      expect(wt.id).toBe('existing-id');
+      expect(store.getAll()).toHaveLength(1);
+      expect(store.calls).toEqual([]); // no add
+    });
+
+    it('refuses to attach when the branch is checked out in the main repo', async () => {
+      git.listWorktrees.mockReturnValue([{ path: REPO, branch: 'main', head: 'abc' }]);
+      await expect(mgr().create('main', REPO)).rejects.toThrow(/main repository/);
+      expect(store.calls).toEqual([]);
+    });
+  });
+
   it('sets the alias (title) when provided; leaves it undefined otherwise', async () => {
     const withAlias = await mgr().create('feat/x', REPO, 'Fix the bug');
     expect(withAlias.alias).toBe('Fix the bug');
