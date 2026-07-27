@@ -19,6 +19,7 @@ import type { SendDestination, DiffComment } from '../diff/types';
 import { buildCommentPrompt } from '../diff/commentPrompt';
 
 export const ACTIVE_WORKTREE_KEY = 'unmess.activeWorktreeId';
+export const WORKTREE_ORDER_KEY = 'unmess.worktreeOrder';
 
 /** A terminal created for setup/teardown scripts (structural subset of vscode.Terminal). */
 export interface HostTerminal {
@@ -265,6 +266,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
       this.deps.agentManager.setSessionOrder(msg.worktreeId, msg.orderedIndexes);
       this.ui.pushWebview();
     },
+    reorderWorktrees: (msg) => {
+      this.deps.globalState.update(WORKTREE_ORDER_KEY, msg.orderedIds);
+      this.ui.pushWebview();
+    },
     deleteWorktree: (msg) => this.deleteWorktree(this.findWorktree(msg.worktreeId)),
     renameWorktree: (msg) => this.renameWorktree(this.findWorktree(msg.worktreeId)),
     initWorktree: (msg) => this.initWorktree(this.findWorktree(msg.worktreeId)),
@@ -353,8 +358,24 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   // ── State projection ───────────────────────────────────────────────────────
 
+  /** Apply the user-chosen display order (main worktree always pinned first). */
+  private orderWorktrees(worktrees: Worktree[]): Worktree[] {
+    const order = this.deps.globalState.get<string[]>(WORKTREE_ORDER_KEY) ?? [];
+    // [main-first, saved-rank] — sort by main flag, then by saved display order
+    // (windows missing from the order fall to the end).
+    const key = (w: Worktree): [number, number] => {
+      const p = order.indexOf(w.id);
+      return [(w.isMain ?? false) ? 0 : 1, p === -1 ? Number.MAX_SAFE_INTEGER : p];
+    };
+    return [...worktrees].sort((a, b) => {
+      const ka = key(a);
+      const kb = key(b);
+      return ka[0] - kb[0] || ka[1] - kb[1];
+    });
+  }
+
   buildState(): UnmessState {
-    const worktrees = this.deps.manager.list();
+    const worktrees = this.orderWorktrees(this.deps.manager.list());
     const items: WorktreeItem[] = worktrees.map((wt) => ({
       id: wt.id,
       branch: wt.branch,

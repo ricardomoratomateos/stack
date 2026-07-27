@@ -50,6 +50,20 @@ export function App() {
     send({ type: 'selectWorktree', worktreeId: id });
   }, []);
 
+  // Drag-to-reorder worktree cards (main stays pinned first by the extension).
+  const [dragCardId, setDragCardId] = useState<string | null>(null);
+  const [overCardId, setOverCardId] = useState<string | null>(null);
+
+  const commitCardReorder = useCallback((fromId: string, toId: string) => {
+    const ids = state.worktrees.map(w => w.id);
+    const fromPos = ids.indexOf(fromId);
+    const toPos = ids.indexOf(toId);
+    if (fromPos === -1 || toPos === -1 || fromPos === toPos) return;
+    const next = [...ids];
+    next.splice(toPos, 0, next.splice(fromPos, 1)[0]);
+    send({ type: 'reorderWorktrees', orderedIds: next });
+  }, [state.worktrees]);
+
   // Permission count for badge
   const permCount = state.worktrees.filter(w => w.agent === 'permission').length;
   const activeCount = state.worktrees.filter(w => w.agent === 'active').length;
@@ -117,6 +131,12 @@ export function App() {
                   onSelect={() => handleSelect(wt.id)}
                   defaultProvider={state.defaultProvider}
                   dockerEnabled={state.dockerEnabled}
+                  cardDragging={dragCardId === wt.id}
+                  cardDragOver={overCardId === wt.id && dragCardId !== null && dragCardId !== wt.id}
+                  onCardDragStart={() => setDragCardId(wt.id)}
+                  onCardDragEnter={() => setOverCardId(wt.id)}
+                  onCardDrop={() => { if (dragCardId) commitCardReorder(dragCardId, wt.id); setDragCardId(null); setOverCardId(null); }}
+                  onCardDragEnd={() => { setDragCardId(null); setOverCardId(null); }}
                 />
               ))
             )}

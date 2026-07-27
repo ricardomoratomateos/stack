@@ -4,6 +4,7 @@ import * as nodePath from 'node:path';
 import {
   WorktreeApplicationService,
   ACTIVE_WORKTREE_KEY,
+  WORKTREE_ORDER_KEY,
   type IWorkspaceHost,
 } from '../../src/application/WorktreeApplicationService';
 import { VsCodeNotifyAdapter } from '../../src/adapters/VsCodeNotifyAdapter';
@@ -60,6 +61,8 @@ interface HarnessOpts {
   liveAgentAccepts?: boolean;
   /** path returned by host.findLatestScreenshot */
   latestScreenshot?: string;
+  /** persisted worktree display order (ids) */
+  worktreeOrder?: string[];
 }
 
 function makeHarness(o: HarnessOpts = {}) {
@@ -225,7 +228,11 @@ function makeHarness(o: HarnessOpts = {}) {
     diff: vi.fn(async () => o.diffOutput ?? ''),
   };
   const globalState = {
-    get: vi.fn(<T,>(k: string): T | undefined => (k === ACTIVE_WORKTREE_KEY ? (o.persistedActiveId as T | undefined) : undefined)),
+    get: vi.fn(<T,>(k: string): T | undefined => {
+      if (k === ACTIVE_WORKTREE_KEY) return o.persistedActiveId as T | undefined;
+      if (k === WORKTREE_ORDER_KEY) return o.worktreeOrder as T | undefined;
+      return undefined;
+    }),
     update: vi.fn(async (k: string, v: unknown) => { calls.push(`globalState.update:${k}:${v}`); }),
   };
   const ui = {
@@ -504,6 +511,15 @@ describe('handleMessage reorderSessions', () => {
     const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], withUi: true });
     await h.service.handleMessage({ type: 'reorderSessions', worktreeId: 'a', orderedIndexes: [3, 1, 2] });
     expect(h.claude.setSessionOrder).toHaveBeenCalledWith('a', [3, 1, 2]);
+    expect(h.ui.pushWebview).toHaveBeenCalled();
+  });
+});
+
+describe('handleMessage reorderWorktrees', () => {
+  it('persists the new worktree order and re-renders the webview', async () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], withUi: true });
+    await h.service.handleMessage({ type: 'reorderWorktrees', orderedIds: ['b', 'a', 'c'] });
+    expect(h.globalState.update).toHaveBeenCalledWith(WORKTREE_ORDER_KEY, ['b', 'a', 'c']);
     expect(h.ui.pushWebview).toHaveBeenCalled();
   });
 });
@@ -906,6 +922,30 @@ describe('buildState', () => {
   it('returns undefined activeWorktreeId when persisted id no longer exists', () => {
     const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], persistedActiveId: 'zombie' });
     expect(h.service.buildState().activeWorktreeId).toBeUndefined();
+  });
+
+  it('applies the saved worktree order, always pinning main first', () => {
+    const main = makeWorktree({ id: 'main', isMain: true });
+    const a = makeWorktree({ id: 'a' });
+    const b = makeWorktree({ id: 'b' });
+    const c = makeWorktree({ id: 'c' });
+    const h = makeHarness({ worktrees: [a, b, c, main], worktreeOrder: ['c', 'a', 'b'] });
+    expect(h.service.buildState().worktrees.map((w) => w.id)).toEqual(['main', 'c', 'a', 'b']);
+  });
+
+  it('places worktrees missing from the saved order at the end (stable)', () => {
+    const a = makeWorktree({ id: 'a' });
+    const b = makeWorktree({ id: 'b' });
+    const c = makeWorktree({ id: 'c' });
+    const h = makeHarness({ worktrees: [a, b, c], worktreeOrder: ['c'] });
+    expect(h.service.buildState().worktrees.map((w) => w.id)).toEqual(['c', 'a', 'b']);
+  });
+
+  it('keeps natural order when no order is persisted', () => {
+    const a = makeWorktree({ id: 'a' });
+    const b = makeWorktree({ id: 'b' });
+    const h = makeHarness({ worktrees: [a, b] });
+    expect(h.service.buildState().worktrees.map((w) => w.id)).toEqual(['a', 'b']);
   });
 });
 

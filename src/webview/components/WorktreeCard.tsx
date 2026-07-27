@@ -26,9 +26,18 @@ interface Props {
   onSelect: () => void;
   defaultProvider?: string;
   dockerEnabled?: boolean;
+  cardDragging: boolean;
+  cardDragOver: boolean;
+  onCardDragStart: () => void;
+  onCardDragEnter: () => void;
+  onCardDrop: () => void;
+  onCardDragEnd: () => void;
 }
 
-export function WorktreeCard({ wt, isSelected, onSelect, defaultProvider, dockerEnabled }: Props) {
+export function WorktreeCard({
+  wt, isSelected, onSelect, defaultProvider, dockerEnabled,
+  cardDragging, cardDragOver, onCardDragStart, onCardDragEnter, onCardDrop, onCardDragEnd,
+}: Props) {
   const [hovered, setHovered] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
@@ -63,9 +72,14 @@ export function WorktreeCard({ wt, isSelected, onSelect, defaultProvider, docker
       : 'transparent',
     transition: 'background .12s, border-color .12s',
     animation: 'unmess-fadein .15s ease',
+    boxShadow: cardDragOver ? `inset 0 2px 0 ${T.borderStrong}` : 'none',
+    opacity: cardDragging ? 0.4 : 1,
     // While tearing down: fade it out and block every interaction.
     ...(deleting ? { opacity: 0.45, pointerEvents: 'none' } : {}),
   };
+
+  // Only non-main cards reorder; main is pinned first by the extension.
+  const draggable = !wt.isMain && !deleting;
 
   const gitMeta: Array<{ text: string; color: string }> = [];
   if (wt.git.hasChanges) gitMeta.push({ text: `~${wt.git.unstaged + wt.git.staged}`, color: T.green });
@@ -76,6 +90,12 @@ export function WorktreeCard({ wt, isSelected, onSelect, defaultProvider, docker
   return (
     <div
       style={cardStyle}
+      draggable={draggable}
+      onDragStart={draggable ? (e) => { e.dataTransfer.effectAllowed = 'move'; onCardDragStart(); } : undefined}
+      onDragEnter={(e) => { e.preventDefault(); onCardDragEnter(); }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+      onDrop={(e) => { e.preventDefault(); onCardDrop(); }}
+      onDragEnd={onCardDragEnd}
       onClick={onSelect}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -284,11 +304,11 @@ function SessionRow({
   return (
     <div
       draggable
-      onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart(); }}
-      onDragEnter={(e) => { e.preventDefault(); onDragEnter(); }}
-      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-      onDrop={(e) => { e.preventDefault(); onDrop(); }}
-      onDragEnd={onDragEnd}
+      onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; onDragStart(); }}
+      onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); onDragEnter(); }}
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; }}
+      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onDrop(); }}
+      onDragEnd={(e) => { e.stopPropagation(); onDragEnd(); }}
       onClick={(e) => {
         e.stopPropagation();
         onSelect();

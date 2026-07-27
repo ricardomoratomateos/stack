@@ -72,6 +72,7 @@ export type WebMessage =
   | { type: 'killSession'; worktreeId: string; index: number }
   | { type: 'attachScreenshot'; worktreeId: string; index: number }
   | { type: 'reorderSessions'; worktreeId: string; orderedIndexes: number[] }
+  | { type: 'reorderWorktrees'; orderedIds: string[] }
   | { type: 'dockerUp'; worktreeId: string }
   | { type: 'dockerDown'; worktreeId: string }
   | { type: 'deleteWorktree'; worktreeId: string }
