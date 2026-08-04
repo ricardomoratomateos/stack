@@ -3,7 +3,7 @@ import * as crypto from 'node:crypto';
 import { AgentSessionManager } from '../session/AgentSessionManager';
 import { GitWatcher } from '../git/GitWatcher';
 import { WorktreeApplicationService } from '../application/WorktreeApplicationService';
-import type { ExtMessage, WebMessage } from '../webview/types';
+import type { ExtMessage, WebMessage, UnmessState } from '../webview/types';
 
 /**
  * Thin webview adapter: renders the React sidebar, pushes state, and forwards
@@ -66,10 +66,33 @@ export class UnmessWebviewProvider implements vscode.WebviewViewProvider {
         : undefined;
   }
 
+  /** Ask the webview to open its new-task modal (the native "+" in the header). */
+  openNewTask(): void {
+    this.view?.show?.(true);
+    const msg: ExtMessage = { type: 'openNewTask' };
+    this.view?.webview.postMessage(msg);
+  }
+
   push(): void {
     if (!this.view?.visible) return;
-    const msg: ExtMessage = { type: 'state', payload: this.service.buildState() };
+    const state = this.service.buildState();
+    this.view.description = UnmessWebviewProvider.describe(state);
+    const msg: ExtMessage = { type: 'state', payload: state };
     this.view.webview.postMessage(msg);
+  }
+
+  /**
+   * Live counts for the native view header, replacing the in-webview title bar:
+   * the section header already says "Worktrees", so repeating it inside the
+   * webview just wasted a row.
+   */
+  static describe(state: UnmessState): string | undefined {
+    const parts: string[] = [];
+    const active = state.worktrees.filter((w) => w.agent === 'active').length;
+    const perm = state.worktrees.filter((w) => w.agent === 'permission').length;
+    if (active > 0) parts.push(`${active} thinking`);
+    if (perm > 0) parts.push(`${perm} needs you`);
+    return parts.length > 0 ? parts.join(' · ') : undefined;
   }
 
   private getHtml(webview: vscode.Webview): string {

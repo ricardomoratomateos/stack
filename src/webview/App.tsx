@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useReducer, useState } from 'react';
-import { SECTION_TITLE_STYLE, T } from './tokens';
+import { T } from './tokens';
 import { WorktreeCard } from './components/WorktreeCard';
 import { NewTaskModal } from './components/NewTaskModal';
 import { StatusPanel } from './components/StatusPanel';
@@ -22,7 +22,9 @@ export function App() {
   useEffect(() => {
     const handler = (e: MessageEvent) => {
       try {
-        dispatch(e.data as ExtMessage);
+        const msg = e.data as ExtMessage;
+        if (msg.type === 'openNewTask') { setNewTask(true); return; }
+        dispatch(msg);
         setLoaded(true);
       } catch { /* ignore */ }
     };
@@ -64,10 +66,6 @@ export function App() {
     send({ type: 'reorderWorktrees', orderedIds: next });
   }, [state.worktrees]);
 
-  // Permission count for badge
-  const permCount = state.worktrees.filter(w => w.agent === 'permission').length;
-  const activeCount = state.worktrees.filter(w => w.agent === 'active').length;
-
   const selectedWt: WorktreeItem | undefined = state.worktrees.find(w => w.id === selected);
 
   return (
@@ -75,44 +73,8 @@ export function App() {
       style={{ display: 'flex', flexDirection: 'column', height: '100%', background: T.bg, position: 'relative' }}
     >
 
-      {/* Top bar */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        padding: '8px 10px 6px',
-        borderBottom: `1px solid ${T.border}`,
-        flexShrink: 0,
-      }}>
-        <span style={{ ...SECTION_TITLE_STYLE, color: T.titleFg }}>
-          worktrees
-        </span>
-
-        {/* Live indicators */}
-        {activeCount > 0 && (
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 3,
-            fontFamily: T.mono, fontSize: 10, color: T.purple,
-          }}>
-            <span className="u-dot-active" style={{ width: 5, height: 5, borderRadius: '50%', background: T.purple, display: 'inline-block' }} />
-            {activeCount}
-          </span>
-        )}
-        {permCount > 0 && (
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 3,
-            fontFamily: T.mono, fontSize: 10, color: T.amber,
-          }}>
-            <span className="u-dot-perm" style={{ width: 5, height: 5, borderRadius: '50%', background: T.amber, display: 'inline-block' }} />
-            {permCount}
-          </span>
-        )}
-
-        <span style={{ flex: 1 }} />
-
-        {/* New task */}
-        <IconBtn title="New task" onClick={() => setNewTask(true)}>
-          <i className="codicon codicon-add" />
-        </IconBtn>
-      </div>
+      {/* No in-webview title bar: the native view header carries the "Worktrees"
+          title, the live counts (as its description) and the "+" button. */}
 
       {/* Body */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -191,29 +153,4 @@ function EmptyState({ onNew }: { onNew: () => void }) {
   );
 }
 
-function IconBtn({ children, title, onClick, active }: {
-  children: React.ReactNode;
-  title: string;
-  onClick: () => void;
-  active?: boolean;
-}) {
-  const [hov, setHov] = useState(false);
-  return (
-    <button
-      title={title}
-      onClick={onClick}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      style={{
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        width: 22, height: 22, borderRadius: 4, border: 'none',
-        background: active ? T.accentBg : hov ? T.surface3 : 'transparent',
-        color: active ? T.accent : hov ? T.textBody : T.textDim,
-        transition: 'background .1s, color .1s',
-      }}
-    >
-      {children}
-    </button>
-  );
-}
 

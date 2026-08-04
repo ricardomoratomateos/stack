@@ -14,6 +14,7 @@ import { DockerMonitor } from './docker/DockerMonitor';
 import { GitWatcher } from './git/GitWatcher';
 import { HookServer } from './server/HookServer';
 import { UnmessWebviewProvider } from './sidebar/UnmessWebviewProvider';
+import { ScreenshotDropZone, DROP_ZONE_VIEW_ID } from './sidebar/ScreenshotDropZone';
 import { PrMonitor } from './pr/PrMonitor';
 import { TmuxManager } from './session/TmuxManager';
 import { WorktreeDimDecorationProvider } from './sidebar/WorktreeDimDecorationProvider';
@@ -135,10 +136,6 @@ class VsCodeWorkspaceHost implements IWorkspaceHost {
       vscode.window.showWarningMessage(`Unmess: could not open ${absPath}`);
     }
   }
-
-  findLatestScreenshot(): Promise<string | undefined> {
-    return findLatestScreenshot();
-  }
 }
 
 export async function activate(ctx: vscode.ExtensionContext) {
@@ -224,6 +221,30 @@ export async function activate(ctx: vscode.ExtensionContext) {
     }),
   );
 
+  // OS-file drop target. The sidebar webview can't receive OS drags (sandboxed
+  // iframe) and the editor-area viewer terminal lets VS Code's editor
+  // drop-target open the file instead — a tree view with a drag-and-drop
+  // controller declaring `text/uri-list` + `files` is the sidebar surface the
+  // workbench routes external file drops to.
+  const dropZone = new ScreenshotDropZone({
+    targetLabel: () => service.activeWorktreeLabel(),
+    attach: (paths) => service.attachDroppedFiles(paths),
+    saveTempFile: async (name, data) => {
+      const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'unmess-drop-'));
+      const file = path.join(dir, name || 'dropped-image.png');
+      await fs.promises.writeFile(file, data);
+      return file;
+    },
+    warn: (message) => void vscode.window.showWarningMessage(message),
+  });
+  ctx.subscriptions.push(
+    vscode.window.createTreeView(DROP_ZONE_VIEW_ID, {
+      treeDataProvider: dropZone,
+      dragAndDropController: dropZone,
+    }),
+    dropZone,
+  );
+
   // "The agent needs you": sidebar badge always; native OS notification only
   // when VSCode is in the background (inside the window the badge suffices).
   const osaNotify = new OsaNotifyAdapter();
@@ -266,7 +287,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
   );
 
   service.setUi({
-    pushWebview: () => webviewProvider.push(),
+    pushWebview: () => {
+      webviewProvider.push();
+      dropZone.refresh(); // keep the "→ target" hint in sync with the active worktree
+    },
     syncDecorations: (worktrees, activeWorktreeId) => dimProvider.update(worktrees, activeWorktreeId),
     openDiffPanel: (worktreeId) => diffPanelManager.open(worktreeId),
   });
@@ -283,6 +307,9 @@ export async function activate(ctx: vscode.ExtensionContext) {
     vscode.commands.registerCommand('unmess.createWorktree', (opts?: { branch?: string; description?: string }) =>
       service.createWorktree(opts),
     ),
+    // The "+" in the view header: opens the webview's rich new-task modal
+    // (title, branch, base branch, description) rather than a bare input box.
+    vscode.commands.registerCommand('unmess.newTask', () => webviewProvider.openNewTask()),
     vscode.commands.registerCommand('unmess.deleteWorktree', (item) => service.deleteWorktree(item?.worktree)),
     vscode.commands.registerCommand('unmess.renameWorktree', (item) => service.renameWorktree(item?.worktree)),
     vscode.commands.registerCommand('unmess.initWorktree', (item) => service.initWorktree(item?.worktree)),

@@ -64,7 +64,10 @@ export interface UnmessState {
 }
 
 // Extension → WebView
-export type ExtMessage = { type: 'state'; payload: UnmessState };
+export type ExtMessage =
+  | { type: 'state'; payload: UnmessState }
+  /** The native "+" in the view header asks the webview to open its new-task modal. */
+  | { type: 'openNewTask' };
 
 // WebView → Extension
 export type WebMessage =
@@ -74,7 +77,6 @@ export type WebMessage =
   | { type: 'focusTerminal'; worktreeId: string }
   | { type: 'focusSession'; worktreeId: string; kind: 'agent' | 'shell'; index: number }
   | { type: 'killSession'; worktreeId: string; index: number }
-  | { type: 'attachScreenshot'; worktreeId: string; index: number }
   | { type: 'reorderSessions'; worktreeId: string; orderedIndexes: number[] }
   | { type: 'reorderWorktrees'; orderedIds: string[] }
   | { type: 'dockerUp'; worktreeId: string }

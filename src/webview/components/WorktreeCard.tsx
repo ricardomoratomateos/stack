@@ -354,25 +354,6 @@ function SessionRow({
               transition: 'max-width .12s ease, opacity .1s, margin-left .12s ease',
               pointerEvents: hov ? 'auto' : 'none',
             }}>
-              {isAgent && (
-                <button
-                  title="Attach latest screenshot"
-                  onClick={(e) => { e.stopPropagation(); send({ type: 'attachScreenshot', worktreeId, index: session.index }); }}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    width: 12, height: 12, border: 'none', background: 'transparent', color: T.textMuted,
-                    cursor: 'pointer', padding: 0, transition: 'color .1s',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = T.textBody; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = T.textMuted; }}
-                >
-                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
-                    <rect x="2" y="3" width="12" height="10" rx="1"/>
-                    <circle cx="5.5" cy="6.5" r="1.1"/>
-                    <path d="M3 12l3.5-3.5L9 11l2-2 2 2" strokeLinejoin="round" strokeLinecap="round"/>
-                  </svg>
-                </button>
-              )}
               <button
                 title="Kill session"
                 onClick={(e) => { e.stopPropagation(); send({ type: 'killSession', worktreeId, index: session.index }); }}

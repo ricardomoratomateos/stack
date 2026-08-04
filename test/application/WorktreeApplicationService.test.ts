@@ -59,8 +59,6 @@ interface HarnessOpts {
   diffOutput?: string;
   /** what agentManager.sendPromptToAgent resolves to (a live agent existed) */
   liveAgentAccepts?: boolean;
-  /** path returned by host.findLatestScreenshot */
-  latestScreenshot?: string;
   /** persisted worktree display order (ids) */
   worktreeOrder?: string[];
   /** branches returned by git.listBranches */
@@ -174,7 +172,6 @@ function makeHarness(o: HarnessOpts = {}) {
     isDirectory: vi.fn((p: string) => (o.gitDirs ?? []).includes(p)),
     writeClipboard: vi.fn(async (text: string) => { calls.push(`host.writeClipboard:${text}`); }),
     openFileInEditor: vi.fn(async (p: string, line?: number) => { calls.push(`host.openFileInEditor:${p}:${line ?? ''}`); }),
-    findLatestScreenshot: vi.fn(async (): Promise<string | undefined> => o.latestScreenshot),
   };
 
   const notify = {
@@ -479,36 +476,97 @@ describe('handleMessage killSession', () => {
   });
 });
 
-describe('handleMessage attachScreenshot', () => {
-  it('focuses the target window and pastes the single-quoted screenshot path unsent', async () => {
+
+describe('activeWorktreeLabel', () => {
+  it('returns undefined when no worktree is active', () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
+    expect(h.service.activeWorktreeLabel()).toBeUndefined();
+  });
+
+  it('returns undefined when the persisted active id no longer exists', () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], persistedActiveId: 'gone' });
+    expect(h.service.activeWorktreeLabel()).toBeUndefined();
+  });
+
+  it('prefers the alias of the active worktree', () => {
     const h = makeHarness({
-      worktrees: [makeWorktree({ id: 'a' })],
-      latestScreenshot: '/Users/me/Screenshots/shot.png',
+      worktrees: [makeWorktree({ id: 'a', alias: 'login fix' })],
+      persistedActiveId: 'a',
     });
-    await h.service.handleMessage({ type: 'attachScreenshot', worktreeId: 'a', index: 1 });
-    expect(h.claude.focusWindow).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }), 1);
-    expect(h.claude.pasteToActiveWindow).toHaveBeenCalledWith('a', "'/Users/me/Screenshots/shot.png' ");
+    expect(h.service.activeWorktreeLabel()).toBe('login fix');
   });
 
-  it('warns and pastes nothing when no screenshot is found', async () => {
-    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], latestScreenshot: undefined });
-    await h.service.handleMessage({ type: 'attachScreenshot', worktreeId: 'a', index: 1 });
-    expect(h.notify.showWarning).toHaveBeenCalledWith('Unmess: no screenshot found in your screenshot folder.');
+  it('falls back to the branch when there is no alias', () => {
+    const h = makeHarness({
+      worktrees: [makeWorktree({ id: 'a', branch: 'feat/drop' })],
+      persistedActiveId: 'a',
+    });
+    expect(h.service.activeWorktreeLabel()).toBe('feat/drop');
+  });
+});
+
+describe('attachDroppedFiles', () => {
+  it('reveals the active worktree viewer and pastes all paths single-quoted, unsent', async () => {
+    const h = makeHarness({
+      worktrees: [makeWorktree({ id: 'a' }), makeWorktree({ id: 'b', branch: 'feat/b' })],
+      persistedActiveId: 'a',
+      terminalIds: ['a'],
+    });
+    await h.service.attachDroppedFiles(['/shots/a b.png', '/shots/two.png']);
+    expect(h.claude.getOrCreateViewer).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }));
+    expect(h.viewers.get('a')!.show).toHaveBeenCalled();
+    expect(h.claude.pasteToActiveWindow).toHaveBeenCalledWith('a', "'/shots/a b.png' '/shots/two.png' ");
+  });
+
+  it('does nothing for an empty path list', async () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], persistedActiveId: 'a', terminalIds: ['a'] });
+    await h.service.attachDroppedFiles([]);
+    expect(h.claude.pasteToActiveWindow).not.toHaveBeenCalled();
+    expect(h.notify.showWarning).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the only worktree when none is active', async () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], terminalIds: ['a'] });
+    await h.service.attachDroppedFiles(['/shots/x.png']);
+    expect(h.claude.pasteToActiveWindow).toHaveBeenCalledWith('a', "'/shots/x.png' ");
+    // The fallback switch makes it the active worktree for the next drop.
+    expect(h.service.activeWorktreeLabel()).toBe('feat/a');
+  });
+
+  it('warns when no worktree is active and several exist', async () => {
+    const h = makeHarness({
+      worktrees: [makeWorktree({ id: 'a' }), makeWorktree({ id: 'b', branch: 'feat/b' })],
+    });
+    await h.service.attachDroppedFiles(['/shots/x.png']);
+    expect(h.notify.showWarning).toHaveBeenCalledWith('Unmess: select a worktree first, then drop the image again.');
     expect(h.claude.pasteToActiveWindow).not.toHaveBeenCalled();
   });
 
-  it('does nothing for an unknown worktree', async () => {
-    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], latestScreenshot: '/x/shot.png' });
-    await h.service.handleMessage({ type: 'attachScreenshot', worktreeId: 'nope', index: 1 });
-    expect(h.host.findLatestScreenshot).not.toHaveBeenCalled();
+  it('warns (with the alias) when the target worktree has no sessions', async () => {
+    const h = makeHarness({
+      worktrees: [makeWorktree({ id: 'a', alias: 'login fix' })],
+      persistedActiveId: 'a',
+    });
+    await h.service.attachDroppedFiles(['/shots/x.png']);
+    expect(h.notify.showWarning).toHaveBeenCalledWith(
+      'Unmess: no agent session in login fix — launch one, then drop the image again.',
+    );
     expect(h.claude.pasteToActiveWindow).not.toHaveBeenCalled();
   });
 
-  it('swallows focusWindow failure and still pastes', async () => {
-    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], latestScreenshot: '/x/shot.png' });
-    h.claude.focusWindow.mockRejectedValue(new Error('boom'));
-    await h.service.handleMessage({ type: 'attachScreenshot', worktreeId: 'a', index: 1 });
-    expect(h.claude.pasteToActiveWindow).toHaveBeenCalledWith('a', "'/x/shot.png' ");
+  it('warns with the branch when the session-less target has no alias', async () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a', branch: 'feat/a' })], persistedActiveId: 'a' });
+    await h.service.attachDroppedFiles(['/shots/x.png']);
+    expect(h.notify.showWarning).toHaveBeenCalledWith(
+      'Unmess: no agent session in feat/a — launch one, then drop the image again.',
+    );
+  });
+
+  it('still pastes when the viewer cannot be created', async () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], persistedActiveId: 'a', terminalIds: ['a'] });
+    h.claude.getOrCreateViewer.mockRejectedValue(new Error('boom'));
+    await h.service.attachDroppedFiles(['/shots/x.png']);
+    expect(h.claude.pasteToActiveWindow).toHaveBeenCalledWith('a', "'/shots/x.png' ");
   });
 });
 

@@ -52,12 +52,23 @@
       "unmess-container": [
         {
           "id": "unmess-sidebar",
-          "name": "",
-          "type": "webview"
+          "name": "Worktrees",
+          "type": "webview",
+          "initialSize": 20
+        },
+        {
+          "id": "unmess-drop-zone",
+          "name": "Screenshot drop",
+          "initialSize": 1
         }
       ]
     },
     "commands": [
+      {
+        "command": "unmess.newTask",
+        "title": "Unmess: New Task",
+        "icon": "$(add)"
+      },
       {
         "command": "unmess.createWorktree",
         "title": "Unmess: Create Worktree",
@@ -125,7 +136,13 @@
       }
     ],
     "menus": {
-      "view/title": [],
+      "view/title": [
+        {
+          "command": "unmess.newTask",
+          "when": "view == unmess-sidebar",
+          "group": "navigation"
+        }
+      ],
       "view/item/context": [
         {
           "command": "unmess.initWorktree",

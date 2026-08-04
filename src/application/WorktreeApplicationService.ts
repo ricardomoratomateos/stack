@@ -46,8 +46,6 @@ export interface IWorkspaceHost {
   writeClipboard(text: string): Promise<void>;
   /** Open a file in the editor, optionally revealing a 1-based line. */
   openFileInEditor(absPath: string, line?: number): Promise<void>;
-  /** Absolute path of the most recent screenshot/image in the OS screenshot folder. */
-  findLatestScreenshot(): Promise<string | undefined>;
 }
 
 /** Bridge to the VSCode UI surfaces (webview + explorer dimming). */
@@ -245,21 +243,6 @@ export class WorktreeApplicationService implements DiffPanelHost {
       );
       if (confirm === 'Kill') this.deps.agentManager.killWindow(msg.worktreeId, msg.index).catch(() => {});
     },
-    attachScreenshot: async (msg) => {
-      const wt = this.findWorktree(msg.worktreeId);
-      if (!wt) return;
-      const shot = await this.deps.host.findLatestScreenshot();
-      if (!shot) {
-        this.deps.notify.showWarning('Unmess: no screenshot found in your screenshot folder.');
-        return;
-      }
-      // Reveal the target window, then paste the path (single-quoted, as a
-      // terminal file-drop does) unsent so the agent picks up the image and the
-      // user can still add prompt text.
-      await this.switchToWorktree(msg.worktreeId);
-      await this.deps.agentManager.focusWindow(wt, msg.index).catch(() => {});
-      await this.deps.agentManager.pasteToActiveWindow(msg.worktreeId, `'${shot}' `);
-    },
     dockerUp: (msg) => {
       const wt = this.findWorktree(msg.worktreeId);
       if (wt) this.dockerUp(wt);
@@ -301,6 +284,41 @@ export class WorktreeApplicationService implements DiffPanelHost {
       | ((m: WebMessage) => void | Promise<void>)
       | undefined;
     if (handler) await handler(msg);
+  }
+
+  // ── External file drops (screenshot drop zone) ─────────────────────────────
+
+  /** Display label of the worktree that receives drops (drop-zone hint). */
+  activeWorktreeLabel(): string | undefined {
+    const wt = this.currentWorktreeId ? this.findWorktree(this.currentWorktreeId) : undefined;
+    return wt ? wt.alias ?? wt.branch : undefined;
+  }
+
+  /**
+   * Route externally-dropped files (macOS screenshot thumbnail → drop-zone
+   * tree) to the active worktree's agent: reveal its viewer and paste the
+   * quoted paths unsent, so the user can add prompt text before hitting Enter.
+   */
+  async attachDroppedFiles(paths: string[]): Promise<void> {
+    if (paths.length === 0) return;
+    const worktrees = this.deps.manager.list();
+    const wt =
+      this.findWorktree(this.currentWorktreeId ?? '') ?? (worktrees.length === 1 ? worktrees[0] : undefined);
+    if (!wt) {
+      this.deps.notify.showWarning('Unmess: select a worktree first, then drop the image again.');
+      return;
+    }
+    if (!this.deps.agentManager.hasTerminals(wt.id)) {
+      this.deps.notify.showWarning(
+        `Unmess: no agent session in ${wt.alias ?? wt.branch} — launch one, then drop the image again.`,
+      );
+      return;
+    }
+    await this.switchToWorktree(wt.id);
+    const viewer = await this.deps.agentManager.getOrCreateViewer(wt).catch(() => undefined);
+    viewer?.show();
+    // Single-quoted, like a native terminal file-drop — paths contain spaces.
+    await this.deps.agentManager.pasteToActiveWindow(wt.id, paths.map((p) => `'${p}' `).join(''));
   }
 
   // ── Worktree switch orchestration ──────────────────────────────────────────

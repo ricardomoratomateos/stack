@@ -21,11 +21,23 @@ function makeWebviewView(visible = true) {
     webview,
     visible,
     badge: undefined as { value: number; tooltip: string } | undefined,
+    description: undefined as string | undefined,
+    show: vi.fn(),
     onDidChangeVisibility: vi.fn(),
   };
 }
 
 const emptyState: UnmessState = { worktrees: [], activeWorktreeId: undefined };
+
+/** Minimal WorktreeItem carrying just the agent state the header summarises. */
+function item(id: string, agent: 'idle' | 'active' | 'permission' | 'waiting'): UnmessState['worktrees'][number] {
+  return {
+    id, branch: `feat/${id}`, path: `/repo/${id}`, isMain: false, deleting: false,
+    agent, agentCount: 1, terminalCount: 0, sessions: [],
+    git: { hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 },
+    docker: [], pr: null,
+  };
+}
 
 function makeHarness() {
   const stateListeners: Array<() => void> = [];
@@ -196,5 +208,49 @@ describe('message dispatch', () => {
     onMessage(msg);
     await flush();
     expect(h.service.handleMessage).toHaveBeenCalledWith(msg);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// native view header: title description + the "+" that opens the modal
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('openNewTask', () => {
+  it('reveals the view and asks the webview to open its new-task modal', () => {
+    const h = makeHarness();
+    const { view } = resolve(h);
+    h.provider.openNewTask();
+    expect(view.show).toHaveBeenCalledWith(true);
+    expect(view.webview.postMessage).toHaveBeenCalledWith({ type: 'openNewTask' });
+  });
+
+  it('is a no-op before the view has been resolved', () => {
+    const h = makeHarness();
+    expect(() => h.provider.openNewTask()).not.toThrow();
+  });
+});
+
+describe('header description', () => {
+  it('summarises the live counts on every push', () => {
+    const h = makeHarness();
+    h.service.buildState.mockReturnValue({
+      worktrees: [item('a', 'active'), item('b', 'active'), item('c', 'permission')],
+      activeWorktreeId: 'a',
+    });
+    const { view } = resolve(h);
+    expect(view.description).toBe('2 thinking · 1 needs you');
+  });
+
+  it.each([
+    { agents: [] as Array<'idle' | 'active' | 'permission'>, expected: undefined },
+    { agents: ['idle'] as const, expected: undefined },
+    { agents: ['active'] as const, expected: '1 thinking' },
+    { agents: ['permission'] as const, expected: '1 needs you' },
+  ])('describe($agents) → $expected', ({ agents, expected }) => {
+    const state: UnmessState = {
+      worktrees: agents.map((a, i) => item(String(i), a)),
+      activeWorktreeId: undefined,
+    };
+    expect(UnmessWebviewProvider.describe(state)).toBe(expected);
   });
 });
