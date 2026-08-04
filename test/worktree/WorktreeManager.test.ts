@@ -87,6 +87,7 @@ function makeGitStub(entries: GitWorktreeEntry[] = []): IGitPort & {
     deleteBranch: vi.fn(),
     branchExists: vi.fn(() => false),
     currentBranch: vi.fn(() => 'main'),
+    listBranches: vi.fn(() => []),
   };
 }
 
@@ -229,7 +230,15 @@ describe('create', () => {
     git.branchExists.mockReturnValue(false);
     await mgr().create('feat/x', REPO);
     expect(git.createWorktree).toHaveBeenCalledWith(
-      path.join(REPO, 'zer', 'feat-x'), 'feat/x', REPO, true,
+      path.join(REPO, 'zer', 'feat-x'), 'feat/x', REPO, true, undefined,
+    );
+  });
+
+  it('forwards the base branch a new branch is cut from', async () => {
+    git.branchExists.mockReturnValue(false);
+    await mgr().create('feat/x', REPO, undefined, 'develop');
+    expect(git.createWorktree).toHaveBeenCalledWith(
+      path.join(REPO, 'zer', 'feat-x'), 'feat/x', REPO, true, 'develop',
     );
   });
 
@@ -238,7 +247,7 @@ describe('create', () => {
     const wt = await mgr().create('feat/x', REPO);
     expect(wt.branch).toBe('feat/x');
     expect(git.createWorktree).toHaveBeenCalledWith(
-      path.join(REPO, 'zer', 'feat-x'), 'feat/x', REPO, false,
+      path.join(REPO, 'zer', 'feat-x'), 'feat/x', REPO, false, undefined,
     );
   });
 

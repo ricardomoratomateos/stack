@@ -202,6 +202,11 @@
           "default": true,
           "description": "Show a native OS notification when an agent finishes or asks for permission while VS Code is in the background. The sidebar attention badge is always shown regardless."
         },
+        "unmess.focusMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Clean-slate switching: when you switch worktree, close the other worktrees' editor tabs and agent terminals so only the active one is on screen. Off (default) makes switching an instant reveal with no flicker."
+        },
         "unmess.scopeSearchToActiveWorktree": {
           "type": "boolean",
           "default": true,

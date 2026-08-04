@@ -91,6 +91,55 @@ describe('GitCliAdapter (integration, real temp git repo)', () => {
       const wtPath = path.join(tmp, 'wt-missing-branch');
       await expect(adapter.createWorktree(wtPath, 'no-such-branch', repo, false)).rejects.toThrow();
     });
+
+    it('cuts a new branch from an explicit base branch (not from HEAD)', async () => {
+      // A base branch whose tip differs from main.
+      git('checkout -b base-for-cut');
+      fs.writeFileSync(path.join(repo, 'base-only.txt'), 'base\n');
+      git('add .');
+      git('commit -m base-commit');
+      const baseHead = git('rev-parse base-for-cut').trim();
+      git('checkout main');
+      const mainHead = git('rev-parse main').trim();
+      expect(baseHead).not.toBe(mainHead);
+
+      const wtPath = path.join(tmp, 'wt-from-base');
+      await adapter.createWorktree(wtPath, 'cut-from-base', repo, true, 'base-for-cut');
+      expect(git('rev-parse HEAD', wtPath).trim()).toBe(baseHead);
+      // The file that only exists on the base branch came along.
+      expect(fs.existsSync(path.join(wtPath, 'base-only.txt'))).toBe(true);
+      git(`worktree remove --force "${wtPath}"`);
+    });
+  });
+
+  describe('listBranches', () => {
+    it('lists local branches, most-recently-committed first', () => {
+      // One future-dated commit is enough to prove --sort=-committerdate: it must
+      // outrank main, whose commit was made "now" by beforeAll.
+      const env = {
+        ...process.env,
+        GIT_COMMITTER_DATE: '2038-01-01T00:00:00Z',
+        GIT_AUTHOR_DATE: '2038-01-01T00:00:00Z',
+      };
+      execSync('git checkout -b futuristic main', { cwd: repo, stdio: 'pipe' });
+      // Empty commit: this test only cares about the ref's committerdate, and
+      // leaving no file behind keeps the shared temp repo clean for later tests.
+      execSync('git commit --allow-empty -m futuristic', { cwd: repo, env, stdio: 'pipe' });
+      execSync('git checkout main', { cwd: repo, stdio: 'pipe' });
+
+      const branches = adapter.listBranches(repo);
+      expect(branches).toContain('futuristic');
+      expect(branches).toContain('main');
+      // Short names: no refs/heads/ prefix, no stray whitespace.
+      expect(branches.every((b) => b === b.trim() && !b.startsWith('refs/'))).toBe(true);
+      expect(branches.indexOf('futuristic')).toBeLessThan(branches.indexOf('main'));
+    });
+
+    it('returns [] on git failure (not a repo)', () => {
+      const notARepo = path.join(tmp, 'not-a-repo-branches');
+      fs.mkdirSync(notARepo, { recursive: true });
+      expect(adapter.listBranches(notARepo)).toEqual([]);
+    });
   });
 
   describe('deleteWorktree', () => {

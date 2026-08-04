@@ -7,9 +7,18 @@ export interface GitWorktreeEntry {
 export interface IGitPort {
   /** `git worktree list --porcelain`, parsed. Returns [] on git failure. */
   listWorktrees(repoRoot: string): GitWorktreeEntry[];
-  /** `git worktree add` (reuses branch) or `add -b` (creates it). Async so the huge
-   *  checkout never blocks the extension host. Rejects on git failure. */
-  createWorktree(worktreePath: string, branch: string, repoRoot: string, newBranch: boolean): Promise<void>;
+  /** `git worktree add` (reuses branch) or `add -b` (creates it, off `baseBranch`
+   *  when given, else the repo's current HEAD). Async so the huge checkout never
+   *  blocks the extension host. Rejects on git failure. */
+  createWorktree(
+    worktreePath: string,
+    branch: string,
+    repoRoot: string,
+    newBranch: boolean,
+    baseBranch?: string,
+  ): Promise<void>;
+  /** Local branch names, most-recently-committed first. Returns [] on git failure. */
+  listBranches(repoRoot: string): string[];
   /** `git worktree remove --force`. Async. Rejects on failure (caller decides to swallow). */
   deleteWorktree(worktreePath: string, repoRoot: string): Promise<void>;
   /** `git branch -D`. Throws on failure. */

@@ -3,14 +3,16 @@ import { T } from '../tokens';
 import { send } from '../vscode';
 
 interface Props {
-  branch?: string;
+  branches?: string[];
+  baseBranch?: string;
   onClose: () => void;
 }
 
-export function NewTaskModal({ branch, onClose }: Props) {
+export function NewTaskModal({ branches, baseBranch, onClose }: Props) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [branchName, setBranchName] = useState('');
+  const [base, setBase] = useState('');
   const titleRef = useRef<HTMLInputElement>(null);
   const branchRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
@@ -20,13 +22,22 @@ export function NewTaskModal({ branch, onClose }: Props) {
   // from yanking focus back while you type.
   useEffect(() => {
     titleRef.current?.focus();
+    send({ type: 'listBranches' });
   }, []);
 
+  // Preselect the repo's current branch once the list arrives, unless the user
+  // already picked something.
   useEffect(() => {
-    // Capture-phase handler: blocks VSCode from intercepting keystrokes while modal is open
+    if (!base && baseBranch) setBase(baseBranch);
+  }, [baseBranch, base]);
+
+  useEffect(() => {
+    // Escape closes the modal. Every other keystroke is deliberately left alone:
+    // a blanket stopPropagation here (capture phase on window) fired before the
+    // event ever reached the focused field, which broke clipboard shortcuts
+    // (⌘V) and the modal's own React key handlers (⌘↵, Enter-to-next-field).
     const capture = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose(); return; }
-      e.stopPropagation();
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
     };
     window.addEventListener('keydown', capture, true);
     return () => window.removeEventListener('keydown', capture, true);
@@ -40,6 +51,7 @@ export function NewTaskModal({ branch, onClose }: Props) {
       branch: b,
       title: title.trim() || undefined,
       description: description.trim() || undefined,
+      baseBranch: base || undefined,
     });
     onClose();
   };
@@ -47,6 +59,11 @@ export function NewTaskModal({ branch, onClose }: Props) {
   const onTextKey = (e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') handleSubmit();
   };
+
+  // Always keep the selected value representable, even before the list loads
+  // or when git returned nothing.
+  const baseOptions = [...new Set([...(base ? [base] : []), ...(branches ?? [])])];
+  if (baseOptions.length === 0) baseOptions.push('main');
 
   return (
     <div
@@ -61,9 +78,24 @@ export function NewTaskModal({ branch, onClose }: Props) {
     >
       <div style={{ width: '100%', maxWidth: 560, animation: 'unmess-fadein .15s ease' }}>
 
-        {/* Context row */}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 10, padding: '0 2px' }}>
-          <Chip label={branch ?? 'main'} mono />
+        {/* Context row: which branch the new one is cut from */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, padding: '0 2px' }}>
+          <span style={{ fontFamily: T.sans, fontSize: 11, color: T.textMuted }}>from</span>
+          <select
+            value={base}
+            onChange={(e) => setBase(e.target.value)}
+            title="Branch the new one is created from"
+            style={{
+              padding: '3px 8px', borderRadius: 999,
+              border: `1px solid ${T.borderStrong}`, background: T.surface2,
+              fontFamily: T.mono, fontSize: 11, color: T.textBody,
+              outline: 'none', cursor: 'pointer', maxWidth: 320,
+            }}
+          >
+            {baseOptions.map((b) => (
+              <option key={b} value={b}>{b}</option>
+            ))}
+          </select>
         </div>
 
         {/* Card */}
@@ -108,7 +140,7 @@ export function NewTaskModal({ branch, onClose }: Props) {
             ref={textRef}
             value={description}
             onChange={e => setDescription(e.target.value)}
-            onKeyDown={e => { e.stopPropagation(); onTextKey(e); }}
+            onKeyDown={onTextKey}
             placeholder="Describe la tarea… ⌘↵ para crear"
             rows={4}
             style={{
@@ -150,19 +182,6 @@ export function NewTaskModal({ branch, onClose }: Props) {
         </p>
       </div>
     </div>
-  );
-}
-
-function Chip({ label, mono }: { label: string; mono?: boolean }) {
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 5,
-      padding: '3px 10px', borderRadius: 999,
-      border: `1px solid ${T.borderStrong}`, background: T.surface2,
-      fontFamily: mono ? T.mono : T.sans, fontSize: 11, color: T.textBody,
-    }}>
-      {label}
-    </span>
   );
 }
 

@@ -149,7 +149,8 @@ export function App() {
       {/* New task modal */}
       {newTask && (
         <NewTaskModal
-          branch={selectedWt?.branch}
+          branches={state.branches}
+          baseBranch={state.baseBranch}
           onClose={() => setNewTask(false)}
         />
       )}

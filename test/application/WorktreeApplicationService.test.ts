@@ -63,6 +63,10 @@ interface HarnessOpts {
   latestScreenshot?: string;
   /** persisted worktree display order (ids) */
   worktreeOrder?: string[];
+  /** branches returned by git.listBranches */
+  branches?: string[];
+  /** tabManager.getState() per worktree id — drives the reveal-path last-active file */
+  lastActiveByWorktree?: Record<string, { uris: string[]; active?: string }>;
 }
 
 function makeHarness(o: HarnessOpts = {}) {
@@ -75,6 +79,7 @@ function makeHarness(o: HarnessOpts = {}) {
     defaultProvider: 'claude',
     claudeCommand: 'claude',
     scopeSearchToActiveWorktree: true,
+    focusMode: false,
     docker: {
       composeFile: 'docker-compose.yml',
       overrideFile: 'docker-compose.worktree.yml',
@@ -132,6 +137,7 @@ function makeHarness(o: HarnessOpts = {}) {
     }),
     closeOtherTabs: vi.fn(async (id: string) => { calls.push(`tab.closeOtherTabs:${id}`); }),
     restoreTabs: vi.fn((id: string) => { calls.push(`tab.restoreTabs:${id}`); return Promise.resolve(); }),
+    getState: vi.fn((id: string) => (o.lastActiveByWorktree ?? {})[id]),
   };
   const breakpointManager = { activate: vi.fn() };
 
@@ -226,6 +232,7 @@ function makeHarness(o: HarnessOpts = {}) {
   const git = {
     currentBranch: vi.fn((): string => ''),
     diff: vi.fn(async () => o.diffOutput ?? ''),
+    listBranches: vi.fn((): string[] => o.branches ?? []),
   };
   const globalState = {
     get: vi.fn(<T,>(k: string): T | undefined => {
@@ -358,10 +365,12 @@ describe('handleMessage focusTerminal', () => {
     const h = makeHarness({ worktrees: [a, b], persistedActiveId: 'a' });
     await h.service.handleMessage({ type: 'focusTerminal', worktreeId: 'b' });
     await flushMicrotasks();
-    // switch ran (target has no terminals so the ONLY getOrCreateViewer comes
-    // from focusTerminal itself, after the switch's restoreTabs)
-    expect(h.calls.indexOf('tab.restoreTabs:b')).toBeGreaterThan(-1);
-    expect(h.calls.indexOf('claude.getOrCreateViewer:b')).toBeGreaterThan(h.calls.indexOf('tab.restoreTabs:b'));
+    // The switch runs first — anchor on its last step (search scoping). The
+    // target has no terminals, so the ONLY getOrCreateViewer comes from
+    // focusTerminal itself, after the switch has finished.
+    const scopingIdx = h.calls.indexOf('host.updateFolderSetting:/repo/zer/feat-b:search.exclude:clear');
+    expect(scopingIdx).toBeGreaterThan(-1);
+    expect(h.calls.indexOf('claude.getOrCreateViewer:b')).toBeGreaterThan(scopingIdx);
     expect(h.viewers.get('b')!.show).toHaveBeenCalled();
   });
 
@@ -512,6 +521,43 @@ describe('handleMessage reorderSessions', () => {
     await h.service.handleMessage({ type: 'reorderSessions', worktreeId: 'a', orderedIndexes: [3, 1, 2] });
     expect(h.claude.setSessionOrder).toHaveBeenCalledWith('a', [3, 1, 2]);
     expect(h.ui.pushWebview).toHaveBeenCalled();
+  });
+});
+
+describe('handleMessage listBranches', () => {
+  const repoOpts = { workspaceFolders: ['/repo'], gitDirs: ['/repo/.git'], withUi: true };
+
+  it('loads the branch list plus the current branch and pushes it to the webview', async () => {
+    const h = makeHarness({ ...repoOpts, branches: ['feat/x', 'main', 'develop'] });
+    h.git.currentBranch.mockReturnValue('main');
+    await h.service.handleMessage({ type: 'listBranches' });
+    expect(h.git.listBranches).toHaveBeenCalledWith('/repo');
+    expect(h.ui.pushWebview).toHaveBeenCalled();
+    const state = h.service.buildState();
+    expect(state.branches).toEqual(['feat/x', 'main', 'develop']);
+    expect(state.baseBranch).toBe('main');
+  });
+
+  it('falls back to an empty base branch when git is on a detached HEAD', async () => {
+    const h = makeHarness({ ...repoOpts, branches: ['main'] });
+    h.git.currentBranch.mockImplementation(() => { throw new Error('detached'); });
+    await h.service.handleMessage({ type: 'listBranches' });
+    expect(h.service.buildState().baseBranch).toBe('');
+  });
+
+  it('does nothing when there is no git repository in the workspace', async () => {
+    const h = makeHarness({ withUi: true }); // no gitDirs → no repo root
+    await h.service.handleMessage({ type: 'listBranches' });
+    expect(h.git.listBranches).not.toHaveBeenCalled();
+    expect(h.service.buildState().branches).toBeUndefined();
+  });
+
+  it('leaves branches undefined until the webview asks', () => {
+    const h = makeHarness(repoOpts);
+    const state = h.service.buildState();
+    expect(state.branches).toBeUndefined();
+    expect(state.baseBranch).toBeUndefined();
+    expect(h.git.listBranches).not.toHaveBeenCalled();
   });
 });
 
@@ -691,32 +737,6 @@ describe('switchToWorktree', () => {
     expect(h.calls[0]).toBe('globalState.update:unmess.activeWorktreeId:b');
   });
 
-  it('snapshots hadViewer for ALL worktrees BEFORE closing viewers', async () => {
-    const { h } = switchHarness({ viewerIds: ['a', 'c'] });
-    await h.service.switchToWorktree('b');
-    const snapshotIdx = h.calls.indexOf('tab.updateViewerState:a,b,c:a,c');
-    expect(snapshotIdx).toBeGreaterThan(-1);
-    expect(snapshotIdx).toBeLessThan(h.calls.indexOf('claude.closeViewer:a'));
-    expect(snapshotIdx).toBeLessThan(h.calls.indexOf('claude.closeViewer:c'));
-  });
-
-  it('calls saveAll(false) before closing any tab or viewer', async () => {
-    const { h } = switchHarness({ viewerIds: ['a'] });
-    await h.service.switchToWorktree('b');
-    const saveIdx = h.calls.indexOf('host.saveAll:false');
-    expect(saveIdx).toBeGreaterThan(-1);
-    expect(saveIdx).toBeLessThan(h.calls.indexOf('claude.closeViewer:a'));
-    expect(saveIdx).toBeLessThan(h.calls.indexOf('tab.closeOtherTabs:b'));
-  });
-
-  it('closes all other worktrees viewers (and only those)', async () => {
-    const { h } = switchHarness({ viewerIds: ['a', 'c'] });
-    await h.service.switchToWorktree('b');
-    expect(h.claude.closeViewer).toHaveBeenCalledWith('a');
-    expect(h.claude.closeViewer).toHaveBeenCalledWith('c');
-    expect(h.claude.closeViewer).not.toHaveBeenCalledWith('b');
-  });
-
   it('creates viewer only when target hasTerminals', async () => {
     const { h } = switchHarness({ terminalIds: ['b'] });
     await h.service.switchToWorktree('b');
@@ -730,60 +750,149 @@ describe('switchToWorktree', () => {
     expect(h.claude.getOrCreateViewer).not.toHaveBeenCalled();
   });
 
-  it('tolerates viewer creation failure and continues the switch', async () => {
-    const { h } = switchHarness({ terminalIds: ['b'] });
-    h.claude.getOrCreateViewer.mockRejectedValue(new Error('boom'));
-    await h.service.switchToWorktree('b');
-    expect(h.tabManager.closeOtherTabs).toHaveBeenCalledWith('b', h.worktrees);
-    expect(h.tabManager.restoreTabs).toHaveBeenCalledWith('b');
+  // ── default path: reveal, never rebuild ──────────────────────────────────
+  describe('reveal (default, focusMode off)', () => {
+    it('tears down nothing: no saveAll, no closeViewer, no tab churn', async () => {
+      const { h } = switchHarness({ viewerIds: ['a', 'c'], terminalIds: ['b'] });
+      await h.service.switchToWorktree('b');
+      expect(h.host.saveAll).not.toHaveBeenCalled();
+      expect(h.claude.closeViewer).not.toHaveBeenCalled();
+      expect(h.tabManager.closeOtherTabs).not.toHaveBeenCalled();
+      expect(h.tabManager.restoreTabs).not.toHaveBeenCalled();
+      expect(h.tabManager.updateViewerState).not.toHaveBeenCalled();
+      expect(h.host.moveEditorToFirstInGroup).not.toHaveBeenCalled();
+    });
+
+    it('order: persist → pushWebview → reveal viewer → reveal last-active file → scoping', async () => {
+      const { h } = switchHarness({
+        viewerIds: ['a'],
+        terminalIds: ['b'],
+        existingPaths: ['/repo/zer/feat-b/src/foo.ts'],
+        lastActiveByWorktree: { b: { uris: [], active: '/repo/zer/feat-b/src/foo.ts' } },
+      });
+      await h.service.switchToWorktree('b');
+      expect(h.calls).toEqual([
+        'globalState.update:unmess.activeWorktreeId:b',
+        'ui.pushWebview',
+        'claude.getOrCreateViewer:b',
+        'viewer.show:b',
+        'host.openFileInEditor:/repo/zer/feat-b/src/foo.ts:',
+        'host.updateFolderSetting:/repo/zer/feat-a:search.exclude:{"**":true}',
+        'host.updateFolderSetting:/repo/zer/feat-b:search.exclude:clear',
+        'host.updateFolderSetting:/repo/zer/feat-c:search.exclude:{"**":true}',
+      ]);
+    });
+
+    it('skips the last-active file when it no longer exists on disk', async () => {
+      const { h } = switchHarness({
+        lastActiveByWorktree: { b: { uris: [], active: '/repo/zer/feat-b/deleted.ts' } },
+      }); // existingPaths empty → host.exists false
+      await h.service.switchToWorktree('b');
+      expect(h.host.openFileInEditor).not.toHaveBeenCalled();
+    });
+
+    it('skips the reveal when the worktree has no remembered active file', async () => {
+      const { h } = switchHarness({ lastActiveByWorktree: { b: { uris: [] } } });
+      await h.service.switchToWorktree('b');
+      expect(h.host.openFileInEditor).not.toHaveBeenCalled();
+    });
+
+    it('swallows a failure opening the last-active file', async () => {
+      const { h } = switchHarness({
+        existingPaths: ['/repo/zer/feat-b/src/foo.ts'],
+        lastActiveByWorktree: { b: { uris: [], active: '/repo/zer/feat-b/src/foo.ts' } },
+      });
+      h.host.openFileInEditor.mockRejectedValue(new Error('unreadable'));
+      await expect(h.service.switchToWorktree('b')).resolves.toBeUndefined();
+    });
   });
 
-  it('order: persist → pushWebview → updateViewerState → saveAll → closeViewers → viewer → closeOtherTabs → restoreTabs', async () => {
-    vi.useFakeTimers();
-    const { h } = switchHarness({ viewerIds: ['a'], terminalIds: ['b'] });
-    await h.service.switchToWorktree('b');
-    expect(h.calls).toEqual([
-      'globalState.update:unmess.activeWorktreeId:b',
-      'ui.pushWebview',
-      'tab.updateViewerState:a,b,c:a',
-      'host.saveAll:false',
-      'claude.closeViewer:a',
-      'claude.closeViewer:c',
-      'claude.getOrCreateViewer:b',
-      'viewer.show:b',
-      'tab.closeOtherTabs:b',
-      'tab.restoreTabs:b',
-      'host.updateFolderSetting:/repo/zer/feat-a:search.exclude:{"**":true}',
-      'host.updateFolderSetting:/repo/zer/feat-b:search.exclude:clear',
-      'host.updateFolderSetting:/repo/zer/feat-c:search.exclude:{"**":true}',
-    ]);
-  });
+  // ── unmess.focusMode: the clean-slate teardown behaviour ─────────────────
+  describe('focusMode (clean slate)', () => {
+    const focus = (over: HarnessOpts = {}) =>
+      switchHarness({ ...over, config: { focusMode: true, ...(over.config ?? {}) } });
 
-  it('after restore: shows viewer again, waits 50ms, and runs moveEditorToFirstInGroup', async () => {
-    vi.useFakeTimers();
-    const { h } = switchHarness({ terminalIds: ['b'] });
-    await h.service.switchToWorktree('b');
-    const showCount = h.viewers.get('b')!.show.mock.calls.length;
-    await vi.advanceTimersByTimeAsync(0);
-    expect(h.viewers.get('b')!.show.mock.calls.length).toBe(showCount + 1);
-    expect(h.host.moveEditorToFirstInGroup).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(50);
-    expect(h.host.moveEditorToFirstInGroup).toHaveBeenCalledTimes(1);
-  });
+    it('snapshots hadViewer for ALL worktrees BEFORE closing viewers', async () => {
+      const { h } = focus({ viewerIds: ['a', 'c'] });
+      await h.service.switchToWorktree('b');
+      const snapshotIdx = h.calls.indexOf('tab.updateViewerState:a,b,c:a,c');
+      expect(snapshotIdx).toBeGreaterThan(-1);
+      expect(snapshotIdx).toBeLessThan(h.calls.indexOf('claude.closeViewer:a'));
+      expect(snapshotIdx).toBeLessThan(h.calls.indexOf('claude.closeViewer:c'));
+    });
 
-  it('skips moveEditorToFirstInGroup when there is no viewer', async () => {
-    const { h } = switchHarness();
-    await h.service.switchToWorktree('b');
-    await flushMicrotasks();
-    expect(h.host.moveEditorToFirstInGroup).not.toHaveBeenCalled();
-  });
+    it('calls saveAll(false) before closing any tab or viewer', async () => {
+      const { h } = focus({ viewerIds: ['a'] });
+      await h.service.switchToWorktree('b');
+      const saveIdx = h.calls.indexOf('host.saveAll:false');
+      expect(saveIdx).toBeGreaterThan(-1);
+      expect(saveIdx).toBeLessThan(h.calls.indexOf('claude.closeViewer:a'));
+      expect(saveIdx).toBeLessThan(h.calls.indexOf('tab.closeOtherTabs:b'));
+    });
 
-  it('swallows restoreTabs failure without breaking the switch', async () => {
-    const { h } = switchHarness();
-    h.tabManager.restoreTabs.mockRejectedValue(new Error('restore boom'));
-    await expect(h.service.switchToWorktree('b')).resolves.toBeUndefined();
-    await flushMicrotasks();
-    expect(h.host.moveEditorToFirstInGroup).not.toHaveBeenCalled();
+    it('closes all other worktrees viewers (and only those)', async () => {
+      const { h } = focus({ viewerIds: ['a', 'c'] });
+      await h.service.switchToWorktree('b');
+      expect(h.claude.closeViewer).toHaveBeenCalledWith('a');
+      expect(h.claude.closeViewer).toHaveBeenCalledWith('c');
+      expect(h.claude.closeViewer).not.toHaveBeenCalledWith('b');
+    });
+
+    it('tolerates viewer creation failure and continues the switch', async () => {
+      const { h } = focus({ terminalIds: ['b'] });
+      h.claude.getOrCreateViewer.mockRejectedValue(new Error('boom'));
+      await h.service.switchToWorktree('b');
+      expect(h.tabManager.closeOtherTabs).toHaveBeenCalledWith('b', h.worktrees);
+      expect(h.tabManager.restoreTabs).toHaveBeenCalledWith('b');
+    });
+
+    it('order: persist → pushWebview → updateViewerState → saveAll → closeViewers → viewer → closeOtherTabs → restoreTabs', async () => {
+      vi.useFakeTimers();
+      const { h } = focus({ viewerIds: ['a'], terminalIds: ['b'] });
+      await h.service.switchToWorktree('b');
+      expect(h.calls).toEqual([
+        'globalState.update:unmess.activeWorktreeId:b',
+        'ui.pushWebview',
+        'tab.updateViewerState:a,b,c:a',
+        'host.saveAll:false',
+        'claude.closeViewer:a',
+        'claude.closeViewer:c',
+        'claude.getOrCreateViewer:b',
+        'viewer.show:b',
+        'tab.closeOtherTabs:b',
+        'tab.restoreTabs:b',
+        'host.updateFolderSetting:/repo/zer/feat-a:search.exclude:{"**":true}',
+        'host.updateFolderSetting:/repo/zer/feat-b:search.exclude:clear',
+        'host.updateFolderSetting:/repo/zer/feat-c:search.exclude:{"**":true}',
+      ]);
+    });
+
+    it('after restore: shows viewer again, waits 50ms, and runs moveEditorToFirstInGroup', async () => {
+      vi.useFakeTimers();
+      const { h } = focus({ terminalIds: ['b'] });
+      await h.service.switchToWorktree('b');
+      const showCount = h.viewers.get('b')!.show.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(h.viewers.get('b')!.show.mock.calls.length).toBe(showCount + 1);
+      expect(h.host.moveEditorToFirstInGroup).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(50);
+      expect(h.host.moveEditorToFirstInGroup).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips moveEditorToFirstInGroup when there is no viewer', async () => {
+      const { h } = focus();
+      await h.service.switchToWorktree('b');
+      await flushMicrotasks();
+      expect(h.host.moveEditorToFirstInGroup).not.toHaveBeenCalled();
+    });
+
+    it('swallows restoreTabs failure without breaking the switch', async () => {
+      const { h } = focus();
+      h.tabManager.restoreTabs.mockRejectedValue(new Error('restore boom'));
+      await expect(h.service.switchToWorktree('b')).resolves.toBeUndefined();
+      await flushMicrotasks();
+      expect(h.host.moveEditorToFirstInGroup).not.toHaveBeenCalled();
+    });
   });
 });
 
@@ -1202,14 +1311,14 @@ describe('createWorktree', () => {
       prompt: 'Branch name',
       placeHolder: 'e.g. AS-7090-fix-payments',
     });
-    expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, undefined);
+    expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, undefined, undefined);
   });
 
   it('passes the title as the worktree alias (trimmed), keeping the description as the prompt', async () => {
     vi.useFakeTimers();
     const { h, created } = createHarness();
     await h.service.createWorktree({ branch: 'feat/x', title: '  My task  ', description: 'do the thing' });
-    expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, 'My task');
+    expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, 'My task', undefined);
     await vi.advanceTimersByTimeAsync(300);
     expect(h.claude.launchWithPrompt).toHaveBeenCalledWith(created, 'do the thing');
   });
@@ -1218,7 +1327,16 @@ describe('createWorktree', () => {
     vi.useFakeTimers();
     const { h } = createHarness();
     await h.service.createWorktree({ branch: 'feat/x', description: 'only a prompt' });
-    expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, undefined);
+    expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, undefined, undefined);
+  });
+
+  it('forwards the chosen base branch from the webview message', async () => {
+    vi.useFakeTimers();
+    const { h } = createHarness();
+    await h.service.handleMessage({
+      type: 'createWorktree', branch: 'feat/x', title: 'T', description: 'd', baseBranch: 'develop',
+    });
+    expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, 'T', 'develop');
   });
 
   it('aborts silently when the input box is cancelled', async () => {

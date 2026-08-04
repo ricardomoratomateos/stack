@@ -25,6 +25,7 @@ describe('ConfigManager', () => {
       opencodeCommand: 'opencode',
       notifyOnAttention: true,
       scopeSearchToActiveWorktree: true,
+      focusMode: false,
       docker: {
         composeFile: 'docker-compose.yml',
         overrideFile: 'docker-compose.worktree.yml',
@@ -53,6 +54,7 @@ describe('ConfigManager', () => {
       opencodeCommand: '/usr/local/bin/opencode',
       notifyOnAttention: false,
       scopeSearchToActiveWorktree: false,
+      focusMode: true,
       docker: {
         composeFile: 'compose.yaml',
         overrideFile: 'compose.wt.yaml',

@@ -57,6 +57,10 @@ export interface UnmessState {
   defaultProvider?: ProviderId;
   /** Show the docker start/stop button (unmess.docker.ports configured). */
   dockerEnabled?: boolean;
+  /** Local branches offered as the base for a new worktree (filled on demand). */
+  branches?: string[];
+  /** Branch preselected as the base — the main repo's current branch. */
+  baseBranch?: string;
 }
 
 // Extension → WebView
@@ -79,5 +83,6 @@ export type WebMessage =
   | { type: 'renameWorktree'; worktreeId: string }
   | { type: 'initWorktree'; worktreeId: string }
   | { type: 'openDiff'; worktreeId: string }
-  | { type: 'createWorktree'; branch: string; title?: string; description?: string }
+  | { type: 'createWorktree'; branch: string; title?: string; description?: string; baseBranch?: string }
+  | { type: 'listBranches' }
   | { type: 'selectWorktree'; worktreeId: string };

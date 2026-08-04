@@ -39,11 +39,32 @@ export class GitCliAdapter implements IGitPort {
     }
   }
 
-  async createWorktree(worktreePath: string, branch: string, repoRoot: string, newBranch: boolean): Promise<void> {
+  async createWorktree(
+    worktreePath: string,
+    branch: string,
+    repoRoot: string,
+    newBranch: boolean,
+    baseBranch?: string,
+  ): Promise<void> {
+    // A new branch can start from an explicit base ref; without one git uses the
+    // repo's current HEAD. Reusing an existing branch ignores the base entirely.
     const cmd = newBranch
-      ? `git worktree add -b "${branch}" "${worktreePath}"`
+      ? `git worktree add -b "${branch}" "${worktreePath}"${baseBranch ? ` "${baseBranch}"` : ''}`
       : `git worktree add "${worktreePath}" "${branch}"`;
     await execAsync(cmd, { cwd: repoRoot, maxBuffer: MAX_BUFFER });
+  }
+
+  listBranches(repoRoot: string): string[] {
+    try {
+      // The format must be quoted: unquoted parentheses are shell syntax.
+      const out = execSync(
+        "git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/",
+        { cwd: repoRoot, encoding: 'utf8' },
+      );
+      return out.split('\n').map((l) => l.trim()).filter(Boolean);
+    } catch {
+      return [];
+    }
   }
 
   async deleteWorktree(worktreePath: string, repoRoot: string): Promise<void> {

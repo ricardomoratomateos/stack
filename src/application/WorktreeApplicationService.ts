@@ -97,6 +97,12 @@ export class WorktreeApplicationService implements DiffPanelHost {
   private ui: UiBridge = NO_UI;
   /** Worktrees currently tearing down in the background — locked against interaction. */
   private deleting = new Set<string>();
+  /**
+   * Branch list for the "create worktree" form. Filled on demand (the webview
+   * asks when the modal opens) rather than in buildState — that runs on every
+   * agent state change and must not shell out to git.
+   */
+  private branchOptions?: { branches: string[]; base: string };
 
   constructor(private readonly deps: WorktreeAppDeps) {
     this.currentWorktreeId = deps.globalState.get<string>(ACTIVE_WORKTREE_KEY);
@@ -274,7 +280,17 @@ export class WorktreeApplicationService implements DiffPanelHost {
     renameWorktree: (msg) => this.renameWorktree(this.findWorktree(msg.worktreeId)),
     initWorktree: (msg) => this.initWorktree(this.findWorktree(msg.worktreeId)),
     openDiff: (msg) => this.ui.openDiffPanel(msg.worktreeId),
-    createWorktree: (msg) => this.createWorktree({ branch: msg.branch, title: msg.title, description: msg.description }),
+    createWorktree: (msg) => this.createWorktree({
+      branch: msg.branch, title: msg.title, description: msg.description, baseBranch: msg.baseBranch,
+    }),
+    listBranches: () => {
+      const root = this.findRepoRoot();
+      if (!root) return;
+      let base = '';
+      try { base = this.deps.git.currentBranch(root); } catch { /* detached or git failure */ }
+      this.branchOptions = { branches: this.deps.git.listBranches(root), base };
+      this.ui.pushWebview();
+    },
     selectWorktree: (msg) => this.switchToWorktree(msg.worktreeId),
   };
 
@@ -302,17 +318,51 @@ export class WorktreeApplicationService implements DiffPanelHost {
     // never fires for a worktree with no sessions to show.
     this.ui.pushWebview();
 
+    // Scope the Breakpoints panel to the target worktree.
+    this.deps.breakpointManager.activate(worktreeId, worktrees);
+
+    if (this.deps.config.get().focusMode) {
+      await this.switchWithFocusMode(target, worktrees);
+    } else {
+      await this.revealWorktree(target);
+    }
+
+    this.refreshDecorations();
+    this.syncSearchScoping();
+  }
+
+  /**
+   * Default switch: reveal, never rebuild. Nothing is closed, so there is no
+   * flicker, no terminal respawn, and VSCode keeps every tab exactly where the
+   * user left it (the editor API can neither hide nor reorder tabs, so the only
+   * way to keep tab order stable is to never touch it).
+   */
+  private async revealWorktree(target: Worktree): Promise<void> {
+    const viewer = this.deps.agentManager.hasTerminals(target.id)
+      ? await this.deps.agentManager.getOrCreateViewer(target).catch(() => undefined)
+      : undefined;
+    viewer?.show();
+
+    // Bring the worktree's last-focused file back to the front. Without this the
+    // editor would keep showing whatever file the previous worktree left active.
+    const lastActive = this.deps.tabManager.getState(target.id)?.active;
+    if (lastActive && this.deps.host.exists(lastActive)) {
+      await this.deps.host.openFileInEditor(lastActive).catch(() => {});
+    }
+  }
+
+  /** Clean-slate switch (unmess.focusMode): only the active worktree on screen. */
+  private async switchWithFocusMode(target: Worktree, worktrees: Worktree[]): Promise<void> {
     const viewerOpenIds = new Set(
       worktrees.filter((wt) => this.deps.agentManager.getViewer(wt.id) !== undefined).map((wt) => wt.id),
     );
     this.deps.tabManager.updateViewerState(worktrees, viewerOpenIds);
-    // Scope the Breakpoints panel to the target worktree, like the tabs above.
-    this.deps.breakpointManager.activate(worktreeId, worktrees);
 
+    // Tabs are about to be closed — flush unsaved work first.
     await this.deps.host.saveAll(false);
 
     await Promise.all(
-      worktrees.filter((wt) => wt.id !== worktreeId).map((wt) => this.deps.agentManager.closeViewer(wt.id)),
+      worktrees.filter((wt) => wt.id !== target.id).map((wt) => this.deps.agentManager.closeViewer(wt.id)),
     );
 
     const viewer = this.deps.agentManager.hasTerminals(target.id)
@@ -320,9 +370,9 @@ export class WorktreeApplicationService implements DiffPanelHost {
       : undefined;
     viewer?.show();
 
-    await this.deps.tabManager.closeOtherTabs(worktreeId, worktrees);
+    await this.deps.tabManager.closeOtherTabs(target.id, worktrees);
     this.deps.tabManager
-      .restoreTabs(worktreeId)
+      .restoreTabs(target.id)
       .then(async () => {
         if (!viewer) return;
         // Defer past the current microtask so the switch resolves first, then
@@ -333,9 +383,6 @@ export class WorktreeApplicationService implements DiffPanelHost {
         await this.deps.host.moveEditorToFirstInGroup();
       })
       .catch(() => {});
-
-    this.refreshDecorations();
-    this.syncSearchScoping();
   }
 
   // ── Selection sync ─────────────────────────────────────────────────────────
@@ -398,6 +445,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
       activeWorktreeId,
       defaultProvider: config.defaultProvider,
       dockerEnabled: config.docker.ports.length > 0,
+      branches: this.branchOptions?.branches,
+      baseBranch: this.branchOptions?.base,
     };
   }
 
@@ -521,7 +570,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   // ── Create ─────────────────────────────────────────────────────────────────
 
-  async createWorktree(opts?: { branch?: string; title?: string; description?: string }): Promise<void> {
+  async createWorktree(opts?: { branch?: string; title?: string; description?: string; baseBranch?: string }): Promise<void> {
     const root = this.findRepoRoot();
     if (!root) {
       this.deps.notify.showError('No git repository found in workspace.');
@@ -538,7 +587,9 @@ export class WorktreeApplicationService implements DiffPanelHost {
       createdWt = await this.deps.notify.withProgress(`Creating worktree "${branch}"`, async (report) => {
         report('Running git worktree add...');
         // Title → worktree alias; description stays as Claude's initial prompt.
-        const wt = await this.deps.manager.create(branch, root, opts?.title?.trim() || undefined);
+        const wt = await this.deps.manager.create(
+          branch, root, opts?.title?.trim() || undefined, opts?.baseBranch,
+        );
 
         report('Adding to workspace...');
         this.deps.host.addWorkspaceFolders({ path: wt.path, name: wt.alias ?? wt.branch });

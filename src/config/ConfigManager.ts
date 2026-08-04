@@ -25,6 +25,7 @@ export class ConfigManager {
       opencodeCommand: cfg.get<string>('opencodeCommand', 'opencode'),
       notifyOnAttention: cfg.get<boolean>('notifyOnAttention', true),
       scopeSearchToActiveWorktree: cfg.get<boolean>('scopeSearchToActiveWorktree', true),
+      focusMode: cfg.get<boolean>('focusMode', false),
       docker: {
         composeFile: docker.composeFile ?? DOCKER_DEFAULTS.composeFile,
         overrideFile: docker.overrideFile ?? DOCKER_DEFAULTS.overrideFile,

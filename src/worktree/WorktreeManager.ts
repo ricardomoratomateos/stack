@@ -99,7 +99,7 @@ export class WorktreeManager {
     return this.git.listWorktrees(repoRoot);
   }
 
-  async create(branch: string, repoRoot: string, alias?: string): Promise<Worktree> {
+  async create(branch: string, repoRoot: string, alias?: string, baseBranch?: string): Promise<Worktree> {
     // If the branch is already checked out in an existing git worktree, don't run
     // `git worktree add` (it would fail with "already checked out"). Attach Unmess
     // to the existing worktree instead.
@@ -122,7 +122,7 @@ export class WorktreeManager {
     const worktreePath = path.join(worktreesDir, safeDirName);
 
     const branchExists = this.git.branchExists(branch, repoRoot);
-    await this.git.createWorktree(worktreePath, branch, repoRoot, !branchExists);
+    await this.git.createWorktree(worktreePath, branch, repoRoot, !branchExists, baseBranch);
 
     console.log(`[unmess] create branch=${branch} path=${worktreePath} existsAfterAdd=${this.fs.exists(worktreePath)} branchExisted=${branchExists}`);
     // Guard against git reporting success without actually materializing the

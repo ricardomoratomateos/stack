@@ -79,6 +79,13 @@ export interface UnmessConfig {
   notifyOnAttention: boolean;
   /** Hide non-active worktree folders from search and Quick Open. */
   scopeSearchToActiveWorktree: boolean;
+  /**
+   * Clean-slate switching: close the other worktrees' editor tabs and viewer
+   * terminals so only the active worktree is on screen. Off (the default) makes
+   * switching a pure reveal — nothing is torn down, so there is no flicker and
+   * VSCode keeps the tab order intact.
+   */
+  focusMode: boolean;
   /** Per-worktree docker orchestration (compose files + auto-generated ports). */
   docker: DockerConfig;
   xdebugBasePort: number;
