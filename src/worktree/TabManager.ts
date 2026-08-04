@@ -119,33 +119,45 @@ export class TabManager {
   /**
    * Restore saved tabs for a worktree in saved order.
    * Closes currently open file tabs first, then reopens all in saved order.
-   * Opening without preserveFocus forces each tab to become active before the
-   * next one opens, which guarantees sequential insertion order in VSCode.
+   *
+   * `preserveFocus: false` is load-bearing, not incidental: `workbench.editor.
+   * openPositioning` defaults to "right", so each editor opens to the right of
+   * the ACTIVE one. Letting each opened tab become active walks the insertion
+   * point forward and yields the saved order. With preserveFocus: true the
+   * anchor never moves, so every tab lands next to the first one and the result
+   * comes out reversed. The saved active tab is re-focused at the end.
    */
   async restoreTabs(worktreeId: string): Promise<void> {
     const state = this.saved.get(worktreeId);
     if (!state || state.uris.length === 0) return;
 
-    const current = openFileTabs();
-    if (current.length > 0) {
-      this.closingProgrammatically++;
-      try {
-        await vscode.window.tabGroups.close(current);
-      } finally {
-        setTimeout(() => this.closingProgrammatically--, 50);
-      }
-    }
-
-    const existingUris = state.uris.filter(f => fs.existsSync(f));
-    if (existingUris.length === 0) return;
-
+    // A single guard spanning the whole operation, released 50ms afterwards to
+    // absorb the tab events VSCode fires late. (This used to be two independent
+    // increments with two independent timers — same net effect, harder to read.)
     this.closingProgrammatically++;
     try {
+      const current = openFileTabs();
+      if (current.length > 0) await vscode.window.tabGroups.close(current);
+
+      const existingUris = state.uris.filter(f => fs.existsSync(f));
+      if (existingUris.length === 0) return;
+
       for (const fsPath of existingUris) {
         try {
           await vscode.window.showTextDocument(vscode.Uri.file(fsPath), {
             preview: false,
-            preserveFocus: true,
+            preserveFocus: false,
+          });
+        } catch { /* file unreadable */ }
+      }
+
+      // Re-focus whatever the user was last looking at; without this the last
+      // file in the list keeps the focus it stole while walking the order.
+      if (state.active && existingUris.includes(state.active)) {
+        try {
+          await vscode.window.showTextDocument(vscode.Uri.file(state.active), {
+            preview: false,
+            preserveFocus: false,
           });
         } catch { /* file unreadable */ }
       }

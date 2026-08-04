@@ -351,16 +351,46 @@ describe('restoreTabs', () => {
     expect(window.showTextDocument).toHaveBeenCalledTimes(1);
   });
 
-  it('reopens uris sequentially in saved order with preview:false and preserveFocus:true', async () => {
+  it('reopens uris sequentially in saved order with preview:false and preserveFocus:FALSE', async () => {
     await memento.update(STORE_KEY, { a: { uris: [fileTwo, fileOne] } });
     const { manager } = build(memento, () => [wtA]);
     await manager.restoreTabs('a');
     expect(window.showTextDocument).toHaveBeenCalledTimes(2);
     expect(window.showTextDocument.mock.calls[0][0].fsPath).toBe(fileTwo);
     expect(window.showTextDocument.mock.calls[1][0].fsPath).toBe(fileOne);
+    // preserveFocus MUST be false: openPositioning defaults to "right", so the
+    // insertion point only walks forward if each opened tab becomes active.
+    // With true, every tab lands beside the first one and the order reverses.
     for (const call of window.showTextDocument.mock.calls) {
-      expect(call[1]).toEqual({ preview: false, preserveFocus: true });
+      expect(call[1]).toEqual({ preview: false, preserveFocus: false });
     }
+  });
+
+  it('re-focuses the saved active tab last, after the whole order is laid out', async () => {
+    await memento.update(STORE_KEY, { a: { uris: [fileTwo, fileOne], active: fileTwo } });
+    const { manager } = build(memento, () => [wtA]);
+    await manager.restoreTabs('a');
+    expect(window.showTextDocument).toHaveBeenCalledTimes(3);
+    expect(window.showTextDocument.mock.calls.map(c => c[0].fsPath))
+      .toEqual([fileTwo, fileOne, fileTwo]);
+  });
+
+  it('does not re-focus an active tab that was filtered out (file gone)', async () => {
+    await memento.update(STORE_KEY, { a: { uris: [missing, fileOne], active: missing } });
+    const { manager } = build(memento, () => [wtA]);
+    await manager.restoreTabs('a');
+    expect(window.showTextDocument).toHaveBeenCalledTimes(1);
+    expect(window.showTextDocument.mock.calls[0][0].fsPath).toBe(fileOne);
+  });
+
+  it('swallows a failure re-focusing the active tab', async () => {
+    await memento.update(STORE_KEY, { a: { uris: [fileOne], active: fileOne } });
+    const { manager } = build(memento, () => [wtA]);
+    window.showTextDocument
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('unreadable'));
+    await expect(manager.restoreTabs('a')).resolves.toBeUndefined();
+    expect(window.showTextDocument).toHaveBeenCalledTimes(2);
   });
 
   it('filters out uris whose file no longer exists', async () => {
