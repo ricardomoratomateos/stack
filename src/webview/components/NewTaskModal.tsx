@@ -78,24 +78,39 @@ export function NewTaskModal({ branches, baseBranch, onClose }: Props) {
     >
       <div style={{ width: '100%', maxWidth: 560, animation: 'unmess-fadein .15s ease' }}>
 
-        {/* Context row: which branch the new one is cut from */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, padding: '0 2px' }}>
-          <span style={{ fontFamily: T.sans, fontSize: 11, color: T.textMuted }}>from</span>
-          <select
-            value={base}
-            onChange={(e) => setBase(e.target.value)}
-            title="Branch the new one is created from"
-            style={{
-              padding: '3px 8px', borderRadius: 999,
-              border: `1px solid ${T.borderStrong}`, background: T.surface2,
-              fontFamily: T.mono, fontSize: 11, color: T.textBody,
-              outline: 'none', cursor: 'pointer', maxWidth: 320,
-            }}
-          >
-            {baseOptions.map((b) => (
-              <option key={b} value={b}>{b}</option>
-            ))}
-          </select>
+        {/* Context row: which branch the new one is cut from.
+            The native select chrome (system chevron, full-width sizing, the
+            browser's focus ring) clashed badly with the card, so it is stripped
+            with appearance:none and given a codicon chevron of our own. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, padding: '0 12px' }}>
+          <span style={{ fontFamily: T.sans, fontSize: 11, color: T.textMuted, flexShrink: 0 }}>from</span>
+          <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', minWidth: 0 }}>
+            <select
+              value={base}
+              onChange={(e) => setBase(e.target.value)}
+              title="Branch the new one is created from"
+              style={{
+                appearance: 'none', WebkitAppearance: 'none',
+                padding: '2px 18px 2px 0',
+                border: 'none', borderBottom: `1px solid ${T.border}`,
+                borderRadius: 0, background: 'transparent',
+                fontFamily: T.mono, fontSize: 11, color: T.textDim,
+                outline: 'none', cursor: 'pointer',
+                maxWidth: 320, textOverflow: 'ellipsis',
+              }}
+            >
+              {baseOptions.map((b) => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+            <i
+              className="codicon codicon-chevron-down"
+              style={{
+                position: 'absolute', right: 2, fontSize: 12,
+                color: T.textMuted, pointerEvents: 'none',
+              }}
+            />
+          </span>
         </div>
 
         {/* Card */}
