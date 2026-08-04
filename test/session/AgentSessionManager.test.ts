@@ -483,17 +483,17 @@ describe('viewer lifecycle', () => {
 // ── focusWindow ───────────────────────────────────────────────────────────────
 
 describe('focusWindow', () => {
-  it('selects the tmux window and recreates the viewer with the window name in the title', async () => {
+  it('selects the tmux window and REUSES the live viewer (never disposes it)', async () => {
     const { mgr, stub } = create();
     (stub.newWindow as ReturnType<typeof vi.fn>).mockResolvedValue(1);
-    const old = await mgr.launch(wt) as unknown as MockTerminal;
+    const existing = await mgr.launch(wt) as unknown as MockTerminal;
     await mgr.focusWindow(wt, 1);
     expect(stub.selectWindow).toHaveBeenLastCalledWith(SESSION, 1);
-    expect(old.dispose).toHaveBeenCalled();
-    const viewer = mgr.getViewer('wt-1') as unknown as MockTerminal;
-    expect(viewer).not.toBe(old);
-    expect(viewer.name).toBe('feat/login — claude');
-    expect(viewer.show).toHaveBeenCalled();
+    // Disposing an editor-area terminal makes VSCode activate a neighbouring tab
+    // in the group, flashing a file the user never opened into view.
+    expect(existing.dispose).not.toHaveBeenCalled();
+    expect(mgr.getViewer('wt-1')).toBe(existing as unknown as vscode.Terminal);
+    expect(existing.show).toHaveBeenCalled();
   });
 
   it('creates a viewer without a window suffix when the window is untracked', async () => {

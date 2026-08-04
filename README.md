@@ -22,7 +22,7 @@ Working on several things at once with AI agents gets messy fast: branches colli
 - **Agents per worktree** — launch Claude Code or opencode (pluggable providers) in any worktree. Multiple agent + shell sessions per worktree, each tracked separately.
 - **Sessions survive reloads** — agents run in tmux, so they keep working across VS Code window reloads and reconnect automatically.
 - **State at a glance** — per-session status (working / waiting / needs permission / idle) with live task titles pulled from the agent, plus a sidebar badge and optional native notification when an agent needs you.
-- **Scoped to the active worktree** — text search, Quick Open, open editor tabs, and breakpoints are automatically scoped to the worktree you're in, so parallel worktrees don't drown each other out.
+- **Scoped to the active worktree** — text search, Quick Open, and breakpoints are automatically scoped to the worktree you're in, so parallel worktrees don't drown each other out. Editor tabs can be scoped too — see [Switching worktrees](#switching-worktrees).
 - **Diff review panel** — review a worktree's changes with per-line comments and feed them straight back to the agent, no PR round-trip needed.
 - **Per-worktree debugging** *(optional)* — each worktree gets its own `launch.json` on a unique debug port, wired to its container, so you can step-debug several worktrees at once without ports colliding.
 - **Per-worktree Docker** *(optional)* — start/stop a dedicated compose stack per worktree with auto-generated, collision-free ports.
@@ -43,7 +43,7 @@ Working on several things at once with AI agents gets messy fast: branches colli
 2. Open a git repository in VS Code and open the **Unmess** view in the activity bar.
 3. Hit **+** to create a worktree for your task.
 4. Click the agent button on the worktree card to launch Claude Code / opencode in it.
-5. Watch status in the sidebar; switch worktrees to jump between tasks — tabs, search, and breakpoints follow you.
+5. Watch status in the sidebar; switch worktrees to jump between tasks — switching is instant, and search and breakpoints follow you.
 
 ## Settings
 
@@ -55,9 +55,20 @@ Working on several things at once with AI agents gets messy fast: branches colli
 | `unmess.opencodeCommand` | `opencode` | Command to launch opencode |
 | `unmess.notifyOnAttention` | `true` | Native OS notification when an agent finishes or asks for permission while VS Code is backgrounded (the sidebar badge always shows) |
 | `unmess.scopeSearchToActiveWorktree` | `true` | Hide non-active worktree folders from search and Quick Open |
+| `unmess.focusMode` | `false` | Clean-slate switching: close the other worktrees' editor tabs and agent terminals so only the active worktree is on screen (see [Switching worktrees](#switching-worktrees)) |
 | `unmess.setupScript` / `unmess.teardownScript` | `""` | Script run on worktree create / delete (e.g. `.unmess/setup.sh`) |
 | `unmess.docker` | — | Per-worktree compose file + auto-generated ports (opt-in; see below) |
 | `unmess.debugTemplate` | php/xdebug | `launch.json` template generated per worktree (`{{PORT}}`, `{{WORKTREE_PATH}}`) |
+
+## Switching worktrees
+
+Clicking a worktree in the sidebar switches to it. There are two behaviours, trading screen tidiness against churn.
+
+**Reveal (default).** Switching brings the worktree's agent terminal to the front and re-applies search scoping and explorer dimming. Nothing is closed or recreated, so switching is instant and flicker-free, and VS Code keeps your editor tabs exactly where you left them. No file is opened for you — that kept the terminal and the editor fighting over the foreground. The cost: tabs and agent terminals from the worktrees you've visited stay open.
+
+**Focus mode** (`"unmess.focusMode": true`). Switching gives you a clean slate: the other worktrees' editor tabs are closed and their agent terminals detached, so only the active worktree is on screen. Each worktree's open files are remembered and reopened, in order, when you come back to it. The cost: visible churn on every switch, since tabs and a terminal really are torn down and rebuilt. Unsaved work is saved first, because tabs are about to close.
+
+> Neither mode ever interrupts an agent: agents run in tmux, so detaching a terminal leaves them working. Only deleting a worktree or killing a session explicitly stops one.
 
 ## Per-repo configuration
 

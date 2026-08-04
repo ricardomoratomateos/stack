@@ -338,17 +338,13 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * way to keep tab order stable is to never touch it).
    */
   private async revealWorktree(target: Worktree): Promise<void> {
-    const viewer = this.deps.agentManager.hasTerminals(target.id)
-      ? await this.deps.agentManager.getOrCreateViewer(target).catch(() => undefined)
-      : undefined;
+    // Reveal the worktree's session terminal and nothing else. Deliberately no
+    // file is opened here: doing both made the terminal and the editor fight for
+    // the foreground, so you saw the file appear and then get shoved aside.
+    // Restoring a worktree's files is what focusMode is for.
+    if (!this.deps.agentManager.hasTerminals(target.id)) return;
+    const viewer = await this.deps.agentManager.getOrCreateViewer(target).catch(() => undefined);
     viewer?.show();
-
-    // Bring the worktree's last-focused file back to the front. Without this the
-    // editor would keep showing whatever file the previous worktree left active.
-    const lastActive = this.deps.tabManager.getState(target.id)?.active;
-    if (lastActive && this.deps.host.exists(lastActive)) {
-      await this.deps.host.openFileInEditor(lastActive).catch(() => {});
-    }
   }
 
   /** Clean-slate switch (unmess.focusMode): only the active worktree on screen. */

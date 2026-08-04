@@ -65,8 +65,6 @@ interface HarnessOpts {
   worktreeOrder?: string[];
   /** branches returned by git.listBranches */
   branches?: string[];
-  /** tabManager.getState() per worktree id — drives the reveal-path last-active file */
-  lastActiveByWorktree?: Record<string, { uris: string[]; active?: string }>;
 }
 
 function makeHarness(o: HarnessOpts = {}) {
@@ -137,7 +135,6 @@ function makeHarness(o: HarnessOpts = {}) {
     }),
     closeOtherTabs: vi.fn(async (id: string) => { calls.push(`tab.closeOtherTabs:${id}`); }),
     restoreTabs: vi.fn((id: string) => { calls.push(`tab.restoreTabs:${id}`); return Promise.resolve(); }),
-    getState: vi.fn((id: string) => (o.lastActiveByWorktree ?? {})[id]),
   };
   const breakpointManager = { activate: vi.fn() };
 
@@ -763,47 +760,39 @@ describe('switchToWorktree', () => {
       expect(h.host.moveEditorToFirstInGroup).not.toHaveBeenCalled();
     });
 
-    it('order: persist → pushWebview → reveal viewer → reveal last-active file → scoping', async () => {
-      const { h } = switchHarness({
-        viewerIds: ['a'],
-        terminalIds: ['b'],
-        existingPaths: ['/repo/zer/feat-b/src/foo.ts'],
-        lastActiveByWorktree: { b: { uris: [], active: '/repo/zer/feat-b/src/foo.ts' } },
-      });
+    it('order: persist → pushWebview → reveal the session terminal → scoping', async () => {
+      const { h } = switchHarness({ viewerIds: ['a'], terminalIds: ['b'] });
       await h.service.switchToWorktree('b');
       expect(h.calls).toEqual([
         'globalState.update:unmess.activeWorktreeId:b',
         'ui.pushWebview',
         'claude.getOrCreateViewer:b',
         'viewer.show:b',
-        'host.openFileInEditor:/repo/zer/feat-b/src/foo.ts:',
         'host.updateFolderSetting:/repo/zer/feat-a:search.exclude:{"**":true}',
         'host.updateFolderSetting:/repo/zer/feat-b:search.exclude:clear',
         'host.updateFolderSetting:/repo/zer/feat-c:search.exclude:{"**":true}',
       ]);
     });
 
-    it('skips the last-active file when it no longer exists on disk', async () => {
-      const { h } = switchHarness({
-        lastActiveByWorktree: { b: { uris: [], active: '/repo/zer/feat-b/deleted.ts' } },
-      }); // existingPaths empty → host.exists false
+    it('opens no file: the terminal and the editor must not fight for the foreground', async () => {
+      const { h } = switchHarness({ terminalIds: ['b'], existingPaths: ['/repo/zer/feat-b/src/foo.ts'] });
       await h.service.switchToWorktree('b');
       expect(h.host.openFileInEditor).not.toHaveBeenCalled();
     });
 
-    it('skips the reveal when the worktree has no remembered active file', async () => {
-      const { h } = switchHarness({ lastActiveByWorktree: { b: { uris: [] } } });
+    it('still finishes the switch (dimming + scoping) when the worktree has no sessions', async () => {
+      const { h } = switchHarness();
       await h.service.switchToWorktree('b');
-      expect(h.host.openFileInEditor).not.toHaveBeenCalled();
+      expect(h.claude.getOrCreateViewer).not.toHaveBeenCalled();
+      expect(h.ui.syncDecorations).toHaveBeenCalled();
+      expect(h.host.updateFolderSetting).toHaveBeenCalled();
     });
 
-    it('swallows a failure opening the last-active file', async () => {
-      const { h } = switchHarness({
-        existingPaths: ['/repo/zer/feat-b/src/foo.ts'],
-        lastActiveByWorktree: { b: { uris: [], active: '/repo/zer/feat-b/src/foo.ts' } },
-      });
-      h.host.openFileInEditor.mockRejectedValue(new Error('unreadable'));
+    it('tolerates viewer creation failure without breaking the switch', async () => {
+      const { h } = switchHarness({ terminalIds: ['b'] });
+      h.claude.getOrCreateViewer.mockRejectedValue(new Error('boom'));
       await expect(h.service.switchToWorktree('b')).resolves.toBeUndefined();
+      expect(h.ui.syncDecorations).toHaveBeenCalled();
     });
   });
 

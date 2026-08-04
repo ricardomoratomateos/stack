@@ -280,16 +280,12 @@ export class AgentSessionManager {
     const sessionName = TmuxManager.sessionName(worktree.id);
     await this.tmux.selectWindow(sessionName, windowIndex);
 
-    // Dispose old viewer so we recreate it with the new window's name in the title
-    const meta = this.windows.get(worktree.id)?.get(windowIndex);
-    const windowName = meta?.name;
-    const old = this.viewers.get(worktree.id);
-    if (old && old.exitStatus === undefined) {
-      this.viewers.delete(worktree.id);
-      old.dispose();
-    }
-
-    const viewer = await this.getOrCreateViewer(worktree, windowName);
+    // Reuse the live viewer. This used to dispose it and build a fresh one just
+    // to put the window name in the tab title — but disposing an editor-area
+    // terminal makes VSCode activate a neighbouring tab in that group, so a file
+    // the user never opened would flash into view before the new terminal
+    // replaced it. A stale tab title is a much smaller price than that.
+    const viewer = await this.getOrCreateViewer(worktree);
     viewer.show();
   }
 
