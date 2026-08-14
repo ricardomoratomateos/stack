@@ -143,32 +143,7 @@
           "group": "navigation"
         }
       ],
-      "view/item/context": [
-        {
-          "command": "unmess.initWorktree",
-          "when": "view == unmess-sidebar && viewItem == worktree",
-          "group": "inline"
-        },
-        {
-          "command": "unmess.launchAgent",
-          "when": "view == unmess-sidebar && (viewItem == worktree || viewItem == worktree-main)",
-          "group": "inline"
-        },
-        {
-          "command": "unmess.openTerminal",
-          "when": "view == unmess-sidebar && (viewItem == worktree || viewItem == worktree-main)",
-          "group": "inline"
-        },
-        {
-          "command": "unmess.deleteWorktree",
-          "when": "view == unmess-sidebar && viewItem == worktree",
-          "group": "inline"
-        },
-        {
-          "command": "unmess.renameWorktree",
-          "when": "view == unmess-sidebar && viewItem == worktree"
-        }
-      ]
+      "view/item/context": []
     },
     "themes": [
       {
@@ -184,6 +159,11 @@
           "type": "string",
           "default": ".worktrees",
           "description": "Directory where worktrees are created (relative to the workspace root)"
+        },
+        "unmess.defaultBaseBranch": {
+          "type": "string",
+          "default": "develop",
+          "description": "Branch new worktrees start from, preselected in the New Task form. Falls back to the main repo's current branch when this branch does not exist."
         },
         "unmess.setupScript": {
           "type": "string",

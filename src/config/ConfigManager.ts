@@ -18,6 +18,7 @@ export class ConfigManager {
     const docker = cfg.get<Partial<DockerConfig>>('docker', {});
     return {
       worktreesDirectory: cfg.get<string>('worktreesDirectory', '.worktrees'),
+      defaultBaseBranch: cfg.get<string>('defaultBaseBranch', 'develop'),
       setupScript: cfg.get<string>('setupScript', ''),
       teardownScript: cfg.get<string>('teardownScript', ''),
       defaultProvider: cfg.get<ProviderId>('defaultProvider', 'claude'),

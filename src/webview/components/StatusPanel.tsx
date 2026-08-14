@@ -1,6 +1,23 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { SECTION_TITLE_STYLE, T } from '../tokens';
+import { getState, setState } from '../vscode';
 import type { WorktreeItem } from '../types';
+
+/** Smallest useful panel height, and the share of the sidebar it may never exceed. */
+const MIN_HEIGHT = 60;
+const MAX_FRACTION = 0.8;
+
+function storedHeight(): number | undefined {
+  const s = getState() as { statusPanelHeight?: unknown } | null | undefined;
+  const h = s?.statusPanelHeight;
+  return typeof h === 'number' && h >= MIN_HEIGHT ? h : undefined;
+}
+
+/** Merge into the existing webview state — never clobber whatever else is in it. */
+function persistHeight(height: number): void {
+  const s = (getState() as Record<string, unknown> | null) ?? {};
+  setState({ ...s, statusPanelHeight: height });
+}
 
 const STATE_LABEL: Record<string, string> = {
   active:     'thinking',
@@ -23,13 +40,81 @@ interface Props {
 }
 
 export function StatusPanel({ wt }: Props) {
+  const [height, setHeight] = useState<number | undefined>(storedHeight);
+  const [sashActive, setSashActive] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const latestHeight = useRef<number | undefined>(height);
+  const endDrag = useRef<(() => void) | undefined>(undefined);
+
+  // A drag in flight when this unmounts (selection cleared) would leak its
+  // window listeners.
+  useEffect(() => () => endDrag.current?.(), []);
+
+  const onSashDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = panelRef.current?.getBoundingClientRect().height ?? MIN_HEIGHT;
+    setSashActive(true);
+
+    const move = (ev: PointerEvent) => {
+      // Dragging the sash UP grows the panel, which is why the delta is inverted.
+      const next = Math.min(
+        Math.max(startHeight + (startY - ev.clientY), MIN_HEIGHT),
+        window.innerHeight * MAX_FRACTION,
+      );
+      latestHeight.current = next;
+      setHeight(next);
+    };
+    const up = () => {
+      endDrag.current?.();
+      setSashActive(false);
+      if (latestHeight.current !== undefined) persistHeight(latestHeight.current);
+    };
+    endDrag.current = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      endDrag.current = undefined;
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  // Clamp on every render: the stored height may not fit a sidebar that has
+  // since been made shorter.
+  const clamped = height !== undefined
+    ? Math.min(height, window.innerHeight * MAX_FRACTION)
+    : undefined;
+
   return (
-    <div style={{
-      borderTop: `1px solid ${T.border}`,
-      overflowY: 'auto',
-      flexShrink: 0,
-      maxHeight: '55%',
-    }}>
+    <div
+      ref={panelRef}
+      style={{
+        position: 'relative',
+        borderTop: `1px solid ${T.border}`,
+        flexShrink: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        // Untouched, the panel keeps its old content-driven cap; once dragged it
+        // holds the height the user chose.
+        ...(clamped !== undefined ? { height: clamped } : { maxHeight: '55%' }),
+      }}
+    >
+      {/* Sash — the same affordance as the boundary between two native views:
+          drag to resize, ns-resize cursor, focus-border line while active. */}
+      <div
+        onPointerDown={onSashDown}
+        onMouseEnter={() => setSashActive(true)}
+        onMouseLeave={() => { if (!endDrag.current) setSashActive(false); }}
+        style={{ position: 'absolute', top: -3, left: 0, right: 0, height: 7, cursor: 'ns-resize', zIndex: 5 }}
+      >
+        <div style={{
+          position: 'absolute', top: 2, left: 0, right: 0, height: 2,
+          background: sashActive ? T.borderStrong : 'transparent',
+          transition: 'background .1s',
+        }} />
+      </div>
+
+      <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
 
       {/* Section header: worktree name */}
       <div style={{
@@ -111,6 +196,7 @@ export function StatusPanel({ wt }: Props) {
         </Section>
       )}
 
+      </div>
     </div>
   );
 }

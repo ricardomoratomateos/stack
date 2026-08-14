@@ -69,7 +69,7 @@ export class WorktreeManager {
       if (storedPaths.has(path.normalize(wt.path))) continue;
 
       const isMain = path.normalize(wt.path) === normalizedRepoRoot;
-      const xdebugPort = isMain ? 0 : this.portAllocator.allocate();
+      const xdebugPort = isMain ? 0 : await this.portAllocator.allocate();
       const worktree: Worktree = {
         id: randomUUID(),
         branch: wt.branch,
@@ -131,7 +131,7 @@ export class WorktreeManager {
       throw new Error(`git worktree add did not create the directory: ${worktreePath}`);
     }
 
-    const xdebugPort = this.portAllocator.allocate();
+    const xdebugPort = await this.portAllocator.allocate();
     const worktree: Worktree = {
       id: randomUUID(),
       branch,
@@ -158,7 +158,7 @@ export class WorktreeManager {
       alias: alias || undefined,
       path: worktreePath,
       repoRoot,
-      xdebugPort: this.portAllocator.allocate(),
+      xdebugPort: await this.portAllocator.allocate(),
       dockerProjectName: branch.replace(/[^a-z0-9-]/gi, '-').toLowerCase(),
       createdAt: Date.now(),
     };
@@ -170,6 +170,32 @@ export class WorktreeManager {
 
     await this.store.add(worktree);
     return worktree;
+  }
+
+  /**
+   * Re-check the ports this worktree is about to bind and move it to a free
+   * slot if something grabbed them since it was allocated. Worth doing right
+   * before a setup script or `compose up`: the slot may have been picked
+   * minutes (or days) earlier, and the thief is usually invisible to the port
+   * registry — another project's container, or a leftover stack from a worktree
+   * that was deleted without its containers coming down.
+   *
+   * Regenerates launch.json so the Xdebug listener follows the new port.
+   * Returns the worktree unchanged when its block is still free.
+   */
+  async ensureFreePorts(worktree: Worktree): Promise<{ worktree: Worktree; movedFrom?: number }> {
+    if (worktree.isMain || worktree.xdebugPort <= 0) return { worktree };
+
+    const busyPort = await this.portAllocator.firstBusyPort(worktree.xdebugPort);
+    if (busyPort === undefined) return { worktree };
+
+    // allocate() skips ports in the registry, and this worktree is still in it,
+    // so it can only come back with a different slot.
+    const xdebugPort = await this.portAllocator.allocate();
+    const updated: Worktree = { ...worktree, xdebugPort };
+    await this.store.patch(worktree.id, { xdebugPort });
+    this.generateLaunchJson(updated);
+    return { worktree: updated, movedFrom: busyPort };
   }
 
   async delete(id: string, deleteBranch = false): Promise<void> {

@@ -69,6 +69,12 @@ export interface DockerConfig {
 
 export interface UnmessConfig {
   worktreesDirectory: string;
+  /**
+   * Branch new worktrees start from. Without this, the base was whatever the
+   * main checkout happened to be sitting on, so parking it on a feature branch
+   * silently made every new worktree a child of that feature branch.
+   */
+  defaultBaseBranch: string;
   setupScript: string;
   teardownScript: string;
   /** Agent launched when no explicit provider is requested. */

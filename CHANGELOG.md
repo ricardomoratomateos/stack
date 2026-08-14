@@ -10,7 +10,7 @@ Initial public release.
 
 ### Added
 
-- **Worktree manager** in the sidebar — create, rename, and delete git worktrees.
+- **Worktree manager** in the sidebar — create, rename, and delete git worktrees, branching off a configurable base (`unmess.defaultBaseBranch`, default `develop`) rather than whatever the main checkout happens to be parked on.
 - **AI agents per worktree** — launch Claude Code or opencode (pluggable providers); multiple agent and shell sessions per worktree, each tracked separately.
 - **tmux-backed sessions** that survive VS Code window reloads and reconnect automatically.
 - **State at a glance** — per-session status with live task titles, a sidebar attention badge, and an optional native notification when an agent needs you.
@@ -18,7 +18,7 @@ Initial public release.
 - **Instant worktree switching** — switching reveals the target worktree's agent terminal without tearing down tabs or terminals, so there is no flicker and VS Code keeps your tab order. `unmess.focusMode` restores the clean-slate behaviour (close and reopen everything) for those who prefer it.
 - **Diff review panel** with per-line comments fed back to the agent.
 - **Per-worktree debugging** — a `launch.json` generated per worktree on a unique debug port, wired to its container.
-- **Per-worktree Docker** orchestration with auto-generated, collision-free ports (opt-in).
+- **Per-worktree Docker** orchestration with auto-generated ports (opt-in). Ports are validated by binding them, so a slot is only handed out when the whole block is actually free on the machine — not merely unused by Unmess. The check runs again just before a stack comes up, and a worktree whose port was taken in the meantime moves to a free slot instead of failing minutes later inside `docker compose`.
 - **Per-worktree setup/teardown scripts** with `UNMESS_*` environment variables.
 
 [0.1.0]: https://github.com/ricardomoratomateos/unmess/releases/tag/v0.1.0

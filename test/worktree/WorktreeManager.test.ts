@@ -630,3 +630,87 @@ describe('generateLaunchJson', () => {
     expect(written.configurations[0].name).toBe('Unmess: Xdebug (feat/x)');
   });
 });
+
+// ---------- ensureFreePorts ----------
+
+/**
+ * Allocator double that answers like the real one: `firstBusyPort` reports the
+ * first port of the slot's block that is held, `allocate` hands out the next
+ * slot. `busy` is keyed by xdebug port.
+ */
+function makeReallocatingAllocatorStub(busy: Record<number, number>, nextPort = 9900) {
+  const allocate = vi.fn(async () => nextPort);
+  const firstBusyPort = vi.fn(async (xdebugPort: number) => busy[xdebugPort]);
+  return { stub: { allocate, firstBusyPort, release: vi.fn() } as unknown as PortAllocator, allocate, firstBusyPort };
+}
+
+describe('ensureFreePorts', () => {
+  it('leaves the worktree alone when its whole port block is still bindable', async () => {
+    const wt = makeWorktree({ xdebugPort: 9899 });
+    const store = makeStoreStub([wt]);
+    const { stub, allocate } = makeReallocatingAllocatorStub({});
+    const mgr = new WorktreeManager(store, stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
+
+    const result = await mgr.ensureFreePorts(wt);
+
+    expect(result).toEqual({ worktree: wt });
+    expect(allocate).not.toHaveBeenCalled();
+    expect(store.calls).not.toContain(`patch:${wt.id}:{"xdebugPort":9900}`);
+  });
+
+  it('moves the worktree to a new slot and reports which port was taken', async () => {
+    const wt = makeWorktree({ xdebugPort: 9901 });
+    const store = makeStoreStub([wt]);
+    // 8083 held by a foreign container — exactly the reported failure.
+    const { stub } = makeReallocatingAllocatorStub({ 9901: 8083 }, 9903);
+    const mgr = new WorktreeManager(store, stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
+
+    const result = await mgr.ensureFreePorts(wt);
+
+    expect(result.movedFrom).toBe(8083);
+    expect(result.worktree.xdebugPort).toBe(9903);
+  });
+
+  it('persists the new port so the move survives a reload', async () => {
+    const wt = makeWorktree({ xdebugPort: 9901 });
+    const store = makeStoreStub([wt]);
+    const { stub } = makeReallocatingAllocatorStub({ 9901: 8083 }, 9903);
+    const mgr = new WorktreeManager(store, stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
+
+    await mgr.ensureFreePorts(wt);
+
+    expect(store.calls).toContain(`patch:${wt.id}:{"xdebugPort":9903}`);
+    expect(store.get(wt.id)!.xdebugPort).toBe(9903);
+  });
+
+  it('regenerates launch.json so the Xdebug listener follows the new port', async () => {
+    const wt = makeWorktree({ xdebugPort: 9901 });
+    const fsStub = makeFsStub();
+    const { stub } = makeReallocatingAllocatorStub({ 9901: 8083 }, 9903);
+    const mgr = new WorktreeManager(makeStoreStub([wt]), stub, makeConfigStub(), undefined, makeGitStub(), fsStub);
+
+    await mgr.ensureFreePorts(wt);
+
+    const written = JSON.parse(fsStub.files.get(path.join(wt.path, '.vscode/launch.json'))!);
+    // A stale launch.json would leave the debugger listening on the dead port.
+    expect(written.configurations[0].port).toBe(9903);
+  });
+
+  it('does not touch the main worktree, whose port 0 means "no stack of its own"', async () => {
+    const main = makeWorktree({ id: 'main', xdebugPort: 0, isMain: true });
+    const { stub, firstBusyPort } = makeReallocatingAllocatorStub({});
+    const mgr = new WorktreeManager(makeStoreStub([main]), stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
+
+    await expect(mgr.ensureFreePorts(main)).resolves.toEqual({ worktree: main });
+    expect(firstBusyPort).not.toHaveBeenCalled();
+  });
+
+  it('skips a non-main worktree that has no port allocated yet', async () => {
+    const wt = makeWorktree({ xdebugPort: 0 });
+    const { stub, firstBusyPort } = makeReallocatingAllocatorStub({});
+    const mgr = new WorktreeManager(makeStoreStub([wt]), stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
+
+    await expect(mgr.ensureFreePorts(wt)).resolves.toEqual({ worktree: wt });
+    expect(firstBusyPort).not.toHaveBeenCalled();
+  });
+});

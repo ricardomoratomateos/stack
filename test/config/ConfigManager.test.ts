@@ -18,6 +18,7 @@ describe('ConfigManager', () => {
 
     expect(config).toEqual({
       worktreesDirectory: '.worktrees',
+      defaultBaseBranch: 'develop',
       setupScript: '',
       teardownScript: '',
       defaultProvider: 'claude',
@@ -47,6 +48,7 @@ describe('ConfigManager', () => {
   it('returns user overrides when set', () => {
     const overrides: Record<string, unknown> = {
       worktreesDirectory: '/abs/worktrees',
+      defaultBaseBranch: 'main',
       setupScript: '/scripts/setup.sh',
       teardownScript: '/scripts/teardown.sh',
       defaultProvider: 'opencode',

@@ -151,7 +151,11 @@ export async function activate(ctx: vscode.ExtensionContext) {
 
   const config = new ConfigManager();
   const store = new WorktreeStore(ctx);
-  const portAllocator = new PortAllocator(store, config.get().xdebugBasePort);
+  // The config getter lets the allocator probe the whole derived docker block,
+  // not just the Xdebug port, before handing a slot out.
+  const portAllocator = new PortAllocator(store, config.get().xdebugBasePort, {
+    config: () => config.get(),
+  });
   const providerFactory = new ProviderFactory(config, ctx.globalStorageUri.fsPath);
   const agentManager = new AgentSessionManager(providerFactory, ctx.globalState);
   const dockerMonitor = new DockerMonitor();

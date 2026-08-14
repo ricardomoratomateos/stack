@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeDockerPorts, buildComposeArgs, composeProject, dockerEnv } from '../../src/docker/dockerCompose';
+import { computeDockerPorts, dockerPortsFor, portBlockFor, buildComposeArgs, composeProject, dockerEnv } from '../../src/docker/dockerCompose';
 import type { UnmessConfig, Worktree } from '../../src/types';
 
 function makeConfig(over: Partial<UnmessConfig['docker']> = {}): UnmessConfig {
@@ -109,5 +109,32 @@ describe('dockerEnv', () => {
 
   it('injects nothing for the main repo (it uses its own stack)', () => {
     expect(dockerEnv(makeWorktree({ isMain: true }), makeConfig())).toEqual({});
+  });
+});
+
+describe('dockerPortsFor', () => {
+  it('derives the same mapping as computeDockerPorts, keyed by the xdebug port alone', () => {
+    // The allocator has to validate a slot before a worktree exists to hold it;
+    // the two must never drift apart on which ports a slot owns.
+    const config = makeConfig();
+    const worktree = makeWorktree({ xdebugPort: 9901 });
+    expect(dockerPortsFor(9901, config)).toEqual(computeDockerPorts(worktree, config));
+  });
+});
+
+describe('portBlockFor', () => {
+  it('lists every distinct port a slot will bind', () => {
+    expect(portBlockFor(9901, makeConfig())).toEqual([9901, 20200, 20201]);
+  });
+
+  it('does not repeat the xdebug port, which XDEBUG_PORT maps back onto', () => {
+    const block = portBlockFor(9901, makeConfig());
+    expect(block.filter((p) => p === 9901)).toHaveLength(1);
+  });
+
+  it('still covers the xdebug port when no docker ports are configured', () => {
+    // VSCode's debug listener binds it even with docker orchestration off, so a
+    // block of nothing would let two worktrees share one Xdebug port.
+    expect(portBlockFor(9901, makeConfig({ ports: [] }))).toEqual([9901]);
   });
 });

@@ -11,12 +11,13 @@ import type { DockerMonitor } from '../docker/DockerMonitor';
 import type { PrMonitor } from '../pr/PrMonitor';
 import type { IWorktreeRepository } from '../ports/IWorktreeRepository';
 import { PROVIDER_IDS, type ProviderId } from '../ports/IAgentProvider';
-import { buildComposeArgs, composeProject, dockerEnv } from '../docker/dockerCompose';
+import { buildComposeArgs, composeProject, dockerEnv, portBlockFor } from '../docker/dockerCompose';
 import type { IGitPort, DiffBase } from '../ports/IGitPort';
 import type { INotifyPort } from '../ports/INotifyPort';
 import type { DiffPanelHost } from '../diff/DiffPanelManager';
 import type { SendDestination, DiffComment } from '../diff/types';
 import { buildCommentPrompt } from '../diff/commentPrompt';
+import { displayLabel, truncateLabel } from '../worktree/displayLabel';
 
 export const ACTIVE_WORKTREE_KEY = 'unmess.activeWorktreeId';
 export const WORKTREE_ORDER_KEY = 'unmess.worktreeOrder';
@@ -123,9 +124,16 @@ export class WorktreeApplicationService implements DiffPanelHost {
     return this.deps.manager.list().find((w) => w.id === worktreeId);
   }
 
-  /** Command-palette invocations arrive without a tree item — fall back to the first stored worktree. */
+  /**
+   * Resolve the worktree a command acts on. Invoked from the command palette
+   * there is no argument, so this falls back to the ACTIVE worktree — falling
+   * back to the first in the store (as this used to) meant "Init worktree" could
+   * run a heavy setup script against a worktree the user was not even looking at.
+   */
   private resolveWorktree(worktree?: Worktree): Worktree | undefined {
-    return worktree ?? this.deps.store.getAll()[0];
+    if (worktree) return worktree;
+    const all = this.deps.store.getAll();
+    return all.find((w) => w.id === this.currentWorktreeId) ?? all[0];
   }
 
   /**
@@ -146,7 +154,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       ...(config.docker.ports.length > 0 ? dockerEnv(wt, config) : {}),
     };
     const prefix = Object.entries(env).map(([k, v]) => `${k}="${v}"`).join(' ');
-    const terminal = this.deps.host.createTerminal({ name: `${labelPrefix}: ${wt.alias ?? wt.branch}`, cwd: wt.path });
+    const terminal = this.deps.host.createTerminal({ name: `${labelPrefix}: ${displayLabel(wt)}`, cwd: wt.path });
     this.deps.agentManager.register(wt.id, terminal as never);
     terminal.show();
     const cmd = `${prefix} bash "${resolved}"`;
@@ -181,14 +189,41 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * pull/build progress), with the auto-generated per-worktree ports injected.
    * Runs from the worktree dir so ${PWD} in the compose points at the worktree.
    */
-  private dockerUp(wt: Worktree): void {
+  private async dockerUp(worktree: Worktree): Promise<void> {
+    const wt = await this.ensurePortsFree(worktree);
     const config = this.deps.config.get();
     const { composePath, overridePath } = this.dockerComposePaths(wt);
     const args = buildComposeArgs(wt, composePath, overridePath, 'up -d');
     const prefix = Object.entries(dockerEnv(wt, config)).map(([k, v]) => `${k}=${v}`).join(' ');
-    const terminal = this.deps.host.createTerminal({ name: `Docker: ${wt.alias ?? wt.branch}`, cwd: wt.path });
+    const terminal = this.deps.host.createTerminal({ name: `Docker: ${displayLabel(wt)}`, cwd: wt.path });
     terminal.show();
     terminal.sendText(`${prefix ? prefix + ' ' : ''}docker compose ${args}`);
+  }
+
+  /**
+   * Move a worktree off ports that got taken since they were allocated, before
+   * spending minutes on a setup script that would only fail at the very end
+   * with docker's "port is already allocated". Deliberately not applied to
+   * teardown, which must address the stack on the ports it actually came up on.
+   */
+  private async ensurePortsFree(wt: Worktree): Promise<Worktree> {
+    let moved: { worktree: Worktree; movedFrom?: number };
+    try {
+      moved = await this.deps.manager.ensureFreePorts(wt);
+    } catch (e) {
+      // No free slot at all, or the store rejected the patch. Carry on with the
+      // ports we have and let docker report the collision itself.
+      console.error('[unmess] port re-check failed; keeping the current ports:', e);
+      return wt;
+    }
+    if (moved.movedFrom !== undefined) {
+      const ports = portBlockFor(moved.worktree.xdebugPort, this.deps.config.get()).join(', ');
+      this.deps.notify.showWarning(
+        `Port ${moved.movedFrom} is already in use — "${displayLabel(moved.worktree)}" moved to ${ports}.`,
+      );
+      this.ui.pushWebview();
+    }
+    return moved.worktree;
   }
 
   /** Bring a worktree's docker stack down silently, then refresh the monitor. */
@@ -245,7 +280,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     },
     dockerUp: (msg) => {
       const wt = this.findWorktree(msg.worktreeId);
-      if (wt) this.dockerUp(wt);
+      if (wt) void this.dockerUp(wt);
     },
     dockerDown: (msg) => {
       const wt = this.findWorktree(msg.worktreeId);
@@ -269,9 +304,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     listBranches: () => {
       const root = this.findRepoRoot();
       if (!root) return;
-      let base = '';
-      try { base = this.deps.git.currentBranch(root); } catch { /* detached or git failure */ }
-      this.branchOptions = { branches: this.deps.git.listBranches(root), base };
+      this.branchOptions = { branches: this.deps.git.listBranches(root), base: this.resolveBaseBranch(root) };
       this.ui.pushWebview();
     },
     selectWorktree: (msg) => this.switchToWorktree(msg.worktreeId),
@@ -291,7 +324,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
   /** Display label of the worktree that receives drops (drop-zone hint). */
   activeWorktreeLabel(): string | undefined {
     const wt = this.currentWorktreeId ? this.findWorktree(this.currentWorktreeId) : undefined;
-    return wt ? wt.alias ?? wt.branch : undefined;
+    return wt ? displayLabel(wt) : undefined;
   }
 
   /**
@@ -476,7 +509,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const wt = this.findWorktree(worktreeId);
     if (!wt) return undefined;
     return {
-      label: wt.alias ?? wt.branch,
+      label: displayLabel(wt),
       hasLiveAgent: this.deps.agentManager.getAgentCount(wt.id) > 0,
     };
   }
@@ -567,7 +600,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const existing = this.deps.host.workspaceFolderPaths();
     const toAdd = current.filter((wt) => !existing.some((p) => p === wt.path));
     if (toAdd.length > 0) {
-      this.deps.host.addWorkspaceFolders(...toAdd.map((wt) => ({ path: wt.path, name: wt.alias ?? wt.branch })));
+      this.deps.host.addWorkspaceFolders(...toAdd.map((wt) => ({ path: wt.path, name: displayLabel(wt) })));
     }
 
     for (const wt of current) {
@@ -584,6 +617,20 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   // ── Create ─────────────────────────────────────────────────────────────────
 
+  /**
+   * The branch a new worktree should start from: `unmess.defaultBaseBranch`
+   * when the repo actually has it, otherwise whatever the main checkout is on.
+   *
+   * The fallback is what makes the setting safe to ship with a `develop`
+   * default — a repo that only has `main` keeps the old behaviour instead of
+   * failing every creation on a branch that does not exist.
+   */
+  private resolveBaseBranch(root: string): string {
+    const configured = this.deps.config.get().defaultBaseBranch?.trim();
+    if (configured && this.deps.git.branchExists(configured, root)) return configured;
+    try { return this.deps.git.currentBranch(root); } catch { return ''; }
+  }
+
   async createWorktree(opts?: { branch?: string; title?: string; description?: string; baseBranch?: string }): Promise<void> {
     const root = this.findRepoRoot();
     if (!root) {
@@ -596,28 +643,42 @@ export class WorktreeApplicationService implements DiffPanelHost {
     }));
     if (!branch) return;
 
+    // The command palette passes no base at all, where git would silently use
+    // HEAD. Resolve the configured default for that path too, so both entry
+    // points branch off the same place.
+    const baseBranch = opts?.baseBranch || this.resolveBaseBranch(root) || undefined;
+
     let createdWt: Worktree | undefined;
     try {
       createdWt = await this.deps.notify.withProgress(`Creating worktree "${branch}"`, async (report) => {
         report('Running git worktree add...');
         // Title → worktree alias; description stays as Claude's initial prompt.
         const wt = await this.deps.manager.create(
-          branch, root, opts?.title?.trim() || undefined, opts?.baseBranch,
+          branch, root, opts?.title?.trim() || undefined, baseBranch,
         );
 
-        report('Adding to workspace...');
-        this.deps.host.addWorkspaceFolders({ path: wt.path, name: wt.alias ?? wt.branch });
-
-        this.deps.gitWatcher.watch(wt.path);
-        this.deps.dockerMonitor.startPolling(composeProject(wt), () => { /* no auto-refresh during create */ });
-        this.deps.prMonitor.startPolling(wt.branch, wt.id, () => this.ui.pushWebview());
-        this.ui.pushWebview();
-
+        // The setup script goes FIRST. It is the slow, essential part (deps, .env,
+        // containers — minutes of work), and it used to sit behind the UI wiring
+        // below: any throw in there left a worktree checked out on disk with no
+        // environment at all and nothing but a toast to show for it.
         const setupScript = this.deps.config.get().setupScript;
         if (setupScript) {
           report('Running setup script...');
           this.runScriptTerminal(wt, setupScript, 'Init', 'Setup complete');
         }
+
+        report('Adding to workspace...');
+        // Best-effort wiring: the worktree exists and its setup is already
+        // running, so a failure here must not fail the whole creation.
+        try {
+          this.deps.host.addWorkspaceFolders({ path: wt.path, name: displayLabel(wt) });
+          this.deps.gitWatcher.watch(wt.path);
+          this.deps.dockerMonitor.startPolling(composeProject(wt), () => { /* no auto-refresh during create */ });
+          this.deps.prMonitor.startPolling(wt.branch, wt.id, () => this.ui.pushWebview());
+        } catch (e) {
+          console.error('[unmess] post-create wiring failed (worktree and setup are unaffected):', e);
+        }
+        this.ui.pushWebview();
 
         return wt;
       });
@@ -720,14 +781,15 @@ export class WorktreeApplicationService implements DiffPanelHost {
     await this.deps.store.setAlias(wt.id, finalAlias);
 
     const idx = this.deps.host.workspaceFolderPaths().findIndex((p) => p === wt.path);
-    if (idx !== -1) this.deps.host.renameWorkspaceFolder(idx, { path: wt.path, name: finalAlias });
+    // The stored alias keeps the user's full text; only the folder label is capped.
+    if (idx !== -1) this.deps.host.renameWorkspaceFolder(idx, { path: wt.path, name: truncateLabel(finalAlias) });
 
     this.ui.pushWebview();
   }
 
   // ── Command helpers (item?.worktree ?? store[0] fallback) ──────────────────
 
-  initWorktree(worktree?: Worktree): void {
+  async initWorktree(worktree?: Worktree): Promise<void> {
     const wt = this.resolveWorktree(worktree);
     if (!wt) return;
     const setupScript = this.deps.config.get().setupScript;
@@ -735,7 +797,9 @@ export class WorktreeApplicationService implements DiffPanelHost {
       this.deps.notify.showError('No setup script configured. Set "unmess.setupScript" in settings.');
       return;
     }
-    this.runScriptTerminal(wt, setupScript, 'Init');
+    // A re-init can happen long after the slot was allocated — re-check before
+    // paying for the whole script again.
+    this.runScriptTerminal(await this.ensurePortsFree(wt), setupScript, 'Init');
   }
 
   openTerminal(worktree?: Worktree): void {

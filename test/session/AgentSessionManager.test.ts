@@ -418,6 +418,36 @@ describe('viewer lifecycle', () => {
     expect(viewer.name).toBe('login-work — claude');
   });
 
+  it('caps a sentence-long alias so the tab cannot swallow the tab bar', async () => {
+    const { mgr } = create();
+    const essay = { ...wt, alias: '[Shop] Al marcar un pedido como enviado, el descuento se pierde al recalcular el total.' };
+    const viewer = await mgr.getOrCreateViewer(essay) as unknown as MockTerminal;
+    expect(viewer.name).toBe('[Shop] Al marcar un pedido como…');
+    expect(viewer.name.length).toBeLessThan(essay.alias.length);
+  });
+
+  it('leaves an alias that already fits untouched (no stray ellipsis)', async () => {
+    const { mgr } = create();
+    const exact = { ...wt, alias: 'x'.repeat(32) };
+    const viewer = await mgr.getOrCreateViewer(exact) as unknown as MockTerminal;
+    expect(viewer.name).toBe('x'.repeat(32));
+  });
+
+  it('reconnect reclaims a viewer named with the CAPPED label (they must agree)', async () => {
+    const stub = makeStub();
+    (stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'claude', title: '' },
+    ]);
+    const mgr = new AgentSessionManager(makeFactory(), new FakeMemento() as unknown as vscode.Memento, stub, () => true, 'Test-Host.local');
+    const essay = { ...wt, alias: '[Shop] Al marcar un pedido como enviado, el descuento se pierde al recalcular el total.' };
+    // A viewer VSCode restored after a reload, carrying the capped name.
+    const restored = makeTerminal({ name: '[Shop] Al marcar un pedido como…' });
+    window.terminals = [restored as never];
+    await mgr.reconnect([essay]);
+    expect(mgr.getViewer(essay.id)).toBe(restored as never);
+  });
+
   it('attaches WITHOUT a cwd when the worktree directory is missing (avoids the does-not-exist launch error)', async () => {
     const stub = makeStub();
     // pathExists → false: the worktree dir is gone but its tmux session may still be alive.
@@ -805,6 +835,19 @@ describe('reconnect', () => {
 
     expect(second.mgr.getState('wt-1')).toBe('permission');
     expect(second.stateEvents).toEqual([{ worktreeId: 'wt-1', state: 'permission' }]);
+  });
+
+  it('does NOT restore a persisted "terminated" — the window still exists, so waiting is the recoverable guess', async () => {
+    const memento = new FakeMemento() as unknown as vscode.Memento;
+    await memento.update('unmess.claudeStates', { 'wt-1': { 1: 'terminated' } });
+    const { mgr, stub, stateEvents } = create('claude', memento);
+    (stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 1, name: 'claude' }]);
+    await mgr.reconnect([wt]);
+    // A stale "terminated" is a dead end: nothing moves it until a hook arrives,
+    // and an agent idling at its prompt never fires one.
+    expect(mgr.getState('wt-1')).toBe('waiting');
+    expect(stateEvents).toEqual([{ worktreeId: 'wt-1', state: 'waiting' }]);
   });
 
   it('falls back to waiting when no state was persisted for the worktree', async () => {

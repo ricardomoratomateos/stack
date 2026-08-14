@@ -173,6 +173,14 @@ export function WorktreeCard({
         >
           <i className="codicon codicon-terminal" />
         </IconActionBtn>
+        {!wt.isMain && (
+          <IconActionBtn
+            title="Run setup script (init worktree)"
+            onClick={(e) => { e.stopPropagation(); send({ type: 'initWorktree', worktreeId: wt.id }); }}
+          >
+            <i className="codicon codicon-zap" />
+          </IconActionBtn>
+        )}
         <IconActionBtn
           title="Review diff & comment"
           onClick={(e) => { e.stopPropagation(); send({ type: 'openDiff', worktreeId: wt.id }); }}

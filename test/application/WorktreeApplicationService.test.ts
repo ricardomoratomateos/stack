@@ -203,6 +203,8 @@ function makeHarness(o: HarnessOpts = {}) {
     }),
     create: vi.fn(),
     delete: vi.fn(async (id: string, db: boolean) => { calls.push(`manager.delete:${id}:${db}`); }),
+    // Ports are free by default; tests that care override this.
+    ensureFreePorts: vi.fn(async (wt: Worktree) => ({ worktree: wt })),
   };
 
   const gitWatcher = {
@@ -227,6 +229,8 @@ function makeHarness(o: HarnessOpts = {}) {
     currentBranch: vi.fn((): string => ''),
     diff: vi.fn(async () => o.diffOutput ?? ''),
     listBranches: vi.fn((): string[] => o.branches ?? []),
+    // A branch "exists" when it is in the harness's branch list.
+    branchExists: vi.fn((b: string): boolean => (o.branches ?? []).includes(b)),
   };
   const globalState = {
     get: vi.fn(<T,>(k: string): T | undefined => {
@@ -730,7 +734,7 @@ describe('handleMessage deleteWorktree / renameWorktree / initWorktree', () => {
   it('initWorktree routes to the service init flow with the resolved worktree', async () => {
     const a = makeWorktree({ id: 'a' });
     const h = makeHarness({ worktrees: [a] });
-    const spy = vi.spyOn(h.service, 'initWorktree').mockImplementation(() => {});
+    const spy = vi.spyOn(h.service, 'initWorktree').mockImplementation(async () => {});
     await h.service.handleMessage({ type: 'initWorktree', worktreeId: 'a' });
     expect(spy).toHaveBeenCalledWith(a);
   });
@@ -1458,6 +1462,32 @@ describe('createWorktree', () => {
     expect(h.host.createTerminal).not.toHaveBeenCalled();
   });
 
+  it('starts the setup script BEFORE the workspace/monitor wiring', async () => {
+    vi.useFakeTimers();
+    const { h } = createHarness({ config: { setupScript: '/scripts/setup.sh' } });
+    await h.service.createWorktree({ branch: 'feat/x' });
+    const setupIdx = h.calls.indexOf('host.createTerminal:Init: feat/x:/repo/zer/feat-x');
+    const wiringIdx = h.calls.findIndex((c) => c.startsWith('host.addWorkspaceFolders'));
+    expect(setupIdx).toBeGreaterThan(-1);
+    expect(wiringIdx).toBeGreaterThan(-1);
+    expect(setupIdx).toBeLessThan(wiringIdx);
+  });
+
+  it.each([
+    ['addWorkspaceFolders', (h: ReturnType<typeof createHarness>['h']) => h.host.addWorkspaceFolders],
+    ['gitWatcher.watch', (h: ReturnType<typeof createHarness>['h']) => h.gitWatcher.watch],
+    ['dockerMonitor.startPolling', (h: ReturnType<typeof createHarness>['h']) => h.dockerMonitor.startPolling],
+    ['prMonitor.startPolling', (h: ReturnType<typeof createHarness>['h']) => h.prMonitor.startPolling],
+  ])('still runs the setup script when %s throws (worktree must not be left bare)', async (_name, pick) => {
+    vi.useFakeTimers();
+    const { h } = createHarness({ config: { setupScript: '/scripts/setup.sh' } });
+    pick(h).mockImplementation(() => { throw new Error('boom'); });
+    await h.service.createWorktree({ branch: 'feat/x' });
+    expect(h.calls).toContain('host.createTerminal:Init: feat/x:/repo/zer/feat-x');
+    // A wiring failure is not a creation failure.
+    expect(h.notify.showError).not.toHaveBeenCalled();
+  });
+
   it('shows an error and aborts when creation fails (no deferred launch)', async () => {
     vi.useFakeTimers();
     const { h } = createHarness();
@@ -1791,24 +1821,42 @@ describe('renameWorktree', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('initWorktree', () => {
-  it('does nothing when no worktree given and store is empty', () => {
+  it('does nothing when no worktree given and store is empty', async () => {
     const h = makeHarness();
-    h.service.initWorktree(undefined);
+    await h.service.initWorktree(undefined);
     expect(h.notify.showError).not.toHaveBeenCalled();
   });
 
-  it('shows an error when no setup script is configured', () => {
+  it('targets the ACTIVE worktree when invoked with no argument (command palette)', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({ worktrees: [a, b], config: { setupScript: '/scripts/setup.sh' } });
+    await h.service.switchToWorktree('b');
+    await h.service.initWorktree(undefined);
+    // Not 'a', which is merely first in the store — that would run a heavy setup
+    // against a worktree the user is not even looking at.
+    expect(h.calls).toContain('host.createTerminal:Init: feat/b:/repo/zer/feat-b');
+  });
+
+  it('falls back to the first worktree when nothing is active yet', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({ worktrees: [a], config: { setupScript: '/scripts/setup.sh' } });
+    await h.service.initWorktree(undefined);
+    expect(h.calls).toContain('host.createTerminal:Init: feat/a:/repo/zer/feat-a');
+  });
+
+  it('shows an error when no setup script is configured', async () => {
     const a = makeWorktree({ id: 'a' });
     const h = makeHarness({ worktrees: [a] });
-    h.service.initWorktree(a);
+    await h.service.initWorktree(a);
     expect(h.notify.showError).toHaveBeenCalledWith('No setup script configured. Set "unmess.setupScript" in settings.');
     expect(h.host.createTerminal).not.toHaveBeenCalled();
   });
 
-  it('re-runs the setup script in a visible terminal (no completion echo)', () => {
+  it('re-runs the setup script in a visible terminal (no completion echo)', async () => {
     const a = makeWorktree({ id: 'a', alias: 'My task' });
     const h = makeHarness({ worktrees: [a], config: { setupScript: '/scripts/setup.sh' } });
-    h.service.initWorktree(a);
+    await h.service.initWorktree(a);
     expect(h.calls).toEqual([
       'host.createTerminal:Init: My task:/repo/zer/feat-a',
       'claude.register:a',
@@ -1817,7 +1865,7 @@ describe('initWorktree', () => {
     ]);
   });
 
-  it('resolves a relative setup script in the worktree and injects the docker ports', () => {
+  it('resolves a relative setup script in the worktree and injects the docker ports', async () => {
     const a = makeWorktree({ id: 'a', branch: 'feat/b', path: '/repo/zer/feat-b' });
     const h = makeHarness({
       worktrees: [a],
@@ -1827,34 +1875,34 @@ describe('initWorktree', () => {
       },
       existingPaths: ['/repo/zer/feat-b/.unmess/setup.sh'],
     });
-    h.service.initWorktree(a);
+    await h.service.initWorktree(a);
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
       'UNMESS_REPO_ROOT="/repo" UNMESS_WORKTREE_PATH="/repo/zer/feat-b" UNMESS_BRANCH="feat/b" UNMESS_COMPOSE_PROJECT="feat-b" WORKTREE_PORT="8081" bash "/repo/zer/feat-b/.unmess/setup.sh"',
     );
   });
 
-  it('uses an absolute setup script path as-is when it exists', () => {
+  it('uses an absolute setup script path as-is when it exists', async () => {
     const a = makeWorktree({ id: 'a' });
     const h = makeHarness({ worktrees: [a], config: { setupScript: '/abs/setup.sh' }, existingPaths: ['/abs/setup.sh'] });
-    h.service.initWorktree(a);
+    await h.service.initWorktree(a);
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
       'UNMESS_REPO_ROOT="/repo" UNMESS_WORKTREE_PATH="/repo/zer/feat-a" UNMESS_BRANCH="feat/a" UNMESS_COMPOSE_PROJECT="feat-a" bash "/abs/setup.sh"',
     );
   });
 
-  it('falls back to the repo root for a relative setup script the branch does not carry', () => {
+  it('falls back to the repo root for a relative setup script the branch does not carry', async () => {
     const a = makeWorktree({ id: 'a' });
     const h = makeHarness({ worktrees: [a], config: { setupScript: 'scripts/setup.sh' } }); // present in neither
-    h.service.initWorktree(a);
+    await h.service.initWorktree(a);
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
       'UNMESS_REPO_ROOT="/repo" UNMESS_WORKTREE_PATH="/repo/zer/feat-a" UNMESS_BRANCH="feat/a" UNMESS_COMPOSE_PROJECT="feat-a" bash "/repo/scripts/setup.sh"',
     );
   });
 
-  it('falls back to the first store entry', () => {
+  it('falls back to the first store entry', async () => {
     const a = makeWorktree({ id: 'a' });
     const h = makeHarness({ worktrees: [a], config: { setupScript: '/s.sh' } });
-    h.service.initWorktree(undefined);
+    await h.service.initWorktree(undefined);
     expect(h.host.createTerminal).toHaveBeenCalledWith({ name: 'Init: feat/a', cwd: a.path });
   });
 });
@@ -2114,5 +2162,190 @@ describe('diff review panel', () => {
     const h = makeHarness({ worktrees: [wtA] });
     await h.service.openFile('nope', 'src/foo.ts');
     expect(h.host.openFileInEditor).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Port re-check before bringing a stack up
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('port re-check before setup / compose up', () => {
+  const dockerCfg = {
+    docker: {
+      composeFile: '.unmess/docker-compose.worktree.yml',
+      overrideFile: '',
+      ports: ['WORKTREE_PORT', 'XDEBUG_PORT'],
+      basePort: 8081,
+      portStride: 1,
+    },
+  };
+
+  /** Make the manager report the worktree's block as stolen and hand back a new slot. */
+  function reassignTo(h: ReturnType<typeof makeHarness>, xdebugPort: number, movedFrom: number) {
+    h.manager.ensureFreePorts.mockImplementation(async (wt: Worktree) => ({
+      worktree: { ...wt, xdebugPort },
+      movedFrom,
+    }));
+  }
+
+  it('brings the stack up on the reassigned ports, not the stolen ones', async () => {
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b', xdebugPort: 9901 });
+    const h = makeHarness({ worktrees: [b], config: dockerCfg });
+    reassignTo(h, 9903, 8083); // 8083 held by a foreign container
+
+    await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
+
+    // Slot 4 → WORKTREE_PORT 8085. The old 8083 must appear nowhere.
+    expect(h.calls).toContain(
+      'terminal.sendText:WORKTREE_PORT=8085 XDEBUG_PORT=9903 docker compose -p "feat-b" -f "/repo/.unmess/docker-compose.worktree.yml" up -d',
+    );
+  });
+
+  it('names the busy port and the new block so the user can see what moved', async () => {
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b', xdebugPort: 9901 });
+    const h = makeHarness({ worktrees: [b], config: dockerCfg });
+    reassignTo(h, 9903, 8083);
+
+    await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
+
+    expect(h.notify.showWarning).toHaveBeenCalledWith(
+      'Port 8083 is already in use — "feat/b" moved to 9903, 8085.',
+    );
+  });
+
+  it('says nothing when the ports were still free', async () => {
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({ worktrees: [b], config: dockerCfg });
+
+    await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
+
+    expect(h.notify.showWarning).not.toHaveBeenCalled();
+  });
+
+  it('re-runs setup with the reassigned ports, so the .env it writes matches the stack', async () => {
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b', xdebugPort: 9901 });
+    const h = makeHarness({ worktrees: [b], config: { ...dockerCfg, setupScript: '/s.sh' } });
+    reassignTo(h, 9903, 8083);
+
+    await h.service.initWorktree(b);
+
+    expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
+      'UNMESS_REPO_ROOT="/repo" UNMESS_WORKTREE_PATH="/repo/zer/feat-b" UNMESS_BRANCH="feat/b" ' +
+        'UNMESS_COMPOSE_PROJECT="feat-b" WORKTREE_PORT="8085" XDEBUG_PORT="9903" bash "/s.sh"',
+    );
+  });
+
+  it('leaves teardown on the original ports — it must address the stack that is actually up', async () => {
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b', xdebugPort: 9901 });
+    const h = makeHarness({
+      worktrees: [b],
+      config: { ...dockerCfg, teardownScript: '/t.sh' },
+      confirmResult: 'Delete',
+    });
+
+    await h.service.deleteWorktree(b);
+
+    expect(h.manager.ensureFreePorts).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the current ports when the re-check itself fails, rather than blocking the user', async () => {
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({ worktrees: [b], config: dockerCfg });
+    h.manager.ensureFreePorts.mockRejectedValue(new Error('no free slot in range'));
+
+    await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
+
+    // Still brings the stack up; docker reports the collision itself if it comes.
+    expect(h.calls).toContain(
+      'terminal.sendText:WORKTREE_PORT=8081 XDEBUG_PORT=9899 docker compose -p "feat-b" -f "/repo/.unmess/docker-compose.worktree.yml" up -d',
+    );
+    expect(h.notify.showWarning).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// unmess.defaultBaseBranch — where new worktrees branch from
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('defaultBaseBranch', () => {
+  const root = '/repo';
+  function harness(o: HarnessOpts = {}) {
+    const created = makeWorktree({ id: 'new', branch: 'feat/x', path: '/repo/zer/feat-x' });
+    const h = makeHarness({ workspaceFolders: [root], gitDirs: ['/repo/.git'], ...o });
+    h.manager.create.mockResolvedValue(created);
+    return h;
+  }
+
+  describe('preselection in the New Task form', () => {
+    it('preselects the configured branch instead of whatever the repo is parked on', async () => {
+      // The old behaviour preselected currentBranch, so leaving the main
+      // checkout on a feature branch made every new worktree its child.
+      const h = harness({
+        config: { defaultBaseBranch: 'develop' },
+        branches: ['develop', 'main', 'AS-1-something'],
+      });
+      h.git.currentBranch.mockReturnValue('AS-1-something');
+
+      await h.service.handleMessage({ type: 'listBranches' });
+
+      expect(h.service.buildState().baseBranch).toBe('develop');
+    });
+
+    it('falls back to the current branch when the configured one is not in the repo', async () => {
+      // Ships with a "develop" default, so a main-only repo must keep working.
+      const h = harness({ config: { defaultBaseBranch: 'develop' }, branches: ['main'] });
+      h.git.currentBranch.mockReturnValue('main');
+
+      await h.service.handleMessage({ type: 'listBranches' });
+
+      expect(h.service.buildState().baseBranch).toBe('main');
+    });
+
+    it('falls back to the current branch when the setting is blank', async () => {
+      const h = harness({ config: { defaultBaseBranch: '   ' }, branches: ['main'] });
+      h.git.currentBranch.mockReturnValue('main');
+
+      await h.service.handleMessage({ type: 'listBranches' });
+
+      expect(h.service.buildState().baseBranch).toBe('main');
+    });
+
+    it('survives a detached HEAD, where currentBranch throws', async () => {
+      const h = harness({ config: { defaultBaseBranch: 'develop' }, branches: ['main'] });
+      h.git.currentBranch.mockImplementation(() => { throw new Error('detached'); });
+
+      await h.service.handleMessage({ type: 'listBranches' });
+
+      expect(h.service.buildState().baseBranch).toBe('');
+    });
+  });
+
+  describe('the base actually handed to git', () => {
+    it('uses the configured branch when invoked from the command palette (no base given)', async () => {
+      // This path used to pass no base at all, so git silently used HEAD.
+      const h = harness({ config: { defaultBaseBranch: 'develop' }, branches: ['develop'] });
+      h.git.currentBranch.mockReturnValue('AS-1-something');
+
+      await h.service.createWorktree({ branch: 'feat/x' });
+
+      expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, undefined, 'develop');
+    });
+
+    it('lets an explicit pick from the form win over the default', async () => {
+      const h = harness({ config: { defaultBaseBranch: 'develop' }, branches: ['develop', 'main'] });
+
+      await h.service.createWorktree({ branch: 'feat/x', baseBranch: 'main' });
+
+      expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, undefined, 'main');
+    });
+
+    it('passes undefined (git uses HEAD) when neither the setting nor git resolve a branch', async () => {
+      const h = harness({ config: { defaultBaseBranch: '' }, branches: [] });
+      h.git.currentBranch.mockReturnValue('');
+
+      await h.service.createWorktree({ branch: 'feat/x' });
+
+      expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, undefined, undefined);
+    });
   });
 });

@@ -24,15 +24,36 @@ export function composeProject(worktree: Worktree): string {
  * matches the one already written to its launch.json.
  */
 export function computeDockerPorts(worktree: Worktree, config: UnmessConfig): Record<string, number> {
+  return dockerPortsFor(worktree.xdebugPort, config);
+}
+
+/**
+ * The same derivation keyed by the Xdebug port alone, so a port can be
+ * validated *before* there is a worktree to attach it to. This is the single
+ * source of truth for the mapping — the allocator and the compose env must
+ * never drift apart on which ports a slot actually owns.
+ */
+export function dockerPortsFor(xdebugPort: number, config: UnmessConfig): Record<string, number> {
   const { ports, basePort, portStride } = config.docker;
-  const slot = Math.max(0, worktree.xdebugPort - config.xdebugBasePort - 1);
+  const slot = Math.max(0, xdebugPort - config.xdebugBasePort - 1);
   const result: Record<string, number> = {};
   let i = 0;
   for (const name of ports) {
-    if (name === 'XDEBUG_PORT') result[name] = worktree.xdebugPort;
+    if (name === 'XDEBUG_PORT') result[name] = xdebugPort;
     else result[name] = basePort + slot * portStride + i++;
   }
   return result;
+}
+
+/**
+ * Every distinct port a worktree on this slot will try to bind. Always includes
+ * the Xdebug port itself, even when `unmess.docker.ports` is empty — VSCode's
+ * debug listener binds it too, and it collides just as happily.
+ */
+export function portBlockFor(xdebugPort: number, config: UnmessConfig): number[] {
+  const block = new Set<number>([xdebugPort]);
+  for (const port of Object.values(dockerPortsFor(xdebugPort, config))) block.add(port);
+  return [...block];
 }
 
 /**

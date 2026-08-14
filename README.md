@@ -50,6 +50,7 @@ Working on several things at once with AI agents gets messy fast: branches colli
 | Setting | Default | Description |
 |---|---|---|
 | `unmess.worktreesDirectory` | `.worktrees` | Where worktrees are created (relative to the workspace root) |
+| `unmess.defaultBaseBranch` | `develop` | Branch new worktrees start from, preselected in the New Task form. Falls back to the main repo's current branch when this branch doesn't exist |
 | `unmess.defaultProvider` | `claude` | Agent launched by the main button when none is picked |
 | `unmess.claudeCommand` | `claude` | Command to launch Claude Code |
 | `unmess.opencodeCommand` | `opencode` | Command to launch opencode |
@@ -58,6 +59,7 @@ Working on several things at once with AI agents gets messy fast: branches colli
 | `unmess.focusMode` | `false` | Clean-slate switching: close the other worktrees' editor tabs and agent terminals so only the active worktree is on screen (see [Switching worktrees](#switching-worktrees)) |
 | `unmess.setupScript` / `unmess.teardownScript` | `""` | Script run on worktree create / delete (e.g. `.unmess/setup.sh`) |
 | `unmess.docker` | — | Per-worktree compose file + auto-generated ports (opt-in; see below) |
+| `unmess.xdebugBasePort` | `9898` | First debug port; each worktree takes the next free slot above it |
 | `unmess.debugTemplate` | php/xdebug | `launch.json` template generated per worktree (`{{PORT}}`, `{{WORKTREE_PATH}}`) |
 
 ## Switching worktrees
@@ -74,7 +76,9 @@ Clicking a worktree in the sidebar switches to it. There are two behaviours, tra
 
 For heavier setups (dedicated Docker stack, dependency prep, debug), point the `unmess.setupScript` / `unmess.teardownScript` and `unmess.docker` settings at your own script and compose files — **anywhere in the repo**, wherever you like to keep them.
 
-When it runs your setup script, Unmess exports `UNMESS_REPO_ROOT`, `UNMESS_WORKTREE_PATH`, `UNMESS_BRANCH`, `UNMESS_COMPOSE_PROJECT` and the worktree's auto-generated ports, so parallel stacks never collide and the matching debug port is wired into the generated `launch.json`. Relative paths resolve against the worktree first, then the main repo.
+When it runs your setup script, Unmess exports `UNMESS_REPO_ROOT`, `UNMESS_WORKTREE_PATH`, `UNMESS_BRANCH`, `UNMESS_COMPOSE_PROJECT` and the worktree's auto-generated ports, and the matching debug port is wired into the generated `launch.json`. Relative paths resolve against the worktree first, then the main repo.
+
+Ports are checked against the machine, not just against Unmess's own bookkeeping: every port a worktree will bind is probed before the slot is handed out, and probed again right before a setup script or `compose up` runs. If something has taken one in the meantime — another project's container, a leftover stack from a deleted worktree, a local dev server — the worktree moves to a free slot, its `launch.json` follows, and you get a toast naming the port that was busy. Re-run your setup script afterwards if it bakes the port into a generated file such as `.env`.
 
 > Tip: a `.unmess/` folder is a handy place to keep these together, but it's just a convention — no folder is required.
 

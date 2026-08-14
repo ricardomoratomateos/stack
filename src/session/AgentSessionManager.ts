@@ -8,6 +8,7 @@ import type { ProviderId } from '../ports/IAgentProvider';
 import { isAgentWindowName, providerForWindowName } from '../ports/IAgentProvider';
 import type { ProviderFactory } from '../providers/ProviderFactory';
 import type { SessionItem } from '../webview/types';
+import { displayLabel } from '../worktree/displayLabel';
 
 type WindowMeta = {
   kind: 'agent' | 'shell';
@@ -65,6 +66,8 @@ export class AgentSessionManager {
     for (const [id, arr] of Object.entries(savedOrders)) this.orders.set(id, arr);
   }
 
+
+
   // ── Private helpers ──────────────────────────────────────────────────────
 
   /** Persist the per-window agent states for a worktree (survives reload). */
@@ -88,8 +91,15 @@ export class AgentSessionManager {
     return (entry as Record<number, AgentSessionState> | undefined)?.[windowIndex];
   }
 
+  /**
+   * Display label for a terminal tab, capped by the shared helper.
+   *
+   * This must stay the single source of the label: reconnect() reclaims viewer
+   * terminals with `terminal.name.startsWith(label(wt))`, so capping anywhere
+   * else would silently break that match.
+   */
   private label(worktree: Worktree): string {
-    return worktree.alias ?? worktree.branch;
+    return displayLabel(worktree);
   }
 
   private windowMap(worktreeId: string): Map<number, WindowMeta> {
@@ -130,6 +140,7 @@ export class AgentSessionManager {
     }
     if (changed) this.terminalsChangeEmitter.fire();
   }
+
 
   /**
    * Debounced second look at the pane titles — Claude Code often rewrites the
@@ -454,7 +465,17 @@ export class AgentSessionManager {
         const title = kind === 'agent' ? this.cleanTitle(w.title, w.name) : undefined;
         // Restore each window's own pre-reload state (e.g. "permission"),
         // falling back to "waiting" when nothing was persisted for it.
-        const restoredState = kind === 'agent' ? (this.persistedState(wt.id, w.index) ?? 'waiting') : 'idle';
+        //
+        // "terminated" is deliberately NOT restored. The window is still listed
+        // in tmux, so something is there; whether its agent process is alive is
+        // not knowable here, and "waiting" is the recoverable guess — any hook
+        // event corrects it, whereas a stale "terminated" is a dead end that
+        // paints a live agent as dead until you kill the window. (It also
+        // unpoisons state wrongly persisted by a past liveness-detection bug.)
+        const persisted = kind === 'agent' ? this.persistedState(wt.id, w.index) : undefined;
+        const restoredState = kind === 'agent'
+          ? (persisted && persisted !== 'terminated' ? persisted : 'waiting')
+          : 'idle';
         wm.set(w.index, { kind, provider, state: restoredState, name: w.name, title });
         if (kind === 'agent') {
           this.stateChangeEmitter.fire({ worktreeId: wt.id, state: restoredState });
