@@ -33,6 +33,19 @@ export const T = {
   mono:        'var(--vscode-editor-font-family)',
   fontSize:    'var(--vscode-font-size, 13px)',
 
+  // Popup menus have their own theme keys — a menu painted from list/sideBar
+  // colours reads as part of the sidebar rather than as a thing floating above
+  // it. Each falls back to the nearest general token for themes that skip them.
+  // The menu is the same surface as a selected worktree card, deliberately:
+  // menu.background is VSCode's *workbench* menu colour and stays grey in
+  // themes with a black sidebar, and sideBar-background made the menu vanish
+  // into the panel. The border matches the fill rather than drawing a
+  // contrasting line — the drop shadow is what lifts it off the card.
+  menuBg:      'var(--vscode-list-activeSelectionBackground, var(--vscode-editorWidget-background))',
+  menuFg:      'var(--vscode-list-activeSelectionForeground, var(--vscode-foreground))',
+  menuBorder:  'var(--vscode-list-activeSelectionBackground, var(--vscode-editorWidget-background))',
+  menuSepBg:   'color-mix(in srgb, var(--vscode-foreground) 12%, transparent)',
+
   sectionHeaderFg: 'var(--vscode-sideBarSectionHeader-foreground, var(--vscode-foreground))',
   sectionHeaderBg: 'var(--vscode-sideBarSectionHeader-background, transparent)',
   titleFg:         'var(--vscode-sideBarTitle-foreground, var(--vscode-foreground))',
@@ -90,4 +103,14 @@ input, textarea { font-family: inherit; font-size: inherit; }
 .u-dot-2 { animation: unmess-bounce 1.2s ease-in-out 0.15s infinite; }
 .u-dot-3 { animation: unmess-bounce 1.2s ease-in-out 0.30s infinite; }
 .u-fadein { animation: unmess-fadein .2s ease; }
+
+/* Popup menu rows. Hover lifts the row by mixing foreground INTO the menu's own
+   fill, rather than using list-hoverBackground: that token is meant to sit on
+   the sidebar's background, and over the (lighter) selection colour it can read
+   as darker than the row it is highlighting. */
+.u-menu-item:hover {
+  background: color-mix(in srgb, var(--vscode-foreground) 10%, var(--vscode-list-activeSelectionBackground)) !important;
+}
+/* A dimmed row is not launchable; say so with the cursor before the click. */
+.u-menu-item[data-disabled='true'] { cursor: help; }
 `;

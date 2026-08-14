@@ -31,7 +31,7 @@ function postHook(baseUrl: string, payload: unknown): Promise<Response> {
 }
 
 describe('EVENT_TO_STATE', () => {
-  it('maps exactly the 7 documented events', () => {
+  it('maps exactly the 8 documented events', () => {
     expect(EVENT_TO_STATE).toEqual({
       SessionStart: 'waiting',
       UserPromptSubmit: 'active',
@@ -40,6 +40,8 @@ describe('EVENT_TO_STATE', () => {
       Stop: 'waiting',
       SessionEnd: 'terminated',
       PermissionRequest: 'permission',
+      // Grok Build's attention signal — it has no PermissionRequest at all.
+      Notification: 'permission',
     });
   });
 });

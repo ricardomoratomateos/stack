@@ -11,6 +11,7 @@ import { VsCodeNotifyAdapter } from '../../src/adapters/VsCodeNotifyAdapter';
 import { window, ProgressLocation, resetVscodeMock } from '../__mocks__/vscode';
 import type { Worktree, UnmessConfig } from '../../src/types';
 import type { SessionItem } from '../../src/webview/types';
+import type { ProviderId } from '../../src/ports/IAgentProvider';
 import type { WorktreeManager } from '../../src/worktree/WorktreeManager';
 import type { AgentSessionManager } from '../../src/session/AgentSessionManager';
 import type { TabManager } from '../../src/worktree/TabManager';
@@ -61,6 +62,10 @@ interface HarnessOpts {
   liveAgentAccepts?: boolean;
   /** persisted worktree display order (ids) */
   worktreeOrder?: string[];
+  /** agents reported as runnable; defaults to none so tests never read the real PATH */
+  installedProviders?: ProviderId[];
+  /** omit the injection entirely and exercise the real PATH lookup */
+  useRealInstalledProviders?: boolean;
   /** branches returned by git.listBranches */
   branches?: string[];
 }
@@ -246,7 +251,7 @@ function makeHarness(o: HarnessOpts = {}) {
     syncDecorations: vi.fn(),
     openDiffPanel: vi.fn((id: string) => { calls.push(`ui.openDiffPanel:${id}`); }),
   };
-  const config = { get: vi.fn(() => cfg) };
+  const config = { get: vi.fn(() => cfg), setDefaultProvider: vi.fn().mockResolvedValue(undefined) };
 
   const service = new WorktreeApplicationService({
     manager: manager as unknown as WorktreeManager,
@@ -262,12 +267,13 @@ function makeHarness(o: HarnessOpts = {}) {
     dockerMonitor: dockerMonitor as unknown as DockerMonitor,
     prMonitor: prMonitor as unknown as PrMonitor,
     globalState,
+    installedProviders: o.useRealInstalledProviders ? undefined : () => o.installedProviders ?? [],
   });
   if (o.withUi !== false) service.setUi(ui);
 
   return {
     service, calls, worktrees, viewers, makeViewer, claude, tabManager, breakpointManager, host, notify, store,
-    manager, gitWatcher, dockerMonitor, prMonitor, git, globalState, ui, cfg,
+    manager, gitWatcher, dockerMonitor, prMonitor, git, globalState, ui, cfg, config,
     dockerCallbacks, prCallbacks, terminalsCreated,
     setActiveTerminal: (t: unknown) => { activeTerminal = t; },
   };
@@ -312,31 +318,6 @@ describe('handleMessage launchAgent', () => {
   it('does nothing for unknown worktreeId (no store fallback)', async () => {
     const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
     await h.service.handleMessage({ type: 'launchAgent', worktreeId: 'nope' });
-    expect(h.claude.launch).not.toHaveBeenCalled();
-  });
-});
-
-describe('handleMessage pickAgent', () => {
-  it('offers every registered provider and launches the chosen one', async () => {
-    const a = makeWorktree({ id: 'a' });
-    const h = makeHarness({ worktrees: [a] });
-    h.host.showQuickPick.mockResolvedValue('opencode');
-    await h.service.handleMessage({ type: 'pickAgent', worktreeId: 'a' });
-    expect(h.host.showQuickPick).toHaveBeenCalledWith(['claude', 'opencode'], { placeHolder: 'Launch agent' });
-    expect(h.claude.launch).toHaveBeenCalledWith(a, { provider: 'opencode' });
-  });
-
-  it('launches nothing when the picker is dismissed', async () => {
-    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
-    h.host.showQuickPick.mockResolvedValue(undefined);
-    await h.service.handleMessage({ type: 'pickAgent', worktreeId: 'a' });
-    expect(h.claude.launch).not.toHaveBeenCalled();
-  });
-
-  it('does nothing for unknown worktreeId (no picker shown)', async () => {
-    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
-    await h.service.handleMessage({ type: 'pickAgent', worktreeId: 'nope' });
-    expect(h.host.showQuickPick).not.toHaveBeenCalled();
     expect(h.claude.launch).not.toHaveBeenCalled();
   });
 });
@@ -1068,6 +1049,9 @@ describe('buildState', () => {
       }],
       activeWorktreeId: 'a',
       defaultProvider: 'claude',
+      // The harness config leaves the *Command settings unset, so nothing
+      // resolves on PATH and the card would dim every agent.
+      installedProviders: [],
       dockerEnabled: false,
     });
     expect(h.dockerMonitor.getContainers).toHaveBeenCalledWith(a.dockerProjectName);
@@ -2347,5 +2331,84 @@ describe('defaultBaseBranch', () => {
 
       expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, undefined, undefined);
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Provider dropdown: choosing the primary, and the not-installed path
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('handleMessage pickDefaultProvider', () => {
+  it('offers every registered provider and persists the choice', async () => {
+    const h = makeHarness();
+    h.host.showQuickPick.mockResolvedValue('grok');
+
+    await h.service.handleMessage({ type: 'pickDefaultProvider' });
+
+    expect(h.host.showQuickPick).toHaveBeenCalledWith(
+      ['claude', 'codex', 'grok', 'opencode'],
+      { placeHolder: 'Agent launched by the main button' },
+    );
+    expect(h.config.setDefaultProvider).toHaveBeenCalledWith('grok');
+  });
+
+  it('persists nothing when the picker is dismissed', async () => {
+    const h = makeHarness();
+    h.host.showQuickPick.mockResolvedValue(undefined);
+
+    await h.service.handleMessage({ type: 'pickDefaultProvider' });
+
+    expect(h.config.setDefaultProvider).not.toHaveBeenCalled();
+  });
+});
+
+describe('handleMessage showProviderInstall', () => {
+  it('names the agent and offers to copy a verified install command', async () => {
+    const h = makeHarness({ confirmResult: undefined });
+
+    await h.service.handleMessage({ type: 'showProviderInstall', provider: 'codex' });
+
+    expect(h.notify.confirm).toHaveBeenCalledWith(
+      'Codex CLI is not on your PATH',
+      expect.stringContaining('npm i -g @openai/codex'),
+      'Copy command',
+    );
+  });
+
+  it('copies the command when the user accepts', async () => {
+    const h = makeHarness({ confirmResult: 'Copy command' });
+
+    await h.service.handleMessage({ type: 'showProviderInstall', provider: 'grok' });
+
+    expect(h.host.writeClipboard).toHaveBeenCalledWith('npm i -g @xai-official/grok');
+  });
+
+  it('copies nothing when the user dismisses', async () => {
+    const h = makeHarness({ confirmResult: undefined });
+
+    await h.service.handleMessage({ type: 'showProviderInstall', provider: 'grok' });
+
+    expect(h.host.writeClipboard).not.toHaveBeenCalled();
+  });
+});
+
+describe('installedProviders in the pushed state', () => {
+  it('forwards what the detector reports, so the card can dim the rest', () => {
+    const h = makeHarness({ installedProviders: ['claude', 'grok'] });
+    expect(h.service.buildState().installedProviders).toEqual(['claude', 'grok']);
+  });
+});
+
+describe('installedProviders fallback', () => {
+  it('uses the real PATH lookup when nothing is injected', () => {
+    // Commands that cannot exist, so the answer is the same on every machine.
+    const h = makeHarness({
+      useRealInstalledProviders: true,
+      config: {
+        claudeCommand: '/nope/claude', codexCommand: '/nope/codex',
+        grokCommand: '/nope/grok', opencodeCommand: '/nope/opencode',
+      },
+    });
+    expect(h.service.buildState().installedProviders).toEqual([]);
   });
 });

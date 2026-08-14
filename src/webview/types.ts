@@ -55,6 +55,8 @@ export interface UnmessState {
   activeWorktreeId?: string;
   /** Provider launched by the main agent button (unmess.defaultProvider). */
   defaultProvider?: ProviderId;
+  /** Agents whose command resolves on PATH; the rest are shown dimmed. */
+  installedProviders?: ProviderId[];
   /** Show the docker start/stop button (unmess.docker.ports configured). */
   dockerEnabled?: boolean;
   /** Local branches offered as the base for a new worktree (filled on demand). */
@@ -72,7 +74,10 @@ export type ExtMessage =
 // WebView → Extension
 export type WebMessage =
   | { type: 'launchAgent'; worktreeId: string; provider?: ProviderId }
-  | { type: 'pickAgent'; worktreeId: string }
+  /** Choose which agent the card's big launch button starts. */
+  | { type: 'pickDefaultProvider' }
+  /** Tell the user how to install an agent whose command is not on PATH. */
+  | { type: 'showProviderInstall'; provider: ProviderId }
   | { type: 'openTerminal'; worktreeId: string }
   | { type: 'focusTerminal'; worktreeId: string }
   | { type: 'focusSession'; worktreeId: string; kind: 'agent' | 'shell'; index: number }

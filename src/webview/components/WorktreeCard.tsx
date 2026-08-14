@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { T } from '../tokens';
-import { StateDot, ThinkingDots } from './StateDot';
+import { StateDot } from './StateDot';
 import { send } from '../vscode';
 import type { SessionItem, WorktreeItem } from '../types';
 
@@ -25,6 +25,7 @@ interface Props {
   isSelected: boolean;
   onSelect: () => void;
   defaultProvider?: string;
+  installedProviders?: string[];
   dockerEnabled?: boolean;
   cardDragging: boolean;
   cardDragOver: boolean;
@@ -35,10 +36,12 @@ interface Props {
 }
 
 export function WorktreeCard({
-  wt, isSelected, onSelect, defaultProvider, dockerEnabled,
+  wt, isSelected, onSelect, defaultProvider, installedProviders, dockerEnabled,
   cardDragging, cardDragOver, onCardDragStart, onCardDragEnter, onCardDrop, onCardDragEnd,
 }: Props) {
   const [hovered, setHovered] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuAnchorRef = useRef<HTMLDivElement>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
 
@@ -153,20 +156,37 @@ export function WorktreeCard({
         marginTop: 7, marginLeft: 14,
         display: 'flex', alignItems: 'center', gap: 2,
       }}>
-        {/* Split button: launch the default provider, chevron picks any other. */}
-        <IconActionBtn
-          title={hasSession ? `New ${defaultProvider ?? 'agent'} session` : `Launch ${defaultProvider ?? 'agent'}`}
-          onClick={(e) => { e.stopPropagation(); send({ type: 'launchAgent', worktreeId: wt.id }); }}
-        >
-          <DefaultProviderIcon provider={defaultProvider} />
-        </IconActionBtn>
-        <IconActionBtn
-          title="Launch another agent…"
-          narrow
-          onClick={(e) => { e.stopPropagation(); send({ type: 'pickAgent', worktreeId: wt.id }); }}
-        >
-          <i className="codicon codicon-chevron-down" style={{ fontSize: 12 }} />
-        </IconActionBtn>
+        {/* Split button: the big half launches the primary agent, the chevron
+            opens the rest. Relative, because the menu anchors to it. */}
+        <div ref={menuAnchorRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <IconActionBtn
+            title={hasSession ? `New ${defaultProvider ?? 'agent'} session` : `Launch ${defaultProvider ?? 'agent'}`}
+            onClick={(e) => { e.stopPropagation(); setMenuOpen(false); send({ type: 'launchAgent', worktreeId: wt.id }); }}
+          >
+            <DefaultProviderIcon provider={defaultProvider} />
+          </IconActionBtn>
+          <IconActionBtn
+            title={menuOpen ? 'Close' : 'Launch another agent…'}
+            narrow
+            onClick={(e) => { e.stopPropagation(); setMenuOpen((open) => !open); }}
+          >
+            <i
+              className={`codicon codicon-chevron-${menuOpen ? 'up' : 'down'}`}
+              style={{ fontSize: 12 }}
+            />
+          </IconActionBtn>
+          {menuOpen && (
+            <ProviderMenu
+              primary={defaultProvider}
+              installed={installedProviders}
+              containerRef={menuAnchorRef}
+              onClose={() => setMenuOpen(false)}
+              onLaunch={(provider) => send({ type: 'launchAgent', worktreeId: wt.id, provider: provider as never })}
+              onSetPrimary={() => send({ type: 'pickDefaultProvider' })}
+              onInstall={(provider) => send({ type: 'showProviderInstall', provider: provider as never })}
+            />
+          )}
+        </div>
         <IconActionBtn
           title="Open terminal"
           onClick={(e) => { e.stopPropagation(); send({ type: 'openTerminal', worktreeId: wt.id }); }}
@@ -246,22 +266,170 @@ function OpenCodeMark({ size = 10 }: { size?: number }) {
   );
 }
 
-/** Brand icon + tint per provider (agents launched pre-provider default to claude). */
-const PROVIDER_VISUAL: Record<string, { icon: (props: { size?: number }) => React.ReactElement; tint: string }> = {
-  claude:   { icon: ClaudeSpark,  tint: 'color-mix(in srgb, #D97757 16%, transparent)' },
-  opencode: { icon: OpenCodeMark, tint: 'color-mix(in srgb, #9DA5B4 14%, transparent)' },
+/** OpenAI's knot, reduced to a single loop at this size. */
+function CodexMark({ size = 10 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="8" r="5.4" stroke="#10A37F" strokeWidth="1.7" />
+      <path d="M8 2.6c2.4 1.6 3.6 3.4 3.6 5.4s-1.2 3.8-3.6 5.4C5.6 11.8 4.4 10 4.4 8S5.6 4.2 8 2.6Z"
+        stroke="#10A37F" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+/** xAI's slashed X. */
+function GrokMark({ size = 10 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <path d="M3 2.6 13 13.4M13 2.6 3 13.4" stroke="#C8CDD6" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Stand-in for a provider this build does not know about (an older session's id). */
+function UnknownMark({ size = 10 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="8" r="5.6" stroke="#6E7681" strokeWidth="1.6" strokeDasharray="2.4 2" />
+    </svg>
+  );
+}
+
+type ProviderVisual = { icon: (props: { size?: number }) => React.ReactElement; tint: string; label: string };
+
+/** Brand icon + tint + display name per provider. */
+const PROVIDER_VISUAL: Record<string, ProviderVisual> = {
+  claude:   { icon: ClaudeSpark,  tint: 'color-mix(in srgb, #D97757 16%, transparent)', label: 'claude' },
+  codex:    { icon: CodexMark,    tint: 'color-mix(in srgb, #10A37F 16%, transparent)', label: 'codex' },
+  grok:     { icon: GrokMark,     tint: 'color-mix(in srgb, #C8CDD6 14%, transparent)', label: 'grok' },
+  opencode: { icon: OpenCodeMark, tint: 'color-mix(in srgb, #9DA5B4 14%, transparent)', label: 'opencode' },
 };
 
-/** Brand icon of the configured default provider, sized to match the codicons beside it. */
+const UNKNOWN_VISUAL: ProviderVisual = {
+  icon: UnknownMark, tint: 'color-mix(in srgb, #6E7681 14%, transparent)', label: 'agent',
+};
+
+/**
+ * Never falls back to Claude. Sessions recorded before providers existed, and
+ * ids from a newer build, are genuinely unknown — painting them with Claude's
+ * mark asserts something we do not know, and Claude is no longer the safe guess.
+ */
+function visualFor(provider?: string): ProviderVisual {
+  return (provider && PROVIDER_VISUAL[provider]) || UNKNOWN_VISUAL;
+}
+
+/** Brand icon of the configured primary provider, sized to match the codicons beside it. */
 function DefaultProviderIcon({ provider }: { provider?: string }) {
-  const visual = PROVIDER_VISUAL[provider ?? 'claude'] ?? PROVIDER_VISUAL.claude;
+  const visual = visualFor(provider);
   return <visual.icon size={13} />;
+}
+
+/** Order shown in the dropdown — stable, so the list never reshuffles under the cursor. */
+const PROVIDER_ORDER = ['claude', 'codex', 'grok', 'opencode'] as const;
+
+/**
+ * The chevron's menu, rendered here rather than through VSCode's QuickPick.
+ * The QuickPick pulls focus to the command palette at the top of the window,
+ * which is a long way from the card you clicked.
+ */
+function ProviderMenu({
+  primary, installed, containerRef, onClose, onLaunch, onSetPrimary, onInstall,
+}: {
+  primary?: string;
+  installed?: string[];
+  /** The split button, which wraps this menu. See the mousedown handler below. */
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  onClose: () => void;
+  onLaunch: (provider: string) => void;
+  onSetPrimary: () => void;
+  onInstall: (provider: string) => void;
+}) {
+  // Dismiss on outside click or Escape. Capture phase, because the card itself
+  // stops propagation on click to avoid selecting the worktree.
+  //
+  // The bounds checked are the whole split button, not just this menu: with the
+  // chevron treated as "outside", clicking it while open closed the menu here
+  // and the button's own onClick immediately reopened it, so it could never be
+  // collapsed by the control that opened it.
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!containerRef.current?.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+    window.addEventListener('mousedown', onDown, true);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('mousedown', onDown, true);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [onClose, containerRef]);
+
+  // Undefined means the extension has not reported yet; treat everything as
+  // available rather than dimming the whole menu on first paint.
+  const isInstalled = (id: string) => installed === undefined || installed.includes(id);
+
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        position: 'absolute', top: '100%', left: 0, zIndex: 20, marginTop: 3,
+        minWidth: 150, padding: 3,
+        background: T.menuBg, color: T.menuFg,
+        border: `1px solid ${T.menuBorder}`, borderRadius: 5,
+        // A black shadow is invisible on a black sidebar; the theme's own
+        // widget shadow is the only one that shows up in every theme.
+        boxShadow: '0 4px 12px var(--vscode-widget-shadow, rgba(0,0,0,.35))',
+      }}
+    >
+      {PROVIDER_ORDER.map((id) => {
+        const visual = visualFor(id);
+        const available = isInstalled(id);
+        return (
+          <button
+            key={id}
+            className="u-menu-item"
+            data-disabled={!available}
+            title={available ? `Launch ${visual.label}` : `${visual.label} is not on your PATH`}
+            onClick={() => { onClose(); available ? onLaunch(id) : onInstall(id); }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 7, width: '100%',
+              padding: '4px 7px', border: 'none', borderRadius: 3,
+              background: 'transparent', color: 'inherit',
+              font: 'inherit', fontSize: 11, textAlign: 'left', cursor: 'pointer',
+              opacity: available ? 1 : 0.4,
+            }}
+          >
+            <visual.icon size={12} />
+            <span style={{ flex: 1, fontWeight: id === primary ? 600 : 400 }}>{visual.label}</span>
+            {id === primary && (
+              <i className="codicon codicon-check" style={{ fontSize: 11, opacity: 0.7 }} />
+            )}
+          </button>
+        );
+      })}
+      <div style={{ height: 1, background: T.menuSepBg, margin: '3px 0' }} />
+      <button
+        className="u-menu-item"
+        title="Choose which agent the big button launches"
+        onClick={() => { onClose(); onSetPrimary(); }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 7, width: '100%',
+          padding: '4px 7px', border: 'none', borderRadius: 3,
+          background: 'transparent', color: 'inherit', opacity: 0.75,
+          font: 'inherit', fontSize: 11, textAlign: 'left', cursor: 'pointer',
+        }}
+      >
+        <i className="codicon codicon-ellipsis" style={{ fontSize: 11 }} />
+        <span>change primary…</span>
+      </button>
+    </div>
+  );
 }
 
 /** Warp-style avatar: brand icon in a tinted circle + state badge overlaid bottom-right. */
 function SessionAvatar({ session }: { session: SessionItem }) {
   const isAgent = session.kind === 'agent';
-  const visual = PROVIDER_VISUAL[session.provider ?? 'claude'] ?? PROVIDER_VISUAL.claude;
+  const visual = visualFor(session.provider);
   const badgeColor = STATE_COLOR[session.state] ?? T.textMuted;
   const badgeCls = session.state === 'active' ? 'u-dot-active' : session.state === 'permission' ? 'u-dot-perm' : '';
   return (

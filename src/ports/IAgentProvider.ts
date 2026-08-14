@@ -1,6 +1,19 @@
 /** Registered coding-agent providers. Extend this list to add a new provider. */
-export const PROVIDER_IDS = ['claude', 'opencode'] as const;
+export const PROVIDER_IDS = ['claude', 'codex', 'grok', 'opencode'] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
+
+/**
+ * How to get each agent, shown when its configured command is not on PATH.
+ * Package names verified against the npm registry; Grok also ships a shell
+ * installer (`curl -fsSL https://x.ai/cli/install.sh | bash`), but npm is used
+ * here so all four instructions are one copyable line of the same shape.
+ */
+export const PROVIDER_INSTALL: Record<ProviderId, { label: string; install: string }> = {
+  claude:   { label: 'Claude Code', install: 'npm i -g @anthropic-ai/claude-code' },
+  codex:    { label: 'Codex CLI',   install: 'npm i -g @openai/codex' },
+  grok:     { label: 'Grok Build',  install: 'npm i -g @xai-official/grok' },
+  opencode: { label: 'opencode',    install: 'npm i -g opencode-ai' },
+};
 
 /** True when a tmux window name belongs to an agent window (windows are named after the provider id). */
 export function isAgentWindowName(name: string): boolean {

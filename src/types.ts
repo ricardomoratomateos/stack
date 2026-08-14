@@ -80,6 +80,8 @@ export interface UnmessConfig {
   /** Agent launched when no explicit provider is requested. */
   defaultProvider: ProviderId;
   claudeCommand: string;
+  codexCommand: string;
+  grokCommand: string;
   opencodeCommand: string;
   /** Toast when an agent finishes or asks for permission while unattended. */
   notifyOnAttention: boolean;

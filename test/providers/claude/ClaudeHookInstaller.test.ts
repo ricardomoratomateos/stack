@@ -51,14 +51,14 @@ describe('ClaudeHookInstaller', () => {
       expect(fs.statSync(scriptPath).mode & 0o777).toBe(0o755);
     });
 
-    it('script curls ${hookUrl}/hook with UNMESS_* env vars', () => {
+    it('curls the endpoint read from the sibling url file, with UNMESS_* env vars', () => {
       makeHook().install(hookUrl);
       const content = fs.readFileSync(scriptPath, 'utf8');
       expect(content.startsWith('#!/bin/bash\n')).toBe(true);
-      expect(content).toContain(`curl -s -X POST "${hookUrl}/hook"`);
+      expect(content).toContain('curl -s -X POST "$URL/hook"');
       expect(content).toContain('$UNMESS_TERMINAL_ID');
       expect(content).toContain('$UNMESS_WORKSPACE_ID');
-      expect(content).toContain('EVENT_NAME="${1:-$HOOK_EVENT_NAME}"');
+      expect(content).toContain('EVENT_NAME="${1:-${HOOK_EVENT_NAME:-}}"');
       expect(content).toContain('"{\\"event\\":\\"$EVENT_NAME\\",\\"terminalId\\":\\"$UNMESS_TERMINAL_ID\\",\\"workspaceId\\":\\"$UNMESS_WORKSPACE_ID\\",\\"windowIndex\\":\\"$UNMESS_WINDOW_INDEX\\"}"');
     });
 
@@ -74,18 +74,26 @@ describe('ClaudeHookInstaller', () => {
       expect(fs.statSync(scriptPath).mtimeMs).toBe(before);
     });
 
-    it('rewrites when hookUrl changes', () => {
+    it('leaves the script byte-identical when only the port changes', () => {
+      // Codex records hook trust against a hash of the definition. A URL baked
+      // into the script would change that hash on every activation (the
+      // HookServer port is random), silently untrusting the hook.
       makeHook().install(hookUrl);
       const past = new Date(Date.now() - 60_000);
       fs.utimesSync(scriptPath, past, past);
       const before = fs.statSync(scriptPath).mtimeMs;
+      const script = fs.readFileSync(scriptPath, 'utf8');
 
       makeHook().install('http://127.0.0.1:55555');
 
-      expect(fs.statSync(scriptPath).mtimeMs).toBeGreaterThan(before);
-      expect(fs.readFileSync(scriptPath, 'utf8')).toContain(
-        'curl -s -X POST "http://127.0.0.1:55555/hook"',
-      );
+      expect(fs.statSync(scriptPath).mtimeMs).toBe(before);
+      expect(fs.readFileSync(scriptPath, 'utf8')).toBe(script);
+    });
+
+    it('writes the new endpoint to the url file the script reads', () => {
+      makeHook().install(hookUrl);
+      makeHook().install('http://127.0.0.1:55555');
+      expect(fs.readFileSync(path.join(storageDir, 'hook-url'), 'utf8')).toBe('http://127.0.0.1:55555');
     });
   });
 
@@ -259,8 +267,9 @@ describe('ClaudeHookInstaller', () => {
   describe('default settings path', () => {
     it('defaults to ~/.claude/settings.json when not injected', () => {
       const hook = new ClaudeHookInstaller(storageDir);
-      // Access the private resolver without touching the real file system
-      const resolved = (hook as unknown as { getClaudeSettingsPath(): string }).getClaudeSettingsPath();
+      // Read the resolved target without installing — writing to the real home
+      // directory is exactly what this test must not do.
+      const resolved = (hook as unknown as { settingsPath: string }).settingsPath;
       expect(resolved).toBe(path.join(os.homedir(), '.claude/settings.json'));
     });
   });

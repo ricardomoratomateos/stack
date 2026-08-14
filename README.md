@@ -51,8 +51,10 @@ Working on several things at once with AI agents gets messy fast: branches colli
 |---|---|---|
 | `unmess.worktreesDirectory` | `.worktrees` | Where worktrees are created (relative to the workspace root) |
 | `unmess.defaultBaseBranch` | `develop` | Branch new worktrees start from, preselected in the New Task form. Falls back to the main repo's current branch when this branch doesn't exist |
-| `unmess.defaultProvider` | `claude` | Agent launched by the main button when none is picked |
+| `unmess.defaultProvider` | `claude` | Primary agent: the one the big launch button starts. The chevron beside it opens the rest |
 | `unmess.claudeCommand` | `claude` | Command to launch Claude Code |
+| `unmess.codexCommand` | `codex` | Command to launch Codex CLI |
+| `unmess.grokCommand` | `grok` | Command to launch Grok Build |
 | `unmess.opencodeCommand` | `opencode` | Command to launch opencode |
 | `unmess.notifyOnAttention` | `true` | Native OS notification when an agent finishes or asks for permission while VS Code is backgrounded (the sidebar badge always shows) |
 | `unmess.scopeSearchToActiveWorktree` | `true` | Hide non-active worktree folders from search and Quick Open |
@@ -61,6 +63,24 @@ Working on several things at once with AI agents gets messy fast: branches colli
 | `unmess.docker` | — | Per-worktree compose file + auto-generated ports (opt-in; see below) |
 | `unmess.xdebugBasePort` | `9898` | First debug port; each worktree takes the next free slot above it |
 | `unmess.debugTemplate` | php/xdebug | `launch.json` template generated per worktree (`{{PORT}}`, `{{WORKTREE_PATH}}`) |
+
+## Agents
+
+Four are supported: **Claude Code**, **Codex CLI**, **Grok Build** and **opencode**. Each worktree card carries a split button — the big half launches your primary agent (`unmess.defaultProvider`), the chevron opens the rest. Agents whose command isn't on your `PATH` are shown dimmed; clicking one offers the install command instead of launching it.
+
+Unmess registers a notify hook with each agent so the sidebar can show live state (thinking / waiting / needs attention). Two caveats worth knowing:
+
+- **Codex's hook system is experimental and off by default.** Unmess writes the hooks, but Codex ignores them — silently, so its sessions simply never change state — until you enable the feature yourself in `~/.codex/config.toml`:
+
+  ```toml
+  [features]
+  codex_hooks = true
+  ```
+
+  Codex also has no session-end event, so a Codex session settles on *waiting* rather than ever showing *terminated*.
+- **Codex and Grok require you to trust hooks** before they run (`/hooks` and `/hooks-trust` respectively). Unmess's notify script is byte-identical on every install for exactly this reason — the endpoint lives in a sibling file, so a restart never changes the script's hash and never costs you that trust.
+
+Grok has no permission-request event; its `Notification` event is what drives the attention badge instead.
 
 ## Switching worktrees
 

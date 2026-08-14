@@ -3,9 +3,13 @@ import * as os from 'node:os';
 import { IAgentProvider, PROVIDER_IDS, ProviderId } from '../ports/IAgentProvider';
 import { ClaudeProvider, ConfigSource } from './claude/ClaudeProvider';
 import { ClaudeHookInstaller } from './claude/ClaudeHookInstaller';
+import { CodexProvider } from './codex/CodexProvider';
+import { CodexHookInstaller } from './codex/CodexHookInstaller';
+import { GrokProvider } from './grok/GrokProvider';
+import { GrokHookInstaller } from './grok/GrokHookInstaller';
 import { OpenCodeProvider } from './opencode/OpenCodeProvider';
 import { OpenCodeHookInstaller } from './opencode/OpenCodeHookInstaller';
-import { CLAUDE_SETTINGS_PATH, OPENCODE_PLUGIN_PATH } from '../constants';
+import { CLAUDE_SETTINGS_PATH, CODEX_HOOKS_PATH, GROK_HOOKS_PATH, OPENCODE_PLUGIN_PATH } from '../constants';
 
 /** Builds (and caches) one strategy instance per registered provider. */
 export class ProviderFactory {
@@ -41,6 +45,16 @@ export class ProviderFactory {
         return new ClaudeProvider(
           this.config,
           new ClaudeHookInstaller(this.storagePath, path.join(this.homeDir, CLAUDE_SETTINGS_PATH)),
+        );
+      case 'codex':
+        return new CodexProvider(
+          this.config,
+          new CodexHookInstaller(this.storagePath, path.join(this.homeDir, CODEX_HOOKS_PATH)),
+        );
+      case 'grok':
+        return new GrokProvider(
+          this.config,
+          new GrokHookInstaller(this.storagePath, path.join(this.homeDir, GROK_HOOKS_PATH)),
         );
       case 'opencode':
         return new OpenCodeProvider(

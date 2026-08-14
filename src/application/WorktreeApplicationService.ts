@@ -1,5 +1,5 @@
 import * as path from 'node:path';
-import type { Worktree } from '../types';
+import type { UnmessConfig, Worktree } from '../types';
 import type { UnmessState, WorktreeItem, WebMessage } from '../webview/types';
 import type { WorktreeManager } from '../worktree/WorktreeManager';
 import type { AgentSessionManager } from '../session/AgentSessionManager';
@@ -10,7 +10,8 @@ import type { GitWatcher } from '../git/GitWatcher';
 import type { DockerMonitor } from '../docker/DockerMonitor';
 import type { PrMonitor } from '../pr/PrMonitor';
 import type { IWorktreeRepository } from '../ports/IWorktreeRepository';
-import { PROVIDER_IDS, type ProviderId } from '../ports/IAgentProvider';
+import { PROVIDER_IDS, PROVIDER_INSTALL, type ProviderId } from '../ports/IAgentProvider';
+import { installedProviders } from '../providers/commandLookup';
 import { buildComposeArgs, composeProject, dockerEnv, portBlockFor } from '../docker/dockerCompose';
 import type { IGitPort, DiffBase } from '../ports/IGitPort';
 import type { INotifyPort } from '../ports/INotifyPort';
@@ -77,6 +78,11 @@ export interface WorktreeAppDeps {
   dockerMonitor: DockerMonitor;
   prMonitor: PrMonitor;
   globalState: GlobalStateLike;
+  /**
+   * Which agents are runnable on this machine. Injected so tests do not depend
+   * on whatever the developer happens to have on their PATH.
+   */
+  installedProviders?: (config: UnmessConfig) => ProviderId[];
 }
 
 const NO_UI: UiBridge = { pushWebview() {}, syncDecorations() {}, openDiffPanel() {} };
@@ -245,13 +251,27 @@ export class WorktreeApplicationService implements DiffPanelHost {
   private readonly messageHandlers: MessageHandlers = {
     launchAgent: (msg) => {
       const wt = this.findWorktree(msg.worktreeId);
-      if (wt) this.deps.agentManager.launch(wt, { provider: msg.provider });
+      if (wt) {
+        this.deps.agentManager.launch(wt, { provider: msg.provider })
+          .catch((e) => this.deps.notify.showError(`Failed to launch agent: ${String(e)}`));
+      }
     },
-    pickAgent: async (msg) => {
-      const wt = this.findWorktree(msg.worktreeId);
-      if (!wt) return;
-      const choice = await this.deps.host.showQuickPick([...PROVIDER_IDS], { placeHolder: 'Launch agent' });
-      if (choice) void this.deps.agentManager.launch(wt, { provider: choice as ProviderId });
+    pickDefaultProvider: async () => {
+      // A QuickPick is right here and wrong in the card's dropdown: this changes
+      // a setting, which is a rare, deliberate act, not a per-launch choice.
+      const choice = await this.deps.host.showQuickPick([...PROVIDER_IDS], {
+        placeHolder: 'Agent launched by the main button',
+      });
+      if (choice) await this.deps.config.setDefaultProvider(choice as ProviderId);
+    },
+    showProviderInstall: async (msg) => {
+      const { label, install } = PROVIDER_INSTALL[msg.provider];
+      const copy = await this.deps.notify.confirm(
+        `${label} is not on your PATH`,
+        `Install it with:\n\n${install}`,
+        'Copy command',
+      );
+      if (copy === 'Copy command') await this.deps.host.writeClipboard(install);
     },
     openTerminal: (msg) => {
       const wt = this.findWorktree(msg.worktreeId);
@@ -491,6 +511,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       worktrees: items,
       activeWorktreeId,
       defaultProvider: config.defaultProvider,
+      installedProviders: (this.deps.installedProviders ?? installedProviders)(config),
       dockerEnabled: config.docker.ports.length > 0,
       branches: this.branchOptions?.branches,
       baseBranch: this.branchOptions?.base,

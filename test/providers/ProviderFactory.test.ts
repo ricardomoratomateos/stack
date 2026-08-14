@@ -4,6 +4,10 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { ProviderFactory } from '../../src/providers/ProviderFactory';
 import { ClaudeProvider, ConfigSource } from '../../src/providers/claude/ClaudeProvider';
+import { CodexProvider } from '../../src/providers/codex/CodexProvider';
+import { GrokProvider } from '../../src/providers/grok/GrokProvider';
+import { CodexHookInstaller } from '../../src/providers/codex/CodexHookInstaller';
+import { GrokHookInstaller } from '../../src/providers/grok/GrokHookInstaller';
 import { OpenCodeProvider } from '../../src/providers/opencode/OpenCodeProvider';
 import { PROVIDER_IDS, isAgentWindowName, providerForWindowName } from '../../src/ports/IAgentProvider';
 
@@ -13,7 +17,10 @@ describe('ProviderFactory', () => {
   let homeDir: string;
 
   const makeConfig = (overrides: Record<string, unknown> = {}): ConfigSource =>
-    ({ get: () => ({ claudeCommand: 'claude', opencodeCommand: 'opencode', defaultProvider: 'claude', ...overrides }) }) as unknown as ConfigSource;
+    ({ get: () => ({
+      claudeCommand: 'claude', codexCommand: 'codex', grokCommand: 'grok',
+      opencodeCommand: 'opencode', defaultProvider: 'claude', ...overrides,
+    }) }) as unknown as ConfigSource;
 
   const makeFactory = (config: ConfigSource = makeConfig()) => new ProviderFactory(config, storageDir, homeDir);
 
@@ -73,7 +80,8 @@ describe('ProviderFactory', () => {
       provider.installHooks('http://127.0.0.1:43110');
 
       const script = fs.readFileSync(path.join(storageDir, 'notify.sh'), 'utf8');
-      expect(script).toContain('curl -s -X POST "http://127.0.0.1:43110/hook"');
+      expect(script).toContain('curl -s -X POST "$URL/hook"');
+      expect(fs.readFileSync(path.join(storageDir, 'hook-url'), 'utf8')).toBe('http://127.0.0.1:43110');
 
       const settingsPath = path.join(homeDir, '.claude/settings.json');
       const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
@@ -187,5 +195,181 @@ describe('ProviderFactory', () => {
       expect(providerForWindowName('opencode')).toBe('opencode');
       expect(providerForWindowName('zsh')).toBeUndefined();
     });
+  });
+});
+
+// ── Codex ────────────────────────────────────────────────────────────────────
+
+describe('CodexProvider', () => {
+  let tmpDir: string;
+  let storageDir: string;
+  let homeDir: string;
+
+  const config = {
+    get: () => ({ codexCommand: 'codex', grokCommand: 'grok', claudeCommand: 'claude', opencodeCommand: 'opencode', defaultProvider: 'claude' }),
+  } as unknown as ConfigSource;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-codex-'));
+    storageDir = path.join(tmpDir, 'storage');
+    homeDir = path.join(tmpDir, 'home');
+    fs.mkdirSync(homeDir, { recursive: true });
+  });
+  afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+
+  const make = () => new ProviderFactory(config, storageDir, homeDir).create('codex');
+  const hooksPath = () => path.join(homeDir, '.codex/hooks.json');
+  const readHooks = () => JSON.parse(fs.readFileSync(hooksPath(), 'utf8'));
+
+  it('is built for the "codex" id', () => {
+    const provider = make();
+    expect(provider).toBeInstanceOf(CodexProvider);
+    expect(provider.label).toBe('Codex');
+  });
+
+  it('buildCommand prefixes UNMESS_WORKSPACE_ID', () => {
+    expect(make().buildCommand('wt-1')).toBe('UNMESS_WORKSPACE_ID="wt-1" codex');
+  });
+
+  it('passes the initial prompt as a positional argument, escaping quotes', () => {
+    expect(make().buildCommand('wt-1', 'fix "this" bug')).toBe(
+      'UNMESS_WORKSPACE_ID="wt-1" codex "fix \\"this\\" bug"',
+    );
+  });
+
+  it('registers into ~/.codex/hooks.json', () => {
+    make().installHooks('http://127.0.0.1:43110');
+    expect(fs.existsSync(hooksPath())).toBe(true);
+  });
+
+  it('does NOT register SessionEnd — Codex has no end-of-session hook', () => {
+    make().installHooks('http://127.0.0.1:43110');
+    const events = Object.keys(readHooks().hooks);
+    expect(events).toContain('Stop');
+    expect(events).not.toContain('SessionEnd');
+  });
+
+  it('keeps another tool\'s hooks in the same file', () => {
+    // Codex users commonly have a second harness registered here; superset
+    // writes exactly this shape.
+    fs.mkdirSync(path.dirname(hooksPath()), { recursive: true });
+    fs.writeFileSync(hooksPath(), JSON.stringify({
+      hooks: { Stop: [{ hooks: [{ type: 'command', command: '/other/notify.sh' }] }] },
+    }));
+
+    make().installHooks('http://127.0.0.1:43110');
+
+    const commands = readHooks().hooks.Stop.flatMap((g: { hooks: { command: string }[] }) => g.hooks.map((h) => h.command));
+    expect(commands).toContain('/other/notify.sh');
+    // Ours is the quoted script path plus the event name.
+    expect(commands.some((c: string) => c.includes(storageDir) && c.endsWith(' Stop'))).toBe(true);
+  });
+
+  it('uninstall removes only our entries, leaving the other tool alone', () => {
+    fs.mkdirSync(path.dirname(hooksPath()), { recursive: true });
+    fs.writeFileSync(hooksPath(), JSON.stringify({
+      hooks: { Stop: [{ hooks: [{ type: 'command', command: '/other/notify.sh' }] }] },
+    }));
+    const provider = make();
+    provider.installHooks('http://127.0.0.1:43110');
+
+    provider.uninstallHooks();
+
+    const commands = readHooks().hooks.Stop.flatMap((g: { hooks: { command: string }[] }) => g.hooks.map((h) => h.command));
+    expect(commands).toEqual(['/other/notify.sh']);
+  });
+
+  it('re-installing does not accumulate duplicates', () => {
+    const provider = make();
+    provider.installHooks('http://127.0.0.1:43110');
+    provider.installHooks('http://127.0.0.1:55555');
+    const entries = readHooks().hooks.Stop.flatMap((g: { hooks: unknown[] }) => g.hooks);
+    expect(entries).toHaveLength(1);
+  });
+
+  it('defaults to ~/.codex/hooks.json when no path is injected', () => {
+    const installer = new CodexHookInstaller(storageDir);
+    expect((installer as unknown as { settingsPath: string }).settingsPath)
+      .toBe(path.join(os.homedir(), '.codex/hooks.json'));
+  });
+
+  it('uninstall gives up quietly when the config cannot be written', () => {
+    const provider = make();
+    provider.installHooks('http://127.0.0.1:43110');
+    // Read-only config: dispose must not throw on the way out of the window.
+    fs.chmodSync(hooksPath(), 0o444);
+    try {
+      expect(() => provider.uninstallHooks()).not.toThrow();
+    } finally {
+      fs.chmodSync(hooksPath(), 0o644);
+    }
+  });
+
+  it('survives a hand-corrupted hooks.json instead of throwing', () => {
+    fs.mkdirSync(path.dirname(hooksPath()), { recursive: true });
+    fs.writeFileSync(hooksPath(), '{ not json');
+    expect(() => make().installHooks('http://127.0.0.1:43110')).not.toThrow();
+    expect(Object.keys(readHooks().hooks)).toContain('Stop');
+  });
+});
+
+// ── Grok ─────────────────────────────────────────────────────────────────────
+
+describe('GrokProvider', () => {
+  let tmpDir: string;
+  let storageDir: string;
+  let homeDir: string;
+
+  const config = {
+    get: () => ({ grokCommand: 'grok', codexCommand: 'codex', claudeCommand: 'claude', opencodeCommand: 'opencode', defaultProvider: 'claude' }),
+  } as unknown as ConfigSource;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-grok-'));
+    storageDir = path.join(tmpDir, 'storage');
+    homeDir = path.join(tmpDir, 'home');
+    fs.mkdirSync(homeDir, { recursive: true });
+  });
+  afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+
+  const make = () => new ProviderFactory(config, storageDir, homeDir).create('grok');
+  const readHooks = () => JSON.parse(fs.readFileSync(path.join(homeDir, '.grok/hooks.json'), 'utf8'));
+
+  it('is built for the "grok" id', () => {
+    const provider = make();
+    expect(provider).toBeInstanceOf(GrokProvider);
+    expect(provider.label).toBe('Grok Build');
+  });
+
+  it('seeds the first prompt with -p, which keeps the interactive TUI', () => {
+    expect(make().buildCommand('wt-1', 'fix "this" bug')).toBe(
+      'UNMESS_WORKSPACE_ID="wt-1" grok -p "fix \\"this\\" bug"',
+    );
+  });
+
+  it('buildCommand without a prompt is the bare command', () => {
+    expect(make().buildCommand('wt-1')).toBe('UNMESS_WORKSPACE_ID="wt-1" grok');
+  });
+
+  it('registers Notification instead of PermissionRequest, which Grok does not emit', () => {
+    make().installHooks('http://127.0.0.1:43110');
+    const events = Object.keys(readHooks().hooks);
+    expect(events).toContain('Notification');
+    expect(events).not.toContain('PermissionRequest');
+  });
+
+  it('registers SessionEnd, which Grok does emit', () => {
+    make().installHooks('http://127.0.0.1:43110');
+    expect(Object.keys(readHooks().hooks)).toContain('SessionEnd');
+  });
+
+  it('uninstall is a no-op when the file was never written', () => {
+    expect(() => make().uninstallHooks()).not.toThrow();
+  });
+
+  it('defaults to ~/.grok/hooks.json when no path is injected', () => {
+    const installer = new GrokHookInstaller(storageDir);
+    expect((installer as unknown as { settingsPath: string }).settingsPath)
+      .toBe(path.join(os.homedir(), '.grok/hooks.json'));
   });
 });

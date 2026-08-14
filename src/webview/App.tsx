@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useReducer, useState } from 'react';
 import { T } from './tokens';
 import { WorktreeCard } from './components/WorktreeCard';
 import { NewTaskModal } from './components/NewTaskModal';
@@ -92,6 +92,7 @@ export function App() {
                   isSelected={selected === wt.id}
                   onSelect={() => handleSelect(wt.id)}
                   defaultProvider={state.defaultProvider}
+                  installedProviders={state.installedProviders}
                   dockerEnabled={state.dockerEnabled}
                   cardDragging={dragCardId === wt.id}
                   cardDragOver={overCardId === wt.id && dragCardId !== null && dragCardId !== wt.id}

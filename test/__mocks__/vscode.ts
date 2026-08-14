@@ -161,9 +161,13 @@ export const workspace = {
   saveAll: vi.fn().mockResolvedValue(true),
   getConfiguration: vi.fn((_section?: string) => ({
     get: vi.fn((_key: string, defaultValue?: unknown) => defaultValue),
+    update: vi.fn().mockResolvedValue(undefined),
   })),
   onDidChangeWorkspaceFolders: vi.fn(() => ({ dispose: vi.fn() })),
 };
+
+/** Mirrors vscode.ConfigurationTarget; only Global is used by Unmess. */
+export const ConfigurationTarget = { Global: 1, Workspace: 2, WorkspaceFolder: 3 } as const;
 
 // ── commands / env ───────────────────────────────────────────────────────────
 export const commands = {
@@ -207,5 +211,6 @@ export function resetVscodeMock(): void {
   });
   workspace.getConfiguration.mockImplementation((_section?: string) => ({
     get: vi.fn((_key: string, defaultValue?: unknown) => defaultValue),
+    update: vi.fn().mockResolvedValue(undefined),
   }));
 }

@@ -11,6 +11,17 @@ const DOCKER_DEFAULTS: DockerConfig = {
 };
 
 export class ConfigManager {
+  /**
+   * Persist the primary agent, so the card's "change primary…" does not send
+   * the user to settings.json. Global scope: which agent you reach for is a
+   * property of you, not of the repository you happen to have open.
+   */
+  async setDefaultProvider(provider: ProviderId): Promise<void> {
+    await vscode.workspace
+      .getConfiguration('unmess')
+      .update('defaultProvider', provider, vscode.ConfigurationTarget.Global);
+  }
+
   get(): UnmessConfig {
     const cfg = vscode.workspace.getConfiguration('unmess');
     // VSCode does not deep-merge object settings, so fold user values over the
@@ -23,6 +34,8 @@ export class ConfigManager {
       teardownScript: cfg.get<string>('teardownScript', ''),
       defaultProvider: cfg.get<ProviderId>('defaultProvider', 'claude'),
       claudeCommand: cfg.get<string>('claudeCommand', 'claude'),
+      codexCommand: cfg.get<string>('codexCommand', 'codex'),
+      grokCommand: cfg.get<string>('grokCommand', 'grok'),
       opencodeCommand: cfg.get<string>('opencodeCommand', 'opencode'),
       notifyOnAttention: cfg.get<boolean>('notifyOnAttention', true),
       scopeSearchToActiveWorktree: cfg.get<boolean>('scopeSearchToActiveWorktree', true),
