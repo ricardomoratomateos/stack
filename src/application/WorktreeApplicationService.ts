@@ -204,6 +204,9 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const terminal = this.deps.host.createTerminal({ name: `Docker: ${displayLabel(wt)}`, cwd: wt.path });
     terminal.show();
     terminal.sendText(`${prefix ? prefix + ' ' : ''}docker compose ${args}`);
+    // `up -d` returns in seconds but runs in the terminal, so nothing tells us
+    // when it landed — watch the project closely for a moment instead.
+    this.deps.dockerMonitor.nudge(composeProject(wt));
   }
 
   /**
@@ -239,6 +242,9 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const args = buildComposeArgs(wt, composePath, overridePath, 'down');
     const env = { ...dockerEnv(wt, config), PWD: wt.path };
     await this.deps.dockerMonitor.runCompose(composeProject(wt), wt.path, args, env).catch(() => {});
+    // runCompose refreshes the cache; without this the fresh cache never
+    // reached the sidebar, so a stopped stack still showed as running.
+    this.ui.pushWebview();
   }
 
   // ── Webview message dispatch ───────────────────────────────────────────────
@@ -624,6 +630,11 @@ export class WorktreeApplicationService implements DiffPanelHost {
       this.deps.host.addWorkspaceFolders(...toAdd.map((wt) => ({ path: wt.path, name: displayLabel(wt) })));
     }
 
+    // The compose project is derived from the worktree's directory name, so a
+    // stack brought up outside Unmess (or under the branch name instead) is
+    // invisible to it. Printing the keys makes that mismatch obvious instead of
+    // looking like a broken docker integration.
+    console.log(`[unmess] docker projects: ${current.map((wt) => composeProject(wt)).join(', ')}`);
     for (const wt of current) {
       this.deps.gitWatcher.watch(wt.path);
       this.deps.dockerMonitor.startPolling(composeProject(wt), () => this.ui.pushWebview());
@@ -694,7 +705,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
         try {
           this.deps.host.addWorkspaceFolders({ path: wt.path, name: displayLabel(wt) });
           this.deps.gitWatcher.watch(wt.path);
-          this.deps.dockerMonitor.startPolling(composeProject(wt), () => { /* no auto-refresh during create */ });
+          this.deps.dockerMonitor.startPolling(composeProject(wt), () => this.ui.pushWebview());
           this.deps.prMonitor.startPolling(wt.branch, wt.id, () => this.ui.pushWebview());
         } catch (e) {
           console.error('[unmess] post-create wiring failed (worktree and setup are unaffected):', e);

@@ -125,23 +125,131 @@ describe('DockerMonitor', () => {
     expect(onChange).toHaveBeenCalledTimes(3);
   });
 
-  it('startPolling is idempotent per project (second call is a no-op)', async () => {
+  it('starts one timer per project, however many times it is called', async () => {
     const runner = makeRunner(JSONL);
     const monitor = new DockerMonitor(runner);
-    const first = vi.fn();
-    const second = vi.fn();
 
-    monitor.startPolling('proj', first);
-    monitor.startPolling('proj', second); // ignored: already polling
+    monitor.startPolling('proj', vi.fn());
+    monitor.startPolling('proj', vi.fn());
     await vi.advanceTimersByTimeAsync(0);
 
+    // One immediate poll: the second call records its callback and returns
+    // before polling, so repeated calls never pile up extra docker invocations.
     expect(runner.exec).toHaveBeenCalledTimes(1);
-    expect(first).toHaveBeenCalledTimes(1);
-    expect(second).not.toHaveBeenCalled();
-
     await vi.advanceTimersByTimeAsync(20_000);
     expect(runner.exec).toHaveBeenCalledTimes(2);
-    expect(second).not.toHaveBeenCalled();
+  });
+
+  it('a later startPolling REPLACES the callback instead of being ignored', async () => {
+    // The callback used to live in the poll closure and was dropped on the
+    // early return, so the first caller owned the project forever. A worktree
+    // created in-session registered a no-op that way and its docker badge went
+    // stale until the window was reloaded.
+    const runner = makeRunner(JSONL);
+    const monitor = new DockerMonitor(runner);
+    const stale = vi.fn();
+    const live = vi.fn();
+
+    monitor.startPolling('proj', stale);
+    monitor.startPolling('proj', live);
+    await vi.advanceTimersByTimeAsync(0);
+    stale.mockClear();
+    live.mockClear();
+
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    expect(live).toHaveBeenCalled();
+    expect(stale).not.toHaveBeenCalled();
+  });
+
+  describe('nudge', () => {
+    it('polls immediately and then every 2s, far faster than the 20s cadence', async () => {
+      const runner = makeRunner(JSONL);
+      const monitor = new DockerMonitor(runner);
+      monitor.startPolling('proj', vi.fn());
+      await vi.advanceTimersByTimeAsync(0);
+      runner.exec.mockClear();
+
+      monitor.nudge('proj');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(runner.exec).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(runner.exec).toHaveBeenCalledTimes(2);
+    });
+
+    it('fires the project callback, so the sidebar repaints', async () => {
+      const runner = makeRunner(JSONL);
+      const monitor = new DockerMonitor(runner);
+      const onChange = vi.fn();
+      monitor.startPolling('proj', onChange);
+      await vi.advanceTimersByTimeAsync(0);
+      onChange.mockClear();
+
+      monitor.nudge('proj');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(onChange).toHaveBeenCalled();
+    });
+
+    it('gives up after a bounded burst instead of polling docker forever', async () => {
+      const runner = makeRunner(JSONL);
+      const monitor = new DockerMonitor(runner);
+      monitor.startPolling('proj', vi.fn());
+      await vi.advanceTimersByTimeAsync(0);
+
+      monitor.nudge('proj');
+      await vi.advanceTimersByTimeAsync(60_000);
+      const afterBurst = runner.exec.mock.calls.length;
+
+      // Only the regular 20s poll should still be running.
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(runner.exec.mock.calls.length).toBe(afterBurst + 1);
+    });
+
+    it('a second nudge restarts the burst rather than stacking timers', async () => {
+      const runner = makeRunner(JSONL);
+      const monitor = new DockerMonitor(runner);
+      monitor.startPolling('proj', vi.fn());
+      await vi.advanceTimersByTimeAsync(0);
+
+      monitor.nudge('proj');
+      monitor.nudge('proj');
+      await vi.advanceTimersByTimeAsync(0);
+      runner.exec.mockClear();
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      // One burst tick, not two.
+      expect(runner.exec).toHaveBeenCalledTimes(1);
+    });
+
+    it('stopPolling cancels an in-flight burst', async () => {
+      const runner = makeRunner(JSONL);
+      const monitor = new DockerMonitor(runner);
+      monitor.startPolling('proj', vi.fn());
+      monitor.nudge('proj');
+      await vi.advanceTimersByTimeAsync(0);
+
+      monitor.stopPolling('proj');
+      runner.exec.mockClear();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(runner.exec).not.toHaveBeenCalled();
+    });
+
+    it('dispose cancels an in-flight burst', async () => {
+      const runner = makeRunner(JSONL);
+      const monitor = new DockerMonitor(runner);
+      monitor.startPolling('proj', vi.fn());
+      monitor.nudge('proj');
+      await vi.advanceTimersByTimeAsync(0);
+
+      monitor.dispose();
+      runner.exec.mockClear();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(runner.exec).not.toHaveBeenCalled();
+    });
   });
 
   it('polls independently per project', async () => {
@@ -222,6 +330,84 @@ describe('DockerMonitor', () => {
     expect(monitor.getContainers('proj')).toEqual([{ name: 'web', state: 'running' }]);
   });
 
+  describe('failure reporting', () => {
+    it('logs why docker failed instead of silently reporting no containers', async () => {
+      // An unreachable daemon and an empty stack used to be the same silent [],
+      // which made "the badge is empty" impossible to diagnose.
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const runner: IProcessRunner & { exec: ReturnType<typeof vi.fn> } = {
+        exec: vi.fn().mockRejectedValue(new Error('command not found: docker')),
+      };
+      const monitor = new DockerMonitor(runner);
+
+      await monitor.refresh('proj');
+
+      expect(spy).toHaveBeenCalledWith('[unmess] docker ps failed for "proj": command not found: docker');
+      spy.mockRestore();
+    });
+
+    it('reports the same failure once, not on every poll', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const runner: IProcessRunner & { exec: ReturnType<typeof vi.fn> } = {
+        exec: vi.fn().mockRejectedValue(new Error('daemon not running')),
+      };
+      const monitor = new DockerMonitor(runner);
+
+      await monitor.refresh('proj');
+      await monitor.refresh('proj');
+      await monitor.refresh('proj');
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      spy.mockRestore();
+    });
+
+    it('reports a different failure even for the same project', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const runner: IProcessRunner & { exec: ReturnType<typeof vi.fn> } = {
+        exec: vi.fn()
+          .mockRejectedValueOnce(new Error('first problem'))
+          .mockRejectedValueOnce(new Error('second problem')),
+      };
+      const monitor = new DockerMonitor(runner);
+
+      await monitor.refresh('proj');
+      await monitor.refresh('proj');
+
+      expect(spy).toHaveBeenCalledTimes(2);
+      spy.mockRestore();
+    });
+
+    it('reports again after a recovery, so a flapping daemon is not hidden forever', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const runner: IProcessRunner & { exec: ReturnType<typeof vi.fn> } = {
+        exec: vi.fn()
+          .mockRejectedValueOnce(new Error('down'))
+          .mockResolvedValueOnce(JSONL)
+          .mockRejectedValueOnce(new Error('down')),
+      };
+      const monitor = new DockerMonitor(runner);
+
+      await monitor.refresh('proj');
+      await monitor.refresh('proj');
+      await monitor.refresh('proj');
+
+      expect(spy).toHaveBeenCalledTimes(2);
+      spy.mockRestore();
+    });
+
+    it('handles a rejection that is not an Error', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const runner: IProcessRunner & { exec: ReturnType<typeof vi.fn> } = {
+        exec: vi.fn().mockRejectedValue('just a string'),
+      };
+      const monitor = new DockerMonitor(runner);
+
+      await expect(monitor.refresh('proj')).resolves.toEqual([]);
+      expect(spy).toHaveBeenCalledWith('[unmess] docker ps failed for "proj": just a string');
+      spy.mockRestore();
+    });
+  });
+
   it('refresh resolves [] when exec fails', async () => {
     const runner: IProcessRunner & { exec: ReturnType<typeof vi.fn> } = {
       exec: vi.fn().mockRejectedValue(new Error('boom')),
@@ -262,9 +448,11 @@ describe('DockerMonitor', () => {
     d.resolve(JSONL);
     await vi.advanceTimersByTimeAsync(0);
 
-    // real behavior: fetch completion writes the cache and fires onChange unconditionally
+    // The in-flight fetch still writes the cache when it lands...
     expect(monitor.getContainers('proj')).toEqual([{ name: 'web', state: 'running' }]);
-    expect(onChange).toHaveBeenCalledTimes(1);
+    // ...but stopPolling dropped the callback, so nothing repaints a worktree
+    // that is on its way out.
+    expect(onChange).not.toHaveBeenCalled();
     // but no timer remains, so no further polls
     await vi.advanceTimersByTimeAsync(60_000);
     expect(runner.exec).toHaveBeenCalledTimes(1);

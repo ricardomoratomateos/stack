@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { SECTION_TITLE_STYLE, T } from '../tokens';
 import { getState, setState } from '../vscode';
 import type { WorktreeItem } from '../types';
@@ -79,6 +79,24 @@ export function StatusPanel({ wt }: Props) {
     window.addEventListener('pointerup', up);
   };
 
+  // Whether anything is scrolled out of sight below. Without a marker, a panel
+  // whose bottom edge happens to land right on a section header is
+  // indistinguishable from one showing everything there is — and the section
+  // then reads as empty rather than as cut off.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [moreBelow, setMoreBelow] = useState(false);
+
+  const syncOverflow = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // 1px of slack: fractional scroll heights never settle on an exact equality.
+    setMoreBelow(el.scrollTop + el.clientHeight < el.scrollHeight - 1);
+  }, []);
+
+  // Re-checked after every render, because both the content (containers coming
+  // up, sessions appearing) and the panel height change independently.
+  useEffect(syncOverflow);
+
   // Clamp on every render: the stored height may not fit a sidebar that has
   // since been made shorter.
   const clamped = height !== undefined
@@ -114,7 +132,11 @@ export function StatusPanel({ wt }: Props) {
         }} />
       </div>
 
-      <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+      <div
+        ref={scrollRef}
+        onScroll={syncOverflow}
+        style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}
+      >
 
       {/* Section header: worktree name */}
       <div style={{
@@ -189,7 +211,10 @@ export function StatusPanel({ wt }: Props) {
 
       {/* Docker */}
       {wt.docker.length > 0 && (
-        <Section label="Docker">
+        <Section
+          label="Docker"
+          hint={`${wt.docker.filter((c) => c.state === 'running').length}/${wt.docker.length} up`}
+        >
           {wt.docker.map((c) => (
             <DockerRow key={c.name} name={c.name} state={c.state} />
           ))}
@@ -197,11 +222,33 @@ export function StatusPanel({ wt }: Props) {
       )}
 
       </div>
+
+      {/* Fade at the bottom edge while content remains below. Purely a marker —
+          pointer-events off, so it never eats a click on the last row. */}
+      {moreBelow && (
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute', left: 0, right: 0, bottom: 0, height: 18,
+            pointerEvents: 'none',
+            background: `linear-gradient(to bottom, transparent, ${T.bg})`,
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * `hint` carries the section's headline number in the header itself.
+ *
+ * Worth the extra prop because the body can be out of sight two different ways
+ * — collapsed, or scrolled past the panel's bottom edge — and a header reading
+ * "DOCKER" with nothing under it does not look truncated, it looks like an
+ * answer: no containers. That cost a long debugging session on a stack that was
+ * running the whole time.
+ */
+function Section({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   return (
     <div style={{ borderBottom: `1px solid ${T.borderLight}` }}>
@@ -221,6 +268,14 @@ function Section({ label, children }: { label: string; children: React.ReactNode
         <span style={{ ...SECTION_TITLE_STYLE, color: T.sectionHeaderFg }}>
           {label}
         </span>
+        {hint && (
+          <span style={{
+            marginLeft: 'auto', flexShrink: 0,
+            fontFamily: T.mono, fontSize: 10, color: T.textDim,
+          }}>
+            {hint}
+          </span>
+        )}
       </button>
       {!collapsed && (
         <div style={{ padding: '0 12px 8px' }}>

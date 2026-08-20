@@ -225,6 +225,7 @@ function makeHarness(o: HarnessOpts = {}) {
       calls.push(`docker.runCompose:${name}:${cwd}:${args}:${JSON.stringify(env)}`);
       return Promise.resolve();
     }),
+    nudge: vi.fn((project: string) => { calls.push(`docker.nudge:${project}`); }),
   };
   const prMonitor = {
     startPolling: vi.fn((branch: string, id: string, cb: () => void) => { calls.push(`pr.startPolling:${branch}:${id}`); prCallbacks.set(id, cb); }),
@@ -1408,13 +1409,16 @@ describe('createWorktree', () => {
     expect(h.calls).toContain('host.addWorkspaceFolders:/repo/zer/feat-x=Aliased');
   });
 
-  it('the docker polling callback registered on create is a no-op (no auto-refresh)', async () => {
+  it('the docker polling callback registered on create pushes webview state', async () => {
+    // It used to be a deliberate no-op, which is why a worktree's containers
+    // only appeared in the sidebar after reloading the window: the setup script
+    // brought the stack up minutes later and nothing ever repainted.
     vi.useFakeTimers();
     const { h } = createHarness();
     await h.service.createWorktree({ branch: 'feat/x' });
     h.calls.length = 0;
     h.dockerCallbacks.get('feat-x')!();
-    expect(h.calls).toEqual([]);
+    expect(h.calls).toEqual(['ui.pushWebview']);
   });
 
   it('the pr polling callback registered on create pushes webview state', async () => {
@@ -2410,5 +2414,46 @@ describe('installedProviders fallback', () => {
       },
     });
     expect(h.service.buildState().installedProviders).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Docker state reaching the sidebar without a window reload
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('docker state refresh', () => {
+  const dockerCfg = {
+    docker: { composeFile: 'docker-compose.yml', overrideFile: '', ports: ['HTTP_PORT'], basePort: 20000, portStride: 100 },
+  };
+
+  it('dockerUp nudges the monitor, because compose runs in a terminal we cannot await', async () => {
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({ worktrees: [b], config: dockerCfg });
+
+    await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
+
+    expect(h.dockerMonitor.nudge).toHaveBeenCalledWith('feat-b');
+  });
+
+  it('dockerDown pushes state, so a stopped stack stops showing as running', async () => {
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({ worktrees: [b], config: dockerCfg });
+    h.calls.length = 0;
+
+    await h.service.handleMessage({ type: 'dockerDown', worktreeId: 'b' });
+
+    expect(h.calls).toContain('ui.pushWebview');
+  });
+
+  it('dockerDown still pushes state when compose itself failed', async () => {
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({ worktrees: [b], config: dockerCfg });
+    h.dockerMonitor.runCompose.mockRejectedValue(new Error('no such project'));
+    h.calls.length = 0;
+
+    await h.service.handleMessage({ type: 'dockerDown', worktreeId: 'b' });
+
+    // Otherwise a failed teardown leaves the badge frozen with no way back.
+    expect(h.calls).toContain('ui.pushWebview');
   });
 });
