@@ -25,11 +25,35 @@ URL=$(cat "$URL_FILE")
 [ -n "$URL" ] || exit 0
 EVENT_NAME="\${1:-\${HOOK_EVENT_NAME:-}}"
 # Drain stdin: the agent writes the event payload there and would block on a
-# reader that never consumes it. We key off the env vars instead.
+# reader that never consumes it. We key off the environment instead.
 PAYLOAD=$(cat)
+
+WORKSPACE_ID="\${UNMESS_WORKSPACE_ID:-}"
+WINDOW_INDEX="\${UNMESS_WINDOW_INDEX:-}"
+
+# Ask tmux where we are whenever the launcher did not say. Those variables are
+# baked in when Unmess starts an agent, so an agent the user starts BY HAND —
+# in a shell window, or after the first one exited — has neither, and every
+# event it sent was dropped for having an empty workspace id. tmux always knows,
+# because the hook runs inside the pane.
+if [ -n "\${TMUX_PANE:-}" ] && command -v tmux >/dev/null 2>&1; then
+  if [ -z "$WINDOW_INDEX" ]; then
+    WINDOW_INDEX=$(tmux display-message -p -t "$TMUX_PANE" '#{window_index}' 2>/dev/null) || WINDOW_INDEX=""
+  fi
+  if [ -z "$WORKSPACE_ID" ]; then
+    # Session names are "unmess-<worktree id>". Worktree ids are UUIDs, so they
+    # survive sessionName()'s sanitising and 50-char cap unchanged and the
+    # prefix strip round-trips exactly.
+    SESSION=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null) || SESSION=""
+    case "$SESSION" in
+      unmess-*) WORKSPACE_ID="\${SESSION#unmess-}" ;;
+    esac
+  fi
+fi
+
 curl -s -X POST "$URL/hook" \\
   -H "Content-Type: application/json" \\
-  -d "{\\"event\\":\\"$EVENT_NAME\\",\\"terminalId\\":\\"$UNMESS_TERMINAL_ID\\",\\"workspaceId\\":\\"$UNMESS_WORKSPACE_ID\\",\\"windowIndex\\":\\"$UNMESS_WINDOW_INDEX\\"}" \\
+  -d "{\\"event\\":\\"$EVENT_NAME\\",\\"terminalId\\":\\"$UNMESS_TERMINAL_ID\\",\\"workspaceId\\":\\"$WORKSPACE_ID\\",\\"windowIndex\\":\\"$WINDOW_INDEX\\"}" \\
   > /dev/null 2>&1 || true
 `;
 

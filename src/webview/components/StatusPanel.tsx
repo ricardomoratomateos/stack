@@ -19,6 +19,28 @@ function persistHeight(height: number): void {
   setState({ ...s, statusPanelHeight: height });
 }
 
+/**
+ * Collapsed sections, keyed "<worktree id>:<label>".
+ *
+ * Per worktree on purpose. The flag used to live in Section's own useState, and
+ * React keeps that instance across a change of the `wt` prop — so collapsing
+ * Docker in one worktree silently reopened it in the next, and switching back
+ * and forth shuffled every section's state.
+ */
+function storedCollapsed(): Record<string, boolean> {
+  const s = getState() as { collapsedSections?: unknown } | null | undefined;
+  const c = s?.collapsedSections;
+  return c && typeof c === 'object' ? { ...(c as Record<string, boolean>) } : {};
+}
+
+function persistCollapsed(map: Record<string, boolean>): void {
+  const s = (getState() as Record<string, unknown> | null) ?? {};
+  // Only collapsed entries are written; expanded is the default, so this cannot
+  // grow a stale entry for every worktree ever opened.
+  const collapsedOnly = Object.fromEntries(Object.entries(map).filter(([, v]) => v));
+  setState({ ...s, collapsedSections: collapsedOnly });
+}
+
 const STATE_LABEL: Record<string, string> = {
   active:     'thinking',
   waiting:    'waiting',
@@ -86,6 +108,20 @@ export function StatusPanel({ wt }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [moreBelow, setMoreBelow] = useState(false);
 
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(storedCollapsed);
+  const sectionProps = (label: string) => {
+    const key = `${wt.id}:${label}`;
+    return {
+      label,
+      collapsed: collapsed[key] === true,
+      onToggle: () => setCollapsed((prev) => {
+        const next = { ...prev, [key]: !prev[key] };
+        persistCollapsed(next);
+        return next;
+      }),
+    };
+  };
+
   const syncOverflow = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -151,7 +187,7 @@ export function StatusPanel({ wt }: Props) {
 
       {/* Claude */}
       {wt.agent !== 'idle' && (
-        <Section label="Agents">
+        <Section {...sectionProps('Agents')}>
           <Row k="State">
             <Badge color={STATE_COLOR[wt.agent]}>{STATE_LABEL[wt.agent]}</Badge>
           </Row>
@@ -167,7 +203,7 @@ export function StatusPanel({ wt }: Props) {
       )}
 
       {/* Git */}
-      <Section label="Git">
+      <Section {...sectionProps('Git')}>
         <Row k="Branch">
           <span style={{ fontFamily: T.mono, fontSize: 11, color: T.textDim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {wt.branch}
@@ -197,7 +233,7 @@ export function StatusPanel({ wt }: Props) {
 
       {/* PR */}
       {wt.pr && (
-        <Section label="Pull Request">
+        <Section {...sectionProps('Pull Request')}>
           <Row k="Number">
             <Badge color={T.blue}>#{wt.pr.number}</Badge>
           </Row>
@@ -212,7 +248,7 @@ export function StatusPanel({ wt }: Props) {
       {/* Docker */}
       {wt.docker.length > 0 && (
         <Section
-          label="Docker"
+          {...sectionProps('Docker')}
           hint={`${wt.docker.filter((c) => c.state === 'running').length}/${wt.docker.length} up`}
         >
           {wt.docker.map((c) => (
@@ -248,15 +284,23 @@ export function StatusPanel({ wt }: Props) {
  * answer: no containers. That cost a long debugging session on a stack that was
  * running the whole time.
  */
-function Section({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
+function Section({ label, hint, collapsed, onToggle, children }: {
+  label: string;
+  hint?: string;
+  collapsed: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
   return (
     <div style={{ borderBottom: `1px solid ${T.borderLight}` }}>
       <button
-        onClick={() => setCollapsed(v => !v)}
+        onClick={onToggle}
         style={{
           width: '100%', display: 'flex', alignItems: 'center', gap: 2,
-          height: 22, padding: '0 12px 0 4px',
+          // Left padding aligns our chevron with the native view header's
+          // twistie below; the webview's content starts at the pane's edge,
+          // where a real pane header is already inset.
+          height: 22, padding: '0 12px 0 10px',
           background: T.sectionHeaderBg, border: 'none',
           cursor: 'pointer', textAlign: 'left',
         }}

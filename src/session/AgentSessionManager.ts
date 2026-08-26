@@ -317,8 +317,13 @@ export class AgentSessionManager {
       // the window was just killed and this is its dying event (e.g. SessionEnd)
       // — drop it, or it would repaint every other session in the worktree.
       const meta = map.get(windowIndex);
-      if (!meta || meta.kind !== 'agent') return;
-      map.set(windowIndex, { ...meta, state });
+      if (!meta) return;
+      // A window recorded as a plain shell that starts reporting agent states
+      // has an agent running in it — the user launched one by hand in a
+      // terminal Unmess opened. Adopt it instead of dropping every event: the
+      // provider stays unknown (nothing says which agent it is), which the card
+      // renders with a neutral mark rather than guessing.
+      map.set(windowIndex, meta.kind === 'agent' ? { ...meta, state } : { ...meta, kind: 'agent', state });
     } else {
       // Agents launched before UNMESS_WINDOW_INDEX existed: no way to know the
       // source window — apply to all agent windows (pre-per-session behavior).

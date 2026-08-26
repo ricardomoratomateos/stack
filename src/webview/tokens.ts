@@ -46,16 +46,28 @@ export const T = {
   menuBorder:  'var(--vscode-list-activeSelectionBackground, var(--vscode-editorWidget-background))',
   menuSepBg:   'color-mix(in srgb, var(--vscode-foreground) 12%, transparent)',
 
+  // sideBarSectionHeader-foreground, which is exactly what the native view
+  // header beside these uses. Swapping it for plain `foreground` made ours the
+  // bright one instead — the mismatch just pointed the other way.
   sectionHeaderFg: 'var(--vscode-sideBarSectionHeader-foreground, var(--vscode-foreground))',
   sectionHeaderBg: 'var(--vscode-sideBarSectionHeader-background, transparent)',
   titleFg:         'var(--vscode-sideBarTitle-foreground, var(--vscode-foreground))',
 } as const;
 
-/** Matches VS Code's native pane-header title (.pane-header h3.title). */
+/**
+ * Matches VS Code's native pane-header title, which these sections sit directly
+ * above (the "Screenshot drop" view is a real one).
+ *
+ * No `textTransform: uppercase`: current VS Code renders a view's contributed
+ * name verbatim, so forcing caps here made our sections shout "AGENTS" next to
+ * a native "Screenshot drop" and the imitation gave itself away.
+ */
 export const SECTION_TITLE_STYLE = {
-  fontSize: 11,
+  // Tracks the workbench font size rather than the old hardcoded 11px: the
+  // native header it sits next to uses it, so a literal here drifts the moment
+  // VS Code (or the user's font-size setting) moves.
+  fontSize: T.fontSize,
   fontWeight: 700,
-  textTransform: 'uppercase',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',

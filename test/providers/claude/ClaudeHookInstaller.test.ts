@@ -51,15 +51,32 @@ describe('ClaudeHookInstaller', () => {
       expect(fs.statSync(scriptPath).mode & 0o777).toBe(0o755);
     });
 
-    it('curls the endpoint read from the sibling url file, with UNMESS_* env vars', () => {
+    it('curls the endpoint read from the sibling url file', () => {
       makeHook().install(hookUrl);
       const content = fs.readFileSync(scriptPath, 'utf8');
       expect(content.startsWith('#!/bin/bash\n')).toBe(true);
       expect(content).toContain('curl -s -X POST "$URL/hook"');
-      expect(content).toContain('$UNMESS_TERMINAL_ID');
-      expect(content).toContain('$UNMESS_WORKSPACE_ID');
       expect(content).toContain('EVENT_NAME="${1:-${HOOK_EVENT_NAME:-}}"');
-      expect(content).toContain('"{\\"event\\":\\"$EVENT_NAME\\",\\"terminalId\\":\\"$UNMESS_TERMINAL_ID\\",\\"workspaceId\\":\\"$UNMESS_WORKSPACE_ID\\",\\"windowIndex\\":\\"$UNMESS_WINDOW_INDEX\\"}"');
+      expect(content).toContain('"{\\"event\\":\\"$EVENT_NAME\\",\\"terminalId\\":\\"$UNMESS_TERMINAL_ID\\",\\"workspaceId\\":\\"$WORKSPACE_ID\\",\\"windowIndex\\":\\"$WINDOW_INDEX\\"}"');
+    });
+
+    it('falls back to asking tmux when the launcher set no UNMESS variables', () => {
+      // An agent the user starts by hand has neither variable, and every event
+      // it sent used to be discarded for carrying an empty workspace id.
+      makeHook().install(hookUrl);
+      const content = fs.readFileSync(scriptPath, 'utf8');
+      expect(content).toContain('WORKSPACE_ID="${UNMESS_WORKSPACE_ID:-}"');
+      expect(content).toContain('WINDOW_INDEX="${UNMESS_WINDOW_INDEX:-}"');
+      expect(content).toContain("tmux display-message -p -t \"$TMUX_PANE\" '#{window_index}'");
+      expect(content).toContain("tmux display-message -p -t \"$TMUX_PANE\" '#{session_name}'");
+      // Session names are "unmess-<worktree id>"; the prefix strip recovers it.
+      expect(content).toContain('unmess-*) WORKSPACE_ID="${SESSION#unmess-}"');
+    });
+
+    it('does nothing outside tmux, where there is no pane to ask about', () => {
+      makeHook().install(hookUrl);
+      const content = fs.readFileSync(scriptPath, 'utf8');
+      expect(content).toContain('if [ -n "${TMUX_PANE:-}" ] && command -v tmux >/dev/null 2>&1; then');
     });
 
     it('does not rewrite when content is unchanged (bug 18)', () => {

@@ -147,21 +147,56 @@ describe('updateState', () => {
     expect(byIndex).toEqual({ 1: 'waiting', 2: 'active' });
   });
 
-  it('DROPS events whose windowIndex is untracked or points at a shell (dying window race)', () => {
+  it('DROPS events for an untracked window (dying window race)', () => {
     // Killing a window removes it from the map BEFORE its SessionEnd hook
     // arrives — that stale event must not repaint the surviving sessions.
-    for (const windowIndex of [9, 3]) {
-      const { mgr, stateEvents } = create();
-      seed(mgr, 'wt-1', [
-        [1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
-        [2, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
-        [3, { kind: 'shell', state: 'idle', name: 'shell' }],
-      ]);
-      mgr.updateState('wt-1', 'terminated', windowIndex);
-      const byIndex = Object.fromEntries(mgr.getSessions('wt-1').map(s => [s.index, s.state]));
-      expect(byIndex, `windowIndex=${windowIndex}`).toEqual({ 1: 'waiting', 2: 'waiting', 3: 'idle' });
-      expect(stateEvents, `windowIndex=${windowIndex}`).toEqual([]);
-    }
+    const { mgr, stateEvents } = create();
+    seed(mgr, 'wt-1', [
+      [1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
+      [2, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
+    ]);
+    mgr.updateState('wt-1', 'terminated', 9);
+    const byIndex = Object.fromEntries(mgr.getSessions('wt-1').map(s => [s.index, s.state]));
+    expect(byIndex).toEqual({ 1: 'waiting', 2: 'waiting' });
+    expect(stateEvents).toEqual([]);
+  });
+
+  it('ADOPTS a shell window that starts reporting agent states', () => {
+    // Only an agent's hook sends these, so a shell window reporting one has an
+    // agent the user started by hand. Dropping the event made that agent
+    // invisible: it never lit up, however long it waited on a permission.
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [
+      [1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
+      [2, { kind: 'shell', state: 'idle', name: 'shell' }],
+    ]);
+
+    mgr.updateState('wt-1', 'permission', 2);
+
+    const adopted = mgr.getSessions('wt-1').find(s => s.index === 2)!;
+    expect(adopted.kind).toBe('agent');
+    expect(adopted.state).toBe('permission');
+    // And it must not have splashed onto the agent that was already there.
+    expect(mgr.getSessions('wt-1').find(s => s.index === 1)!.state).toBe('waiting');
+  });
+
+  it('leaves the adopted window without a provider rather than guessing one', () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[2, { kind: 'shell', state: 'idle', name: 'shell' }]]);
+
+    mgr.updateState('wt-1', 'active', 2);
+
+    expect(mgr.getSessions('wt-1').find(s => s.index === 2)!.provider).toBeUndefined();
+  });
+
+  it('counts an adopted window as an agent, not a terminal', () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[2, { kind: 'shell', state: 'idle', name: 'shell' }]]);
+
+    mgr.updateState('wt-1', 'active', 2);
+
+    expect(mgr.getAgentCount('wt-1')).toBe(1);
+    expect(mgr.getShellCount('wt-1')).toBe(0);
   });
 
   it('applies the state to ALL agent windows when the event carries no windowIndex (legacy launches)', () => {
