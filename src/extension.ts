@@ -181,6 +181,9 @@ class VsCodeWorkspaceHost implements IWorkspaceHost {
   async writeClipboard(text: string): Promise<void> {
     await vscode.env.clipboard.writeText(text);
   }
+  async openExternal(url: string): Promise<void> {
+    await vscode.env.openExternal(vscode.Uri.parse(url));
+  }
   async openFileInEditor(absPath: string, line?: number): Promise<void> {
     try {
       const doc = await vscode.workspace.openTextDocument(absPath);

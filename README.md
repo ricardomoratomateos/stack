@@ -98,6 +98,8 @@ For heavier setups (dedicated Docker stack, dependency prep, debug), point the `
 
 When it runs your setup script, Unmess exports `UNMESS_REPO_ROOT`, `UNMESS_WORKTREE_PATH`, `UNMESS_BRANCH`, `UNMESS_COMPOSE_PROJECT` and the worktree's auto-generated ports, and the matching debug port is wired into the generated `launch.json`. Relative paths resolve against the worktree first, then the main repo.
 
+Each worktree's ports are listed on its card, under Docker, and clicking one opens `http://localhost:<port>` — the numbers are derived from the same function that builds the compose environment, so the card cannot drift from what the container actually publishes. The debug port is shown when you name `XDEBUG_PORT` but is not clickable; a debugger listener answers nothing a browser can render.
+
 Ports are checked against the machine, not just against Unmess's own bookkeeping: every port a worktree will bind is probed before the slot is handed out, and probed again right before a setup script or `compose up` runs. If something has taken one in the meantime — another project's container, a leftover stack from a deleted worktree, a local dev server — the worktree moves to a free slot, its `launch.json` follows, and you get a toast naming the port that was busy. Re-run your setup script afterwards if it bakes the port into a generated file such as `.env`.
 
 > A `.unmess/` folder is a handy place to keep these together. Scripts and compose files can live anywhere; only `.unmess/config.json` below is a fixed path.

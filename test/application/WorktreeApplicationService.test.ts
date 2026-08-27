@@ -179,6 +179,7 @@ function makeHarness(o: HarnessOpts = {}) {
     isDirectory: vi.fn((p: string) => (o.gitDirs ?? []).includes(p)),
     writeClipboard: vi.fn(async (text: string) => { calls.push(`host.writeClipboard:${text}`); }),
     openFileInEditor: vi.fn(async (p: string, line?: number) => { calls.push(`host.openFileInEditor:${p}:${line ?? ''}`); }),
+    openExternal: vi.fn(async (url: string) => { calls.push(`host.openExternal:${url}`); }),
   };
 
   const notify = {
@@ -1056,6 +1057,9 @@ describe('buildState', () => {
         sessions: [],
         git: { hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 },
         docker: [{ name: 'db', state: 'running' }],
+        // Empty because the default config names no ports; the derivation is
+        // covered on its own below.
+        ports: [],
         pr: { number: 7, state: 'OPEN', url: 'u' },
       }],
       activeWorktreeId: 'a',
@@ -2618,5 +2622,57 @@ describe('defaultBaseBranch in a repo that does not use it', () => {
     await h.service.createWorktree({ branch: 'feat/x' });
 
     expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, undefined, 'only-branch');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ports on the card
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('worktree ports', () => {
+  const portsCfg = {
+    docker: {
+      composeFile: 'docker-compose.yml',
+      overrideFile: 'docker-compose.worktree.yml',
+      ports: ['HTTP_PORT', 'DB_PORT', 'XDEBUG_PORT'],
+      basePort: 20000,
+      portStride: 100,
+    },
+  };
+
+  it('are empty when the user has configured none', () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
+    expect(h.service.buildState().worktrees[0]?.ports).toEqual([]);
+  });
+
+  it('carry the same numbers the compose env is given', () => {
+    // Derived, not stored: the card cannot drift from what the container
+    // actually publishes, because both come out of one function.
+    const a = makeWorktree({ id: 'a', xdebugPort: 9899 });
+    const h = makeHarness({ worktrees: [a], config: portsCfg });
+
+    expect(h.service.buildState().worktrees[0]?.ports).toEqual([
+      { name: 'HTTP_PORT', port: 20000, openable: true },
+      { name: 'DB_PORT', port: 20001, openable: true },
+      // Special-cased to the worktree's own debug port, and not a URL.
+      { name: 'XDEBUG_PORT', port: 9899, openable: false },
+    ]);
+  });
+
+  it('move with the worktree when it lands on another slot', () => {
+    const a = makeWorktree({ id: 'a', xdebugPort: 9901 });
+    const h = makeHarness({ worktrees: [a], config: portsCfg });
+
+    expect(h.service.buildState().worktrees[0]?.ports).toEqual([
+      { name: 'HTTP_PORT', port: 20200, openable: true },
+      { name: 'DB_PORT', port: 20201, openable: true },
+      { name: 'XDEBUG_PORT', port: 9901, openable: false },
+    ]);
+  });
+
+  it('open on localhost, which is where compose published them', () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], config: portsCfg });
+    void h.service.handleMessage({ type: 'openPort', port: 20200 });
+    expect(h.host.openExternal).toHaveBeenCalledWith('http://localhost:20200');
   });
 });

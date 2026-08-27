@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { SECTION_TITLE_STYLE, T } from '../tokens';
-import { getState, setState } from '../vscode';
-import type { WorktreeItem } from '../types';
+import { getState, send, setState } from '../vscode';
+import type { PortMapping, WorktreeItem } from '../types';
 
 /** Smallest useful panel height, and the share of the sidebar it may never exceed. */
 const MIN_HEIGHT = 60;
@@ -248,14 +248,20 @@ export function StatusPanel({ wt }: Props) {
         </Section>
       )}
 
-      {/* Docker */}
-      {wt.docker.length > 0 && (
+      {/* Docker. Shown for the ports alone when the stack is down, which is
+          exactly when you want to know which port this worktree answers on. */}
+      {(wt.docker.length > 0 || wt.ports.length > 0) && (
         <Section
           {...sectionProps('Docker')}
-          hint={`${wt.docker.filter((c) => c.state === 'running').length}/${wt.docker.length} up`}
+          hint={wt.docker.length > 0
+            ? `${wt.docker.filter((c) => c.state === 'running').length}/${wt.docker.length} up`
+            : undefined}
         >
           {wt.docker.map((c) => (
             <DockerRow key={c.name} name={c.name} state={c.state} />
+          ))}
+          {wt.ports.map((p) => (
+            <PortRow key={p.name} {...p} />
           ))}
         </Section>
       )}
@@ -371,6 +377,48 @@ function prColor(state: string): string {
     case 'merged': return T.purple;
     default:       return T.textMuted;
   }
+}
+
+/**
+ * One of the worktree's own ports.
+ *
+ * The number was the missing half of per-worktree docker: Unmess assigned each
+ * worktree a block of ports and then never told anyone which, so finding the
+ * one you wanted meant reading the generated compose override or guessing from
+ * the slot arithmetic.
+ */
+function PortRow({ name, port, openable }: PortMapping) {
+  // HTTP_PORT reads as "http" beside the container names, which are lowercase.
+  const label = name.replace(/_PORT$/, '').toLowerCase();
+  const value = (
+    <span style={{ fontFamily: T.mono, fontSize: 11, color: openable ? T.blue : T.textDim, flexShrink: 0 }}>
+      {port}
+    </span>
+  );
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minHeight: 22 }}>
+      {/* Aligns the label with the container rows above, which lead with a dot. */}
+      <span aria-hidden style={{ width: 5, flexShrink: 0 }} />
+      <span style={{ fontFamily: T.mono, fontSize: 11, color: T.textDim, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {label}
+      </span>
+      {openable ? (
+        <button
+          type="button"
+          title={`Open http://localhost:${port}`}
+          onClick={() => send({ type: 'openPort', port })}
+          style={{ background: 'none', border: 'none', padding: 0, display: 'flex', alignItems: 'center' }}
+        >
+          {value}
+        </button>
+      ) : (
+        // The debug port: shown because the user asked for it by naming
+        // XDEBUG_PORT, but a debugger listener answers nothing a browser can
+        // render, so there is no click to offer.
+        <span title="Debug port">{value}</span>
+      )}
+    </div>
+  );
 }
 
 function DockerRow({ name, state }: { name: string; state: string }) {

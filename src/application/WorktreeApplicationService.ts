@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import type { UnmessConfig, Worktree } from '../types';
-import type { UnmessState, WorktreeItem, WebMessage } from '../webview/types';
+import type { UnmessState, WorktreeItem, WebMessage, PortMapping } from '../webview/types';
 import type { WorktreeManager } from '../worktree/WorktreeManager';
 import type { AgentSessionManager } from '../session/AgentSessionManager';
 import type { TabManager } from '../worktree/TabManager';
@@ -12,7 +12,7 @@ import type { PrMonitor } from '../pr/PrMonitor';
 import type { IWorktreeRepository } from '../ports/IWorktreeRepository';
 import { PROVIDER_IDS, PROVIDER_INSTALL, type ProviderId } from '../ports/IAgentProvider';
 import { installedProviders } from '../providers/commandLookup';
-import { buildComposeArgs, composeProject, dockerEnv, portBlockFor } from '../docker/dockerCompose';
+import { buildComposeArgs, composeProject, computeDockerPorts, dockerEnv, portBlockFor } from '../docker/dockerCompose';
 import type { IGitPort, DiffBase } from '../ports/IGitPort';
 import type { INotifyPort } from '../ports/INotifyPort';
 import type { DiffPanelHost } from '../diff/DiffPanelManager';
@@ -49,6 +49,8 @@ export interface IWorkspaceHost {
   writeClipboard(text: string): Promise<void>;
   /** Open a file in the editor, optionally revealing a 1-based line. */
   openFileInEditor(absPath: string, line?: number): Promise<void>;
+  /** Hand a URL to the OS (the browser, for a worktree's own http port). */
+  openExternal(url: string): Promise<void>;
 }
 
 /** Bridge to the VSCode UI surfaces (webview + explorer dimming). */
@@ -343,6 +345,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       this.branchOptions = { branches: this.deps.git.listBranches(root), base: this.resolveBaseBranch(root) };
       this.ui.pushWebview();
     },
+    openPort: (msg) => void this.openPort(msg.port),
     selectWorktree: (msg) => this.switchToWorktree(msg.worktreeId),
   };
 
@@ -504,6 +507,41 @@ export class WorktreeApplicationService implements DiffPanelHost {
     });
   }
 
+  /**
+   * Opens one of a worktree's ports in the browser.
+   *
+   * localhost rather than 0.0.0.0 or the machine's LAN address: the compose
+   * override publishes on the host, and a URL a browser will actually resolve
+   * is the whole value of the click.
+   */
+  async openPort(port: number): Promise<void> {
+    await this.deps.host.openExternal(`http://localhost:${port}`);
+  }
+
+  /**
+   * The ports this worktree actually owns, for display on its card.
+   *
+   * Derived, never stored: the same derivation the compose env and the port
+   * probe use, so the number on the card is by construction the number the
+   * container is published on. A worktree moved to a free slot takes its card
+   * with it.
+   *
+   * Only the ports the user named in `unmess.docker.ports` — the debug port is
+   * in there when they asked for it (XDEBUG_PORT) and left out otherwise, since
+   * a debug port nobody configured is Unmess's bookkeeping rather than something
+   * the user needs to know.
+   */
+  private portsFor(wt: Worktree): PortMapping[] {
+    const config = this.deps.config.get();
+    return Object.entries(computeDockerPorts(wt, config)).map(([name, port]) => ({
+      name,
+      port,
+      // Everything but the debug port: a debugger listener answers nothing a
+      // browser can render, and offering to open it is a dead tab every time.
+      openable: name !== 'XDEBUG_PORT',
+    }));
+  }
+
   buildState(): UnmessState {
     const worktrees = this.orderWorktrees(this.deps.manager.list());
     const items: WorktreeItem[] = worktrees.map((wt) => ({
@@ -519,6 +557,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       sessions: this.deps.agentManager.getSessions(wt.id),
       git: this.deps.gitWatcher.getStatus(wt.path),
       docker: this.deps.dockerMonitor.getContainers(composeProject(wt)).map((c) => ({ name: c.name, state: c.state })),
+      ports: this.portsFor(wt),
       pr: this.deps.prMonitor.getStatus(wt.id) ?? null,
     }));
     const activeWorktreeId = worktrees.find((wt) => wt.id === this.currentWorktreeId)?.id;

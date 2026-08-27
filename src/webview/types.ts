@@ -18,6 +18,18 @@ export interface DockerContainer {
   state: string;
 }
 
+/** One of the worktree's own auto-generated ports. */
+export interface PortMapping {
+  /** Env var name from `unmess.docker.ports`, e.g. HTTP_PORT. */
+  name: string;
+  port: number;
+  /**
+   * Whether opening `http://localhost:<port>` in a browser makes sense. False
+   * for the debug port, which is a debugger listener and not a server.
+   */
+  openable: boolean;
+}
+
 export interface PrStatus {
   number: number;
   state: string;
@@ -47,6 +59,8 @@ export interface WorktreeItem {
   sessions: SessionItem[];
   git: GitStatus;
   docker: DockerContainer[];
+  /** Ports this worktree owns — empty unless `unmess.docker.ports` is set. */
+  ports: PortMapping[];
   pr?: PrStatus | null;
 }
 
@@ -86,6 +100,7 @@ export type WebMessage =
   | { type: 'killSession'; worktreeId: string; index: number }
   | { type: 'reorderSessions'; worktreeId: string; orderedIndexes: number[] }
   | { type: 'reorderWorktrees'; orderedIds: string[] }
+  | { type: 'openPort'; port: number }
   | { type: 'dockerUp'; worktreeId: string }
   | { type: 'dockerDown'; worktreeId: string }
   | { type: 'deleteWorktree'; worktreeId: string }
