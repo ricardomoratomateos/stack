@@ -7,6 +7,7 @@ import { WorktreeStore } from './worktree/WorktreeStore';
 import { WorktreeManager } from './worktree/WorktreeManager';
 import { PortAllocator } from './worktree/portAllocator';
 import { ConfigManager } from './config/ConfigManager';
+import { REPO_CONFIG_RELATIVE, renderRepoConfig } from './config/RepoConfig';
 import { AgentSessionManager } from './session/AgentSessionManager';
 import { AttentionNotifier } from './session/AttentionNotifier';
 import { ProviderFactory } from './providers/ProviderFactory';
@@ -28,6 +29,63 @@ import { WorktreeApplicationService, IWorkspaceHost, HostTerminal } from './appl
 import { DiffPanelManager } from './diff/DiffPanelManager';
 import { SIDEBAR_VIEW_ID } from './constants';
 import { PACKAGE_MANAGERS, promptTmuxInstall } from './onboarding/tmuxGate';
+import { findRepoRoot } from './worktree/findRepoRoot';
+
+/**
+ * Surfaces a broken `.unmess/config.json` with a way to go fix it.
+ *
+ * A warning rather than an error, and never a modal: whatever is wrong, the
+ * extension is already running on the user's own settings, so this is news the
+ * user needs rather than a wall to climb over.
+ */
+async function reportRepoConfigProblems(config: ConfigManager, problems: string[]): Promise<void> {
+  const file = config.repoConfigPath();
+  const head = problems[0] ?? '';
+  const rest = problems.length > 1 ? ` (+${problems.length - 1} more)` : '';
+  const action = await vscode.window.showWarningMessage(
+    `Unmess: ${REPO_CONFIG_RELATIVE} — ${head}${rest}`,
+    ...(file ? ['Open file'] : []),
+  );
+  if (action === 'Open file' && file) {
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file));
+  }
+}
+
+/**
+ * Writes `.unmess/config.json` from whatever is in effect right now.
+ *
+ * The point of the command is the handover: the person who made Unmess work
+ * here has the answers in their own settings.json, and everyone who clones the
+ * repo afterwards has none of them. This lifts them into a file that travels
+ * with the code.
+ */
+async function createRepoConfig(config: ConfigManager, root: string | undefined): Promise<void> {
+  if (!root) {
+    vscode.window.showWarningMessage('Unmess: open a git repository first.');
+    return;
+  }
+  const file = path.join(root, REPO_CONFIG_RELATIVE);
+  if (fs.existsSync(file)) {
+    // Never silently overwritten: this file is committed and shared, so the
+    // copy on disk may well be a teammate's work rather than a stale draft.
+    const overwrite = await vscode.window.showWarningMessage(
+      `Unmess: ${REPO_CONFIG_RELATIVE} already exists.`,
+      'Open it',
+      'Overwrite',
+    );
+    if (overwrite === 'Open it') {
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file));
+      return;
+    }
+    if (overwrite !== 'Overwrite') return;
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, renderRepoConfig(config.get()));
+  await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file));
+  vscode.window.showInformationMessage(
+    `Unmess: wrote ${REPO_CONFIG_RELATIVE}. Commit it and your team gets the same setup.`,
+  );
+}
 
 /** Resolve which of the given binaries are on PATH (via `which`). */
 function detectBinaries(bins: readonly string[]): Promise<Set<string>> {
@@ -149,7 +207,18 @@ export async function activate(ctx: vscode.ExtensionContext) {
     return;
   }
 
-  const config = new ConfigManager();
+  // Resolved per read, not captured: the user can add or remove the folder that
+  // holds the repository at any point in a window's life.
+  const repoRootOf = () =>
+    findRepoRoot(
+      (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
+      (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } },
+    );
+
+  const config = new ConfigManager({
+    repoRoot: repoRootOf,
+    onProblems: (problems) => void reportRepoConfigProblems(config, problems),
+  });
   const store = new WorktreeStore(ctx);
   // The config getter lets the allocator probe the whole derived docker block,
   // not just the Xdebug port, before handing a slot out.
@@ -314,6 +383,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     // The "+" in the view header: opens the webview's rich new-task modal
     // (title, branch, base branch, description) rather than a bare input box.
     vscode.commands.registerCommand('unmess.newTask', () => webviewProvider.openNewTask()),
+    vscode.commands.registerCommand('unmess.createRepoConfig', () => createRepoConfig(config, repoRootOf())),
     vscode.commands.registerCommand('unmess.deleteWorktree', (item) => service.deleteWorktree(item?.worktree)),
     vscode.commands.registerCommand('unmess.renameWorktree', (item) => service.renameWorktree(item?.worktree)),
     vscode.commands.registerCommand('unmess.initWorktree', (item) => service.initWorktree(item?.worktree)),

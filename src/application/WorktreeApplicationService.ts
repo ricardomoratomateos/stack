@@ -19,6 +19,7 @@ import type { DiffPanelHost } from '../diff/DiffPanelManager';
 import type { SendDestination, DiffComment } from '../diff/types';
 import { buildCommentPrompt } from '../diff/commentPrompt';
 import { displayLabel, truncateLabel } from '../worktree/displayLabel';
+import { findRepoRoot } from '../worktree/findRepoRoot';
 
 export const ACTIVE_WORKTREE_KEY = 'unmess.activeWorktreeId';
 export const WORKTREE_ORDER_KEY = 'unmess.worktreeOrder';
@@ -579,10 +580,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
   // ── Repo discovery + activation ────────────────────────────────────────────
 
   findRepoRoot(folders: string[] = this.deps.host.workspaceFolderPaths()): string | undefined {
-    for (const f of folders) {
-      if (this.deps.host.isDirectory(path.join(f, '.git'))) return f;
-    }
-    return undefined;
+    return findRepoRoot(folders, (p) => this.deps.host.isDirectory(p));
   }
 
   async start(): Promise<void> {

@@ -115,6 +115,11 @@
         "command": "unmess.attachLatestScreenshot",
         "title": "Unmess: Attach Latest Screenshot to Agent",
         "icon": "$(file-media)"
+      },
+      {
+        "command": "unmess.createRepoConfig",
+        "title": "Unmess: Create Repo Config File",
+        "icon": "$(file-code)"
       }
     ],
     "keybindings": [
@@ -158,22 +163,22 @@
         "unmess.worktreesDirectory": {
           "type": "string",
           "default": ".worktrees",
-          "description": "Directory where worktrees are created (relative to the workspace root)"
+          "description": "Directory where worktrees are created (relative to the workspace root) Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
         },
         "unmess.defaultBaseBranch": {
           "type": "string",
           "default": "develop",
-          "description": "Branch new worktrees start from, preselected in the New Task form. Falls back to the main repo's current branch when this branch does not exist."
+          "description": "Branch new worktrees start from, preselected in the New Task form. When this branch does not exist, Unmess uses the repository's own main line (the first of main/master/develop it finds, locally or on a remote), and only then the current branch. Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
         },
         "unmess.setupScript": {
           "type": "string",
           "default": "",
-          "description": "Script to run after creating a worktree"
+          "description": "Script to run after creating a worktree Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
         },
         "unmess.teardownScript": {
           "type": "string",
           "default": "",
-          "description": "Script to run before deleting a worktree"
+          "description": "Script to run before deleting a worktree Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
         },
         "unmess.defaultProvider": {
           "type": "string",
@@ -255,12 +260,12 @@
               "description": "Size of the port block each worktree owns"
             }
           },
-          "description": "Per-worktree docker orchestration: compose files and auto-generated ports"
+          "description": "Per-worktree docker orchestration: compose files and auto-generated ports Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
         },
         "unmess.xdebugBasePort": {
           "type": "number",
           "default": 9898,
-          "description": "Base port for Xdebug. Each worktree gets base+N"
+          "description": "Base port for Xdebug. Each worktree gets base+N Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
         },
         "unmess.debugTemplate": {
           "type": "object",
@@ -271,7 +276,7 @@
             "port": "{{PORT}}",
             "pathMappings": {}
           },
-          "description": "launch.json template for each worktree. Use {{PORT}} and {{WORKTREE_PATH}} as placeholders"
+          "description": "launch.json template for each worktree. Use {{PORT}} and {{WORKTREE_PATH}} as placeholders Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
         }
       }
     }

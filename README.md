@@ -50,7 +50,7 @@ Working on several things at once with AI agents gets messy fast: branches colli
 | Setting | Default | Description |
 |---|---|---|
 | `unmess.worktreesDirectory` | `.worktrees` | Where worktrees are created (relative to the workspace root) |
-| `unmess.defaultBaseBranch` | `develop` | Branch new worktrees start from, preselected in the New Task form. Falls back to the main repo's current branch when this branch doesn't exist |
+| `unmess.defaultBaseBranch` | `develop` | Branch new worktrees start from, preselected in the New Task form. When it doesn't exist, Unmess uses the repo's own main line (first of `main`/`master`/`develop` it finds, local or remote), then the current branch |
 | `unmess.defaultProvider` | `claude` | Primary agent: the one the big launch button starts. The chevron beside it opens the rest |
 | `unmess.claudeCommand` | `claude` | Command to launch Claude Code |
 | `unmess.codexCommand` | `codex` | Command to launch Codex CLI |
@@ -100,7 +100,41 @@ When it runs your setup script, Unmess exports `UNMESS_REPO_ROOT`, `UNMESS_WORKT
 
 Ports are checked against the machine, not just against Unmess's own bookkeeping: every port a worktree will bind is probed before the slot is handed out, and probed again right before a setup script or `compose up` runs. If something has taken one in the meantime — another project's container, a leftover stack from a deleted worktree, a local dev server — the worktree moves to a free slot, its `launch.json` follows, and you get a toast naming the port that was busy. Re-run your setup script afterwards if it bakes the port into a generated file such as `.env`.
 
-> Tip: a `.unmess/` folder is a handy place to keep these together, but it's just a convention — no folder is required.
+> A `.unmess/` folder is a handy place to keep these together. Scripts and compose files can live anywhere; only `.unmess/config.json` below is a fixed path.
+
+## Sharing the setup with your team
+
+Most of the settings above describe the *project*, not you: where worktrees go, which compose files exist, which branch work starts from, what the setup script is called. Keeping them in your own `settings.json` means a teammate who clones the repo gets an extension that does nothing useful until someone pastes them a copy of your config.
+
+Put them in **`.unmess/config.json`** instead and commit it:
+
+```json
+{
+  "version": 1,
+  "worktreesDirectory": ".worktrees",
+  "defaultBaseBranch": "main",
+  "setupScript": ".unmess/setup.sh",
+  "teardownScript": ".unmess/teardown.sh",
+  "docker": {
+    "composeFile": "docker-compose.yml",
+    "overrideFile": "docker-compose.worktree.yml",
+    "ports": ["HTTP_PORT", "DB_PORT"],
+    "basePort": 20000,
+    "portStride": 100
+  },
+  "xdebugBasePort": 9898
+}
+```
+
+Run **Unmess: Create Repo Config File** from the command palette to generate it from whatever is currently in effect on your machine — that's the handover: your working setup becomes a file that travels with the code.
+
+**Precedence** is *your explicit setting* → *the repo file* → *the shipped default*. So the repo file gives everyone a sane starting point, and anyone who deliberately sets a value in their own `settings.json` keeps it. Only an explicitly-set value counts; a key you never touched doesn't shadow the repo's.
+
+**Which keys it accepts:** `worktreesDirectory`, `defaultBaseBranch`, `setupScript`, `teardownScript`, `docker`, `xdebugBasePort`, `debugTemplate`. Every key is optional, and `docker` merges key by key — naming just your compose file won't reset `basePort`.
+
+**Which it doesn't:** `defaultProvider`, the per-agent commands, `notifyOnAttention`, `focusMode`, `scopeSearchToActiveWorktree`. Which agent you reach for and where its binary lives are properties of your machine, and a repository you cloned has no business overriding them. Put one in the file and Unmess tells you so rather than quietly ignoring it.
+
+A broken file never breaks the extension: bad JSON, an unknown key or a wrong type falls back to your own settings and says what was wrong.
 
 ## License
 

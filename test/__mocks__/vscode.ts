@@ -177,6 +177,9 @@ export const workspace = {
   saveAll: vi.fn().mockResolvedValue(true),
   getConfiguration: vi.fn((_section?: string) => ({
     get: vi.fn((_key: string, defaultValue?: unknown) => defaultValue),
+    // Nothing set explicitly, which is what a bare workspace means. Tests that
+    // care about precedence override getConfiguration wholesale.
+    inspect: vi.fn((key: string) => ({ key })),
     update: vi.fn().mockResolvedValue(undefined),
   })),
   onDidChangeWorkspaceFolders: vi.fn(() => ({ dispose: vi.fn() })),
@@ -227,6 +230,7 @@ export function resetVscodeMock(): void {
   });
   workspace.getConfiguration.mockImplementation((_section?: string) => ({
     get: vi.fn((_key: string, defaultValue?: unknown) => defaultValue),
+    inspect: vi.fn((key: string) => ({ key })),
     update: vi.fn().mockResolvedValue(undefined),
   }));
 }
