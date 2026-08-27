@@ -66,10 +66,10 @@ export const SECTION_TITLE_STYLE = {
   // native header it sits next to uses it, so a literal here drifts the moment
   // VS Code (or the user's font-size setting) moves.
   fontSize: T.fontSize,
-  // Bold, because the native pane header beside these is. Dropping this to 400
-  // was a guess read off a screenshot, and it was backwards: losing the
-  // uppercase did not mean losing the weight.
-  fontWeight: 700,
+  // Semibold, which is what `.pane-header .title` asks for in the modern UI.
+  // Not 700 (the classic value) and emphatically not 400, which was a guess read
+  // backwards off a screenshot.
+  fontWeight: 'var(--vscode-fontWeight-semiBold, 600)',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
@@ -130,20 +130,49 @@ input, textarea { font-family: inherit; font-size: inherit; }
 
 /* Collapsible section headers.
 
-   No background of their own, and a hover highlight instead — which is what the
-   native pane header beside these does. sideBarSectionHeader-background is a
-   real, visible fill in most themes (it is meant for the headers of *stacked*
-   views, which do sit on a band), so painting it here put a grey bar under
-   AGENTS / GIT / DOCKER next to a transparent "Screenshot Drop", and ours were
-   the only ones that did not light up under the pointer. Those two together were
-   the giveaway, not the type. */
-.u-section-header { background: transparent; }
-.u-section-header:hover { background: var(--vscode-list-hoverBackground); }
+   Transcribed from VS Code's own stylesheet rather than guessed off a
+   screenshot — three attempts at eyeballing this got the weight, the background
+   and the height wrong in turn. The source is
+   Contents/Resources/app/out/vs/workbench/workbench.desktop.main.css, rule
+   ".style-override .monaco-pane-view .pane > .pane-header", which is the modern
+   UI (it renders view titles capitalised rather than uppercase — the giveaway
+   that this is the branch in play):
 
-/* Sections are divided from each other, but not from whatever follows the
-   webview: VS Code draws its own boundary above the next pane header, and ours
-   landing 1px above it made a double line and stole a pixel from a gap that was
-   already 3px wider than the native rhythm. */
-.u-section { border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 6%, transparent); }
-.u-section:last-child { border-bottom: none; }
+     height: var(--pane-header-size)          -> 28px here, 22px classic
+     margin: 0 var(--vscode-spacing-size40)   -> 4px
+     padding: 0 0 0 var(--vscode-spacing-size40)
+     border-radius: var(--vscode-cornerRadius-small)
+     background: sideBar-background, hover list-hoverBackground
+     :before -> a rule along the TOP, inset a further 4px each side
+
+   The design tokens do not reach a webview (only theme *colours* are injected),
+   so each carries the fallback VS Code itself writes. "--pane-header-size" is
+   not a "--vscode-*" variable at all and cannot arrive here, hence the literal.
+
+   Consequences worth naming: the header is inset from the panel edges and
+   rounded, so its hover is a rounded rect rather than a full-bleed band; and
+   the separator belongs to the header above it, not below its content. */
+.u-section-header {
+  position: relative;
+  height: 28px;
+  margin: 0 var(--vscode-spacing-size40, 4px);
+  padding: 0 0 0 var(--vscode-spacing-size40, 4px);
+  border-radius: var(--vscode-cornerRadius-small, 4px);
+  background: transparent;
+}
+.u-section-header:hover { background: var(--vscode-list-hoverBackground); }
+.u-section-header::before {
+  content: '';
+  position: absolute; top: 0;
+  /* Inset within a header that is itself margin-inset, so the line stops 8px
+     short of each panel edge. A full-bleed border was the difference that read
+     as "the lines are wrong". */
+  left: var(--vscode-spacing-size40, 4px);
+  right: var(--vscode-spacing-size40, 4px);
+  height: var(--vscode-strokeThickness, 1px);
+  background: var(--vscode-sideBarSectionHeader-border,
+              var(--vscode-panel-border,
+              color-mix(in srgb, var(--vscode-foreground) 6%, transparent)));
+  pointer-events: none;
+}
 `;

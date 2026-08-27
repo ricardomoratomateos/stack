@@ -177,7 +177,8 @@ export function StatusPanel({ wt }: Props) {
       {/* Section header: worktree name */}
       <div style={{
         padding: '7px 12px 5px',
-        borderBottom: `1px solid ${T.borderLight}`,
+        // No bottom border: the first section's own top rule is that line now,
+        // and it is inset the way the native one is.
         display: 'flex', alignItems: 'center', gap: 6,
       }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: T.titleFg, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -330,30 +331,40 @@ function Section({ label, hint, collapsed, onToggle, children }: {
         // Background and hover live in GLOBAL_CSS: :hover cannot be expressed
         // inline, and the two belong together.
         className="u-section-header"
+        // Height, insets, radius, hover and the separator all live in
+        // GLOBAL_CSS, transcribed from VS Code's own pane-header rule. Only the
+        // flex layout is left here.
         style={{
-          width: '100%', display: 'flex', alignItems: 'center', gap: 2,
-          // Left padding aligns our chevron with the native view header's
-          // twistie below; the webview's content starts at the pane's edge,
-          // where a real pane header is already inset.
-          height: 22, padding: '0 12px 0 10px',
-          border: 'none',
-          cursor: 'pointer', textAlign: 'left',
+          // `width` deliberately absent: the class supplies horizontal margins,
+          // and 100% would add them to a full-width box and overflow.
+          display: 'flex', alignItems: 'center', gap: 2,
+          border: 'none', cursor: 'pointer', textAlign: 'left',
         }}
       >
         <i
           className={`codicon codicon-chevron-${collapsed ? 'right' : 'down'}`}
-          // lineHeight 1 so the icon's box is its glyph. Without it a 16px
-          // codicon carries the inherited line box of 13px body text, and flex
-          // centres that box instead of the arrow — measured against the native
-          // twistie, ours sat exactly 1px high.
-          style={{ fontSize: 16, lineHeight: 1, color: T.sectionHeaderFg, flexShrink: 0 }}
+          style={{
+            fontSize: 16,
+            // lineHeight 1 so the icon's box is its glyph rather than the
+            // inherited text line box, which is what flex would otherwise
+            // centre.
+            lineHeight: 1,
+            // `.pane-header.expanded > .codicon:first-of-type` in VS Code's own
+            // stylesheet. The 1px I measured off the screenshot was real; this
+            // is where it comes from, and it applies only when expanded.
+            transform: collapsed ? undefined : 'translateY(1px)',
+            color: T.sectionHeaderFg,
+            flexShrink: 0,
+          }}
         />
         <span style={{ ...SECTION_TITLE_STYLE, color: T.sectionHeaderFg }}>
           {label}
         </span>
         {hint && (
           <span style={{
-            marginLeft: 'auto', flexShrink: 0,
+            // padding-right is 0 on the native header; its actions carry their
+            // own 8px margin instead, so the hint does the same.
+            marginLeft: 'auto', marginRight: 8, flexShrink: 0,
             fontFamily: T.mono, fontSize: 10, color: T.textDim,
           }}>
             {hint}
