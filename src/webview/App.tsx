@@ -29,6 +29,8 @@ export function App() {
       } catch { /* ignore */ }
     };
     window.addEventListener('message', handler);
+    // Announce only AFTER the listener exists, so the reply cannot be missed.
+    send({ type: 'ready' });
     return () => window.removeEventListener('message', handler);
   }, []);
 

@@ -326,3 +326,69 @@ describe('NodeProcessRunner (integration)', () => {
     await expect(runner.exec('exit 3')).rejects.toThrow();
   });
 });
+
+// A branch that lives only on a remote is the "pick up the task I started on
+// the other machine" case. branchExists (rev-parse) does not resolve it, so
+// without remoteBranch() Unmess treated the name as brand new and cut an empty
+// branch from the base — silently orphaning what had been pushed.
+describe('GitCliAdapter.remoteBranch (integration, real remote)', () => {
+  let remoteTmp: string;
+  let clone: string;
+
+  beforeAll(() => {
+    remoteTmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-remote-')));
+    const bare = path.join(remoteTmp, 'origin.git');
+    execSync(`git init --bare -b main "${bare}"`, { stdio: 'pipe' });
+
+    const seed = path.join(remoteTmp, 'seed');
+    execSync(`git clone "${bare}" "${seed}"`, { stdio: 'pipe' });
+    const g = (c: string) => execSync(`git ${c}`, { cwd: seed, stdio: 'pipe' });
+    g('config user.email "test@unmess.dev"');
+    g('config user.name "Unmess Test"');
+    g('config commit.gpgsign false');
+    fs.writeFileSync(path.join(seed, 'a.txt'), 'a\n');
+    g('add .');
+    g('commit -m init');
+    g('push -u origin main');
+    g('checkout -b only-on-remote');
+    fs.writeFileSync(path.join(seed, 'b.txt'), 'b\n');
+    g('add .');
+    g('commit -m remote-work');
+    g('push -u origin only-on-remote');
+
+    clone = path.join(remoteTmp, 'clone');
+    execSync(`git clone "${bare}" "${clone}"`, { stdio: 'pipe' });
+  });
+
+  afterAll(() => fs.rmSync(remoteTmp, { recursive: true, force: true }));
+
+  it('resolves a branch that exists only on the remote', () => {
+    expect(new GitCliAdapter().remoteBranch('only-on-remote', clone)).toBe('origin/only-on-remote');
+  });
+
+  it('branchExists still says false for it — which is why remoteBranch exists', () => {
+    expect(new GitCliAdapter().branchExists('only-on-remote', clone)).toBe(false);
+  });
+
+  it('returns undefined for a name no remote has', () => {
+    expect(new GitCliAdapter().remoteBranch('never-existed', clone)).toBeUndefined();
+  });
+
+  it('returns undefined in a repo with no remotes at all', () => {
+    expect(new GitCliAdapter().remoteBranch('main', repo)).toBeUndefined();
+  });
+
+  it('returns undefined when git itself fails (not a repo)', () => {
+    expect(new GitCliAdapter().remoteBranch('main', remoteTmp)).toBeUndefined();
+  });
+
+  it('checks out the remote work instead of an empty branch', async () => {
+    const wtPath = path.join(remoteTmp, 'wt-remote');
+    await new GitCliAdapter().createWorktree(
+      wtPath, 'only-on-remote', clone, true, 'main', 'origin/only-on-remote',
+    );
+    // b.txt only exists on the remote branch; an empty branch cut from main
+    // would not have it.
+    expect(fs.existsSync(path.join(wtPath, 'b.txt'))).toBe(true);
+  });
+});

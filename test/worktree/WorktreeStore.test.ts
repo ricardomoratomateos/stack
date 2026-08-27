@@ -248,3 +248,29 @@ describe('InMemoryWorktreeRepository parity with WorktreeStore semantics', () =>
     expect(repo.get('nope')).toBeUndefined();
   });
 });
+
+describe('port registry stays in step with the worktrees', () => {
+  const makeStore = () => new WorktreeStore({ globalState: new FakeMemento() });
+
+  it('reports the NEW port after a patch reassigns it', async () => {
+    // ensureFreePorts moves a worktree off a port something else grabbed, via
+    // patch(). The stored registry was only ever written by add(), so it kept
+    // reporting the old port: the new one was never reserved and the old one
+    // was reserved forever — the exact collision the port work removed.
+    const store = makeStore();
+    const wt = makeWorktree({ id: 'a', xdebugPort: 9899 });
+    await store.add(wt);
+
+    await store.patch('a', { xdebugPort: 9903 });
+
+    expect(Object.values(store.getPortRegistry())).toEqual([9903]);
+  });
+
+  it('never reports a port no worktree holds', async () => {
+    const store = makeStore();
+    await store.add(makeWorktree({ id: 'a', xdebugPort: 9899 }));
+    await store.patch('a', { xdebugPort: 9903 });
+
+    expect(Object.values(store.getPortRegistry())).not.toContain(9899);
+  });
+});

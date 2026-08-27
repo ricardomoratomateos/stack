@@ -236,11 +236,14 @@ function makeHarness(o: HarnessOpts = {}) {
   const prMonitor = {
     startPolling: vi.fn((branch: string, id: string, cb: () => void) => { calls.push(`pr.startPolling:${branch}:${id}`); prCallbacks.set(id, cb); }),
     getStatus: vi.fn((): { number: number; state: string; url: string } | undefined => undefined),
+    stopPolling: vi.fn((id: string) => { calls.push(`pr.stopPolling:${id}`); }),
   };
   const git = {
     currentBranch: vi.fn((): string => ''),
     diff: vi.fn(async () => o.diffOutput ?? ''),
     listBranches: vi.fn((): string[] => o.branches ?? []),
+    // No remote counterpart unless a test says otherwise.
+    remoteBranch: vi.fn((): string | undefined => undefined),
     // A branch "exists" when it is in the harness's branch list.
     branchExists: vi.fn((b: string): boolean => (o.branches ?? []).includes(b)),
   };
@@ -1629,6 +1632,7 @@ describe('deleteWorktree', () => {
       // then the cascade
       'gitWatcher.unwatch:/repo/zer/feat-a',
       'docker.stopPolling:feat-a',
+      'pr.stopPolling:a',
       'claude.killWorktreeSession:a',
       'manager.delete:a:false',
       // finally: cleared + refreshed
@@ -2510,5 +2514,33 @@ describe('docker state refresh', () => {
 
     // Otherwise a failed teardown leaves the badge frozen with no way back.
     expect(h.calls).toContain('ui.pushWebview');
+  });
+});
+
+describe('deleteWorktree stops every poller', () => {
+  it('stops the PR poll, not just docker and the git watcher', async () => {
+    // Nothing called prMonitor.stopPolling: each deleted worktree left a
+    // `gh pr list` running against a dead branch every 5 minutes until reload.
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({ worktrees: [a], confirmResult: 'Delete' });
+
+    await h.service.deleteWorktree(a);
+
+    expect(h.calls).toContain('pr.stopPolling:a');
+    expect(h.calls).toContain('docker.stopPolling:feat-a');
+    expect(h.calls).toContain('gitWatcher.unwatch:/repo/zer/feat-a');
+  });
+});
+
+describe('the ready handshake', () => {
+  it('pushes state when the webview says it is listening', async () => {
+    // The first push races the bundle load. Without an answer to `ready`, a
+    // quiet repo can sit on the loading dots forever: nothing polls.
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
+    h.calls.length = 0;
+
+    await h.service.handleMessage({ type: 'ready' });
+
+    expect(h.calls).toEqual(['ui.pushWebview']);
   });
 });

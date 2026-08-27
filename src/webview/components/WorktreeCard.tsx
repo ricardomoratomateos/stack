@@ -42,6 +42,10 @@ export function WorktreeCard({
   const [hovered, setHovered] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuAnchorRef = useRef<HTMLDivElement>(null);
+  // Undefined means the extension has not reported yet — assume available
+  // rather than dimming the button on first paint (same rule as the menu).
+  const primaryInstalled =
+    installedProviders === undefined || !defaultProvider || installedProviders.includes(defaultProvider);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
 
@@ -159,11 +163,31 @@ export function WorktreeCard({
         {/* Split button: the big half launches the primary agent, the chevron
             opens the rest. Relative, because the menu anchors to it. */}
         <div ref={menuAnchorRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          {/* The primary agent gets the same installed check the menu applies.
+              Without it the menu greyed an agent out while the button 13px away
+              launched it anyway, and the failure surfaced inside tmux rather
+              than as a notification. */}
           <IconActionBtn
-            title={hasSession ? `New ${defaultProvider ?? 'agent'} session` : `Launch ${defaultProvider ?? 'agent'}`}
-            onClick={(e) => { e.stopPropagation(); setMenuOpen(false); send({ type: 'launchAgent', worktreeId: wt.id }); }}
+            title={
+              !primaryInstalled
+                ? `${defaultProvider ?? 'agent'} is not on your PATH`
+                : hasSession
+                ? `New ${defaultProvider ?? 'agent'} session`
+                : `Launch ${defaultProvider ?? 'agent'}`
+            }
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(false);
+              if (!primaryInstalled && defaultProvider) {
+                send({ type: 'showProviderInstall', provider: defaultProvider as never });
+                return;
+              }
+              send({ type: 'launchAgent', worktreeId: wt.id });
+            }}
           >
-            <DefaultProviderIcon provider={defaultProvider} />
+            <span style={{ opacity: primaryInstalled ? 1 : 0.4, display: 'inline-flex' }}>
+              <DefaultProviderIcon provider={defaultProvider} />
+            </span>
           </IconActionBtn>
           <IconActionBtn
             title={menuOpen ? 'Close' : 'Launch another agent…'}

@@ -238,8 +238,11 @@ export function StatusPanel({ wt }: Props) {
             <Badge color={T.blue}>#{wt.pr.number}</Badge>
           </Row>
           <Row k="State">
-            <Badge color={wt.pr.state === 'open' ? T.green : wt.pr.state === 'merged' ? T.purple : T.textMuted}>
-              {wt.pr.state}
+            {/* `gh pr list` reports OPEN/CLOSED/MERGED; comparing against the
+                lowercase forms matched nothing, so the badge was always grey
+                whatever the PR was doing. */}
+            <Badge color={prColor(wt.pr.state)}>
+              {wt.pr.state.toLowerCase()}
             </Badge>
           </Row>
         </Section>
@@ -359,6 +362,15 @@ function Badge({ children, color }: { children: React.ReactNode; color: string }
       {children}
     </span>
   );
+}
+
+/** Case-insensitive, because the state comes straight from `gh` in upper case. */
+function prColor(state: string): string {
+  switch (state.toLowerCase()) {
+    case 'open':   return T.green;
+    case 'merged': return T.purple;
+    default:       return T.textMuted;
+  }
 }
 
 function DockerRow({ name, state }: { name: string; state: string }) {

@@ -76,6 +76,8 @@ export type WebMessage =
   | { type: 'launchAgent'; worktreeId: string; provider?: ProviderId }
   /** Choose which agent the card's big launch button starts. */
   | { type: 'pickDefaultProvider' }
+  /** The webview finished mounting and is listening. See the handshake below. */
+  | { type: 'ready' }
   /** Tell the user how to install an agent whose command is not on PATH. */
   | { type: 'showProviderInstall'; provider: ProviderId }
   | { type: 'openTerminal'; worktreeId: string }

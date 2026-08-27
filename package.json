@@ -281,7 +281,7 @@
     "compile": "node esbuild.js",
     "watch": "node esbuild.js --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.webview.json",
-    "package": "vsce package",
+    "package": "vsce package --no-dependencies",
     "lint": "eslint src --ext ts,tsx",
     "test": "vitest run",
     "test:watch": "vitest",

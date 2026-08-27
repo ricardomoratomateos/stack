@@ -39,7 +39,14 @@ export class WorktreeStore implements IWorktreeRepository {
   async patch(id: string, fields: Partial<Worktree>): Promise<void> {
     const data = this.load();
     const wt = data.worktrees.find((w) => w.id === id);
-    if (wt) Object.assign(wt, fields);
+    if (wt) {
+      Object.assign(wt, fields);
+      // Keep the stored registry honest for anyone reading the blob directly.
+      // It is no longer what the allocator consults (see getPortRegistry), but
+      // a copy that silently disagreed with the worktrees is exactly how a
+      // reassigned port ended up unreserved.
+      data.portRegistry[wt.path] = wt.xdebugPort;
+    }
     await this.save(data);
   }
 
@@ -62,8 +69,17 @@ export class WorktreeStore implements IWorktreeRepository {
     await this.save(data);
   }
 
+  /**
+   * Derived from the worktrees, not read from the stored copy.
+   *
+   * The allocator builds its "taken" set from this, and the stored registry was
+   * only written by add() and remove() — never by patch(). So reassigning a
+   * port (ensureFreePorts) left the NEW port unreserved and the OLD one
+   * reserved forever, which is precisely the collision the port work set out to
+   * remove. Deriving makes the two impossible to disagree.
+   */
   getPortRegistry(): Record<string, number> {
-    return this.load().portRegistry;
+    return Object.fromEntries(this.load().worktrees.map((w) => [w.path, w.xdebugPort]));
   }
 
   async pruneNonExistent(): Promise<Worktree[]> {

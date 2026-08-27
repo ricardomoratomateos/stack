@@ -45,13 +45,43 @@ export class GitCliAdapter implements IGitPort {
     repoRoot: string,
     newBranch: boolean,
     baseBranch?: string,
+    trackRemote?: string,
   ): Promise<void> {
     // A new branch can start from an explicit base ref; without one git uses the
     // repo's current HEAD. Reusing an existing branch ignores the base entirely.
-    const cmd = newBranch
+    //
+    // trackRemote is the third case: the branch exists only on the remote. It
+    // must start from that ref and track it, or the work already pushed there is
+    // silently replaced by an empty branch cut from the base.
+    const cmd = trackRemote
+      ? `git worktree add --track -b "${branch}" "${worktreePath}" "${trackRemote}"`
+      : newBranch
       ? `git worktree add -b "${branch}" "${worktreePath}"${baseBranch ? ` "${baseBranch}"` : ''}`
       : `git worktree add "${worktreePath}" "${branch}"`;
     await execAsync(cmd, { cwd: repoRoot, maxBuffer: MAX_BUFFER });
+  }
+
+  /**
+   * The remote ref for a branch with no local counterpart.
+   *
+   * `branchExists` uses `rev-parse --verify <branch>`, which does NOT resolve a
+   * remote-only branch — so typing the name of a branch you pushed from another
+   * machine looked like a brand-new branch, and Unmess cut an empty one from the
+   * base under that same name.
+   */
+  remoteBranch(branch: string, repoRoot: string): string | undefined {
+    try {
+      const remotes = execSync('git remote', { cwd: repoRoot, encoding: 'utf8' })
+        .split('\n').map((r) => r.trim()).filter(Boolean);
+      for (const remote of remotes) {
+        const ref = `${remote}/${branch}`;
+        try {
+          execSync(`git rev-parse --verify --quiet "${ref}^{commit}"`, { cwd: repoRoot, stdio: 'pipe' });
+          return ref;
+        } catch { /* try the next remote */ }
+      }
+    } catch { /* no remotes, or git failed */ }
+    return undefined;
   }
 
   listBranches(repoRoot: string): string[] {

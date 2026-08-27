@@ -122,7 +122,12 @@ export class WorktreeManager {
     const worktreePath = path.join(worktreesDir, safeDirName);
 
     const branchExists = this.git.branchExists(branch, repoRoot);
-    await this.git.createWorktree(worktreePath, branch, repoRoot, !branchExists, baseBranch);
+    // A branch that exists only on the remote is NOT a new branch. Treating it
+    // as one cut an empty branch from the base under the same name, quietly
+    // orphaning whatever had been pushed — the exact case of picking up a task
+    // started on another machine.
+    const trackRemote = branchExists ? undefined : this.git.remoteBranch(branch, repoRoot);
+    await this.git.createWorktree(worktreePath, branch, repoRoot, !branchExists, baseBranch, trackRemote);
 
     console.log(`[unmess] create branch=${branch} path=${worktreePath} existsAfterAdd=${this.fs.exists(worktreePath)} branchExisted=${branchExists}`);
     // Guard against git reporting success without actually materializing the

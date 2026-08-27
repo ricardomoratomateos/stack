@@ -262,6 +262,15 @@ export class WorktreeApplicationService implements DiffPanelHost {
           .catch((e) => this.deps.notify.showError(`Failed to launch agent: ${String(e)}`));
       }
     },
+    ready: () => {
+      // The first push happens in the same synchronous turn that sets the
+      // webview HTML, long before the bundle has loaded and registered its
+      // message listener — so it can be dropped on the floor. Nothing polls,
+      // every later push is reactive to an event, and the webview shows its
+      // loading dots until a message arrives: on a quiet repo it would spin
+      // forever. So the webview says when it is listening, and we answer.
+      this.ui.pushWebview();
+    },
     pickDefaultProvider: async () => {
       // A QuickPick is right here and wrong in the card's dropdown: this changes
       // a setting, which is a rare, deliberate act, not a per-launch choice.
@@ -778,6 +787,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
     try {
       this.deps.gitWatcher.unwatch(wt.path);
       this.deps.dockerMonitor.stopPolling(composeProject(wt));
+      // Nothing stopped the PR poll: every deleted worktree left a `gh pr list`
+      // running against a branch that no longer exists, every 5 minutes, until
+      // the window was reloaded.
+      this.deps.prMonitor.stopPolling(wt.id);
 
       const teardownScript = this.deps.config.get().teardownScript;
       if (teardownScript && this.deps.host.exists(wt.path)) {

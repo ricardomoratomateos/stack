@@ -22,7 +22,7 @@ export function StateDot({ state, size = 7 }: Props) {
         width: size,
         height: size,
         borderRadius: '50%',
-        background: DOT_COLOR[state],
+        background: (DOT_COLOR[state] ?? DOT_COLOR.idle),
         flexShrink: 0,
       }}
     />

@@ -16,6 +16,8 @@ export interface IGitPort {
     repoRoot: string,
     newBranch: boolean,
     baseBranch?: string,
+    /** Remote ref to start from and track, for a branch that exists only on the remote. */
+    trackRemote?: string,
   ): Promise<void>;
   /** Local branch names, most-recently-committed first. Returns [] on git failure. */
   listBranches(repoRoot: string): string[];
@@ -23,8 +25,10 @@ export interface IGitPort {
   deleteWorktree(worktreePath: string, repoRoot: string): Promise<void>;
   /** `git branch -D`. Throws on failure. */
   deleteBranch(branch: string, repoRoot: string): void;
-  /** `git rev-parse --verify <branch>`. */
+  /** `git rev-parse --verify <branch>`. LOCAL branches only — see remoteBranch. */
   branchExists(branch: string, repoRoot: string): boolean;
+  /** The remote ref for a branch that has no local counterpart, e.g. "origin/foo". */
+  remoteBranch(branch: string, repoRoot: string): string | undefined;
   /** `git branch --show-current`. Returns '' on detached HEAD, throws on git failure. */
   currentBranch(cwd: string): string;
   /**

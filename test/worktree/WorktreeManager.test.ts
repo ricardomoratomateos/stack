@@ -78,6 +78,7 @@ function makeGitStub(entries: GitWorktreeEntry[] = []): IGitPort & {
   deleteWorktree: ReturnType<typeof vi.fn>;
   deleteBranch: ReturnType<typeof vi.fn>;
   branchExists: ReturnType<typeof vi.fn>;
+  remoteBranch: ReturnType<typeof vi.fn>;
   currentBranch: ReturnType<typeof vi.fn>;
 } {
   return {
@@ -86,6 +87,8 @@ function makeGitStub(entries: GitWorktreeEntry[] = []): IGitPort & {
     deleteWorktree: vi.fn(),
     deleteBranch: vi.fn(),
     branchExists: vi.fn(() => false),
+    // No remote counterpart by default; the tests that care override it.
+    remoteBranch: vi.fn(() => undefined),
     currentBranch: vi.fn(() => 'main'),
     listBranches: vi.fn(() => []),
   };
@@ -230,7 +233,7 @@ describe('create', () => {
     git.branchExists.mockReturnValue(false);
     await mgr().create('feat/x', REPO);
     expect(git.createWorktree).toHaveBeenCalledWith(
-      path.join(REPO, 'zer', 'feat-x'), 'feat/x', REPO, true, undefined,
+      path.join(REPO, 'zer', 'feat-x'), 'feat/x', REPO, true, undefined, undefined,
     );
   });
 
@@ -238,7 +241,7 @@ describe('create', () => {
     git.branchExists.mockReturnValue(false);
     await mgr().create('feat/x', REPO, undefined, 'develop');
     expect(git.createWorktree).toHaveBeenCalledWith(
-      path.join(REPO, 'zer', 'feat-x'), 'feat/x', REPO, true, 'develop',
+      path.join(REPO, 'zer', 'feat-x'), 'feat/x', REPO, true, 'develop', undefined,
     );
   });
 
@@ -247,7 +250,7 @@ describe('create', () => {
     const wt = await mgr().create('feat/x', REPO);
     expect(wt.branch).toBe('feat/x');
     expect(git.createWorktree).toHaveBeenCalledWith(
-      path.join(REPO, 'zer', 'feat-x'), 'feat/x', REPO, false, undefined,
+      path.join(REPO, 'zer', 'feat-x'), 'feat/x', REPO, false, undefined, undefined,
     );
   });
 
@@ -712,5 +715,55 @@ describe('ensureFreePorts', () => {
 
     await expect(mgr.ensureFreePorts(wt)).resolves.toEqual({ worktree: wt });
     expect(firstBusyPort).not.toHaveBeenCalled();
+  });
+});
+
+// ---------- ramas que solo existen en el remoto ----------
+
+describe('create with a branch that exists only on the remote', () => {
+  it('tracks the remote instead of cutting an empty branch from the base', async () => {
+    // `branchExists` uses rev-parse, which does not resolve origin/foo. Without
+    // this, typing the name of a branch pushed from another machine created a
+    // brand-new empty branch under that same name — losing the work silently.
+    const git = makeGitStub();
+    git.branchExists.mockReturnValue(false);
+    git.remoteBranch.mockReturnValue('origin/feat/x');
+    const fsStub = makeFsStub();
+    fsStub.dirs.add('/repo/zer/feat-x');
+    const mgr = new WorktreeManager(makeStoreStub(), makePortAllocatorStub(), makeConfigStub(), undefined, git, fsStub);
+
+    await mgr.create('feat/x', REPO, undefined, 'develop');
+
+    expect(git.createWorktree).toHaveBeenCalledWith(
+      '/repo/zer/feat-x', 'feat/x', REPO, true, 'develop', 'origin/feat/x',
+    );
+  });
+
+  it('does not consult the remote when the branch is already local', async () => {
+    const git = makeGitStub();
+    git.branchExists.mockReturnValue(true);
+    const fsStub = makeFsStub();
+    fsStub.dirs.add('/repo/zer/feat-x');
+    const mgr = new WorktreeManager(makeStoreStub(), makePortAllocatorStub(), makeConfigStub(), undefined, git, fsStub);
+
+    await mgr.create('feat/x', REPO);
+
+    expect(git.remoteBranch).not.toHaveBeenCalled();
+    expect(git.createWorktree).toHaveBeenCalledWith(
+      '/repo/zer/feat-x', 'feat/x', REPO, false, undefined, undefined,
+    );
+  });
+
+  it('still cuts a new branch when it exists neither locally nor on a remote', async () => {
+    const git = makeGitStub();
+    const fsStub = makeFsStub();
+    fsStub.dirs.add('/repo/zer/feat-x');
+    const mgr = new WorktreeManager(makeStoreStub(), makePortAllocatorStub(), makeConfigStub(), undefined, git, fsStub);
+
+    await mgr.create('feat/x', REPO, undefined, 'develop');
+
+    expect(git.createWorktree).toHaveBeenCalledWith(
+      '/repo/zer/feat-x', 'feat/x', REPO, true, 'develop', undefined,
+    );
   });
 });

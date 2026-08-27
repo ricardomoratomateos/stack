@@ -6,6 +6,8 @@ import { IWorktreeRepository } from '../../src/ports/IWorktreeRepository';
  * - add() registers the worktree's xdebug port in the registry keyed by PATH
  * - remove() drops both the worktree and its port-registry entry
  * - patch() merges partial fields into an existing worktree (no-op on unknown id)
+ * - getPortRegistry() DERIVES from the worktrees, like the real store: a stored
+ *   copy that patch() never updated is what let a reassigned port go unreserved
  * - setAlias() no-ops on unknown id
  * - getAll() returns [] when empty
  */
@@ -43,6 +45,6 @@ export class InMemoryWorktreeRepository implements IWorktreeRepository {
   }
 
   getPortRegistry(): Record<string, number> {
-    return this.portRegistry;
+    return Object.fromEntries([...this.worktrees.values()].map((w) => [w.path, w.xdebugPort]));
   }
 }
