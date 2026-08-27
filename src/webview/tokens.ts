@@ -155,6 +155,17 @@ input, textarea { font-family: inherit; font-size: inherit; }
 .u-section-header {
   position: relative;
   height: 28px;
+  /* Chromium sizes a <button> to fit-content even when display:flex makes it a
+     block-level flex container, so without this the header shrank to wrap its
+     own label: the hover highlight came out as a pill around "Docker 3/3 up"
+     instead of a row, and the hint's margin-left:auto had no space to push
+     into. The native header is a div and needs no such help.
+
+     Not "width: 100%" — with the global border-box that is the full container
+     width PLUS the horizontal margins, overflowing by 8px, and body's
+     overflow-x:hidden turns that into a silently clipped hint rather than a
+     scrollbar. */
+  width: calc(100% - 2 * var(--vscode-spacing-size40, 4px));
   margin: 0 var(--vscode-spacing-size40, 4px);
   padding: 0 0 0 var(--vscode-spacing-size40, 4px);
   border-radius: var(--vscode-cornerRadius-small, 4px);
