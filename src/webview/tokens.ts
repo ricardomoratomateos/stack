@@ -67,7 +67,10 @@ export const SECTION_TITLE_STYLE = {
   // native header it sits next to uses it, so a literal here drifts the moment
   // VS Code (or the user's font-size setting) moves.
   fontSize: T.fontSize,
-  fontWeight: 700,
+  // Normal weight, like the native header beside these. 700 was the old
+  // uppercase style; kept alongside a regular-weight "Screenshot Drop" it was
+  // the last thing giving the imitation away.
+  fontWeight: 400,
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
