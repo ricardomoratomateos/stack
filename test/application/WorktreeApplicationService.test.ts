@@ -62,6 +62,8 @@ interface HarnessOpts {
   liveAgentAccepts?: boolean;
   /** persisted worktree display order (ids) */
   worktreeOrder?: string[];
+  /** what dockerMonitor.refresh resolves to after a teardown (leftover containers) */
+  containersLeftAfterDown?: Array<{ name: string; state: string }>;
   /** agents reported as runnable; defaults to none so tests never read the real PATH */
   installedProviders?: ProviderId[];
   /** omit the injection entirely and exercise the real PATH lookup */
@@ -226,6 +228,10 @@ function makeHarness(o: HarnessOpts = {}) {
       return Promise.resolve();
     }),
     nudge: vi.fn((project: string) => { calls.push(`docker.nudge:${project}`); }),
+    refresh: vi.fn((project: string) => {
+      calls.push(`docker.refresh:${project}`);
+      return Promise.resolve(o.containersLeftAfterDown ?? []);
+    }),
   };
   const prMonitor = {
     startPolling: vi.fn((branch: string, id: string, cb: () => void) => { calls.push(`pr.startPolling:${branch}:${id}`); prCallbacks.set(id, cb); }),
@@ -1630,30 +1636,71 @@ describe('deleteWorktree', () => {
     ]);
   });
 
-  it('runs the teardown script and waits a fixed 2s before killing the session', async () => {
-    vi.useFakeTimers();
+  it('runs the teardown script, then awaits its own compose down before deleting', async () => {
+    // The script goes to a terminal that cannot be awaited. It used to get a
+    // flat 2s head start, which is far less than one `compose down`, so
+    // `git worktree remove` yanked the directory and the containers survived.
     const a = makeWorktree({ id: 'a' });
     const h = makeHarness({
       worktrees: [a],
       confirmResult: 'Delete',
-      config: { teardownScript: '/scripts/teardown.sh' },
+      config: {
+        teardownScript: '/scripts/teardown.sh',
+        docker: { composeFile: 'docker-compose.yml', overrideFile: '', ports: ['HTTP_PORT'], basePort: 20000, portStride: 100 },
+      },
       existingPaths: [a.path],
     });
-    const done = h.service.deleteWorktree(a);
-    await vi.advanceTimersByTimeAsync(0);
+
+    await h.service.deleteWorktree(a);
+
     expect(h.calls).toContain(`host.createTerminal:Teardown: feat/a:${a.path}`);
-    expect(h.calls).toContain('claude.register:a');
-    expect(h.calls).toContain('terminal.show:Teardown: feat/a');
-    expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      'UNMESS_REPO_ROOT="/repo" UNMESS_WORKTREE_PATH="/repo/zer/feat-a" UNMESS_BRANCH="feat/a" UNMESS_COMPOSE_PROJECT="feat-a" bash "/scripts/teardown.sh" && echo "✓ Teardown complete"',
-    );
-    expect(h.claude.killWorktreeSession).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1999);
-    expect(h.claude.killWorktreeSession).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
-    await done;
+    const downAt = h.calls.findIndex((c) => c.startsWith('docker.runCompose:feat-a') && c.includes(' down'));
+    const deleteAt = h.calls.indexOf('manager.delete:a:false');
+    expect(downAt).toBeGreaterThanOrEqual(0);
+    // The stack must be down BEFORE the worktree directory goes away.
+    expect(downAt).toBeLessThan(deleteAt);
     expect(h.claude.killWorktreeSession).toHaveBeenCalledWith('a');
   });
+
+  it('warns when containers outlive the teardown instead of reporting success', async () => {
+    // A stack registered under a different compose project name than the one
+    // derived from the directory is invisible to `compose down` — which then
+    // succeeds having removed nothing.
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({
+      worktrees: [a],
+      confirmResult: 'Delete',
+      config: { docker: { composeFile: 'docker-compose.yml', overrideFile: '', ports: ['HTTP_PORT'], basePort: 20000, portStride: 100 } },
+      containersLeftAfterDown: [{ name: 'feat-a-web-1', state: 'running' }],
+    });
+
+    await h.service.deleteWorktree(a);
+
+    expect(h.notify.showWarning).toHaveBeenCalledWith(expect.stringContaining('left 1 container(s) running'));
+  });
+
+  it('says nothing when the stack really did come down', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({
+      worktrees: [a],
+      confirmResult: 'Delete',
+      config: { docker: { composeFile: 'docker-compose.yml', overrideFile: '', ports: ['HTTP_PORT'], basePort: 20000, portStride: 100 } },
+    });
+
+    await h.service.deleteWorktree(a);
+
+    expect(h.notify.showWarning).not.toHaveBeenCalled();
+  });
+
+  it('skips compose entirely when docker is not configured', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({ worktrees: [a], confirmResult: 'Delete' });
+
+    await h.service.deleteWorktree(a);
+
+    expect(h.calls.some((c) => c.startsWith('docker.runCompose'))).toBe(false);
+  });
+
 
   it('skips the teardown script when the worktree path is gone', async () => {
     const a = makeWorktree({ id: 'a' });
@@ -1682,56 +1729,64 @@ describe('deleteWorktree', () => {
   });
 
   it('flags the worktree as deleting during teardown and clears it when done', async () => {
-    vi.useFakeTimers();
     const a = makeWorktree({ id: 'a' });
     const h = makeHarness({
-      worktrees: [a],
-      confirmResult: 'Delete',
-      config: { teardownScript: '/scripts/teardown.sh' },
+      worktrees: [a], confirmResult: 'Delete',
+      config: { teardownScript: '/scripts/teardown.sh', docker: { composeFile: 'docker-compose.yml', overrideFile: '', ports: ['HTTP_PORT'], basePort: 20000, portStride: 100 } },
       existingPaths: [a.path],
     });
+    // Hold the delete on its one real await — the compose down.
+    let release!: () => void;
+    h.dockerMonitor.runCompose.mockReturnValue(new Promise<void>((r) => { release = r; }));
+
     const done = h.service.deleteWorktree(a);
-    await vi.advanceTimersByTimeAsync(0);
-    // mid-teardown (paused on the 2s wait): locked
+    await Promise.resolve();
+
     expect(h.service.buildState().worktrees[0].deleting).toBe(true);
-    await vi.advanceTimersByTimeAsync(2000);
+    release();
     await done;
     expect(h.service.buildState().worktrees[0].deleting).toBe(false);
   });
 
   it('ignores actions targeting a worktree that is tearing down', async () => {
-    vi.useFakeTimers();
     const a = makeWorktree({ id: 'a' });
     const h = makeHarness({
-      worktrees: [a],
-      confirmResult: 'Delete',
-      config: { teardownScript: '/scripts/teardown.sh' },
+      worktrees: [a], confirmResult: 'Delete',
+      config: { teardownScript: '/scripts/teardown.sh', docker: { composeFile: 'docker-compose.yml', overrideFile: '', ports: ['HTTP_PORT'], basePort: 20000, portStride: 100 } },
       existingPaths: [a.path],
     });
+    let release!: () => void;
+    h.dockerMonitor.runCompose.mockReturnValue(new Promise<void>((r) => { release = r; }));
+
     const done = h.service.deleteWorktree(a);
-    await vi.advanceTimersByTimeAsync(0); // now mid-teardown
+    await Promise.resolve();
+
     await h.service.handleMessage({ type: 'launchAgent', worktreeId: 'a' });
     await h.service.handleMessage({ type: 'openTerminal', worktreeId: 'a' });
     expect(h.claude.launch).not.toHaveBeenCalled();
     expect(h.claude.openTerminal).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(2000);
+
+    release();
     await done;
   });
 
   it('does not start a second teardown if delete is triggered again while tearing down', async () => {
-    vi.useFakeTimers();
     const a = makeWorktree({ id: 'a' });
     const h = makeHarness({
-      worktrees: [a],
-      confirmResult: 'Delete',
-      config: { teardownScript: '/scripts/teardown.sh' },
+      worktrees: [a], confirmResult: 'Delete',
+      config: { teardownScript: '/scripts/teardown.sh', docker: { composeFile: 'docker-compose.yml', overrideFile: '', ports: ['HTTP_PORT'], basePort: 20000, portStride: 100 } },
       existingPaths: [a.path],
     });
+    let release!: () => void;
+    h.dockerMonitor.runCompose.mockReturnValue(new Promise<void>((r) => { release = r; }));
+
     const done = h.service.deleteWorktree(a);
-    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+
     await h.service.deleteWorktree(a); // ignored — already deleting
     expect(h.notify.confirm).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(2000);
+
+    release();
     await done;
   });
 });

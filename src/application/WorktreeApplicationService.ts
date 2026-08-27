@@ -782,7 +782,27 @@ export class WorktreeApplicationService implements DiffPanelHost {
       const teardownScript = this.deps.config.get().teardownScript;
       if (teardownScript && this.deps.host.exists(wt.path)) {
         this.runScriptTerminal(wt, teardownScript, 'Teardown', 'Teardown complete');
-        await this.delay(2000);
+      }
+
+      // Bring the stack down ourselves, and WAIT for it.
+      //
+      // The teardown script goes to a terminal that cannot be awaited, and the
+      // two seconds it used to be given are far less than a single
+      // `compose down` — so `git worktree remove` pulled the directory out from
+      // under it and the containers outlived the worktree, holding their ports
+      // until someone noticed weeks later. This runs headless and is awaited,
+      // so deletion cannot outrun it.
+      if (this.deps.config.get().docker.ports.length > 0) {
+        await this.dockerDown(wt);
+        // Containers left standing mean the stack came up under a different
+        // compose project name than the one derived from this directory — say
+        // so, instead of reporting a clean teardown that removed nothing.
+        const left = await this.deps.dockerMonitor.refresh(composeProject(wt)).catch(() => []);
+        if (left.length > 0) {
+          this.deps.notify.showWarning(
+            `"${displayLabel(wt)}" left ${left.length} container(s) running. Its stack is registered under a different compose project — check \`docker compose ls\`.`,
+          );
+        }
       }
 
       await this.deps.agentManager.killWorktreeSession(wt.id);
