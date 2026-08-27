@@ -767,3 +767,34 @@ describe('create with a branch that exists only on the remote', () => {
     );
   });
 });
+
+describe('create hands the port back when it fails after allocating', () => {
+  it('releases the slot if the store rejects, and still propagates the error', async () => {
+    // The slot is held from the moment allocate() returns until it reaches the
+    // store. A creation that dies in between would otherwise sterilise that
+    // port for the rest of the session.
+    const allocator = makePortAllocatorStub(9899);
+    const store = makeStoreStub();
+    store.add = async () => { throw new Error('globalState write failed'); };
+    const git = makeGitStub();
+    const fsStub = makeFsStub();
+    fsStub.dirs.add('/repo/zer/feat-x');
+    const mgr = new WorktreeManager(store, allocator, makeConfigStub(), undefined, git, fsStub);
+
+    await expect(mgr.create('feat/x', REPO)).rejects.toThrow('globalState write failed');
+
+    expect(allocator.release).toHaveBeenCalledWith(9899);
+  });
+
+  it('does not release the slot when creation succeeds', async () => {
+    const allocator = makePortAllocatorStub(9899);
+    const git = makeGitStub();
+    const fsStub = makeFsStub();
+    fsStub.dirs.add('/repo/zer/feat-x');
+    const mgr = new WorktreeManager(makeStoreStub(), allocator, makeConfigStub(), undefined, git, fsStub);
+
+    await mgr.create('feat/x', REPO);
+
+    expect(allocator.release).not.toHaveBeenCalled();
+  });
+});

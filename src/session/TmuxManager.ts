@@ -43,15 +43,6 @@ export class TmuxManager implements ISessionManager {
     if (!(await this.hasSession(name))) {
       await this.run(`tmux new-session -d -s "${name}" -c "${cwd}"`);
     }
-    // Window names are Unmess's identity for a session: reconnect() classifies a
-    // window as an agent by matching its name against the provider ids. Left to
-    // its default, tmux renames a window after whatever command is running in
-    // it, and every agent window comes back as an unrecognised shell. Set on
-    // every call, not just on creation, so sessions that predate this are fixed
-    // too. Best-effort: an old tmux without the option must not block a launch.
-    try {
-      await this.run(`tmux set-option -t "${name}" automatic-rename off`);
-    } catch { /* not fatal — worst case the names drift, as they did before */ }
   }
 
   /** Creates a new window and returns its index. */
@@ -59,7 +50,19 @@ export class TmuxManager implements ISessionManager {
     const out = await this.run(
       `tmux new-window -t "${session}" -n "${name}" -c "${cwd}" -P -F "#{window_index}"`,
     );
-    return parseInt(out, 10);
+    const index = parseInt(out, 10);
+    // Pin the name we just gave it. Window names are Unmess's identity for a
+    // session — reconnect() decides a window holds an agent by matching its
+    // name against the provider ids — and tmux otherwise renames a window after
+    // whatever command is running in it, so every agent window would come back
+    // as an unrecognised shell. Set on the window itself: automatic-rename is a
+    // WINDOW option, and setting it on the session does not reliably reach
+    // windows created afterwards (it does not on the Linux runners).
+    // Best-effort, because a naming quirk must never block a launch.
+    try {
+      await this.run(`tmux set-window-option -t "${session}:${index}" automatic-rename off`);
+    } catch { /* worst case the name drifts, exactly as it did before */ }
+    return index;
   }
 
   async sendKeys(target: string, keys: string): Promise<void> {

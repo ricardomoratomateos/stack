@@ -23,6 +23,12 @@ export class PortAllocator {
   private store: PortRegistryReader;
   private basePort: number;
   private options: PortAllocatorOptions;
+  /**
+   * Slots handed out but not yet written to the store. Held here because the
+   * registry only learns about a worktree once it is added, which happens after
+   * allocate() returns — a window two concurrent creations both fit through.
+   */
+  private reserved = new Set<number>();
 
   constructor(store: PortRegistryReader, basePort: number, options: PortAllocatorOptions = {}) {
     this.store = store;
@@ -40,11 +46,21 @@ export class PortAllocator {
    * whole block is.
    */
   async allocate(): Promise<number> {
-    const taken = new Set(Object.values(this.store.getPortRegistry()));
+    const registry = new Set(Object.values(this.store.getPortRegistry()));
+    // Anything that reached the store no longer needs holding.
+    for (const p of this.reserved) if (registry.has(p)) this.reserved.delete(p);
+
     let port = this.basePort + 1;
     for (let tried = 0; tried < MAX_SLOTS; tried++, port++) {
-      if (taken.has(port)) continue;
+      if (registry.has(port) || this.reserved.has(port)) continue;
+      // Claim the candidate BEFORE probing it. The probe is async and the
+      // caller only writes to the store afterwards, so two creations started
+      // together used to read the same registry, probe the same free ports and
+      // be handed the same slot — two worktrees with one block of docker ports,
+      // failing minutes later inside `compose up`.
+      this.reserved.add(port);
       if ((await this.firstBusyPort(port)) === undefined) return port;
+      this.reserved.delete(port);
     }
     throw new Error(
       `No free port slot found in ${this.basePort + 1}..${this.basePort + MAX_SLOTS} — ` +
@@ -72,7 +88,12 @@ export class PortAllocator {
     return undefined;
   }
 
-  release(_port: number): void {
-    // ports are released automatically when the worktree is removed from the store
+  /**
+   * Drop a reservation for a slot that never made it into the store, so a
+   * failed creation does not sterilise the port until the window is reloaded.
+   * Ports of worktrees that DID get stored are released by removing them.
+   */
+  release(port: number): void {
+    this.reserved.delete(port);
   }
 }

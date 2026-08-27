@@ -137,22 +137,30 @@ export class WorktreeManager {
     }
 
     const xdebugPort = await this.portAllocator.allocate();
-    const worktree: Worktree = {
-      id: randomUUID(),
-      branch,
-      alias: alias || undefined,
-      path: worktreePath,
-      repoRoot,
-      xdebugPort,
-      dockerProjectName: branch.replace(/[^a-z0-9-]/gi, '-').toLowerCase(),
-      createdAt: Date.now(),
-    };
+    try {
+      const worktree: Worktree = {
+        id: randomUUID(),
+        branch,
+        alias: alias || undefined,
+        path: worktreePath,
+        repoRoot,
+        xdebugPort,
+        dockerProjectName: branch.replace(/[^a-z0-9-]/gi, '-').toLowerCase(),
+        createdAt: Date.now(),
+      };
 
-    this.generateLaunchJson(worktree);
-    this.generateSettingsJson(worktree);
-    await this.store.add(worktree);
+      this.generateLaunchJson(worktree);
+      this.generateSettingsJson(worktree);
+      await this.store.add(worktree);
 
-    return worktree;
+      return worktree;
+    } catch (e) {
+      // The slot is held from the moment it is handed out until it reaches the
+      // store. If we never get there, hand it back rather than sterilise it for
+      // the rest of the session.
+      this.portAllocator.release(xdebugPort);
+      throw e;
+    }
   }
 
   /** Register a Unmess entry for a git worktree that already exists on disk. */

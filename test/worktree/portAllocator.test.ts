@@ -65,14 +65,16 @@ describe('PortAllocator', () => {
       await expect(allocator.allocate()).resolves.toBe(9900);
     });
 
-    it('re-reads the registry on every call (same result until the registry changes)', async () => {
+    it('re-reads the registry on every call, and does not reissue a slot it just gave out', async () => {
       const registry: Record<string, number> = {};
       const allocator = new PortAllocator(stubStore(registry), 9898, FREE);
       await expect(allocator.allocate()).resolves.toBe(9899);
-      // allocate() does not record the port itself — the store does, on add()
-      await expect(allocator.allocate()).resolves.toBe(9899);
-      registry['/repo/zer/wt-a'] = 9899;
+      // It used to hand 9899 out again here, because the store had not been
+      // written yet — which is how two concurrent creations collided.
       await expect(allocator.allocate()).resolves.toBe(9900);
+      // Once stored, the registry keeps it taken on its own.
+      registry['/repo/zer/wt-a'] = 9899;
+      await expect(allocator.allocate()).resolves.toBe(9901);
     });
 
     // ── OS-level availability ────────────────────────────────────────────────
@@ -197,5 +199,68 @@ describe('PortAllocator', () => {
       expect(registry).toEqual({ '/repo/zer/wt-a': 9899 });
       await expect(allocator.allocate()).resolves.toBe(9900);
     });
+  });
+});
+
+describe('concurrent allocation', () => {
+  it('never hands the same slot to two callers started together', async () => {
+    // allocate() reads the registry, probes, and returns — but the caller only
+    // writes to the store afterwards. Two creations started together therefore
+    // read the same registry, probed the same free ports, and were handed the
+    // same slot: two worktrees sharing one block of docker ports, which fails
+    // minutes later inside `compose up`.
+    const allocator = new PortAllocator(stubStore({}), 9898, { config: stubConfig(), isPortFree: stubProbe() });
+
+    const [a, b, c] = await Promise.all([
+      allocator.allocate(),
+      allocator.allocate(),
+      allocator.allocate(),
+    ]);
+
+    expect(new Set([a, b, c]).size).toBe(3);
+  });
+
+  it('keeps holding a slot until it reaches the store', async () => {
+    const registry: Record<string, number> = {};
+    const allocator = new PortAllocator(stubStore(registry), 9898, { isPortFree: stubProbe() });
+
+    const first = await allocator.allocate();
+    const second = await allocator.allocate();
+
+    // Neither has been stored yet; the second must not reuse the first.
+    expect(second).not.toBe(first);
+  });
+
+  it('stops holding a slot once the store knows about it', async () => {
+    const registry: Record<string, number> = {};
+    const allocator = new PortAllocator(stubStore(registry), 9898, { isPortFree: stubProbe() });
+
+    const first = await allocator.allocate();
+    registry['/repo/zer/a'] = first; // the caller stored it
+
+    // The reservation is now redundant; the registry alone keeps it taken.
+    expect(await allocator.allocate()).not.toBe(first);
+  });
+
+  it('release hands a slot back when the creation that took it failed', async () => {
+    const allocator = new PortAllocator(stubStore({}), 9898, { isPortFree: stubProbe() });
+
+    const first = await allocator.allocate();
+    allocator.release(first);
+
+    expect(await allocator.allocate()).toBe(first);
+  });
+
+  it('does not hold a slot whose probe said busy', async () => {
+    // 9899's block is busy, so it is never handed out — and must not stay
+    // reserved either, or a transient conflict would burn the slot for good.
+    const busy = { current: true };
+    const allocator = new PortAllocator(stubStore({}), 9898, {
+      isPortFree: async (port: number) => !(port === 9899 && busy.current),
+    });
+
+    expect(await allocator.allocate()).toBe(9900);
+    busy.current = false;
+    expect(await allocator.allocate()).toBe(9899);
   });
 });
