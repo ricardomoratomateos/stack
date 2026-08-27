@@ -29,6 +29,11 @@ export interface IGitPort {
   branchExists(branch: string, repoRoot: string): boolean;
   /** The remote ref for a branch that has no local counterpart, e.g. "origin/foo". */
   remoteBranch(branch: string, repoRoot: string): string | undefined;
+  /**
+   * The repository's own main line — the first of main/master/develop that
+   * resolves, locally or on a remote. Undefined in a repo that has none.
+   */
+  mainBranch(repoRoot: string): string | undefined;
   /** `git branch --show-current`. Returns '' on detached HEAD, throws on git failure. */
   currentBranch(cwd: string): string;
   /**

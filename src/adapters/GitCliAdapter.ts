@@ -84,6 +84,18 @@ export class GitCliAdapter implements IGitPort {
     return undefined;
   }
 
+  /**
+   * The repository's own main line, so Unmess does not have to assume one.
+   * Reuses the same resolution the diff already relies on.
+   */
+  mainBranch(repoRoot: string): string | undefined {
+    const ref = this.resolveMainBranch(repoRoot, ['main', 'master', 'develop']);
+    // Strip the remote prefix: callers want a branch to start FROM, and
+    // `git worktree add -b x <path> origin/main` and `... main` differ only in
+    // which one exists locally.
+    return ref?.replace(/^origin\//, '');
+  }
+
   listBranches(repoRoot: string): string[] {
     try {
       // The format must be quoted: unquoted parentheses are shell syntax.

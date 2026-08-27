@@ -669,6 +669,13 @@ export class WorktreeApplicationService implements DiffPanelHost {
   private resolveBaseBranch(root: string): string {
     const configured = this.deps.config.get().defaultBaseBranch?.trim();
     if (configured && this.deps.git.branchExists(configured, root)) return configured;
+    // An empty setting (or one naming a branch this repo does not have) means
+    // "work it out": whichever of main/master/develop the repository actually
+    // uses. Shipping a hardcoded default is fine for the repo it was written
+    // for and wrong for everyone else's — this keeps the setting for people who
+    // want to pin it, without assuming a branching convention.
+    const main = this.deps.git.mainBranch(root);
+    if (main) return main;
     try { return this.deps.git.currentBranch(root); } catch { return ''; }
   }
 

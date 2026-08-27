@@ -244,6 +244,7 @@ function makeHarness(o: HarnessOpts = {}) {
     listBranches: vi.fn((): string[] => o.branches ?? []),
     // No remote counterpart unless a test says otherwise.
     remoteBranch: vi.fn((): string | undefined => undefined),
+    mainBranch: vi.fn((): string | undefined => undefined),
     // A branch "exists" when it is in the harness's branch list.
     branchExists: vi.fn((b: string): boolean => (o.branches ?? []).includes(b)),
   };
@@ -2567,5 +2568,55 @@ describe('deleteWorktree when git refuses', () => {
 
     // A failed delete must not leave the card frozen in "deleting" forever.
     expect(h.service.buildState().worktrees[0].deleting).toBe(false);
+  });
+});
+
+describe('defaultBaseBranch in a repo that does not use it', () => {
+  const root = '/repo';
+  function harness(o: HarnessOpts = {}) {
+    const h = makeHarness({ workspaceFolders: [root], gitDirs: ['/repo/.git'], ...o });
+    h.manager.create.mockResolvedValue(makeWorktree({ id: 'new' }));
+    return h;
+  }
+
+  it('uses the repo\'s own main line when the configured branch is absent', async () => {
+    // Shipping "develop" as the default is right for the repo this was written
+    // for and wrong for everyone else's. Rather than branch from whatever the
+    // checkout happens to be on, ask git which main line the repo actually has.
+    const h = harness({ config: { defaultBaseBranch: 'develop' }, branches: ['main'] });
+    h.git.mainBranch.mockReturnValue('main');
+    h.git.currentBranch.mockReturnValue('some-feature');
+
+    await h.service.createWorktree({ branch: 'feat/x' });
+
+    expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, undefined, 'main');
+  });
+
+  it('works it out when the setting is empty', async () => {
+    const h = harness({ config: { defaultBaseBranch: '' }, branches: ['master'] });
+    h.git.mainBranch.mockReturnValue('master');
+
+    await h.service.createWorktree({ branch: 'feat/x' });
+
+    expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, undefined, 'master');
+  });
+
+  it('still prefers the configured branch when the repo has it', async () => {
+    const h = harness({ config: { defaultBaseBranch: 'develop' }, branches: ['develop', 'main'] });
+    h.git.mainBranch.mockReturnValue('main');
+
+    await h.service.createWorktree({ branch: 'feat/x' });
+
+    expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, undefined, 'develop');
+  });
+
+  it('falls back to the current branch in a repo with no main line at all', async () => {
+    const h = harness({ config: { defaultBaseBranch: '' }, branches: [] });
+    h.git.mainBranch.mockReturnValue(undefined);
+    h.git.currentBranch.mockReturnValue('only-branch');
+
+    await h.service.createWorktree({ branch: 'feat/x' });
+
+    expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, undefined, 'only-branch');
   });
 });

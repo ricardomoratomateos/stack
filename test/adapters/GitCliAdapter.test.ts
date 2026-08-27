@@ -392,3 +392,50 @@ describe('GitCliAdapter.remoteBranch (integration, real remote)', () => {
     expect(fs.existsSync(path.join(wtPath, 'b.txt'))).toBe(true);
   });
 });
+
+describe('GitCliAdapter.mainBranch (integration)', () => {
+  it('finds the repo\'s own main line', () => {
+    // The test repo is initialised on `main`.
+    expect(new GitCliAdapter().mainBranch(repo)).toBe('main');
+  });
+
+  it('strips the remote prefix, so the caller gets a branch to start from', () => {
+    // A fresh clone has origin/main but no local main until something checks it
+    // out; `worktree add -b x <path> main` and `... origin/main` differ only in
+    // which one exists locally, and the caller wants the plain name.
+    const t = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-mainbr-')));
+    try {
+      const bare = path.join(t, 'origin.git');
+      execSync(`git init --bare -b main "${bare}"`, { stdio: 'pipe' });
+      const seed = path.join(t, 'seed');
+      execSync(`git clone "${bare}" "${seed}"`, { stdio: 'pipe' });
+      const g = (c: string) => execSync(`git ${c}`, { cwd: seed, stdio: 'pipe' });
+      g('config user.email "t@unmess.dev"');
+      g('config user.name "T"');
+      g('config commit.gpgsign false');
+      fs.writeFileSync(path.join(seed, 'a.txt'), 'a\n');
+      g('add .');
+      g('commit -m init');
+      g('push -u origin main');
+
+      expect(new GitCliAdapter().mainBranch(seed)).toBe('main');
+    } finally {
+      fs.rmSync(t, { recursive: true, force: true });
+    }
+  });
+
+  it('returns undefined in a repo with no main line at all', () => {
+    const t = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-nomain-')));
+    try {
+      execSync('git init -b only-this', { cwd: t, stdio: 'pipe' });
+      execSync('git config user.email "t@unmess.dev"', { cwd: t, stdio: 'pipe' });
+      execSync('git config user.name "T"', { cwd: t, stdio: 'pipe' });
+      execSync('git config commit.gpgsign false', { cwd: t, stdio: 'pipe' });
+      execSync('git commit --allow-empty -m init', { cwd: t, stdio: 'pipe' });
+
+      expect(new GitCliAdapter().mainBranch(t)).toBeUndefined();
+    } finally {
+      fs.rmSync(t, { recursive: true, force: true });
+    }
+  });
+});
