@@ -97,10 +97,16 @@ describe('command construction', () => {
     await expect(tmux.hasSession('s1')).resolves.toBe(false);
   });
 
-  it('ensureSession does nothing when the session exists', async () => {
+  it('does not recreate an existing session, but still pins its window names', async () => {
+    // automatic-rename is set on EVERY call, not just on creation: sessions
+    // created before this existed would otherwise keep drifting, and a drifted
+    // name makes reconnect() read an agent window as an unrecognised shell.
     const calls = captureExec(() => ({}));
     await tmux.ensureSession('s1', '/some/cwd');
-    expect(calls).toEqual(['tmux has-session -t "s1" 2>/dev/null']);
+    expect(calls).toEqual([
+      'tmux has-session -t "s1" 2>/dev/null',
+      'tmux set-option -t "s1" automatic-rename off',
+    ]);
   });
 
   it('ensureSession creates a detached session with -c cwd when missing', async () => {
@@ -109,7 +115,18 @@ describe('command construction', () => {
     expect(calls).toEqual([
       'tmux has-session -t "s1" 2>/dev/null',
       'tmux new-session -d -s "s1" -c "/some/cwd"',
+      'tmux set-option -t "s1" automatic-rename off',
     ]);
+  });
+
+  it('still creates the session when tmux rejects automatic-rename', async () => {
+    // An old tmux without the option must not block a launch.
+    const calls = captureExec(cmd =>
+      cmd.startsWith('tmux has-session') ? { err: new Error('nope') }
+      : cmd.includes('automatic-rename') ? { err: new Error('unknown option') }
+      : {});
+    await expect(tmux.ensureSession('s1', '/some/cwd')).resolves.toBeUndefined();
+    expect(calls).toContain('tmux new-session -d -s "s1" -c "/some/cwd"');
   });
 
   it('newWindow passes name/cwd and parses the printed window index (trimmed)', async () => {

@@ -69,7 +69,21 @@ export class GitWatcher {
   private handlers: ChangeHandler[] = [];
   private statusCache = new Map<string, GitStatus>();
 
-  constructor(private readonly fetchStatusFn: FetchStatusFn = fetchStatus) {}
+  constructor(
+    private readonly fetchStatusFn: FetchStatusFn = fetchStatus,
+    /**
+     * Injected so tests can drive the debounce without a real watcher.
+     *
+     * The debounce tests used to install a genuine fs.watch over a temp repo and
+     * invoke the captured listener by hand — but the same listener kept
+     * receiving real FSEvents, each one re-arming the timer. That made them fail
+     * in both directions (a refresh too many, or the window pushed past the
+     * advanced time), and only under load: `npm test` passed while
+     * `npm run test:coverage` did not, because v8 instrumentation moved the
+     * latency just enough. The coverage gate therefore never got evaluated.
+     */
+    private readonly watchFn: typeof fs.watch = fs.watch,
+  ) {}
 
   watch(worktreePath: string): void {
     if (this.watchers.has(worktreePath)) return;
@@ -79,7 +93,7 @@ export class GitWatcher {
 
     const fsWatchers: fs.FSWatcher[] = [];
 
-    const wtWatcher = fs.watch(worktreePath, { recursive: true }, (_, filename) => {
+    const wtWatcher = this.watchFn(worktreePath, { recursive: true }, (_, filename) => {
       if (!filename || shouldIgnore(filename)) return;
       // File changes: debounce 10s — git status badges don't need sub-second updates
       // Git index changes: debounce 3s — staging/committing should reflect a bit faster
@@ -94,7 +108,7 @@ export class GitWatcher {
       if (match?.[1]) {
         const realGitDir = match[1].trim();
         if (fs.existsSync(realGitDir)) {
-          const gitDirWatcher = fs.watch(realGitDir, { recursive: true }, (_, filename) => {
+          const gitDirWatcher = this.watchFn(realGitDir, { recursive: true }, (_, filename) => {
             if (!filename || shouldIgnore(filename)) return;
             this.scheduleRefresh(worktreePath, 3000);
           });

@@ -13,9 +13,30 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
+
+      # tmux is not preinstalled on ubuntu-latest. Without it the integration
+      # tests silently skip (it.runIf) and the run reports green having never
+      # talked to tmux at all — which is how a real tmux behaviour difference
+      # would reach main unnoticed.
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+      - run: tmux -V
+
       - run: npm ci
-      - run: npx tsc --noEmit
-      - run: npm test
+
+      # Both configs: tsconfig.json covers the extension host, and
+      # tsconfig.webview.json the React views. The webview one already existed
+      # but no script or job had ever invoked it, so every line of it was
+      # effectively unchecked.
+      - run: npm run typecheck
+
+      # No lint step: `npm run lint` has never been runnable — there is no
+      # ESLint config anywhere in the repo, so the script fails before linting
+      # a single file. Adding one (and fixing whatever it finds) is its own job.
+
+      # test:coverage, not test — `vitest run` ignores the 100% thresholds
+      # declared in vitest.config.ts, so the gate was decorative.
+      - run: npm run test:coverage
+
       - run: npm run compile

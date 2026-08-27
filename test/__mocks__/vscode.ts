@@ -22,8 +22,20 @@ export class EventEmitter<T> {
 }
 
 // ── Uri ──────────────────────────────────────────────────────────────────────
+/**
+ * Structurally complete enough to be passed where a real `vscode.Uri` is
+ * expected. Only `scheme`/`fsPath` carry behaviour — the rest exist so the
+ * tests type-check against the real signatures instead of only running.
+ */
 export class Uri {
+  readonly authority = '';
+  readonly query = '';
+  readonly fragment = '';
+
   constructor(public scheme: string, public fsPath: string) {}
+
+  get path(): string { return this.fsPath; }
+
   static file(p: string): Uri { return new Uri('file', p); }
   static parse(value: string): Uri {
     const [scheme, rest] = value.split('://');
@@ -32,7 +44,11 @@ export class Uri {
   static joinPath(base: Uri, ...parts: string[]): Uri {
     return new Uri(base.scheme, [base.fsPath, ...parts].join('/'));
   }
+  with(change: { scheme?: string; path?: string }): Uri {
+    return new Uri(change.scheme ?? this.scheme, change.path ?? this.fsPath);
+  }
   toString(): string { return `${this.scheme}://${this.fsPath}`; }
+  toJSON(): unknown { return { scheme: this.scheme, path: this.fsPath }; }
 }
 
 // ── Enums / value types ──────────────────────────────────────────────────────

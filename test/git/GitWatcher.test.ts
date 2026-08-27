@@ -62,6 +62,28 @@ function makeWatcher(fetchFn?: (worktreePath: string) => Promise<GitStatus>): Gi
   return w;
 }
 
+/**
+ * A GitWatcher whose file watching emits ONLY what the test emits.
+ *
+ * These tests used to capture the listener from a real fs.watch over a temp
+ * directory, then invoke it by hand — but that same listener kept receiving
+ * genuine FSEvents, and each one re-armed the debounce. They failed in both
+ * directions (one refresh too many, or the window pushed past the advanced
+ * time) and only under load: `npm test` passed while `npm run test:coverage`
+ * did not, because v8 instrumentation shifted the latency just enough. The
+ * coverage gate was therefore never reached.
+ */
+function makeDebounceWatcher(fetchFn: (worktreePath: string) => Promise<GitStatus>) {
+  const listeners: Array<(event: string, filename: string | null) => void> = [];
+  const watchFn = ((_p: unknown, _o: unknown, listener: (e: string, f: string | null) => void) => {
+    listeners.push(listener);
+    return { close: () => {} } as unknown as fs.FSWatcher;
+  }) as unknown as typeof fs.watch;
+  const w = new GitWatcher(fetchFn, watchFn);
+  activeWatchers.push(w);
+  return { w, listeners };
+}
+
 afterEach(() => {
   for (const w of activeWatchers.splice(0)) w.dispose();
 });
@@ -225,18 +247,14 @@ describe('debounce', () => {
     vi.useRealTimers();
   });
 
-  function listenerFor(callIndex: number): WatchListener {
-    return watchSpy.mock.calls[callIndex][2] as unknown as WatchListener;
-  }
-
   it('coalesces rapid file events into one refresh (~10s)', async () => {
     const fetchFn = vi.fn(async () => STATUS_A);
     const repo = makeFakeRepo();
-    const w = makeWatcher(fetchFn);
+    const { w, listeners } = makeDebounceWatcher(fetchFn);
     w.watch(repo);
     await vi.advanceTimersByTimeAsync(0);
     expect(fetchFn).toHaveBeenCalledTimes(1); // immediate refresh on watch()
-    const listener = listenerFor(0);
+    const listener = listeners[0];
 
     listener('change', 'src/a.ts');
     listener('change', 'src/b.ts');
@@ -250,10 +268,10 @@ describe('debounce', () => {
   it('resets the pending window on every event (trailing debounce)', async () => {
     const fetchFn = vi.fn(async () => STATUS_A);
     const repo = makeFakeRepo();
-    const w = makeWatcher(fetchFn);
+    const { w, listeners } = makeDebounceWatcher(fetchFn);
     w.watch(repo);
     await vi.advanceTimersByTimeAsync(0);
-    const listener = listenerFor(0);
+    const listener = listeners[0];
 
     listener('change', 'src/a.ts');
     await vi.advanceTimersByTimeAsync(9000);
@@ -267,10 +285,10 @@ describe('debounce', () => {
   it('git index changes (.git, .git/index*, .git/HEAD*) refresh faster (~3s)', async () => {
     const fetchFn = vi.fn(async () => STATUS_A);
     const repo = makeFakeRepo();
-    const w = makeWatcher(fetchFn);
+    const { w, listeners } = makeDebounceWatcher(fetchFn);
     w.watch(repo);
     await vi.advanceTimersByTimeAsync(0);
-    const listener = listenerFor(0);
+    const listener = listeners[0];
 
     for (const name of ['.git', '.git/index', '.git/index.lock', '.git/HEAD']) {
       fetchFn.mockClear();
@@ -285,11 +303,11 @@ describe('debounce', () => {
   it('a git index event supersedes a pending 10s file timer with the 3s window', async () => {
     const fetchFn = vi.fn(async () => STATUS_A);
     const repo = makeFakeRepo();
-    const w = makeWatcher(fetchFn);
+    const { w, listeners } = makeDebounceWatcher(fetchFn);
     w.watch(repo);
     await vi.advanceTimersByTimeAsync(0);
     fetchFn.mockClear();
-    const listener = listenerFor(0);
+    const listener = listeners[0];
 
     listener('change', 'src/a.ts'); // 10s timer
     await vi.advanceTimersByTimeAsync(5000);
@@ -301,11 +319,11 @@ describe('debounce', () => {
   it('ignored and falsy filenames never schedule a refresh', async () => {
     const fetchFn = vi.fn(async () => STATUS_A);
     const repo = makeFakeRepo();
-    const w = makeWatcher(fetchFn);
+    const { w, listeners } = makeDebounceWatcher(fetchFn);
     w.watch(repo);
     await vi.advanceTimersByTimeAsync(0);
     fetchFn.mockClear();
-    const listener = listenerFor(0);
+    const listener = listeners[0];
 
     listener('change', 'node_modules/x.js');
     listener('change', '.git/objects/ab/cd');
@@ -318,7 +336,7 @@ describe('debounce', () => {
   it('refresh notifies onChange handlers and populates the cache', async () => {
     const fetchFn = vi.fn(async () => STATUS_A);
     const repo = makeFakeRepo();
-    const w = makeWatcher(fetchFn);
+    const { w, listeners } = makeDebounceWatcher(fetchFn);
     const seen: Array<[string, GitStatus]> = [];
     w.onChange((p, s) => seen.push([p, s]));
     w.watch(repo);
@@ -331,7 +349,7 @@ describe('debounce', () => {
   it('a rejected fetch is swallowed: no handler call, cache untouched', async () => {
     const fetchFn = vi.fn(async () => { throw new Error('boom'); });
     const repo = makeFakeRepo();
-    const w = makeWatcher(fetchFn);
+    const { w, listeners } = makeDebounceWatcher(fetchFn);
     const handler = vi.fn();
     w.onChange(handler);
     w.watch(repo);

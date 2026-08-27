@@ -188,21 +188,35 @@ describe('push', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('message dispatch', () => {
-  it.each([
-    { type: 'launchClaude', worktreeId: 'a' },
-    { type: 'pickAgent', worktreeId: 'a' },
-    { type: 'openTerminal', worktreeId: 'a' },
-    { type: 'focusTerminal', worktreeId: 'a' },
-    { type: 'focusSession', worktreeId: 'a', kind: 'claude', index: 1 },
-    { type: 'killSession', worktreeId: 'a', index: 1 },
-    { type: 'dockerUp', worktreeId: 'a' },
-    { type: 'dockerDown', worktreeId: 'a' },
-    { type: 'deleteWorktree', worktreeId: 'a' },
-    { type: 'renameWorktree', worktreeId: 'a' },
-    { type: 'initWorktree', worktreeId: 'a' },
-    { type: 'createWorktree', branch: 'b' },
-    { type: 'selectWorktree', worktreeId: 'a' },
-  ] as WebMessage[])('delegates $type to the application service', async (msg) => {
+  // Keyed by WebMessage['type'], so removing or renaming a message is a
+  // compile error here rather than a case that quietly keeps passing. Three of
+  // these used to reference `launchClaude`, `pickAgent` and a `focusSession`
+  // with kind 'claude' — none of which had existed in the protocol for a while.
+  // The `as WebMessage[]` cast hid it and the assertion only checked blind
+  // forwarding, so thirteen cases stayed green against an API that was gone.
+  const SAMPLES: { [K in WebMessage['type']]: Extract<WebMessage, { type: K }> } = {
+    ready: { type: 'ready' },
+    launchAgent: { type: 'launchAgent', worktreeId: 'a' },
+    pickDefaultProvider: { type: 'pickDefaultProvider' },
+    showProviderInstall: { type: 'showProviderInstall', provider: 'claude' },
+    openTerminal: { type: 'openTerminal', worktreeId: 'a' },
+    focusTerminal: { type: 'focusTerminal', worktreeId: 'a' },
+    focusSession: { type: 'focusSession', worktreeId: 'a', kind: 'agent', index: 1 },
+    killSession: { type: 'killSession', worktreeId: 'a', index: 1 },
+    reorderSessions: { type: 'reorderSessions', worktreeId: 'a', orderedIndexes: [1] },
+    reorderWorktrees: { type: 'reorderWorktrees', orderedIds: ['a'] },
+    dockerUp: { type: 'dockerUp', worktreeId: 'a' },
+    dockerDown: { type: 'dockerDown', worktreeId: 'a' },
+    deleteWorktree: { type: 'deleteWorktree', worktreeId: 'a' },
+    renameWorktree: { type: 'renameWorktree', worktreeId: 'a' },
+    initWorktree: { type: 'initWorktree', worktreeId: 'a' },
+    createWorktree: { type: 'createWorktree', branch: 'b' },
+    selectWorktree: { type: 'selectWorktree', worktreeId: 'a' },
+    listBranches: { type: 'listBranches' },
+    openDiff: { type: 'openDiff', worktreeId: 'a' },
+  };
+
+  it.each(Object.values(SAMPLES))('delegates $type to the application service', async (msg) => {
     const h = makeHarness();
     const { onMessage } = resolve(h);
     onMessage(msg);

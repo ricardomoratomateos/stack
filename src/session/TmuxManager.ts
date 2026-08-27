@@ -43,6 +43,15 @@ export class TmuxManager implements ISessionManager {
     if (!(await this.hasSession(name))) {
       await this.run(`tmux new-session -d -s "${name}" -c "${cwd}"`);
     }
+    // Window names are Unmess's identity for a session: reconnect() classifies a
+    // window as an agent by matching its name against the provider ids. Left to
+    // its default, tmux renames a window after whatever command is running in
+    // it, and every agent window comes back as an unrecognised shell. Set on
+    // every call, not just on creation, so sessions that predate this are fixed
+    // too. Best-effort: an old tmux without the option must not block a launch.
+    try {
+      await this.run(`tmux set-option -t "${name}" automatic-rename off`);
+    } catch { /* not fatal — worst case the names drift, as they did before */ }
   }
 
   /** Creates a new window and returns its index. */
