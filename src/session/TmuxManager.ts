@@ -127,8 +127,20 @@ export class TmuxManager implements ISessionManager {
   }
 
   async listWindows(session: string): Promise<Array<{ index: number; name: string; title: string }>> {
-    // \x01 separator: window names and pane titles may contain spaces.
-    const SEP = '\x01';
+    // A PRINTABLE separator, deliberately.
+    //
+    // This used to be \x01, guarded by forcing a UTF-8 locale — because under
+    // the C locale tmux replaces every non-printable byte of its output with
+    // '_'. That guard is not reliable: the locale must exist on the machine
+    // (en_US.UTF-8 usually does not on Linux) and, worse, it is the tmux
+    // SERVER's locale that formats the output, and the server may already be
+    // running from an earlier command. When it failed, the damage was silent:
+    // parseInt still read the leading digits so the index looked right, while
+    // name and title came back empty — every agent window then classified as an
+    // unrecognised shell, which is what reconnect() uses to find agents.
+    // Printable ASCII survives any locale, so the parse no longer has a way to
+    // half-fail.
+    const SEP = '|:unmess:|';
     try {
       const out = await this.run(
         `tmux list-windows -t "${session}" -F "#{window_index}${SEP}#{window_name}${SEP}#{pane_title}"`,

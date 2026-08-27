@@ -123,22 +123,65 @@ export class AgentSessionManager {
     return title;
   }
 
-  /** Re-read tmux pane titles for a worktree's tracked agent windows. */
-  async refreshTitles(worktreeId: string): Promise<void> {
+  /**
+   * Reconcile a worktree's session list against what tmux actually has.
+   *
+   * The window map used to be written only when Unmess itself acted — launch,
+   * openTerminal, killWindow — so everything else that happens to a window was
+   * invisible: a window the user closed with `exit` stayed on the card forever
+   * as a session that could not be focused or killed, and an agent started in a
+   * window Unmess never opened did not exist at all.
+   *
+   * Deliberately conservative in what it adopts: only windows whose name
+   * identifies a provider. Adopting every unknown window would surface the
+   * session's own initial shell (window 0, an artefact of `new-session`) as a
+   * session row nobody asked for.
+   */
+  async syncWindows(worktreeId: string): Promise<void> {
     const map = this.windows.get(worktreeId);
-    if (!map || map.size === 0) return;
+    if (!map) return;
     const tmuxWindows = await this.tmux.listWindows(TmuxManager.sessionName(worktreeId));
+    // An empty list means tmux failed or the session is gone — both return []
+    // from listWindows. Pruning on that would wipe every session on a transient
+    // error, so treat it as "no information" rather than "nothing is there".
+    if (tmuxWindows.length === 0) return;
+
     let changed = false;
+    const live = new Set(tmuxWindows.map((w) => w.index));
+
+    for (const index of [...map.keys()]) {
+      if (!live.has(index)) {
+        map.delete(index);
+        changed = true;
+      }
+    }
+
     for (const w of tmuxWindows) {
-      const meta = map.get(w.index);
-      if (!meta || meta.kind !== 'agent') continue;
+      let meta = map.get(w.index);
+      if (!meta) {
+        const provider = providerForWindowName(w.name);
+        if (!provider) continue; // not ours to adopt
+        meta = { kind: 'agent', provider, state: 'waiting', name: w.name };
+        map.set(w.index, meta);
+        changed = true;
+      }
+      if (meta.kind !== 'agent') continue;
       const title = this.cleanTitle(w.title, meta.name);
       if (title !== meta.title) {
         map.set(w.index, { ...meta, title });
         changed = true;
       }
     }
-    if (changed) this.terminalsChangeEmitter.fire();
+
+    if (changed) {
+      this.persistState(worktreeId);
+      this.terminalsChangeEmitter.fire();
+    }
+  }
+
+  /** @deprecated Kept as the old name; syncWindows does this and more. */
+  async refreshTitles(worktreeId: string): Promise<void> {
+    return this.syncWindows(worktreeId);
   }
 
 

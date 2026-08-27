@@ -189,19 +189,19 @@ describe('command construction', () => {
     expect(calls).toEqual(['tmux kill-window -t "s1:2"']);
   });
 
-  it('listWindows parses \\x01-separated index/name/title lines, keeping spaces in names and titles', async () => {
+  it('listWindows parses separator-delimited index/name/title lines, keeping spaces in names and titles', async () => {
     const calls = captureExec(() => ({
-      stdout: '0\x01zsh\x01my-host.local\n1\x01claude\x01⠂ Fix login flow bug\n2\x01my window name\x01\n',
+      stdout: '0|:unmess:|zsh|:unmess:|my-host.local\n1|:unmess:|claude|:unmess:|⠂ Fix login flow bug\n2|:unmess:|my window name|:unmess:|\n',
     }));
     await expect(tmux.listWindows('s1')).resolves.toEqual([
       { index: 0, name: 'zsh', title: 'my-host.local' },
       { index: 1, name: 'claude', title: '⠂ Fix login flow bug' },
       { index: 2, name: 'my window name', title: '' },
     ]);
-    expect(calls).toEqual(['tmux list-windows -t "s1" -F "#{window_index}\x01#{window_name}\x01#{pane_title}"']);
+    expect(calls).toEqual(['tmux list-windows -t "s1" -F "#{window_index}|:unmess:|#{window_name}|:unmess:|#{pane_title}"']);
   });
 
-  it('run() forces a UTF-8 locale — the extension host has no LANG, and C-locale tmux mangles \\x01 and non-ASCII titles to "_"', async () => {
+  it('run() forces a UTF-8 locale — the extension host has no LANG, and C-locale tmux mangles non-ASCII titles to "_"', async () => {
     captureExec(() => ({}));
     await tmux.hasSession('s1');
     expect(execOptsSeen).toHaveLength(1);
@@ -287,7 +287,7 @@ describe('utf8LocaleFor', () => {
 
   it('uses C.UTF-8 everywhere else — en_US.UTF-8 is often not generated on Linux', () => {
     // Setting LC_ALL to a locale the system lacks leaves the process in C, and
-    // C-locale tmux replaces the \x01 field separator with '_'.
+    // C-locale tmux replaces non-ASCII bytes with '_'.
     expect(utf8LocaleFor('linux')).toBe('C.UTF-8');
     expect(utf8LocaleFor('win32')).toBe('C.UTF-8');
   });

@@ -947,16 +947,68 @@ describe('session titles', () => {
     expect(getTerminalsChanges()).toBe(2);
   });
 
-  it('ignores shell windows and tmux windows not in the tracked map', async () => {
-    const { mgr, stub, getTerminalsChanges } = create();
+  it('leaves shell windows untitled, but ADOPTS an untracked agent window', async () => {
+    // A window Unmess did not open — the user pressed Ctrl-b c and started an
+    // agent — used to be invisible: the map was only ever written when Unmess
+    // itself acted. Adoption is limited to windows whose name identifies a
+    // provider, so the session's own initial shell never becomes a row.
+    const { mgr, stub } = create();
     seed(mgr, 'wt-1', [[2, { kind: 'shell', state: 'idle', name: 'shell' }]]);
     (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
       { index: 2, name: 'shell', title: 'some shell title' },
       { index: 9, name: 'claude', title: 'untracked window' },
     ]);
-    await mgr.refreshTitles('wt-1');
-    expect(mgr.getSessions('wt-1')[0].title).toBeUndefined();
-    expect(getTerminalsChanges()).toBe(0);
+
+    await mgr.syncWindows('wt-1');
+
+    const byIndex = Object.fromEntries(mgr.getSessions('wt-1').map((s) => [s.index, s]));
+    expect(byIndex[2].title).toBeUndefined();       // still a shell
+    expect(byIndex[9].kind).toBe('agent');
+    expect(byIndex[9].provider).toBe('claude');
+    expect(byIndex[9].title).toBe('untracked window');
+  });
+
+  it('does not adopt a window whose name is not a provider', async () => {
+    // Window 0 is an artefact of `new-session`; surfacing it would put a
+    // session row on every card that nobody asked for.
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 0, name: 'zsh', title: 'my-host.local' },
+      { index: 1, name: 'claude', title: 'working' },
+    ]);
+
+    await mgr.syncWindows('wt-1');
+
+    expect(mgr.getSessions('wt-1').map((s) => s.index)).toEqual([1]);
+  });
+
+  it('drops a window tmux no longer has, so a closed session stops haunting the card', async () => {
+    // `exit` inside a window left a row that could not be focused or killed.
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [
+      [1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
+      [2, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
+    ]);
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'claude', title: 'still here' },
+    ]);
+
+    await mgr.syncWindows('wt-1');
+
+    expect(mgr.getSessions('wt-1').map((s) => s.index)).toEqual([1]);
+  });
+
+  it('prunes nothing when tmux returns nothing — that is an error, not an empty session', async () => {
+    // listWindows returns [] both when the session is gone AND when the command
+    // failed. Pruning on that would wipe every session on a transient error.
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    await mgr.syncWindows('wt-1');
+
+    expect(mgr.getSessions('wt-1')).toHaveLength(1);
   });
 
   it('refreshTitles early-returns without querying tmux when nothing is tracked', async () => {
