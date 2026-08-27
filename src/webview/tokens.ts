@@ -50,7 +50,6 @@ export const T = {
   // header beside these uses. Swapping it for plain `foreground` made ours the
   // bright one instead — the mismatch just pointed the other way.
   sectionHeaderFg: 'var(--vscode-sideBarSectionHeader-foreground, var(--vscode-foreground))',
-  sectionHeaderBg: 'var(--vscode-sideBarSectionHeader-background, transparent)',
   titleFg:         'var(--vscode-sideBarTitle-foreground, var(--vscode-foreground))',
 } as const;
 
@@ -128,4 +127,16 @@ input, textarea { font-family: inherit; font-size: inherit; }
 }
 /* A dimmed row is not launchable; say so with the cursor before the click. */
 .u-menu-item[data-disabled='true'] { cursor: help; }
+
+/* Collapsible section headers.
+
+   No background of their own, and a hover highlight instead — which is what the
+   native pane header beside these does. sideBarSectionHeader-background is a
+   real, visible fill in most themes (it is meant for the headers of *stacked*
+   views, which do sit on a band), so painting it here put a grey bar under
+   AGENTS / GIT / DOCKER next to a transparent "Screenshot Drop", and ours were
+   the only ones that did not light up under the pointer. Those two together were
+   the giveaway, not the type. */
+.u-section-header { background: transparent; }
+.u-section-header:hover { background: var(--vscode-list-hoverBackground); }
 `;

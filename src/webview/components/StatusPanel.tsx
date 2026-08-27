@@ -324,13 +324,16 @@ function Section({ label, hint, collapsed, onToggle, children }: {
     <div style={{ borderBottom: `1px solid ${T.borderLight}` }}>
       <button
         onClick={onToggle}
+        // Background and hover live in GLOBAL_CSS: :hover cannot be expressed
+        // inline, and the two belong together.
+        className="u-section-header"
         style={{
           width: '100%', display: 'flex', alignItems: 'center', gap: 2,
           // Left padding aligns our chevron with the native view header's
           // twistie below; the webview's content starts at the pane's edge,
           // where a real pane header is already inset.
           height: 22, padding: '0 12px 0 10px',
-          background: T.sectionHeaderBg, border: 'none',
+          border: 'none',
           cursor: 'pointer', textAlign: 'left',
         }}
       >
