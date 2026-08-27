@@ -58,6 +58,8 @@ interface HarnessOpts {
   sessions?: SessionItem[];
   /** unified diff returned by git.diff */
   diffOutput?: string;
+  /** Make git.fetchBranch reject, as a repo with no remote would. */
+  fetchFails?: boolean;
   /** what agentManager.sendPromptToAgent resolves to (a live agent existed) */
   liveAgentAccepts?: boolean;
   /** persisted worktree display order (ids) */
@@ -216,8 +218,9 @@ function makeHarness(o: HarnessOpts = {}) {
   };
 
   const gitWatcher = {
-    watch: vi.fn((p: string) => { calls.push(`gitWatcher.watch:${p}`); }),
+    watch: vi.fn((p: string, base?: string) => { calls.push(`gitWatcher.watch:${p}${base ? `:${base}` : ''}`); }),
     unwatch: vi.fn((p: string) => { calls.push(`gitWatcher.unwatch:${p}`); }),
+    refreshNow: vi.fn(async (p: string) => { calls.push(`gitWatcher.refreshNow:${p}`); }),
     getStatus: vi.fn(() => ({ hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 })),
   };
   const dockerMonitor = {
@@ -248,6 +251,10 @@ function makeHarness(o: HarnessOpts = {}) {
     mainBranch: vi.fn((): string | undefined => undefined),
     // A branch "exists" when it is in the harness's branch list.
     branchExists: vi.fn((b: string): boolean => (o.branches ?? []).includes(b)),
+    fetchBranch: vi.fn(async (cwd: string, remote: string, branch: string) => {
+      calls.push(`git.fetchBranch:${cwd}:${remote}/${branch}`);
+      if (o.fetchFails) throw new Error('no such remote');
+    }),
   };
   const globalState = {
     get: vi.fn(<T,>(k: string): T | undefined => {
@@ -2676,3 +2683,95 @@ describe('worktree ports', () => {
     expect(h.host.openExternal).toHaveBeenCalledWith('http://localhost:20200');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Drift against the base branch
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('base-branch drift', () => {
+  it('watches a worktree against the base it was cut from', async () => {
+    // Recorded at creation, so it survives the setting moving on afterwards.
+    const a = makeWorktree({ id: 'a', branch: 'feat/a', baseBranch: 'release/3.2' });
+    const h = makeHarness({ worktrees: [a], workspaceFolders: ['/repo'] });
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.calls).toContain(`gitWatcher.watch:${a.path}:release/3.2`);
+  });
+
+  it('falls back to the configured base for a worktree with no record of one', async () => {
+    // Adopted from git, or created before the base was stored.
+    const a = makeWorktree({ id: 'a', branch: 'feat/a' });
+    const h = makeHarness({
+      worktrees: [a],
+      workspaceFolders: ['/repo'],
+      config: { defaultBaseBranch: 'develop' },
+      branches: ['develop'],
+    });
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.calls).toContain(`gitWatcher.watch:${a.path}:develop`);
+  });
+
+  it('measures nothing for the main worktree', async () => {
+    const main = makeWorktree({ id: 'm', path: '/repo', branch: 'develop', isMain: true });
+    const h = makeHarness({ worktrees: [main], workspaceFolders: ['/repo'], branches: ['develop'] });
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.calls).toContain('gitWatcher.watch:/repo');
+    expect(h.calls).not.toContain('gitWatcher.watch:/repo:develop');
+  });
+
+  it('measures nothing for a worktree sitting on the base itself', async () => {
+    // A row of zeroes against your own branch is noise, not information.
+    const a = makeWorktree({ id: 'a', branch: 'develop', baseBranch: 'develop' });
+    const h = makeHarness({ worktrees: [a], workspaceFolders: ['/repo'] });
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.calls).toContain(`gitWatcher.watch:${a.path}`);
+    expect(h.calls).not.toContain(`gitWatcher.watch:${a.path}:develop`);
+  });
+
+  it('fetches just the base branch and re-reads, on request', async () => {
+    const a = makeWorktree({ id: 'a', branch: 'feat/a', baseBranch: 'develop' });
+    const h = makeHarness({ worktrees: [a] });
+
+    await h.service.handleMessage({ type: 'refreshDrift', worktreeId: 'a' });
+
+    // One branch from one remote, not the whole thing.
+    expect(h.calls).toContain(`git.fetchBranch:${a.path}:origin/develop`);
+    expect(h.calls).toContain(`gitWatcher.refreshNow:${a.path}`);
+    expect(h.ui.pushWebview).toHaveBeenCalled();
+  });
+
+  it('still re-reads when the fetch fails', async () => {
+    // No remote, no network, no credentials: the local comparison is still worth
+    // redoing, and a toast for a fetch nobody watched would be noise.
+    const a = makeWorktree({ id: 'a', branch: 'feat/a', baseBranch: 'develop' });
+    const h = makeHarness({ worktrees: [a], fetchFails: true });
+
+    await h.service.handleMessage({ type: 'refreshDrift', worktreeId: 'a' });
+
+    expect(h.calls).toContain(`gitWatcher.refreshNow:${a.path}`);
+    expect(h.notify.showError).not.toHaveBeenCalled();
+  });
+
+  it('does nothing for a worktree with no base to compare against', async () => {
+    const main = makeWorktree({ id: 'm', path: '/repo', branch: 'develop', isMain: true });
+    const h = makeHarness({ worktrees: [main] });
+
+    await h.service.handleMessage({ type: 'refreshDrift', worktreeId: 'm' });
+
+    expect(h.git.fetchBranch).not.toHaveBeenCalled();
+  });
+
+  it('does nothing for a worktree that no longer exists', async () => {
+    const h = makeHarness({ worktrees: [] });
+    await h.service.handleMessage({ type: 'refreshDrift', worktreeId: 'gone' });
+    expect(h.git.fetchBranch).not.toHaveBeenCalled();
+  });
+});
+

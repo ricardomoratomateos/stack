@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import { GitStatus } from '../types';
+import { BaseDrift, GitStatus } from '../types';
 
 const execAsync = promisify(exec);
 
@@ -38,9 +38,57 @@ export function isGitIndexChange(filename: string): boolean {
   return filename === '.git' || filename.startsWith('.git/index') || filename.startsWith('.git/HEAD');
 }
 
-export type FetchStatusFn = (worktreePath: string) => Promise<GitStatus>;
+export type FetchStatusFn = (worktreePath: string, baseBranch?: string) => Promise<GitStatus>;
 
-export async function fetchStatus(worktreePath: string): Promise<GitStatus> {
+/**
+ * How far this branch has drifted from the branch it was cut from.
+ *
+ * Prefers `origin/<base>` over the local `<base>`, because the local one is
+ * itself usually stale — nobody checks out develop just to pull it — and the
+ * remote ref is what the rest of the team is working from.
+ *
+ * **No fetch of our own.** This runs on a filesystem watch, so fetching here
+ * would put a network round trip behind every file save, on repositories whose
+ * remotes may be slow or want credentials. The remote ref is refreshed by
+ * whatever the user already has doing that — VS Code's own `git.autofetch`, a
+ * terminal `git pull`, or the explicit refresh on the card — and the ref being
+ * compared is reported alongside the numbers so the answer is never presented as
+ * fresher than it is.
+ */
+export async function baseDrift(
+  worktreePath: string,
+  baseBranch: string,
+  run: (cmd: string) => Promise<string> = async (cmd) =>
+    (await execAsync(cmd, { cwd: worktreePath })).stdout,
+): Promise<BaseDrift | undefined> {
+  for (const ref of [`origin/${baseBranch}`, baseBranch]) {
+    try {
+      // --count with --left-right gives "<ahead>\t<behind>" in one call; three
+      // dots, so a merge base is found rather than a raw range.
+      const out = await run(`git rev-list --left-right --count HEAD...${quoteRef(ref)}`);
+      const { ahead, behind } = parseAheadBehind(out);
+      if (Number.isNaN(ahead) || Number.isNaN(behind)) continue;
+      return { ref, ahead, behind };
+    } catch {
+      // Ref does not exist here — try the local branch, then give up.
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Refs reach here from a config file and a branch name, so they are quoted.
+ *
+ * Rejected outright rather than escaped when they contain anything git would not
+ * accept in a ref anyway: the value ends up in a shell command, and "escape it
+ * correctly" is a worse bet than "do not build the command at all".
+ */
+function quoteRef(ref: string): string {
+  if (!/^[\w./-]+$/.test(ref)) throw new Error(`refusing to use "${ref}" as a git ref`);
+  return `"${ref}"`;
+}
+
+export async function fetchStatus(worktreePath: string, baseBranch?: string): Promise<GitStatus> {
   try {
     const { stdout: statusOutput } = await execAsync('git status --porcelain', { cwd: worktreePath });
     const { staged, unstaged, untracked, hasChanges } = parseStatus(statusOutput);
@@ -57,7 +105,9 @@ export async function fetchStatus(worktreePath: string): Promise<GitStatus> {
       // no upstream or detached HEAD
     }
 
-    return { hasChanges, staged, unstaged, untracked, ahead, behind };
+    const base = baseBranch ? await baseDrift(worktreePath, baseBranch) : undefined;
+
+    return { hasChanges, staged, unstaged, untracked, ahead, behind, base };
   } catch {
     return DEFAULT_STATUS;
   }
@@ -68,6 +118,14 @@ export class GitWatcher {
   private debounceTimers = new Map<string, NodeJS.Timeout>();
   private handlers: ChangeHandler[] = [];
   private statusCache = new Map<string, GitStatus>();
+
+  /**
+   * Base branch to measure each worktree against, by path.
+   *
+   * Held here rather than passed to refresh() because refresh is also reached
+   * from a debounced watcher callback that has nothing but the path.
+   */
+  private bases = new Map<string, string>();
 
   constructor(
     private readonly fetchStatusFn: FetchStatusFn = fetchStatus,
@@ -85,7 +143,18 @@ export class GitWatcher {
     private readonly watchFn: typeof fs.watch = fs.watch,
   ) {}
 
-  watch(worktreePath: string): void {
+  /**
+   * @param baseBranch Branch to report drift against. Omit for the main
+   * worktree, or when the worktree is itself on the base — comparing a branch
+   * to itself is a row of zeroes nobody needs.
+   */
+  watch(worktreePath: string, baseBranch?: string): void {
+    // Recorded before the early return: an already-watched worktree may have
+    // been reconciled with a different base since, and dropping it here would
+    // leave the drift measured against the old one until the next reload.
+    if (baseBranch) this.bases.set(worktreePath, baseBranch);
+    else this.bases.delete(worktreePath);
+
     if (this.watchers.has(worktreePath)) return;
 
     const gitEntry = path.join(worktreePath, '.git');
@@ -133,6 +202,7 @@ export class GitWatcher {
       this.debounceTimers.delete(worktreePath);
     }
     this.statusCache.delete(worktreePath);
+    this.bases.delete(worktreePath);
   }
 
   onChange(handler: ChangeHandler): void {
@@ -150,6 +220,7 @@ export class GitWatcher {
     this.watchers.clear();
     this.debounceTimers.clear();
     this.statusCache.clear();
+    this.bases.clear();
   }
 
   private scheduleRefresh(worktreePath: string, delay: number): void {
@@ -162,10 +233,21 @@ export class GitWatcher {
     this.debounceTimers.set(worktreePath, timer);
   }
 
+  /**
+   * Recomputes now and resolves when the cache holds the answer.
+   *
+   * The awaitable half of refresh(), for the explicit "check again" on the card:
+   * the caller has just fetched and needs the new numbers on screen, not on the
+   * next filesystem event.
+   */
+  async refreshNow(worktreePath: string): Promise<void> {
+    const status = await this.fetchStatusFn(worktreePath, this.bases.get(worktreePath)).catch(() => undefined);
+    if (!status) return;
+    this.statusCache.set(worktreePath, status);
+    for (const handler of this.handlers) handler(worktreePath, status);
+  }
+
   private refresh(worktreePath: string): void {
-    this.fetchStatusFn(worktreePath).then((status) => {
-      this.statusCache.set(worktreePath, status);
-      for (const handler of this.handlers) handler(worktreePath, status);
-    }).catch(() => {});
+    void this.refreshNow(worktreePath);
   }
 }

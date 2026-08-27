@@ -147,6 +147,10 @@ export class WorktreeManager {
         xdebugPort,
         dockerProjectName: branch.replace(/[^a-z0-9-]/gi, '-').toLowerCase(),
         createdAt: Date.now(),
+        // Recorded now, because it is unknowable later: git keeps no note of
+        // what a branch was cut from, and the setting this came from will have
+        // moved on by the time anyone asks how far behind we are.
+        baseBranch: baseBranch || undefined,
       };
 
       this.generateLaunchJson(worktree);

@@ -92,6 +92,14 @@ Clicking a worktree in the sidebar switches to it. There are two behaviours, tra
 
 > Neither mode ever interrupts an agent: agents run in tmux, so detaching a terminal leaves them working. Only deleting a worktree or killing a session explicitly stops one.
 
+## Staying in sync with the base branch
+
+Each worktree card shows how far its branch has drifted from the branch it was cut from — `origin/develop  ↓12` under Git. That is a different question from ahead/behind, which compares against your own upstream and answers "have I pushed"; this one answers "should I rebase", and it is the number that grows while you work.
+
+The base is recorded when the worktree is created, so a worktree cut from `release/3.2` keeps measuring against `release/3.2` however `unmess.defaultBaseBranch` moves afterwards. Worktrees adopted from git carry no such record and fall back to the configured base. Nothing is shown for the main worktree, or for a worktree sitting on the base itself.
+
+**Unmess never fetches on its own.** The drift is read on a filesystem watch that fires as you save, and putting a network round trip behind that — on repositories whose remotes may be slow or want credentials — is not something to do uninvited. It compares against `origin/<base>` when that ref exists and the local `<base>` otherwise, and the card always names which, so the answer is never presented as fresher than it is. Keeping the remote ref current is whatever you already use for that: VS Code's own `git.autofetch`, a terminal `git pull` — or clicking the row, which fetches that one branch from `origin` and re-reads.
+
 ## Per-repo configuration
 
 For heavier setups (dedicated Docker stack, dependency prep, debug), point the `unmess.setupScript` / `unmess.teardownScript` and `unmess.docker` settings at your own script and compose files — **anywhere in the repo**, wherever you like to keep them.

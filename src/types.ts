@@ -16,7 +16,25 @@ export interface GitStatus {
   staged: number;
   unstaged: number;
   untracked: number;
+  /** Against the branch's own upstream: "have I pushed?". */
   ahead: number;
+  behind: number;
+  /**
+   * Against the branch this worktree was cut from: "should I rebase?".
+   *
+   * A different question from ahead/behind, and the one that actually goes
+   * stale while you work. Absent when there is no base to compare to — the main
+   * worktree, a base branch that no longer exists, a comparison git refused.
+   */
+  base?: BaseDrift;
+}
+
+export interface BaseDrift {
+  /** What was compared against, e.g. "origin/develop" or "develop". */
+  ref: string;
+  /** Commits on this branch that the base does not have. */
+  ahead: number;
+  /** Commits on the base that this branch does not have. */
   behind: number;
 }
 
@@ -30,6 +48,15 @@ export interface Worktree {
   dockerProjectName: string;
   createdAt: number;
   isMain?: boolean;
+  /**
+   * Branch this worktree was cut from, recorded at creation.
+   *
+   * Kept per worktree rather than read from the setting at display time: a
+   * worktree started off release/3.2 must keep measuring against release/3.2
+   * after the setting moves on. Absent for worktrees adopted from git, which
+   * carry no record of it — those fall back to the configured base.
+   */
+  baseBranch?: string;
 }
 
 export interface WorktreeState {

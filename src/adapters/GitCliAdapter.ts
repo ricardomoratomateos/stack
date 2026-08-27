@@ -187,4 +187,14 @@ export class GitCliAdapter implements IGitPort {
       return '';
     }
   }
+
+  async fetchBranch(cwd: string, remote: string, branch: string): Promise<void> {
+    // Both come from git's own output or a validated ref, but they land in a
+    // shell command, so anything that is not ref-shaped is refused rather than
+    // escaped.
+    for (const part of [remote, branch]) {
+      if (!/^[\w./-]+$/.test(part)) throw new Error(`refusing to fetch "${part}"`);
+    }
+    await execAsync(`git fetch "${remote}" "${branch}"`, { cwd, maxBuffer: MAX_BUFFER });
+  }
 }

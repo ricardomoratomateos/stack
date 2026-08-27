@@ -10,6 +10,7 @@ import {
   shouldIgnore,
   isGitIndexChange,
   fetchStatus,
+  baseDrift,
   DEFAULT_STATUS,
 } from '../../src/git/GitWatcher';
 import type { GitStatus } from '../../src/types';
@@ -545,3 +546,207 @@ describe('lifecycle', () => {
     expect(w.getStatus(repo)).toEqual(statuses[0]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// baseDrift — how far a branch has slid behind the one it was cut from
+// ---------------------------------------------------------------------------
+
+describe('baseDrift', () => {
+  /** Records the commands and answers from a table, throwing for absent refs. */
+  const runner = (answers: Record<string, string>) => {
+    const seen: string[] = [];
+    const run = async (cmd: string): Promise<string> => {
+      seen.push(cmd);
+      const answer = answers[cmd];
+      if (answer === undefined) throw new Error(`fatal: bad revision (${cmd})`);
+      return answer;
+    };
+    return { run, seen };
+  };
+
+  it('prefers the remote ref over the local branch', async () => {
+    // The local develop is usually the stale one — nobody checks it out just to
+    // pull it — so origin's is the honest comparison.
+    const { run, seen } = runner({
+      'git rev-list --left-right --count HEAD..."origin/develop"': '3\t12\n',
+      'git rev-list --left-right --count HEAD..."develop"': '3\t0\n',
+    });
+
+    await expect(baseDrift('/wt', 'develop', run)).resolves.toEqual({
+      ref: 'origin/develop',
+      ahead: 3,
+      behind: 12,
+    });
+    expect(seen).toHaveLength(1); // the local branch was never asked
+  });
+
+  it('falls back to the local branch when there is no remote ref', async () => {
+    const { run } = runner({ 'git rev-list --left-right --count HEAD..."develop"': '1\t4\n' });
+
+    await expect(baseDrift('/wt', 'develop', run)).resolves.toEqual({
+      ref: 'develop',
+      ahead: 1,
+      behind: 4,
+    });
+  });
+
+  it('gives up when neither ref exists', async () => {
+    const { run } = runner({});
+    await expect(baseDrift('/wt', 'gone', run)).resolves.toBeUndefined();
+  });
+
+  it('treats unparseable counts as no answer rather than NaN on the card', async () => {
+    const { run } = runner({
+      'git rev-list --left-right --count HEAD..."origin/develop"': 'not numbers\n',
+      'git rev-list --left-right --count HEAD..."develop"': '0\t7\n',
+    });
+
+    // Moves on to the local branch instead of reporting NaN behind.
+    await expect(baseDrift('/wt', 'develop', run)).resolves.toEqual({
+      ref: 'develop',
+      ahead: 0,
+      behind: 7,
+    });
+  });
+
+  it('reports zero drift rather than hiding it', async () => {
+    // "up to date with origin/develop" is an answer worth showing; the caller
+    // decides not to ask at all when the worktree IS the base.
+    const { run } = runner({ 'git rev-list --left-right --count HEAD..."origin/main"': '0\t0\n' });
+    await expect(baseDrift('/wt', 'main', run)).resolves.toEqual({ ref: 'origin/main', ahead: 0, behind: 0 });
+  });
+
+  it('refuses a base branch that is not ref-shaped', async () => {
+    // The name arrives from .unmess/config.json, which is a file in the repo, and
+    // it ends up in a shell command. Refused for both candidate refs, so the
+    // result is no drift rather than an executed injection.
+    const { run, seen } = runner({});
+    await expect(baseDrift('/wt', 'main; touch /tmp/pwned', run)).resolves.toBeUndefined();
+    expect(seen).toEqual([]);
+  });
+
+  it('measures real drift in real repos', async () => {
+    const repo = makeRealRepo();
+    git(repo, 'branch develop');
+    git(repo, 'checkout -b feature');
+    git(repo, 'commit --allow-empty -m mine');
+    git(repo, 'commit --allow-empty -m mine-2');
+    git(repo, 'checkout develop');
+    git(repo, 'commit --allow-empty -m theirs');
+    git(repo, 'checkout feature');
+
+    await expect(baseDrift(repo, 'develop')).resolves.toEqual({
+      ref: 'develop',
+      ahead: 2,
+      behind: 1,
+    });
+  });
+
+  it('is folded into fetchStatus only when a base is given', async () => {
+    const repo = makeRealRepo();
+    git(repo, 'branch develop');
+    git(repo, 'checkout -b feature');
+    git(repo, 'commit --allow-empty -m mine');
+
+    expect((await fetchStatus(repo)).base).toBeUndefined();
+    expect((await fetchStatus(repo, 'develop')).base).toEqual({ ref: 'develop', ahead: 1, behind: 0 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// base branch plumbing on the watcher
+// ---------------------------------------------------------------------------
+
+describe('GitWatcher base branch', () => {
+  /** Records the (path, base) pairs fetchStatus was called with. */
+  const recorder = () => {
+    const calls: Array<[string, string | undefined]> = [];
+    const fetchFn = async (p: string, base?: string): Promise<GitStatus> => {
+      calls.push([p, base]);
+      return STATUS_A;
+    };
+    return { calls, fetchFn };
+  };
+
+  it('passes the base it was given to every refresh', async () => {
+    const repo = makeFakeRepo();
+    const { calls, fetchFn } = recorder();
+    const w = makeWatcher(fetchFn);
+
+    w.watch(repo, 'develop');
+    await w.refreshNow(repo);
+
+    expect(calls).toContainEqual([repo, 'develop']);
+  });
+
+  it('updates the base of an already-watched worktree', async () => {
+    // watch() returns early when the path is already watched, so recording the
+    // base after that check would pin the drift to whatever base the worktree
+    // was first seen with — through every reconcile, until a window reload.
+    const repo = makeFakeRepo();
+    const { calls, fetchFn } = recorder();
+    const w = makeWatcher(fetchFn);
+
+    w.watch(repo, 'develop');
+    w.watch(repo, 'release/3.2');
+    await w.refreshNow(repo);
+
+    expect(calls.at(-1)).toEqual([repo, 'release/3.2']);
+  });
+
+  it('clears the base when a later watch omits it', async () => {
+    const repo = makeFakeRepo();
+    const { calls, fetchFn } = recorder();
+    const w = makeWatcher(fetchFn);
+
+    w.watch(repo, 'develop');
+    w.watch(repo);
+    await w.refreshNow(repo);
+
+    expect(calls.at(-1)).toEqual([repo, undefined]);
+  });
+
+  it('forgets the base on unwatch', async () => {
+    const repo = makeFakeRepo();
+    const { calls, fetchFn } = recorder();
+    const w = makeWatcher(fetchFn);
+
+    w.watch(repo, 'develop');
+    w.unwatch(repo);
+    w.watch(repo);
+    await w.refreshNow(repo);
+
+    expect(calls.at(-1)).toEqual([repo, undefined]);
+  });
+
+  it('refreshNow publishes to the cache and the handlers', async () => {
+    const repo = makeFakeRepo();
+    const { fetchFn } = recorder();
+    const w = makeWatcher(fetchFn);
+    const seen: GitStatus[] = [];
+    w.onChange((_p, status) => seen.push(status));
+
+    await w.refreshNow(repo);
+
+    expect(w.getStatus(repo)).toEqual(STATUS_A);
+    expect(seen).toEqual([STATUS_A]);
+  });
+
+  it('refreshNow keeps the last good status when the read fails', async () => {
+    // A failed git call must not blank the card; the previous answer is stale
+    // but it is not wrong the way all-zeros would be.
+    const repo = makeFakeRepo();
+    let attempt = 0;
+    const w = makeWatcher(async () => {
+      attempt += 1;
+      if (attempt === 1) return STATUS_A;
+      throw new Error('git exploded');
+    });
+
+    await w.refreshNow(repo);
+    await expect(w.refreshNow(repo)).resolves.toBeUndefined();
+
+    expect(w.getStatus(repo)).toEqual(STATUS_A);
+  });
+});
+

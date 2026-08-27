@@ -9,6 +9,16 @@ export interface GitStatus {
   staged: number;
   unstaged: number;
   untracked: number;
+  /** Against the branch's own upstream: "have I pushed?". */
+  ahead: number;
+  behind: number;
+  /** Against the branch this worktree was cut from: "should I rebase?". */
+  base?: BaseDrift;
+}
+
+export interface BaseDrift {
+  /** What was compared against, e.g. "origin/develop". */
+  ref: string;
   ahead: number;
   behind: number;
 }
@@ -101,6 +111,7 @@ export type WebMessage =
   | { type: 'reorderSessions'; worktreeId: string; orderedIndexes: number[] }
   | { type: 'reorderWorktrees'; orderedIds: string[] }
   | { type: 'openPort'; port: number }
+  | { type: 'refreshDrift'; worktreeId: string }
   | { type: 'dockerUp'; worktreeId: string }
   | { type: 'dockerDown'; worktreeId: string }
   | { type: 'deleteWorktree'; worktreeId: string }

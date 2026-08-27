@@ -245,6 +245,20 @@ describe('create', () => {
     );
   });
 
+  it('records the base branch on the worktree, because git will not', async () => {
+    // git keeps no note of what a branch was cut from, and the setting this came
+    // from will have moved on by the time anyone asks how far behind we are.
+    git.branchExists.mockReturnValue(false);
+    const wt = await mgr().create('feat/x', REPO, undefined, 'release/3.2');
+    expect(wt.baseBranch).toBe('release/3.2');
+  });
+
+  it('leaves the base branch unset when the caller named none', async () => {
+    git.branchExists.mockReturnValue(false);
+    const wt = await mgr().create('feat/x', REPO);
+    expect(wt.baseBranch).toBeUndefined();
+  });
+
   it('uses git worktree add (no -b, reuse branch) when branch exists — does NOT throw', async () => {
     git.branchExists.mockReturnValue(true);
     const wt = await mgr().create('feat/x', REPO);

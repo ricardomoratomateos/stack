@@ -346,6 +346,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       this.ui.pushWebview();
     },
     openPort: (msg) => void this.openPort(msg.port),
+    refreshDrift: (msg) => void this.refreshDrift(msg.worktreeId),
     selectWorktree: (msg) => this.switchToWorktree(msg.worktreeId),
   };
 
@@ -505,6 +506,48 @@ export class WorktreeApplicationService implements DiffPanelHost {
       const kb = key(b);
       return ka[0] - kb[0] || ka[1] - kb[1];
     });
+  }
+
+  /**
+   * Branch this worktree's drift should be measured against, if any.
+   *
+   * The one recorded at creation wins: a worktree cut from release/3.2 stays
+   * measured against release/3.2 however the setting moves afterwards. Older
+   * worktrees and ones adopted from git have no record, so they fall back to the
+   * configured base — right in the common case and honest about being a guess,
+   * since the card names the ref it compared.
+   *
+   * Nothing for the main worktree, and nothing for a worktree sitting on the
+   * base itself: a row of zeroes against your own branch is noise.
+   */
+  private driftBaseFor(wt: Worktree): string | undefined {
+    if (wt.isMain) return undefined;
+    const base = wt.baseBranch ?? this.resolveBaseBranch(wt.repoRoot);
+    return base && base !== wt.branch ? base : undefined;
+  }
+
+  /**
+   * Refreshes the remote ref the drift is measured against, on request.
+   *
+   * The only place Unmess touches the network for this. It is a click rather
+   * than a timer because the numbers are read off a filesystem watch that fires
+   * on every save, and because a repo's remote may be slow or want credentials —
+   * neither is something to inflict on someone who just typed.
+   */
+  async refreshDrift(worktreeId: string): Promise<void> {
+    const wt = this.findWorktree(worktreeId);
+    if (!wt) return;
+    const base = this.driftBaseFor(wt);
+    if (!base) return;
+    try {
+      await this.deps.git.fetchBranch(wt.path, 'origin', base);
+    } catch {
+      // No remote, no network, no credentials: the local comparison below is
+      // still worth redoing, and a toast for a fetch nobody watched is noise.
+    }
+    this.deps.gitWatcher.watch(wt.path, base);
+    await this.deps.gitWatcher.refreshNow(wt.path);
+    this.ui.pushWebview();
   }
 
   /**
@@ -682,7 +725,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     // looking like a broken docker integration.
     console.log(`[unmess] docker projects: ${current.map((wt) => composeProject(wt)).join(', ')}`);
     for (const wt of current) {
-      this.deps.gitWatcher.watch(wt.path);
+      this.deps.gitWatcher.watch(wt.path, this.driftBaseFor(wt));
       this.deps.dockerMonitor.startPolling(composeProject(wt), () => this.ui.pushWebview());
       this.deps.prMonitor.startPolling(wt.branch, wt.id, () => this.ui.pushWebview());
     }
@@ -757,7 +800,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
         // running, so a failure here must not fail the whole creation.
         try {
           this.deps.host.addWorkspaceFolders({ path: wt.path, name: displayLabel(wt) });
-          this.deps.gitWatcher.watch(wt.path);
+          this.deps.gitWatcher.watch(wt.path, this.driftBaseFor(wt));
           this.deps.dockerMonitor.startPolling(composeProject(wt), () => this.ui.pushWebview());
           this.deps.prMonitor.startPolling(wt.branch, wt.id, () => this.ui.pushWebview());
         } catch (e) {

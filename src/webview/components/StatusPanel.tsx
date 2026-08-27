@@ -215,6 +215,26 @@ export function StatusPanel({ wt }: Props) {
         {wt.git.behind > 0 && (
           <Row k="Behind"><Val>↓ {wt.git.behind}</Val></Row>
         )}
+        {wt.git.base && (
+          <Row k="Base">
+            <button
+              type="button"
+              title={`${wt.git.base.behind} commit${wt.git.base.behind === 1 ? '' : 's'} behind ${wt.git.base.ref}, ${wt.git.base.ahead} ahead — click to fetch and check again`}
+              onClick={() => send({ type: 'refreshDrift', worktreeId: wt.id })}
+              style={{ background: 'none', border: 'none', padding: 0, display: 'flex', alignItems: 'center', gap: 6, maxWidth: '100%' }}
+            >
+              <span style={{ fontFamily: T.mono, fontSize: 11, color: T.textDim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {wt.git.base.ref}
+              </span>
+              {/* Behind is the number that matters — it is the one that grows
+                  while you work and the one that decides whether to rebase — so
+                  it gets the colour and shows even at zero. */}
+              <span style={{ fontFamily: T.mono, fontSize: 11, flexShrink: 0, color: wt.git.base.behind > 0 ? T.amber : T.textMuted }}>
+                ↓{wt.git.base.behind}
+              </span>
+            </button>
+          </Row>
+        )}
         {wt.git.hasChanges && (
           <Row k="Changes">
             <Val>

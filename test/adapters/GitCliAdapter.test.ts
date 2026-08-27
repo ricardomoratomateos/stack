@@ -438,4 +438,43 @@ describe('GitCliAdapter.mainBranch (integration)', () => {
       fs.rmSync(t, { recursive: true, force: true });
     }
   });
+
+});
+
+describe('GitCliAdapter.fetchBranch (integration)', () => {
+  it('updates the remote-tracking ref from a real remote', async () => {
+    // Two real repos, one added as the other's origin: the only way to prove a
+    // fetch moved a ref is to move the ref on the far side first.
+    const upstream = path.join(tmp, 'upstream');
+    fs.mkdirSync(upstream);
+    git('init -b main', upstream);
+    git('config user.email "test@unmess.dev"', upstream);
+    git('config user.name "Unmess Test"', upstream);
+    git('config commit.gpgsign false', upstream);
+    fs.writeFileSync(path.join(upstream, 'a.txt'), 'one\n');
+    git('add .', upstream);
+    git('commit -m one', upstream);
+
+    const clone = path.join(tmp, 'clone');
+    execSync(`git clone "${upstream}" "${clone}"`, { stdio: 'pipe' });
+    const before = git('rev-parse origin/main', clone).trim();
+
+    fs.writeFileSync(path.join(upstream, 'a.txt'), 'two\n');
+    git('commit -am two', upstream);
+
+    await adapter.fetchBranch(clone, 'origin', 'main');
+
+    expect(git('rev-parse origin/main', clone).trim()).not.toBe(before);
+  });
+
+  it('rejects when the remote does not exist', async () => {
+    await expect(adapter.fetchBranch(repo, 'origin', 'main')).rejects.toThrow();
+  });
+
+  it('refuses a remote or branch that is not ref-shaped', async () => {
+    // The values reach here from a config file and git output, and they land in
+    // a shell command. Refused rather than escaped.
+    await expect(adapter.fetchBranch(repo, 'origin; rm -rf /', 'main')).rejects.toThrow(/refusing to fetch/);
+    await expect(adapter.fetchBranch(repo, 'origin', 'main$(id)')).rejects.toThrow(/refusing to fetch/);
+  });
 });
