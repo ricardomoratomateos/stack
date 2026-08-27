@@ -23,7 +23,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 import { execSync } from 'node:child_process'; // real (spread from original module)
-import { TmuxManager } from '../../src/session/TmuxManager';
+import { TmuxManager, utf8LocaleFor } from '../../src/session/TmuxManager';
 
 let hasTmux = false;
 try { execSync('which tmux', { stdio: 'ignore' }); hasTmux = true; } catch { /* no tmux in CI */ }
@@ -205,7 +205,12 @@ describe('command construction', () => {
     captureExec(() => ({}));
     await tmux.hasSession('s1');
     expect(execOptsSeen).toHaveLength(1);
-    expect(execOptsSeen[0]?.env?.LC_ALL).toBe('en_US.UTF-8');
+    // Platform-dependent on purpose: en_US.UTF-8 is the macOS one and is often
+    // NOT generated on Linux, where setting LC_ALL to a missing locale leaves
+    // the process in C — the exact state this exists to avoid. glibc has C.UTF-8.
+    const expected = process.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8';
+    expect(execOptsSeen[0]?.env?.LC_ALL).toBe(expected);
+    expect(execOptsSeen[0]?.env?.LANG).toBe(expected);
   });
 
   it('listWindows tolerates lines missing name/title fields', async () => {
@@ -248,7 +253,14 @@ describe('TmuxManager (integration)', () => {
     const idx = await tmux.newWindow(SES, 'testwin', os.tmpdir());
     expect(Number.isInteger(idx)).toBe(true);
     const windows = await tmux.listWindows(SES);
-    expect(windows.some(w => w.index === idx && w.name === 'testwin')).toBe(true);
+    // Spell out what tmux actually returned. This assertion failed on the Linux
+    // runners for weeks while passing locally, and a bare `false` said nothing
+    // about which half was wrong: a mangled separator (every field junk) reads
+    // identically to a renamed window.
+    const detail = `idx=${idx} windows=${JSON.stringify(windows)}`;
+    const found = windows.find(w => w.index === idx);
+    expect(found, detail).toBeDefined();
+    expect(found?.name, detail).toBe('testwin');
     await tmux.selectWindow(SES, idx);
     await tmux.sendKeys(`${SES}:${idx}`, "echo 'hi'");
     await tmux.killWindow(SES, idx);
@@ -265,5 +277,18 @@ describe('TmuxManager (integration)', () => {
     expect(await tmux.hasSession(SES)).toBe(false);
     await expect(tmux.killSession(SES)).resolves.toBeUndefined(); // idempotent
     expect(await tmux.listWindows(SES)).toEqual([]);
+  });
+});
+
+describe('utf8LocaleFor', () => {
+  it('uses the macOS locale on darwin', () => {
+    expect(utf8LocaleFor('darwin')).toBe('en_US.UTF-8');
+  });
+
+  it('uses C.UTF-8 everywhere else — en_US.UTF-8 is often not generated on Linux', () => {
+    // Setting LC_ALL to a locale the system lacks leaves the process in C, and
+    // C-locale tmux replaces the \x01 field separator with '_'.
+    expect(utf8LocaleFor('linux')).toBe('C.UTF-8');
+    expect(utf8LocaleFor('win32')).toBe('C.UTF-8');
   });
 });

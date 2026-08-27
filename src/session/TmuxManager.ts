@@ -4,6 +4,18 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ISessionManager } from '../ports/ISessionManager';
 
+/**
+ * A UTF-8 locale that actually exists on the given platform.
+ *
+ * `en_US.UTF-8` is the macOS one and is frequently NOT generated on Linux —
+ * setting LC_ALL to a locale the system does not have leaves the process in C,
+ * which is the very state forcing a locale exists to avoid. glibc ships
+ * `C.UTF-8`. Exported so both branches can be exercised from one machine.
+ */
+export function utf8LocaleFor(platform: NodeJS.Platform): string {
+  return platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8';
+}
+
 export class TmuxManager implements ISessionManager {
   static sessionName(worktreeId: string): string {
     return 'unmess-' + worktreeId
@@ -13,13 +25,16 @@ export class TmuxManager implements ISessionManager {
       .slice(0, 50);
   }
 
+  private static readonly UTF8_LOCALE = utf8LocaleFor(process.platform);
+
   private run(cmd: string): Promise<string> {
     return new Promise((resolve, reject) => {
       // Force a UTF-8 locale: the VSCode extension host has no LANG/LC_ALL, and
       // under the C locale tmux replaces every non-printable/non-ASCII byte of
       // its output with '_' — destroying the \x01 field separator in
       // listWindows and any non-ASCII pane title.
-      exec(cmd, { env: { ...process.env, LC_ALL: 'en_US.UTF-8' } }, (err, stdout) => {
+      const locale = TmuxManager.UTF8_LOCALE;
+      exec(cmd, { env: { ...process.env, LC_ALL: locale, LANG: locale } }, (err, stdout) => {
         if (err) reject(err);
         else resolve(stdout.trim());
       });

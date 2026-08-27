@@ -2544,3 +2544,28 @@ describe('the ready handshake', () => {
     expect(h.calls).toEqual(['ui.pushWebview']);
   });
 });
+
+describe('deleteWorktree when git refuses', () => {
+  it('tells the user and leaves the card in place', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({ worktrees: [a], confirmResult: 'Delete' });
+    h.manager.delete.mockRejectedValue(new Error('is locked'));
+
+    await h.service.deleteWorktree(a);
+
+    expect(h.notify.showError).toHaveBeenCalledWith(
+      expect.stringContaining('still registered with git'),
+    );
+  });
+
+  it('clears the deleting lock so the worktree stays usable', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({ worktrees: [a], confirmResult: 'Delete' });
+    h.manager.delete.mockRejectedValue(new Error('is locked'));
+
+    await h.service.deleteWorktree(a);
+
+    // A failed delete must not leave the card frozen in "deleting" forever.
+    expect(h.service.buildState().worktrees[0].deleting).toBe(false);
+  });
+});

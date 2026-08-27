@@ -798,3 +798,59 @@ describe('create hands the port back when it fails after allocating', () => {
     expect(allocator.release).not.toHaveBeenCalled();
   });
 });
+
+describe('delete does not purge the store behind git\'s back', () => {
+  const stillListed = (wt: Worktree) => [{ path: wt.path, branch: wt.branch, head: 'abc' }];
+
+  it('throws instead of forgetting a worktree git still registers', async () => {
+    // Purging anyway made the card vanish while git kept the worktree; the next
+    // reconcile readopted the same path under a NEW id, orphaning the alias,
+    // session order, tabs and breakpoints keyed to the old one.
+    const wt = makeWorktree({ id: 'a' });
+    const store = makeStoreStub([wt]);
+    const git = makeGitStub(stillListed(wt));
+    git.deleteWorktree.mockRejectedValue(new Error('is locked'));
+    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+
+    await expect(mgr.delete('a')).rejects.toThrow('is locked');
+
+    expect(store.get('a')).toBeDefined();
+    expect(store.calls).not.toContain('remove:a');
+  });
+
+  it('still forgets it when git no longer lists it (already gone by hand)', async () => {
+    const wt = makeWorktree({ id: 'a' });
+    const store = makeStoreStub([wt]);
+    const git = makeGitStub([]); // git does not know this path any more
+    git.deleteWorktree.mockRejectedValue(new Error('is not a working tree'));
+    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+
+    await mgr.delete('a');
+
+    expect(store.get('a')).toBeUndefined();
+  });
+
+  it('does not delete the branch when the worktree could not be removed', async () => {
+    const wt = makeWorktree({ id: 'a' });
+    const git = makeGitStub(stillListed(wt));
+    git.deleteWorktree.mockRejectedValue(new Error('is locked'));
+    const mgr = new WorktreeManager(makeStoreStub([wt]), makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+
+    await expect(mgr.delete('a', true)).rejects.toThrow();
+
+    expect(git.deleteBranch).not.toHaveBeenCalled();
+  });
+});
+
+describe('delete with a non-Error rejection', () => {
+  it('still refuses and reports something usable', async () => {
+    const wt = makeWorktree({ id: 'a' });
+    const store = makeStoreStub([wt]);
+    const git = makeGitStub([{ path: wt.path, branch: wt.branch, head: 'abc' }]);
+    git.deleteWorktree.mockRejectedValue('just a string');
+    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+
+    await expect(mgr.delete('a')).rejects.toThrow('just a string');
+    expect(store.get('a')).toBeDefined();
+  });
+});

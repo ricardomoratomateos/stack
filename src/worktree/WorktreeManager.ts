@@ -217,10 +217,27 @@ export class WorktreeManager {
 
     this.agentManager?.terminateSession(worktree.id);
 
+    let removeError: unknown;
     try {
       await this.git.deleteWorktree(worktree.path, worktree.repoRoot);
-    } catch {
-      // worktree may already be gone
+    } catch (e) {
+      removeError = e;
+    }
+
+    if (removeError) {
+      // The failure may be benign — the directory already deleted by hand, a
+      // stale administrative entry — so ask git what it still knows rather than
+      // trusting the exit code. If the worktree is genuinely still registered,
+      // stop: purging the store anyway made the card vanish while git kept the
+      // worktree, and the next reconcile readopted the same path under a NEW
+      // id, orphaning the alias, session order, tabs and breakpoints keyed to
+      // the old one. The user saw it come back nameless.
+      const stillRegistered = this.git
+        .listWorktrees(worktree.repoRoot)
+        .some((wt) => path.normalize(wt.path) === path.normalize(worktree.path));
+      if (stillRegistered) {
+        throw removeError instanceof Error ? removeError : new Error(String(removeError));
+      }
     }
 
     if (deleteBranch) {

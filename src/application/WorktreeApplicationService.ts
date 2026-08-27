@@ -821,7 +821,16 @@ export class WorktreeApplicationService implements DiffPanelHost {
       await this.deps.agentManager.killWorktreeSession(wt.id);
       const folderIdx = this.deps.host.workspaceFolderPaths().findIndex((p) => p === wt.path);
       if (folderIdx !== -1) this.deps.host.removeWorkspaceFolder(folderIdx);
-      await this.deps.manager.delete(wt.id, confirm === 'Delete + branch');
+      try {
+        await this.deps.manager.delete(wt.id, confirm === 'Delete + branch');
+      } catch (e) {
+        // The manager refuses to purge the store while git still registers the
+        // worktree, so the card stays and the user is told why — better than a
+        // card that disappears and returns nameless on the next reconcile.
+        this.deps.notify.showError(
+          `Could not delete "${displayLabel(wt)}": ${String(e)}. The worktree is still registered with git.`,
+        );
+      }
     } finally {
       this.deleting.delete(wt.id);
       this.ui.pushWebview();
