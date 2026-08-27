@@ -321,7 +321,10 @@ function Section({ label, hint, collapsed, onToggle, children }: {
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ borderBottom: `1px solid ${T.borderLight}` }}>
+    // The divider is in CSS so the LAST section can drop it: below it sits the
+    // boundary VS Code already draws above the next pane, and two lines 1px
+    // apart read as one thick one.
+    <div className="u-section">
       <button
         onClick={onToggle}
         // Background and hover live in GLOBAL_CSS: :hover cannot be expressed
@@ -339,7 +342,11 @@ function Section({ label, hint, collapsed, onToggle, children }: {
       >
         <i
           className={`codicon codicon-chevron-${collapsed ? 'right' : 'down'}`}
-          style={{ fontSize: 16, color: T.sectionHeaderFg, flexShrink: 0 }}
+          // lineHeight 1 so the icon's box is its glyph. Without it a 16px
+          // codicon carries the inherited line box of 13px body text, and flex
+          // centres that box instead of the arrow — measured against the native
+          // twistie, ours sat exactly 1px high.
+          style={{ fontSize: 16, lineHeight: 1, color: T.sectionHeaderFg, flexShrink: 0 }}
         />
         <span style={{ ...SECTION_TITLE_STYLE, color: T.sectionHeaderFg }}>
           {label}

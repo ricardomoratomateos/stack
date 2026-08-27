@@ -139,4 +139,11 @@ input, textarea { font-family: inherit; font-size: inherit; }
    the giveaway, not the type. */
 .u-section-header { background: transparent; }
 .u-section-header:hover { background: var(--vscode-list-hoverBackground); }
+
+/* Sections are divided from each other, but not from whatever follows the
+   webview: VS Code draws its own boundary above the next pane header, and ours
+   landing 1px above it made a double line and stole a pixel from a gap that was
+   already 3px wider than the native rhythm. */
+.u-section { border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 6%, transparent); }
+.u-section:last-child { border-bottom: none; }
 `;
