@@ -36,6 +36,17 @@ export class AgentSessionManager {
   // worktreeId → pending debounced title refresh
   private titleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+  /**
+   * Single timer that keeps shell rows current.
+   *
+   * syncWindows is otherwise only reached from a hook event, which is an
+   * AGENT's heartbeat — so a shell in a worktree with no agent running would
+   * have been labelled once and then frozen, which is most of the time you have
+   * a shell open. One interval for all worktrees rather than one each, and it
+   * only exists while some worktree actually has a shell.
+   */
+  private shellTimer?: ReturnType<typeof setInterval>;
+
   readonly onStateChange = this.stateChangeEmitter.event;
   readonly onTerminalsChange = this.terminalsChangeEmitter.event;
 
@@ -124,6 +135,37 @@ export class AgentSessionManager {
   }
 
   /**
+   * Subtitle for a shell window: whatever it is busy running.
+   *
+   * The same slot the agents use for their live task, so a shell reads
+   * "shell / npm" the way an agent reads "claude / Investigating the Slack bug".
+   *
+   * `pane_current_command` is the process in the pane right now, so a shell
+   * sitting at its prompt reports the shell itself — which is the row's name
+   * already and says nothing. Those are dropped rather than echoed. Login shells
+   * arrive as "-zsh", hence the leading dash.
+   *
+   * Deliberately not the *last* command: tmux does not record one, and getting
+   * it would mean a hook in the user's shell rc — which in this project has
+   * form, a .zshrc hook being what once deleted worktrees behind everyone's
+   * back. What is running now is free and answers the same question while it
+   * matters.
+   */
+  private commandTitle(command: string | undefined): string | undefined {
+    if (!command) return undefined;
+    const name = command.replace(/^-/, '').trim();
+    if (!name) return undefined;
+    return AgentSessionManager.SHELLS.has(name.toLowerCase()) ? undefined : name;
+  }
+
+  /** Programs that ARE the shell, so naming them tells the user nothing. */
+  private static readonly SHELLS = new Set([
+    'sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'csh', 'tcsh', 'ash', 'nu', 'xonsh',
+    // Wrappers that show up in a pane running an interactive shell.
+    'login', 'tmux', 'screen', 'reattach-to-user-namespace',
+  ]);
+
+  /**
    * Reconcile a worktree's session list against what tmux actually has.
    *
    * The window map used to be written only when Unmess itself acted — launch,
@@ -165,8 +207,9 @@ export class AgentSessionManager {
         map.set(w.index, meta);
         changed = true;
       }
-      if (meta.kind !== 'agent') continue;
-      const title = this.cleanTitle(w.title, meta.name);
+      const title = meta.kind === 'agent'
+        ? this.cleanTitle(w.title, meta.name)
+        : this.commandTitle(w.command);
       if (title !== meta.title) {
         map.set(w.index, { ...meta, title });
         changed = true;
@@ -175,7 +218,8 @@ export class AgentSessionManager {
 
     if (changed) {
       this.persistState(worktreeId);
-      this.terminalsChangeEmitter.fire();
+      this.syncShellPolling();
+    this.terminalsChangeEmitter.fire();
     }
   }
 
@@ -198,6 +242,42 @@ export class AgentSessionManager {
       this.refreshTitles(worktreeId).catch(() => {});
     }, 800));
   }
+
+  /**
+   * Starts or stops the shell poller to match whether any shell is open.
+   *
+   * Called wherever the window map changes. Idempotent, and a no-op in the
+   * common case — an extra `tmux list-windows` every two seconds is worth it
+   * for a label that moves, and worth nothing at all when there is no shell to
+   * label, which is why it is not simply always on.
+   */
+  private syncShellPolling(): void {
+    const wanted = [...this.windows.entries()]
+      .filter(([, map]) => [...map.values()].some((w) => w.kind === 'shell'))
+      .map(([id]) => id);
+
+    if (wanted.length === 0) {
+      if (this.shellTimer) { clearInterval(this.shellTimer); this.shellTimer = undefined; }
+      return;
+    }
+    if (this.shellTimer) return;
+    this.shellTimer = setInterval(() => {
+      for (const [worktreeId, map] of this.windows.entries()) {
+        if (![...map.values()].some((w) => w.kind === 'shell')) continue;
+        // Failures are ignored on purpose: a tmux hiccup should leave the last
+        // known label on screen rather than blanking the row.
+        this.syncWindows(worktreeId).catch(() => {});
+      }
+    }, AgentSessionManager.SHELL_POLL_MS);
+  }
+
+  /**
+   * Two seconds. Fast enough that starting a build labels the row while you are
+   * still looking at it, slow enough to stay far below the docker poller's
+   * 20s-per-project load. syncWindows only touches the UI when something
+   * actually changed, so a quiet shell costs one exec and no re-render.
+   */
+  private static readonly SHELL_POLL_MS = 2_000;
 
   private aggregateState(worktreeId: string): AgentSessionState {
     const states = [...(this.windows.get(worktreeId) ?? new Map()).values()]
@@ -281,6 +361,7 @@ export class AgentSessionManager {
 
     this.persistState(worktree.id);
     this.stateChangeEmitter.fire({ worktreeId: worktree.id, state: 'waiting' });
+    this.syncShellPolling();
     this.terminalsChangeEmitter.fire();
     return viewer;
   }
@@ -325,6 +406,7 @@ export class AgentSessionManager {
     const viewer = await this.getOrCreateViewer(worktree);
     viewer.show();
 
+    this.syncShellPolling();
     this.terminalsChangeEmitter.fire();
     return viewer;
   }
@@ -408,6 +490,7 @@ export class AgentSessionManager {
     const stored = this.globalState.get<Record<string, number[]>>(AgentSessionManager.ORDER_KEY, {});
     stored[worktreeId] = orderedIndexes;
     this.globalState.update(AgentSessionManager.ORDER_KEY, stored);
+    this.syncShellPolling();
     this.terminalsChangeEmitter.fire();
   }
 
@@ -453,6 +536,7 @@ export class AgentSessionManager {
     }
     this.persistState(worktreeId);
     this.stateChangeEmitter.fire({ worktreeId, state: this.aggregateState(worktreeId) });
+    this.syncShellPolling();
     this.terminalsChangeEmitter.fire();
   }
 
@@ -487,6 +571,7 @@ export class AgentSessionManager {
     this.viewers.delete(worktreeId);
     this.persistState(worktreeId);
     this.stateChangeEmitter.fire({ worktreeId, state: 'idle' });
+    this.syncShellPolling();
     this.terminalsChangeEmitter.fire();
   }
 
@@ -510,7 +595,7 @@ export class AgentSessionManager {
         if (w.index === 0 && w.name !== 'shell' && !isAgentWindowName(w.name)) continue;
         const provider = providerForWindowName(w.name);
         const kind: 'agent' | 'shell' = provider ? 'agent' : 'shell';
-        const title = kind === 'agent' ? this.cleanTitle(w.title, w.name) : undefined;
+        const title = kind === 'agent' ? this.cleanTitle(w.title, w.name) : this.commandTitle(w.command);
         // Restore each window's own pre-reload state (e.g. "permission"),
         // falling back to "waiting" when nothing was persisted for it.
         //
@@ -545,12 +630,14 @@ export class AgentSessionManager {
       }
     }
 
+    this.syncShellPolling();
     this.terminalsChangeEmitter.fire();
   }
 
   dispose(): void {
     for (const timer of this.titleTimers.values()) clearTimeout(timer);
     this.titleTimers.clear();
+    if (this.shellTimer) { clearInterval(this.shellTimer); this.shellTimer = undefined; }
     this.stateChangeEmitter.dispose();
     this.terminalsChangeEmitter.dispose();
   }

@@ -68,6 +68,8 @@ Working on several things at once with AI agents gets messy fast: branches colli
 
 Four are supported: **Claude Code**, **Codex CLI**, **Grok Build** and **opencode**. Each worktree card carries a split button — the big half launches your primary agent (`unmess.defaultProvider`), the chevron opens the rest. Agents whose command isn't on your `PATH` are shown dimmed; clicking one offers the install command instead of launching it.
 
+Shell sessions carry a subtitle too, in the same slot the agents use for their live task: whatever the shell is running right now — `npm`, `vim`, `psql`, `docker`. A shell sitting at its prompt says nothing rather than repeating its own name. It needs no shell configuration; the reading comes from tmux itself.
+
 Unmess registers a notify hook with each agent so the sidebar can show live state (thinking / waiting / needs attention). Two caveats worth knowing:
 
 - **Codex's hook system is experimental and off by default.** Unmess writes the hooks, but Codex ignores them — silently, so its sessions simply never change state — until you enable the feature yourself in `~/.codex/config.toml`:

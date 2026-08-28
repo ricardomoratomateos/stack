@@ -143,11 +143,11 @@ export class TmuxManager implements ISessionManager {
     const SEP = '|:unmess:|';
     try {
       const out = await this.run(
-        `tmux list-windows -t "${session}" -F "#{window_index}${SEP}#{window_name}${SEP}#{pane_title}"`,
+        `tmux list-windows -t "${session}" -F "#{window_index}${SEP}#{window_name}${SEP}#{pane_title}${SEP}#{pane_current_command}"`,
       );
       return out.split('\n').filter(Boolean).map(line => {
-        const [index, name, title] = line.split(SEP);
-        return { index: parseInt(index, 10), name: name ?? '', title: title ?? '' };
+        const [index, name, title, command] = line.split(SEP);
+        return { index: parseInt(index, 10), name: name ?? '', title: title ?? '', command: command ?? '' };
       });
     } catch { return []; }
   }

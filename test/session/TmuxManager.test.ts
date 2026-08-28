@@ -189,16 +189,21 @@ describe('command construction', () => {
     expect(calls).toEqual(['tmux kill-window -t "s1:2"']);
   });
 
-  it('listWindows parses separator-delimited index/name/title lines, keeping spaces in names and titles', async () => {
+  it('listWindows parses separator-delimited index/name/title/command lines, keeping spaces in names and titles', async () => {
     const calls = captureExec(() => ({
-      stdout: '0|:unmess:|zsh|:unmess:|my-host.local\n1|:unmess:|claude|:unmess:|⠂ Fix login flow bug\n2|:unmess:|my window name|:unmess:|\n',
+      stdout:
+        '0|:unmess:|zsh|:unmess:|my-host.local|:unmess:|zsh\n' +
+        '1|:unmess:|claude|:unmess:|⠂ Fix login flow bug|:unmess:|node\n' +
+        '2|:unmess:|my window name|:unmess:||:unmess:|npm\n',
     }));
     await expect(tmux.listWindows('s1')).resolves.toEqual([
-      { index: 0, name: 'zsh', title: 'my-host.local' },
-      { index: 1, name: 'claude', title: '⠂ Fix login flow bug' },
-      { index: 2, name: 'my window name', title: '' },
+      { index: 0, name: 'zsh', title: 'my-host.local', command: 'zsh' },
+      { index: 1, name: 'claude', title: '⠂ Fix login flow bug', command: 'node' },
+      { index: 2, name: 'my window name', title: '', command: 'npm' },
     ]);
-    expect(calls).toEqual(['tmux list-windows -t "s1" -F "#{window_index}|:unmess:|#{window_name}|:unmess:|#{pane_title}"']);
+    expect(calls).toEqual([
+      'tmux list-windows -t "s1" -F "#{window_index}|:unmess:|#{window_name}|:unmess:|#{pane_title}|:unmess:|#{pane_current_command}"',
+    ]);
   });
 
   it('run() forces a UTF-8 locale — the extension host has no LANG, and C-locale tmux mangles non-ASCII titles to "_"', async () => {
@@ -215,7 +220,7 @@ describe('command construction', () => {
 
   it('listWindows tolerates lines missing name/title fields', async () => {
     captureExec(() => ({ stdout: '3\n' }));
-    await expect(tmux.listWindows('s1')).resolves.toEqual([{ index: 3, name: '', title: '' }]);
+    await expect(tmux.listWindows('s1')).resolves.toEqual([{ index: 3, name: '', title: '', command: '' }]);
   });
 
   it('listWindows returns [] on error or empty output', async () => {
@@ -266,6 +271,32 @@ describe('TmuxManager (integration)', () => {
     await tmux.killWindow(SES, idx);
     const after = await tmux.listWindows(SES);
     expect(after.some(w => w.index === idx)).toBe(false);
+  });
+
+  it.runIf(hasTmux)('listWindows reports what a window is actually running', async () => {
+    // The whole point of the shell label: idle reports the shell itself (which
+    // the UI drops), busy reports the command.
+    const idx = await tmux.newWindow(SES, 'cmdwin', os.tmpdir());
+
+    /** Polls until `want` matches, rather than sleeping a guessed interval. */
+    const settle = async (want: (c: string) => boolean): Promise<string> => {
+      for (let i = 0; i < 40; i++) {
+        const w = (await tmux.listWindows(SES)).find(x => x.index === idx);
+        if (w && want(w.command ?? '')) return w.command ?? '';
+        await new Promise(r => setTimeout(r, 100));
+      }
+      const w = (await tmux.listWindows(SES)).find(x => x.index === idx);
+      return w?.command ?? '<gone>';
+    };
+
+    // A shell takes a moment to exec; send-keys before then is swallowed, which
+    // is why this waits for the shell rather than assuming it is up.
+    expect(await settle(c => /sh$/.test(c))).toMatch(/sh$/); // zsh / bash / sh
+
+    await tmux.sendKeys(`${SES}:${idx}`, 'sleep 30');
+    expect(await settle(c => c === 'sleep')).toBe('sleep');
+
+    await tmux.killWindow(SES, idx);
   });
 
   it.runIf(hasTmux)('detachClients succeeds with no clients attached', async () => {

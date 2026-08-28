@@ -1124,3 +1124,194 @@ describe('compat API', () => {
     expect(stateEvents).toEqual([]);
   });
 });
+
+// ── shell rows labelled with what they are running ───────────────────────────
+
+describe('shell command labels', () => {
+  /** A manager already tracking one shell window, with tmux replying `windows`. */
+  const withShell = async (windows: Array<Record<string, unknown>>) => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'shell', state: 'idle', name: 'shell' }]]);
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue(windows);
+    await mgr.syncWindows('wt-1');
+    return { mgr, stub };
+  };
+
+  it('shows the process the shell is running, in the agents\' subtitle slot', async () => {
+    // The row reads "shell / npm" the way an agent reads "claude / <task>".
+    const { mgr } = await withShell([{ index: 1, name: 'shell', title: '', command: 'npm' }]);
+    const session = mgr.getSessions('wt-1')[0];
+    expect(session?.name).toBe('shell');
+    expect(session?.title).toBe('npm');
+  });
+
+  it('says nothing when the shell is just sitting at its prompt', async () => {
+    // pane_current_command is the shell itself then, which is the row's own name
+    // and tells the user nothing.
+    const { mgr } = await withShell([{ index: 1, name: 'shell', title: '', command: 'zsh' }]);
+    expect(mgr.getSessions('wt-1')[0]?.title).toBeUndefined();
+  });
+
+  it('recognises a login shell, which tmux reports with a leading dash', async () => {
+    const { mgr } = await withShell([{ index: 1, name: 'shell', title: '', command: '-bash' }]);
+    expect(mgr.getSessions('wt-1')[0]?.title).toBeUndefined();
+  });
+
+  it('strips the dash from a real command too', async () => {
+    const { mgr } = await withShell([{ index: 1, name: 'shell', title: '', command: '-vim' }]);
+    expect(mgr.getSessions('wt-1')[0]?.title).toBe('vim');
+  });
+
+  it('ignores an empty or whitespace command', async () => {
+    expect((await withShell([{ index: 1, name: 'shell', title: '', command: '' }]))
+      .mgr.getSessions('wt-1')[0]?.title).toBeUndefined();
+    expect((await withShell([{ index: 1, name: 'shell', title: '', command: '  ' }]))
+      .mgr.getSessions('wt-1')[0]?.title).toBeUndefined();
+    expect((await withShell([{ index: 1, name: 'shell', title: '' }]))
+      .mgr.getSessions('wt-1')[0]?.title).toBeUndefined();
+  });
+
+  it('clears the label when the command finishes', async () => {
+    const { mgr, stub } = await withShell([{ index: 1, name: 'shell', title: '', command: 'sleep' }]);
+    expect(mgr.getSessions('wt-1')[0]?.title).toBe('sleep');
+
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'shell', title: '', command: 'zsh' },
+    ]);
+    await mgr.syncWindows('wt-1');
+
+    expect(mgr.getSessions('wt-1')[0]?.title).toBeUndefined();
+  });
+
+  it('leaves an agent\'s task title alone', async () => {
+    // Agents keep taking their subtitle from pane_title; the command would only
+    // ever say "node".
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'claude', title: 'Investigating the Slack bug', command: 'node' },
+    ]);
+    await mgr.syncWindows('wt-1');
+    expect(mgr.getSessions('wt-1')[0]?.title).toBe('Investigating the Slack bug');
+  });
+
+  it('labels a shell on reconnect, before any poll has run', async () => {
+    const stub = makeStub();
+    (stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'shell', title: '', command: 'psql' },
+    ]);
+    const mgr = new AgentSessionManager(
+      makeFactory(), new FakeMemento() as unknown as vscode.Memento, stub, () => true, 'Test-Host.local',
+    );
+    await mgr.reconnect([wt]);
+    expect(mgr.getSessions('wt-1')[0]?.title).toBe('psql');
+    mgr.dispose();
+  });
+});
+
+// ── the poll that keeps those labels alive ───────────────────────────────────
+
+describe('shell polling', () => {
+  const timer = (mgr: AgentSessionManager) =>
+    (mgr as unknown as { shellTimer?: unknown }).shellTimer;
+
+  it('does not poll when no shell is open', () => {
+    // An agent-only worktree gets its refreshes from hook events; a timer here
+    // would be an exec every two seconds for nothing.
+    vi.useFakeTimers();
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    (mgr as unknown as { syncShellPolling(): void }).syncShellPolling();
+    expect(timer(mgr)).toBeUndefined();
+    mgr.dispose();
+  });
+
+  it('polls once a shell exists, and keeps its labels current', async () => {
+    // syncWindows is otherwise only reached from a hook event — an AGENT's
+    // heartbeat — so without this a shell in a worktree with no agent running
+    // would be labelled once and then frozen.
+    vi.useFakeTimers();
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'shell', state: 'idle', name: 'shell' }]]);
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'shell', title: '', command: 'npm' },
+    ]);
+    (mgr as unknown as { syncShellPolling(): void }).syncShellPolling();
+    expect(timer(mgr)).toBeDefined();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(stub.listWindows).toHaveBeenCalledWith(SESSION);
+    expect(mgr.getSessions('wt-1')[0]?.title).toBe('npm');
+    mgr.dispose();
+  });
+
+  it('runs one timer however many worktrees have shells', () => {
+    vi.useFakeTimers();
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'shell', state: 'idle', name: 'shell' }]]);
+    seed(mgr, 'wt-2', [[1, { kind: 'shell', state: 'idle', name: 'shell' }]]);
+    const sync = (mgr as unknown as { syncShellPolling(): void });
+    sync.syncShellPolling();
+    const first = timer(mgr);
+    sync.syncShellPolling();
+    expect(timer(mgr)).toBe(first);
+    mgr.dispose();
+  });
+
+  it('polls every worktree that has a shell, and no others', async () => {
+    vi.useFakeTimers();
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'shell', state: 'idle', name: 'shell' }]]);
+    seed(mgr, 'wt-2', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    (mgr as unknown as { syncShellPolling(): void }).syncShellPolling();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(stub.listWindows).toHaveBeenCalledWith(SESSION);
+    expect(stub.listWindows).not.toHaveBeenCalledWith('unmess-wt-2');
+    mgr.dispose();
+  });
+
+  it('stops once the last shell is gone', () => {
+    vi.useFakeTimers();
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'shell', state: 'idle', name: 'shell' }]]);
+    const sync = (mgr as unknown as { syncShellPolling(): void });
+    sync.syncShellPolling();
+    expect(timer(mgr)).toBeDefined();
+
+    (mgr as unknown as { windowMap(id: string): Map<number, unknown> }).windowMap('wt-1').clear();
+    sync.syncShellPolling();
+
+    expect(timer(mgr)).toBeUndefined();
+    mgr.dispose();
+  });
+
+  it('survives a tmux failure with the last known label still on screen', async () => {
+    // Blanking the row on a hiccup is worse than showing a slightly stale one.
+    vi.useFakeTimers();
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'shell', state: 'idle', name: 'shell', title: 'npm' }]]);
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no server'));
+    (mgr as unknown as { syncShellPolling(): void }).syncShellPolling();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(mgr.getSessions('wt-1')[0]?.title).toBe('npm');
+    mgr.dispose();
+  });
+
+  it('starts polling when a terminal is opened, and clears the timer on dispose', async () => {
+    vi.useFakeTimers();
+    const { mgr, stub } = create();
+    (stub.newWindow as ReturnType<typeof vi.fn>).mockResolvedValue(2);
+    await mgr.openTerminal(wt);
+    expect(timer(mgr)).toBeDefined();
+
+    mgr.dispose();
+    expect(timer(mgr)).toBeUndefined();
+  });
+});
+

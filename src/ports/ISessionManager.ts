@@ -3,6 +3,11 @@ export interface TmuxWindow {
   name: string;
   /** Title of the window's active pane (set via OSC by the running program, e.g. Claude Code's live status). */
   title?: string;
+  /**
+   * Process running in the active pane right now — `zsh` when the shell is
+   * sitting at a prompt, `npm`/`vim`/`psql` when it is not.
+   */
+  command?: string;
 }
 
 /** Port over tmux session operations (implemented by TmuxManager). */
