@@ -20,6 +20,7 @@ import type { SendDestination, DiffComment } from '../diff/types';
 import { buildCommentPrompt } from '../diff/commentPrompt';
 import { displayLabel, truncateLabel } from '../worktree/displayLabel';
 import { findRepoRoot } from '../worktree/findRepoRoot';
+import { canonicalPath, worktreesInRepo } from '../worktree/worktreesInRepo';
 
 export const ACTIVE_WORKTREE_KEY = 'unmess.activeWorktreeId';
 export const WORKTREE_ORDER_KEY = 'unmess.worktreeOrder';
@@ -145,10 +146,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * workspace, so a resolved root does not go missing under us.
    */
   private worktreesInWindow(): Worktree[] {
-    const root = this.findRepoRoot();
-    if (!root) return [];
-    const normalized = path.normalize(root);
-    return this.deps.manager.list().filter((w) => path.normalize(w.repoRoot) === normalized);
+    return worktreesInRepo(this.deps.manager.list(), this.findRepoRoot());
   }
 
   private findWorktree(worktreeId: string): Worktree | undefined {
@@ -724,7 +722,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     // folders had just been removed. findRepoRoot decides which repo a window
     // belongs to; this now agrees with it.
     const root = this.findRepoRoot();
-    if (root && paths.some((p) => path.normalize(p) === path.normalize(root))) {
+    if (root && paths.some((p) => canonicalPath(p) === canonicalPath(root))) {
       await this.loadWorktreesForRepo(root);
     }
     // Worktree folders register asynchronously after addWorkspaceFolders —
@@ -752,14 +750,14 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   async loadWorktreesForRepo(repoRoot: string): Promise<void> {
     const { current } = await this.deps.manager.reconcile(repoRoot);
-    const normalizedRoot = path.normalize(repoRoot);
+    const normalizedRoot = canonicalPath(repoRoot);
     // The store is global; this window is not. Everything below — the explorer
     // folders, the git watches, the docker and PR polling — used to run against
     // every worktree of every repository the extension had ever seen, which is
     // how a window opened on one project filled up with another one's folders.
-    const mine = current.filter((w) => path.normalize(w.repoRoot) === normalizedRoot);
+    const mine = worktreesInRepo(current, repoRoot);
 
-    const keep = new Set([repoRoot, ...mine.map((w) => w.path)].map((p) => path.normalize(p)));
+    const keep = new Set([repoRoot, ...mine.map((w) => w.path)].map(canonicalPath));
     // Folders Unmess itself added for some OTHER repository, which are ours to
     // take back. Deliberately excludes another repo's MAIN checkout: that is a
     // project the user opened, not noise we introduced.
@@ -772,14 +770,14 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const foreign = new Set(
       current
         .filter((w) => {
-          const root = path.normalize(w.repoRoot);
-          return root !== normalizedRoot && path.normalize(w.path) !== root;
+          const root = canonicalPath(w.repoRoot);
+          return root !== normalizedRoot && canonicalPath(w.path) !== root;
         })
-        .map((w) => path.normalize(w.path)),
+        .map((w) => canonicalPath(w.path)),
     );
     const indicesToRemove = this.deps.host
       .workspaceFolderPaths()
-      .map((p, i) => ({ p: path.normalize(p), i }))
+      .map((p, i) => ({ p: canonicalPath(p), i }))
       // Only folders Unmess is responsible for: another repo's worktree, or a
       // stale one inside this repository. A folder it does not recognise is the
       // user's own and is left where they put it.
@@ -916,7 +914,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
     const repoRoot = this.findRepoRoot();
     const pathExists = this.deps.host.exists(wt.path);
-    const isActuallyMain = pathExists && !!repoRoot && path.normalize(wt.path) === path.normalize(repoRoot);
+    const isActuallyMain = pathExists && !!repoRoot && canonicalPath(wt.path) === canonicalPath(repoRoot);
     if (isActuallyMain) {
       let isTrulyMain = true;
       try {

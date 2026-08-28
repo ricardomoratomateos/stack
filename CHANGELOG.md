@@ -4,6 +4,13 @@ All notable changes to Unmess are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] — 2026-08-28
+
+### Fixed
+
+- **The last two places the global store leaked through.** The tab and breakpoint managers were still handed every worktree the extension had seen. Both attribute an open file to a worktree by path prefix, so a file opened in another project's worktree was saved under that worktree's id — from a window that does not manage it, into state that project's own window then restores. Both are now scoped like everything else.
+- **Paths compare the same way everywhere.** `path.normalize` keeps a trailing separator, so "/repo/" and "/repo" were unequal — and these paths arrive from three sources that disagree about it: git's output, the workspace folder list, and a hand-written config file. A mismatch showed up as a window silently listing nothing. One canonical form now, shared by the sidebar filter, the workspace-folder pruning and the worktree reconciler.
+
 ## [0.1.1] — 2026-08-28
 
 ### Fixed
@@ -34,5 +41,6 @@ Initial public release.
 - **Ports on the card** — each worktree lists the ports it owns under Docker, clickable to open `http://localhost:<port>`. Derived from the same function that builds the compose environment, so the card cannot disagree with what the container publishes; visible while the stack is down, which is when you need it.
 - **Committable repo configuration** — a `.unmess/config.json` carries the settings that describe the project (worktree location, base branch, setup scripts, compose files, port ranges) so a teammate who clones the repo inherits a working setup instead of a paste of someone else's `settings.json`. **Unmess: Create Repo Config File** generates it from what is currently in effect. Precedence is your own explicit setting, then the repo file, then the shipped default; per-user settings such as which agent you prefer are refused rather than silently applied.
 
+[0.1.2]: https://github.com/ricardomoratomateos/unmess/releases/tag/v0.1.2
 [0.1.1]: https://github.com/ricardomoratomateos/unmess/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ricardomoratomateos/unmess/releases/tag/v0.1.0

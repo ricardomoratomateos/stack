@@ -30,6 +30,7 @@ import { DiffPanelManager } from './diff/DiffPanelManager';
 import { SIDEBAR_VIEW_ID } from './constants';
 import { PACKAGE_MANAGERS, promptTmuxInstall } from './onboarding/tmuxGate';
 import { findRepoRoot } from './worktree/findRepoRoot';
+import { worktreesInRepo } from './worktree/worktreesInRepo';
 
 /**
  * Surfaces a broken `.unmess/config.json` with a way to go fix it.
@@ -269,8 +270,15 @@ export async function activate(ctx: vscode.ExtensionContext) {
   const dimProvider = new WorktreeDimDecorationProvider();
   ctx.subscriptions.push(vscode.window.registerFileDecorationProvider(dimProvider));
 
-  const tabManager = new TabManager(ctx.globalState, () => manager.list());
-  const breakpointManager = new BreakpointManager(ctx.globalState, () => manager.list());
+  // Scoped to this window's repository, like everything else that answers
+  // "what is in front of the user". Both managers attribute an open file to a
+  // worktree by path prefix, so handing them the global store let a file opened
+  // in another project's worktree be saved under that worktree's id — in a
+  // window that does not manage it, into state its own window then restores.
+  const worktreesHere = () => worktreesInRepo(manager.list(), repoRootOf());
+
+  const tabManager = new TabManager(ctx.globalState, worktreesHere);
+  const breakpointManager = new BreakpointManager(ctx.globalState, worktreesHere);
 
   const service = new WorktreeApplicationService({
     manager,

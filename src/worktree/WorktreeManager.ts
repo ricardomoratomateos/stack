@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { canonicalPath } from './worktreesInRepo';
 import { randomUUID } from 'node:crypto';
 import { Worktree } from '../types';
 import { PortAllocator } from './portAllocator';
@@ -33,7 +34,7 @@ export class WorktreeManager {
    */
   async reconcile(repoRoot: string): Promise<{ adopted: Worktree[]; removed: Worktree[]; current: Worktree[] }> {
     const gitWorktrees = this.listFromGit(repoRoot);
-    const normalizedRepoRoot = path.normalize(repoRoot);
+    const normalizedRepoRoot = canonicalPath(repoRoot);
 
     // If git failed (returned empty), abort — never wipe the store on a git error
     if (gitWorktrees.length === 0) {
@@ -43,7 +44,7 @@ export class WorktreeManager {
     const removed: Worktree[] = [];
 
     // Add git worktrees missing from store (including main worktree)
-    const storedPaths = new Set(this.store.getAll().map((w) => path.normalize(w.path)));
+    const storedPaths = new Set(this.store.getAll().map((w) => canonicalPath(w.path)));
     const adopted: Worktree[] = [];
 
     // Patch isMain and branch on already-stored worktrees.
@@ -56,10 +57,10 @@ export class WorktreeManager {
       // that unmess's checkout has stopped being unmess's main one, and vice
       // versa — which is exactly how opening a second repo demoted the first
       // one's main checkout out of the top slot.
-      if (stored.repoRoot && path.normalize(stored.repoRoot) !== normalizedRepoRoot) continue;
-      const shouldBeMain = path.normalize(stored.path) === normalizedRepoRoot;
+      if (stored.repoRoot && canonicalPath(stored.repoRoot) !== normalizedRepoRoot) continue;
+      const shouldBeMain = canonicalPath(stored.path) === normalizedRepoRoot;
       const matchingGit = gitWorktrees.find(
-        (wt) => path.normalize(wt.path) === path.normalize(stored.path),
+        (wt) => canonicalPath(wt.path) === canonicalPath(stored.path),
       );
       const updates: Partial<Worktree> = {};
       if (stored.isMain !== shouldBeMain) updates.isMain = shouldBeMain;
@@ -72,9 +73,9 @@ export class WorktreeManager {
     }
 
     for (const wt of gitWorktrees) {
-      if (storedPaths.has(path.normalize(wt.path))) continue;
+      if (storedPaths.has(canonicalPath(wt.path))) continue;
 
-      const isMain = path.normalize(wt.path) === normalizedRepoRoot;
+      const isMain = canonicalPath(wt.path) === normalizedRepoRoot;
       const xdebugPort = isMain ? 0 : await this.portAllocator.allocate();
       const worktree: Worktree = {
         id: randomUUID(),
@@ -111,11 +112,11 @@ export class WorktreeManager {
     // to the existing worktree instead.
     const existingGit = this.git.listWorktrees(repoRoot).find((wt) => wt.branch === branch);
     if (existingGit) {
-      if (path.normalize(existingGit.path) === path.normalize(repoRoot)) {
+      if (canonicalPath(existingGit.path) === canonicalPath(repoRoot)) {
         throw new Error(`Branch "${branch}" is checked out in the main repository — can't attach it as a worktree.`);
       }
       const alreadyTracked = this.store.getAll().find(
-        (w) => path.normalize(w.path) === path.normalize(existingGit.path),
+        (w) => canonicalPath(w.path) === canonicalPath(existingGit.path),
       );
       if (alreadyTracked) return alreadyTracked;
       return this.attach(existingGit.path, branch, repoRoot, alias);
@@ -244,7 +245,7 @@ export class WorktreeManager {
       // the old one. The user saw it come back nameless.
       const stillRegistered = this.git
         .listWorktrees(worktree.repoRoot)
-        .some((wt) => path.normalize(wt.path) === path.normalize(worktree.path));
+        .some((wt) => canonicalPath(wt.path) === canonicalPath(worktree.path));
       if (stillRegistered) {
         throw removeError instanceof Error ? removeError : new Error(String(removeError));
       }
