@@ -1197,7 +1197,10 @@ describe('start', () => {
 
 describe('handleAddedWorkspaceFolders (one repo at a time)', () => {
   it('loads the first added git repo only', async () => {
+    // VSCode has already put the folders in the workspace by the time the event
+    // fires, so the harness models them as present.
     const h = makeHarness({
+      workspaceFolders: ['/repo1', '/repo2'],
       existingPaths: ['/repo1/.git', '/repo2/.git'],
       gitDirs: ['/repo1/.git', '/repo2/.git'],
     });
@@ -1207,14 +1210,37 @@ describe('handleAddedWorkspaceFolders (one repo at a time)', () => {
     expect(spy).toHaveBeenCalledWith('/repo1');
   });
 
+  it('ignores a second repository dropped in beside the first', async () => {
+    // Reloading for the newcomer would prune the original's worktree folders as
+    // foreign while the sidebar, still scoped to the original, went on listing
+    // worktrees whose folders had just been removed.
+    const h = makeHarness({
+      workspaceFolders: ['/repo1', '/repo2'],
+      existingPaths: ['/repo1/.git', '/repo2/.git'],
+      gitDirs: ['/repo1/.git', '/repo2/.git'],
+    });
+    const spy = vi.spyOn(h.service, 'loadWorktreesForRepo').mockResolvedValue(undefined);
+    await h.service.handleAddedWorkspaceFolders(['/repo2']);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it('skips non-git folders and .git files', async () => {
     const h = makeHarness({
+      workspaceFolders: ['/plain', '/linked'],
       existingPaths: ['/linked/.git'], // exists but is a FILE
       gitDirs: [],
     });
     const spy = vi.spyOn(h.service, 'loadWorktreesForRepo').mockResolvedValue(undefined);
     await h.service.handleAddedWorkspaceFolders(['/plain', '/linked']);
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('still re-applies search scoping when nothing loaded', async () => {
+    // Worktree folders register asynchronously after addWorkspaceFolders, so the
+    // scoping has to be rewritten whenever folders land, loaded or not.
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a', path: '/repo/zer/feat-a' })] });
+    await h.service.handleAddedWorkspaceFolders(['/repo/zer/feat-a']);
+    expect(h.host.updateFolderSetting).toHaveBeenCalled();
   });
 });
 
@@ -1226,19 +1252,21 @@ describe('loadWorktreesForRepo', () => {
   it('runs reconcile → clean stale folders (descending) → batch-add → watchers → reconnect → tree ready/refresh → push', async () => {
     const a = makeWorktree({ id: 'a', path: '/repo', branch: 'main', isMain: true });
     const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
-    // '/stale-1' (idx 1) and '/stale-2' (idx 3) must be removed in DESCENDING order;
-    // b's folder is missing and must be batch-added.
+    // Stale worktree folders of THIS repo, at idx 1 and 3, removed in DESCENDING
+    // order so the earlier removals do not shift the later indexes; b's folder is
+    // missing and must be batch-added.
     const h = makeHarness({
       worktrees: [a, b],
-      workspaceFolders: ['/repo', '/stale-1', '/other-keep', '/stale-2'],
+      workspaceFolders: ['/repo', '/repo/zer/stale-1', '/elsewhere/mine', '/repo/zer/stale-2'],
     });
-    // '/other-keep' is stale too — everything not repoRoot or a worktree path goes
+    // '/elsewhere/mine' stays. Unmess removes folders it is responsible for — a
+    // stale worktree of this repo, or one it added for another repo — and leaves
+    // anything it does not recognise where the user put it.
     h.service.setUi(h.ui);
     await h.service.loadWorktreesForRepo('/repo');
     expect(h.calls).toEqual([
       'manager.reconcile:/repo',
       'host.removeWorkspaceFolder:3',
-      'host.removeWorkspaceFolder:2',
       'host.removeWorkspaceFolder:1',
       'host.addWorkspaceFolders:/repo/zer/feat-b=feat/b',
       'gitWatcher.watch:/repo',
@@ -2910,6 +2938,85 @@ describe('worktrees are scoped to the window\'s repository', () => {
     void h.service.renameWorktree();
 
     expect(h.host.showInputBox).toHaveBeenCalledWith(expect.objectContaining({ value: 'feat/a' }));
+  });
+});
+
+describe('loadWorktreesForRepo keeps to its own repository', () => {
+  const foreignWorktree = makeWorktree({
+    id: 'z', branch: 'other/feat', path: '/other/zer/feat', repoRoot: '/other',
+  });
+  const foreignRoot = makeWorktree({
+    id: 'zr', branch: 'main', path: '/other', repoRoot: '/other', isMain: true,
+  });
+
+  it('adds only this repo\'s worktrees to the explorer', async () => {
+    // The complaint that started this: a window opened on one project filled up
+    // with another project's folders.
+    const mine = makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/feat-a' });
+    const h = makeHarness({ worktrees: [mine, foreignWorktree], workspaceFolders: ['/repo'] });
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.calls).toContain('host.addWorkspaceFolders:/repo/zer/feat-a=feat/a');
+    expect(h.calls.some((c) => c.includes('/other/zer/feat'))).toBe(false);
+  });
+
+  it('takes back a folder it added for another repository', async () => {
+    const mine = makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/feat-a' });
+    const h = makeHarness({
+      worktrees: [mine, foreignWorktree],
+      workspaceFolders: ['/repo', '/other/zer/feat'],
+    });
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.calls).toContain('host.removeWorkspaceFolder:1');
+  });
+
+  it('leaves another repository\'s checkout alone even with isMain wrongly false', async () => {
+    // 0.1.0 demoted other repos' main checkouts, so that flag cannot be trusted
+    // to identify one. Removing a project folder from someone's workspace is a
+    // far worse thing to get wrong than leaving a folder behind.
+    const demoted = makeWorktree({
+      id: 'zr2', branch: 'main', path: '/other', repoRoot: '/other', isMain: false,
+    });
+    const mine = makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/feat-a' });
+    const h = makeHarness({
+      worktrees: [mine, demoted],
+      workspaceFolders: ['/repo', '/other'],
+    });
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.calls.some((c) => c.startsWith('host.removeWorkspaceFolder'))).toBe(false);
+  });
+
+  it('leaves another repository\'s main checkout alone', async () => {
+    // That is a project the user opened, not noise Unmess introduced. Ripping it
+    // out of their window would be worse than the folders it is cleaning up.
+    const mine = makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/feat-a' });
+    const h = makeHarness({
+      worktrees: [mine, foreignRoot],
+      workspaceFolders: ['/repo', '/other'],
+    });
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.calls.some((c) => c.startsWith('host.removeWorkspaceFolder'))).toBe(false);
+  });
+
+  it('watches, and polls docker and PRs for, only this repo', async () => {
+    // These ran against every worktree of every repo the extension had seen:
+    // a git watcher, a docker poll and a gh call each, forever.
+    const mine = makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/feat-a' });
+    const h = makeHarness({ worktrees: [mine, foreignWorktree], workspaceFolders: ['/repo'] });
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.calls).toContain('gitWatcher.watch:/repo/zer/feat-a');
+    expect(h.calls.some((c) => c.startsWith('gitWatcher.watch:/other'))).toBe(false);
+    expect(h.calls.some((c) => c === 'pr.startPolling:other/feat:z')).toBe(false);
+    expect(h.calls.some((c) => c.startsWith('docker.startPolling:feat'))).toBe(true);
   });
 });
 

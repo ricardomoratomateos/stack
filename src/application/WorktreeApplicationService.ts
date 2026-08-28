@@ -714,12 +714,18 @@ export class WorktreeApplicationService implements DiffPanelHost {
   }
 
   async handleAddedWorkspaceFolders(paths: string[]): Promise<void> {
-    for (const p of paths) {
-      const gitDir = path.join(p, '.git');
-      if (this.deps.host.exists(gitDir) && this.deps.host.isDirectory(gitDir)) {
-        await this.loadWorktreesForRepo(p);
-        break; // one repo at a time
-      }
+    // Only when the folder that arrived IS this window's repository.
+    //
+    // This used to load whichever added folder had a .git first, which is right
+    // for the case it was written for — a repo dropped into an empty window —
+    // and wrong for a second repo dropped in beside the first: it would reload
+    // for the newcomer, prune the original's worktree folders as foreign, and
+    // leave the sidebar (still scoped to the original) listing worktrees whose
+    // folders had just been removed. findRepoRoot decides which repo a window
+    // belongs to; this now agrees with it.
+    const root = this.findRepoRoot();
+    if (root && paths.some((p) => path.normalize(p) === path.normalize(root))) {
+      await this.loadWorktreesForRepo(root);
     }
     // Worktree folders register asynchronously after addWorkspaceFolders —
     // folder-scoped settings can only be written once the folder exists, so
@@ -746,18 +752,44 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   async loadWorktreesForRepo(repoRoot: string): Promise<void> {
     const { current } = await this.deps.manager.reconcile(repoRoot);
+    const normalizedRoot = path.normalize(repoRoot);
+    // The store is global; this window is not. Everything below — the explorer
+    // folders, the git watches, the docker and PR polling — used to run against
+    // every worktree of every repository the extension had ever seen, which is
+    // how a window opened on one project filled up with another one's folders.
+    const mine = current.filter((w) => path.normalize(w.repoRoot) === normalizedRoot);
 
-    const validPaths = new Set([repoRoot, ...current.map((w) => w.path)]);
+    const keep = new Set([repoRoot, ...mine.map((w) => w.path)].map((p) => path.normalize(p)));
+    // Folders Unmess itself added for some OTHER repository, which are ours to
+    // take back. Deliberately excludes another repo's MAIN checkout: that is a
+    // project the user opened, not noise we introduced.
+    //
+    // Identified by the path being its own repo root rather than by isMain,
+    // because that flag is exactly what the cross-repo bug corrupted — a
+    // checkout demoted by 0.1.0 would otherwise be read as a stray worktree and
+    // removed from the workspace, which is a far worse thing to get wrong than
+    // leaving a folder behind.
+    const foreign = new Set(
+      current
+        .filter((w) => {
+          const root = path.normalize(w.repoRoot);
+          return root !== normalizedRoot && path.normalize(w.path) !== root;
+        })
+        .map((w) => path.normalize(w.path)),
+    );
     const indicesToRemove = this.deps.host
       .workspaceFolderPaths()
-      .map((p, i) => ({ p, i }))
-      .filter(({ p }) => !validPaths.has(p))
+      .map((p, i) => ({ p: path.normalize(p), i }))
+      // Only folders Unmess is responsible for: another repo's worktree, or a
+      // stale one inside this repository. A folder it does not recognise is the
+      // user's own and is left where they put it.
+      .filter(({ p }) => !keep.has(p) && (foreign.has(p) || p.startsWith(normalizedRoot + path.sep)))
       .map(({ i }) => i)
       .sort((a, b) => b - a);
     for (const idx of indicesToRemove) this.deps.host.removeWorkspaceFolder(idx);
 
     const existing = this.deps.host.workspaceFolderPaths();
-    const toAdd = current.filter((wt) => !existing.some((p) => p === wt.path));
+    const toAdd = mine.filter((wt) => !existing.some((p) => p === wt.path));
     if (toAdd.length > 0) {
       this.deps.host.addWorkspaceFolders(...toAdd.map((wt) => ({ path: wt.path, name: displayLabel(wt) })));
     }
@@ -766,14 +798,17 @@ export class WorktreeApplicationService implements DiffPanelHost {
     // stack brought up outside Unmess (or under the branch name instead) is
     // invisible to it. Printing the keys makes that mismatch obvious instead of
     // looking like a broken docker integration.
-    console.log(`[unmess] docker projects: ${current.map((wt) => composeProject(wt)).join(', ')}`);
-    for (const wt of current) {
+    console.log(`[unmess] docker projects: ${mine.map((wt) => composeProject(wt)).join(', ')}`);
+    for (const wt of mine) {
       this.deps.gitWatcher.watch(wt.path, this.driftBaseFor(wt));
       this.deps.dockerMonitor.startPolling(composeProject(wt), () => this.ui.pushWebview());
       this.deps.prMonitor.startPolling(wt.branch, wt.id, () => this.ui.pushWebview());
     }
 
-    await this.deps.agentManager.reconnect(current);
+    // `mine`, not `current`: reconnecting another repo's worktrees costs a tmux
+    // lookup each and leaves the session manager tracking windows this window
+    // will never show — which the shell poller would then keep polling.
+    await this.deps.agentManager.reconnect(mine);
     this.ui.pushWebview();
     this.refreshDecorations();
     this.syncSearchScoping();
