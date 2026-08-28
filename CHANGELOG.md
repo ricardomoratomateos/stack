@@ -4,6 +4,12 @@ All notable changes to Unmess are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] — 2026-08-28
+
+### Changed
+
+- **New icon.** Three threads enter tangled, cross once, and leave as parallel lines — the product's name, drawn. It replaces a letter "U", which said nothing about what the extension does and competed with every other extension starting with the same letter. The marketplace icon carries the same mark on the existing lime.
+
 ## [0.1.2] — 2026-08-28
 
 ### Fixed
@@ -41,6 +47,7 @@ Initial public release.
 - **Ports on the card** — each worktree lists the ports it owns under Docker, clickable to open `http://localhost:<port>`. Derived from the same function that builds the compose environment, so the card cannot disagree with what the container publishes; visible while the stack is down, which is when you need it.
 - **Committable repo configuration** — a `.unmess/config.json` carries the settings that describe the project (worktree location, base branch, setup scripts, compose files, port ranges) so a teammate who clones the repo inherits a working setup instead of a paste of someone else's `settings.json`. **Unmess: Create Repo Config File** generates it from what is currently in effect. Precedence is your own explicit setting, then the repo file, then the shipped default; per-user settings such as which agent you prefer are refused rather than silently applied.
 
+[0.1.3]: https://github.com/ricardomoratomateos/unmess/releases/tag/v0.1.3
 [0.1.2]: https://github.com/ricardomoratomateos/unmess/releases/tag/v0.1.2
 [0.1.1]: https://github.com/ricardomoratomateos/unmess/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ricardomoratomateos/unmess/releases/tag/v0.1.0
