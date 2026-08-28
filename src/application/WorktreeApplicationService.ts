@@ -138,13 +138,15 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * checkout was opened beside aside, that checkout arrived at the top of
    * aside's sidebar as "main".
    *
-   * Falls back to the whole store when no repository resolves, rather than
-   * showing an empty list: a window whose git folder is momentarily out of the
-   * workspace should look uninformative, not look like the worktrees are gone.
+   * No repository, no worktrees. Showing the whole store in that case would be
+   * the same bug in its worst form — a window with nothing git-shaped open
+   * listing every worktree of every project. And there is no transient to
+   * protect against: loadWorktreesForRepo always keeps the repo root in the
+   * workspace, so a resolved root does not go missing under us.
    */
   private worktreesInWindow(): Worktree[] {
     const root = this.findRepoRoot();
-    if (!root) return this.deps.manager.list();
+    if (!root) return [];
     const normalized = path.normalize(root);
     return this.deps.manager.list().filter((w) => path.normalize(w.repoRoot) === normalized);
   }

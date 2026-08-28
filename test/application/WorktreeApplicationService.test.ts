@@ -48,8 +48,14 @@ interface HarnessOpts {
   viewerIds?: string[];
   /** worktree ids for which hasTerminals() returns true */
   terminalIds?: string[];
+  /**
+   * Workspace folders. Defaults to ['/repo'], the repoRoot makeWorktree uses:
+   * a window with no git repository in it now shows no worktrees at all, so a
+   * harness without one models an empty sidebar rather than a normal window.
+   * Pass [] deliberately to test that case.
+   */
   workspaceFolders?: string[];
-  /** paths for which host.isDirectory returns true */
+  /** paths for which host.isDirectory returns true. Defaults to ['/repo/.git']. */
   gitDirs?: string[];
   /** paths for which host.exists returns true */
   existingPaths?: string[];
@@ -148,7 +154,7 @@ function makeHarness(o: HarnessOpts = {}) {
   };
   const breakpointManager = { activate: vi.fn() };
 
-  const folders = [...(o.workspaceFolders ?? [])];
+  const folders = [...(o.workspaceFolders ?? ['/repo'])];
   const terminalsCreated: Array<{ name: string; cwd: string; show: ReturnType<typeof vi.fn>; sendText: ReturnType<typeof vi.fn> }> = [];
   let activeTerminal: unknown;
   const host = {
@@ -181,7 +187,7 @@ function makeHarness(o: HarnessOpts = {}) {
     }),
     activeTerminal: vi.fn(() => activeTerminal),
     exists: vi.fn((p: string) => (o.existingPaths ?? []).includes(p)),
-    isDirectory: vi.fn((p: string) => (o.gitDirs ?? []).includes(p)),
+    isDirectory: vi.fn((p: string) => (o.gitDirs ?? ['/repo/.git']).includes(p)),
     writeClipboard: vi.fn(async (text: string) => { calls.push(`host.writeClipboard:${text}`); }),
     openFileInEditor: vi.fn(async (p: string, line?: number) => { calls.push(`host.openFileInEditor:${p}:${line ?? ''}`); }),
     openExternal: vi.fn(async (url: string) => { calls.push(`host.openExternal:${url}`); }),
@@ -608,7 +614,9 @@ describe('handleMessage listBranches', () => {
   });
 
   it('does nothing when there is no git repository in the workspace', async () => {
-    const h = makeHarness({ withUi: true }); // no gitDirs → no repo root
+    // Explicitly empty: the harness now defaults to a window WITH a repo, since
+    // one without shows no worktrees at all.
+    const h = makeHarness({ withUi: true, workspaceFolders: [], gitDirs: [] });
     await h.service.handleMessage({ type: 'listBranches' });
     expect(h.git.listBranches).not.toHaveBeenCalled();
     expect(h.service.buildState().branches).toBeUndefined();
@@ -2882,14 +2890,14 @@ describe('worktrees are scoped to the window\'s repository', () => {
     expect((last?.[0] as Array<{ id: string }>).map((w) => w.id)).toEqual(['a']);
   });
 
-  it('falls back to the whole store when no repository resolves', () => {
-    // A window with the git folder momentarily out of the workspace should look
-    // uninformative, not look like the worktrees have been deleted.
+  it('shows nothing at all when no repository is open', () => {
+    // Not "everything" — a window with nothing git-shaped in it listing every
+    // worktree of every project is the same bug in its worst form.
     const a = inRepo('/repo', { id: 'a' });
     const other = inRepo('/other', { id: 'z', path: '/other' });
     const h = makeHarness({ worktrees: [a, other], workspaceFolders: [], gitDirs: [] });
 
-    expect(h.service.buildState().worktrees.map((w) => w.id)).toEqual(['a', 'z']);
+    expect(h.service.buildState().worktrees).toEqual([]);
   });
 
   it('resolves a palette command against this window, not the first repo stored', () => {
