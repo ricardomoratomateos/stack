@@ -126,7 +126,27 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   /** Push the current worktree list + active worktree to the explorer dimming. */
   private refreshDecorations(): void {
-    this.ui.syncDecorations(this.deps.manager.list(), this.currentWorktreeId);
+    this.ui.syncDecorations(this.worktreesInWindow(), this.currentWorktreeId);
+  }
+
+  /**
+   * The worktrees belonging to the repository open in THIS window.
+   *
+   * The store is global to the extension, so every window used to list every
+   * worktree of every repo it had ever seen. Invisible while only one project
+   * was ever open; the moment the extension was installed and Unmess's own
+   * checkout was opened beside aside, that checkout arrived at the top of
+   * aside's sidebar as "main".
+   *
+   * Falls back to the whole store when no repository resolves, rather than
+   * showing an empty list: a window whose git folder is momentarily out of the
+   * workspace should look uninformative, not look like the worktrees are gone.
+   */
+  private worktreesInWindow(): Worktree[] {
+    const root = this.findRepoRoot();
+    if (!root) return this.deps.manager.list();
+    const normalized = path.normalize(root);
+    return this.deps.manager.list().filter((w) => path.normalize(w.repoRoot) === normalized);
   }
 
   private findWorktree(worktreeId: string): Worktree | undefined {
@@ -141,7 +161,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
    */
   private resolveWorktree(worktree?: Worktree): Worktree | undefined {
     if (worktree) return worktree;
-    const all = this.deps.store.getAll();
+    const all = this.worktreesInWindow();
     return all.find((w) => w.id === this.currentWorktreeId) ?? all[0];
   }
 
@@ -375,7 +395,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
    */
   async attachDroppedFiles(paths: string[]): Promise<void> {
     if (paths.length === 0) return;
-    const worktrees = this.deps.manager.list();
+    const worktrees = this.worktreesInWindow();
     const wt =
       this.findWorktree(this.currentWorktreeId ?? '') ?? (worktrees.length === 1 ? worktrees[0] : undefined);
     if (!wt) {
@@ -607,7 +627,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
   }
 
   buildState(): UnmessState {
-    const worktrees = this.orderWorktrees(this.deps.manager.list());
+    const worktrees = this.orderWorktrees(this.worktreesInWindow());
     const items: WorktreeItem[] = worktrees.map((wt) => ({
       id: wt.id,
       branch: wt.branch,
@@ -713,7 +733,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
    */
   private syncSearchScoping(): void {
     const enabled = this.deps.config.get().scopeSearchToActiveWorktree;
-    const worktrees = this.deps.manager.list();
+    const worktrees = this.worktreesInWindow();
     // With no worktree selected, keep the main repo searchable as the fallback.
     const activeId = this.currentWorktreeId ?? worktrees.find((w) => w.isMain)?.id;
     for (const wt of worktrees) {
@@ -1005,7 +1025,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
   }
 
   private cycleWorktree(direction: 1 | -1): void {
-    const worktrees = this.deps.manager.list();
+    const worktrees = this.worktreesInWindow();
     if (!worktrees.length) return;
     const active = this.deps.host.activeTerminal();
     let idx = -1;

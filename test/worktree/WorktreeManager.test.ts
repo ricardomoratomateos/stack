@@ -868,3 +868,37 @@ describe('delete with a non-Error rejection', () => {
     expect(store.get('a')).toBeDefined();
   });
 });
+
+describe('reconcile leaves other repositories alone', () => {
+  const MAIN: GitWorktreeEntry = { path: '/repo', head: 'aaa', branch: 'main' };
+
+  const foreign = makeWorktree({
+    id: 'foreign', branch: 'main', path: '/other', repoRoot: '/other', isMain: true,
+  });
+
+  it("does not demote another repo's main checkout", async () => {
+    // Opening a second repository used to flip the first one's main checkout to
+    // isMain: false, dropping it out of the top slot in its own window — the
+    // store is shared across every window the extension runs in.
+    const store = makeStoreStub([foreign]);
+    const mgr = new WorktreeManager(
+      store, makePortAllocatorStub(9899), makeConfigStub(), undefined, makeGitStub([MAIN]), makeFsStub(),
+    );
+
+    await mgr.reconcile(REPO);
+
+    expect(store.calls.some((c) => c.startsWith('patch:foreign'))).toBe(false);
+  });
+
+  it("still patches this repo's own entries", async () => {
+    const mine = makeWorktree({ id: 'mine', branch: 'stale', path: '/repo', repoRoot: REPO, isMain: false });
+    const store = makeStoreStub([mine]);
+    const mgr = new WorktreeManager(
+      store, makePortAllocatorStub(9899), makeConfigStub(), undefined, makeGitStub([MAIN]), makeFsStub(),
+    );
+
+    await mgr.reconcile(REPO);
+
+    expect(store.calls.some((c) => c.startsWith('patch:mine'))).toBe(true);
+  });
+});

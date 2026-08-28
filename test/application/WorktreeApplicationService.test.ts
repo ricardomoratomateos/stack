@@ -2833,3 +2833,75 @@ describe('renameSession', () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// One window, one repository
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('worktrees are scoped to the window\'s repository', () => {
+  const inRepo = (repoRoot: string, over: Record<string, unknown> = {}) =>
+    makeWorktree({ repoRoot, ...over } as never);
+
+  /** A window whose workspace holds `folders`, with `gitRoot` the real repo. */
+  const windowOn = (gitRoot: string, worktrees: ReturnType<typeof makeWorktree>[]) =>
+    makeHarness({
+      worktrees,
+      workspaceFolders: [gitRoot],
+      gitDirs: [`${gitRoot}/.git`],
+    });
+
+  it('lists only the worktrees of the repo open in this window', () => {
+    // The bug this exists for: with the extension installed in every window,
+    // Unmess's own checkout turned up at the top of aside's sidebar.
+    const mine = inRepo('/repo', { id: 'a', path: '/repo/zer/feat-a', branch: 'feat/a' });
+    const other = inRepo('/other', { id: 'z', path: '/other', branch: 'main', isMain: true });
+    const h = windowOn('/repo', [mine, other]);
+
+    expect(h.service.buildState().worktrees.map((w) => w.id)).toEqual(['a']);
+  });
+
+  it('keeps the other repo out of next/previous cycling', () => {
+    const a = inRepo('/repo', { id: 'a', path: '/repo/zer/feat-a', branch: 'feat/a' });
+    const other = inRepo('/other', { id: 'z', path: '/other', branch: 'main' });
+    const h = windowOn('/repo', [a, other]);
+
+    h.service.focusNextWorktree();
+
+    // Only one worktree here, so cycling lands back on it rather than on /other.
+    expect(h.calls.filter((c) => c.startsWith('globalState.update:unmess.activeWorktreeId'))
+      .every((c) => !c.includes('z'))).toBe(true);
+  });
+
+  it('dims only this window\'s worktrees', async () => {
+    const a = inRepo('/repo', { id: 'a', path: '/repo/zer/feat-a', branch: 'feat/a' });
+    const other = inRepo('/other', { id: 'z', path: '/other', branch: 'main' });
+    const h = windowOn('/repo', [a, other]);
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    const last = h.ui.syncDecorations.mock.calls.at(-1);
+    expect((last?.[0] as Array<{ id: string }>).map((w) => w.id)).toEqual(['a']);
+  });
+
+  it('falls back to the whole store when no repository resolves', () => {
+    // A window with the git folder momentarily out of the workspace should look
+    // uninformative, not look like the worktrees have been deleted.
+    const a = inRepo('/repo', { id: 'a' });
+    const other = inRepo('/other', { id: 'z', path: '/other' });
+    const h = makeHarness({ worktrees: [a, other], workspaceFolders: [], gitDirs: [] });
+
+    expect(h.service.buildState().worktrees.map((w) => w.id)).toEqual(['a', 'z']);
+  });
+
+  it('resolves a palette command against this window, not the first repo stored', () => {
+    // resolveWorktree falls back to "the first one" when invoked with no
+    // argument; the first one used to be whatever the store happened to hold.
+    const other = inRepo('/other', { id: 'z', path: '/other', branch: 'main' });
+    const mine = inRepo('/repo', { id: 'a', path: '/repo/zer/feat-a', branch: 'feat/a' });
+    const h = windowOn('/repo', [other, mine]);
+
+    void h.service.renameWorktree();
+
+    expect(h.host.showInputBox).toHaveBeenCalledWith(expect.objectContaining({ value: 'feat/a' }));
+  });
+});
+

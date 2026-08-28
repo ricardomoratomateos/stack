@@ -51,6 +51,12 @@ export class WorktreeManager {
     // Also sync branch names — a store entry can have a stale branch if the
     // worktree was switched to a different branch outside of Unmess.
     for (const stored of this.store.getAll()) {
+      // Another repository's worktree, tracked from another window. Its isMain
+      // flag is that repo's business: reconciling aside must not decide
+      // that unmess's checkout has stopped being unmess's main one, and vice
+      // versa — which is exactly how opening a second repo demoted the first
+      // one's main checkout out of the top slot.
+      if (stored.repoRoot && path.normalize(stored.repoRoot) !== normalizedRepoRoot) continue;
       const shouldBeMain = path.normalize(stored.path) === normalizedRepoRoot;
       const matchingGit = gitWorktrees.find(
         (wt) => path.normalize(wt.path) === path.normalize(stored.path),
