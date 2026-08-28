@@ -345,6 +345,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       this.branchOptions = { branches: this.deps.git.listBranches(root), base: this.resolveBaseBranch(root) };
       this.ui.pushWebview();
     },
+    renameSession: (msg) => void this.renameSession(msg.worktreeId, msg.index),
     openPort: (msg) => void this.openPort(msg.port),
     refreshDrift: (msg) => void this.refreshDrift(msg.worktreeId),
     selectWorktree: (msg) => this.switchToWorktree(msg.worktreeId),
@@ -547,6 +548,26 @@ export class WorktreeApplicationService implements DiffPanelHost {
     }
     this.deps.gitWatcher.watch(wt.path, base);
     await this.deps.gitWatcher.refreshNow(wt.path);
+    this.ui.pushWebview();
+  }
+
+  /**
+   * Names one session — the shell running redis becomes "redis".
+   *
+   * Prefilled with whatever the row shows now, so renaming is an edit rather
+   * than a retype, and an empty answer clears the name instead of setting a
+   * blank one: that is the only way back to the derived label.
+   */
+  async renameSession(worktreeId: string, index: number): Promise<void> {
+    const session = this.deps.agentManager.getSessions(worktreeId).find((s) => s.index === index);
+    if (!session) return;
+    const name = await this.deps.host.showInputBox({
+      prompt: 'Name for this session',
+      value: session.alias ?? session.name,
+      placeHolder: 'e.g. redis',
+    });
+    if (name === undefined) return; // dismissed
+    this.deps.agentManager.setSessionAlias(worktreeId, index, name);
     this.ui.pushWebview();
   }
 

@@ -118,6 +118,9 @@ function makeHarness(o: HarnessOpts = {}) {
     }),
     focusWindow: vi.fn(async (w: Worktree, i: number) => { calls.push(`claude.focusWindow:${w.id}:${i}`); }),
     getSessions: vi.fn((_id: string) => o.sessions ?? []),
+    setSessionAlias: vi.fn((id: string, index: number, alias: string) => {
+      calls.push(`agent.setSessionAlias:${id}:${index}:${alias}`);
+    }),
     killWindow: vi.fn(async (id: string, i: number) => { calls.push(`claude.killWindow:${id}:${i}`); }),
     pasteToActiveWindow: vi.fn(async (id: string, text: string) => { calls.push(`claude.pasteToActiveWindow:${id}:${text}`); }),
     setSessionOrder: vi.fn((id: string, order: number[]) => { calls.push(`claude.setSessionOrder:${id}:${order.join(',')}`); }),
@@ -2772,6 +2775,61 @@ describe('base-branch drift', () => {
     const h = makeHarness({ worktrees: [] });
     await h.service.handleMessage({ type: 'refreshDrift', worktreeId: 'gone' });
     expect(h.git.fetchBranch).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Naming a session
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('renameSession', () => {
+  const withSessions = (sessions: Array<Record<string, unknown>>) =>
+    makeHarness({ worktrees: [makeWorktree({ id: 'a' })], sessions: sessions as never });
+
+  it('prefills with the current name and stores the answer', async () => {
+    // Renaming is an edit, not a retype.
+    const h = withSessions([{ index: 2, name: 'shell', kind: 'shell', state: 'idle' }]);
+    h.host.showInputBox.mockResolvedValue('redis');
+
+    await h.service.handleMessage({ type: 'renameSession', worktreeId: 'a', index: 2 });
+
+    expect(h.host.showInputBox).toHaveBeenCalledWith(expect.objectContaining({ value: 'shell' }));
+    expect(h.claude.setSessionAlias).toHaveBeenCalledWith('a', 2, 'redis');
+    expect(h.ui.pushWebview).toHaveBeenCalled();
+  });
+
+  it('prefills with the name already given, not the window name', async () => {
+    const h = withSessions([{ index: 2, name: 'shell', alias: 'redis', kind: 'shell', state: 'idle' }]);
+    h.host.showInputBox.mockResolvedValue('cache');
+
+    await h.service.handleMessage({ type: 'renameSession', worktreeId: 'a', index: 2 });
+
+    expect(h.host.showInputBox).toHaveBeenCalledWith(expect.objectContaining({ value: 'redis' }));
+  });
+
+  it('passes an empty answer through, which is how a name is cleared', async () => {
+    const h = withSessions([{ index: 2, name: 'shell', alias: 'redis', kind: 'shell', state: 'idle' }]);
+    h.host.showInputBox.mockResolvedValue('');
+
+    await h.service.handleMessage({ type: 'renameSession', worktreeId: 'a', index: 2 });
+
+    expect(h.claude.setSessionAlias).toHaveBeenCalledWith('a', 2, '');
+  });
+
+  it('does nothing when the box is dismissed', async () => {
+    // undefined is Escape; '' is a deliberate clear. They must not be conflated.
+    const h = withSessions([{ index: 2, name: 'shell', kind: 'shell', state: 'idle' }]);
+    h.host.showInputBox.mockResolvedValue(undefined);
+
+    await h.service.handleMessage({ type: 'renameSession', worktreeId: 'a', index: 2 });
+
+    expect(h.claude.setSessionAlias).not.toHaveBeenCalled();
+  });
+
+  it('does nothing for a session that is not there', async () => {
+    const h = withSessions([]);
+    await h.service.handleMessage({ type: 'renameSession', worktreeId: 'a', index: 9 });
+    expect(h.host.showInputBox).not.toHaveBeenCalled();
   });
 });
 

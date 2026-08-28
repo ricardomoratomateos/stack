@@ -1315,3 +1315,141 @@ describe('shell polling', () => {
   });
 });
 
+// ── naming a session ─────────────────────────────────────────────────────────
+
+describe('session aliases', () => {
+  const shell = (index: number) =>
+    [index, { kind: 'shell' as const, state: 'idle' as const, name: 'shell' }] as const;
+
+  it('shows the name the user gave instead of the window name', () => {
+    // The point of the feature: a shell running redis reads "redis".
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [shell(1)]);
+    mgr.setSessionAlias('wt-1', 1, 'redis');
+    const session = mgr.getSessions('wt-1')[0];
+    expect(session?.alias).toBe('redis');
+    // The window name is untouched — it is what identifies an agent on reload.
+    expect(session?.name).toBe('shell');
+  });
+
+  it('names only the session asked for', () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [shell(1), shell(2)]);
+    mgr.setSessionAlias('wt-1', 1, 'redis');
+    expect(mgr.getSessions('wt-1').map((x) => x.alias)).toEqual(['redis', undefined]);
+  });
+
+  it('trims, and an empty name clears it', () => {
+    // Clearing is the only way back to the derived label, so a blank answer
+    // must not set a blank name.
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [shell(1)]);
+    mgr.setSessionAlias('wt-1', 1, '  redis  ');
+    expect(mgr.getSessions('wt-1')[0]?.alias).toBe('redis');
+    mgr.setSessionAlias('wt-1', 1, '   ');
+    expect(mgr.getSessions('wt-1')[0]?.alias).toBeUndefined();
+  });
+
+  it('wins over the running-command label', () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'shell', state: 'idle', name: 'shell', title: 'redis-server' }]]);
+    mgr.setSessionAlias('wt-1', 1, 'cache');
+    const session = mgr.getSessions('wt-1')[0];
+    expect(session?.alias).toBe('cache');
+    expect(session?.title).toBe('redis-server'); // still shown underneath
+  });
+
+  it('names an agent session too', () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    mgr.setSessionAlias('wt-1', 1, 'the refactor one');
+    expect(mgr.getSessions('wt-1')[0]?.alias).toBe('the refactor one');
+  });
+
+  it('survives a reload', async () => {
+    const memento = new FakeMemento() as unknown as vscode.Memento;
+    const first = create('claude', memento);
+    seed(first.mgr, 'wt-1', [shell(1)]);
+    first.mgr.setSessionAlias('wt-1', 1, 'redis');
+    first.mgr.dispose();
+
+    const stub = makeStub();
+    (stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'shell', title: '', command: 'redis-server' },
+    ]);
+    const revived = new AgentSessionManager(makeFactory(), memento, stub, () => true, 'Test-Host.local');
+    await revived.reconnect([wt]);
+
+    expect(revived.getSessions('wt-1')[0]?.alias).toBe('redis');
+    revived.dispose();
+  });
+
+  it('forgets the name when the window is killed', async () => {
+    // tmux reuses window indexes, so a name left behind would land on whatever
+    // opens in that slot next.
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [shell(1)]);
+    mgr.setSessionAlias('wt-1', 1, 'redis');
+    await mgr.killWindow('wt-1', 1);
+
+    seed(mgr, 'wt-1', [shell(1)]);
+    expect(mgr.getSessions('wt-1')[0]?.alias).toBeUndefined();
+  });
+
+  it('forgets the name when the window disappears from tmux', async () => {
+    // Not an EMPTY reply — syncWindows treats that as "no information", since a
+    // failed command looks exactly like a vanished session. tmux has to say the
+    // window is gone by listing the others.
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [shell(1), shell(2)]);
+    mgr.setSessionAlias('wt-1', 1, 'redis');
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 2, name: 'shell', title: '', command: 'zsh' },
+    ]);
+    await mgr.syncWindows('wt-1');
+
+    seed(mgr, 'wt-1', [shell(1)]);
+    expect(mgr.getSessions('wt-1').find((x) => x.index === 1)?.alias).toBeUndefined();
+  });
+
+  it('keeps every name when tmux says nothing at all', async () => {
+    // An empty reply is a failed command as often as an empty session; pruning
+    // on it would wipe the names off a card because the tmux server hiccuped.
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [shell(1)]);
+    mgr.setSessionAlias('wt-1', 1, 'redis');
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    await mgr.syncWindows('wt-1');
+
+    expect(mgr.getSessions('wt-1')[0]?.alias).toBe('redis');
+  });
+
+  it('forgets every name when the whole session is killed', async () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [shell(1), shell(2)]);
+    mgr.setSessionAlias('wt-1', 1, 'redis');
+    mgr.setSessionAlias('wt-1', 2, 'worker');
+    await mgr.killWorktreeSession('wt-1');
+
+    seed(mgr, 'wt-1', [shell(1), shell(2)]);
+    expect(mgr.getSessions('wt-1').map((x) => x.alias)).toEqual([undefined, undefined]);
+  });
+
+  it('keeps one worktree\'s names out of another\'s', () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [shell(1)]);
+    seed(mgr, 'wt-2', [shell(1)]);
+    mgr.setSessionAlias('wt-1', 1, 'redis');
+    expect(mgr.getSessions('wt-2')[0]?.alias).toBeUndefined();
+  });
+
+  it('tells the UI a name changed', () => {
+    const { mgr, getTerminalsChanges } = create();
+    seed(mgr, 'wt-1', [shell(1)]);
+    const before = getTerminalsChanges();
+    mgr.setSessionAlias('wt-1', 1, 'redis');
+    expect(getTerminalsChanges()).toBe(before + 1);
+  });
+});
+

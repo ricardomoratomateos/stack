@@ -46,7 +46,10 @@ export interface PrStatus {
 }
 
 export interface SessionItem {
+  /** Window name from tmux — "claude", "shell". Says what is running. */
   name: string;
+  /** What the user calls this session, if they have named it. Wins over `name`. */
+  alias?: string;
   kind: 'agent' | 'shell';
   /** Which agent runs in this window (only for kind 'agent'). */
   provider?: ProviderId;
@@ -110,6 +113,7 @@ export type WebMessage =
   | { type: 'killSession'; worktreeId: string; index: number }
   | { type: 'reorderSessions'; worktreeId: string; orderedIndexes: number[] }
   | { type: 'reorderWorktrees'; orderedIds: string[] }
+  | { type: 'renameSession'; worktreeId: string; index: number }
   | { type: 'openPort'; port: number }
   | { type: 'refreshDrift'; worktreeId: string }
   | { type: 'dockerUp'; worktreeId: string }

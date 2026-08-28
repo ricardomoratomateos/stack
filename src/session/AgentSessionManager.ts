@@ -57,8 +57,23 @@ export class AgentSessionManager {
   // worktree. Purely cosmetic — tmux window indexes stay put so state tracking,
   // kill and focus keep working; only getSessions() sorts by this.
   private static readonly ORDER_KEY = 'unmess.sessionOrder';
+
+  /**
+   * User-chosen names for sessions, worktreeId → (window index → name).
+   *
+   * Kept here rather than in the tmux window name, which looks like the obvious
+   * place and is a trap: providerForWindowName() identifies an agent BY that
+   * name, so renaming a "claude" window would bring it back as an unrecognised
+   * shell after a reload, and calling a shell "claude" would have it adopted as
+   * an agent. The window name says what is running; this says what the user
+   * calls it.
+   */
+  private static readonly ALIAS_KEY = 'unmess.sessionAliases';
   // worktreeId → ordered tmux window indexes (display order)
   private orders = new Map<string, number[]>();
+
+  // worktreeId → (tmux window index → user-chosen name)
+  private aliases = new Map<string, Map<number, string>>();
 
   constructor(
     private providers: ProviderFactory,
@@ -75,6 +90,13 @@ export class AgentSessionManager {
 
     const savedOrders = this.globalState.get<Record<string, number[]>>(AgentSessionManager.ORDER_KEY, {});
     for (const [id, arr] of Object.entries(savedOrders)) this.orders.set(id, arr);
+
+    const savedAliases = this.globalState.get<Record<string, Record<string, string>>>(
+      AgentSessionManager.ALIAS_KEY, {},
+    );
+    for (const [id, byIndex] of Object.entries(savedAliases)) {
+      this.aliases.set(id, new Map(Object.entries(byIndex).map(([i, name]) => [Number(i), name])));
+    }
   }
 
 
@@ -194,6 +216,9 @@ export class AgentSessionManager {
     for (const index of [...map.keys()]) {
       if (!live.has(index)) {
         map.delete(index);
+        // The name goes with the window. tmux reuses indexes, so leaving it
+        // behind would hang "redis" on whatever opens next in that slot.
+        this.forgetAlias(worktreeId, index);
         changed = true;
       }
     }
@@ -466,8 +491,10 @@ export class AgentSessionManager {
   getSessions(worktreeId: string): SessionItem[] {
     const map = this.windows.get(worktreeId);
     if (!map) return [];
+    const byIndex = this.aliases.get(worktreeId);
     const items = [...map.entries()].map(([index, meta]) => ({
       name: meta.name,
+      alias: byIndex?.get(index),
       kind: meta.kind,
       provider: meta.provider,
       state: meta.state,
@@ -482,6 +509,38 @@ export class AgentSessionManager {
       items.sort((a, b) => rank(a.index) - rank(b.index));
     }
     return items;
+  }
+
+  /**
+   * Name (or un-name, with an empty string) one session.
+   *
+   * The label is the user's, so it wins over everything derived — a window
+   * running redis stays "redis" whether or not tmux still reports the process.
+   */
+  setSessionAlias(worktreeId: string, windowIndex: number, alias: string): void {
+    const map = this.aliases.get(worktreeId) ?? new Map<number, string>();
+    const trimmed = alias.trim();
+    if (trimmed) map.set(windowIndex, trimmed);
+    else map.delete(windowIndex);
+    this.aliases.set(worktreeId, map);
+    this.persistAliases();
+    this.terminalsChangeEmitter.fire();
+  }
+
+  /** Drop a session's name — its window is gone and the index will be reused. */
+  private forgetAlias(worktreeId: string, windowIndex: number): void {
+    const map = this.aliases.get(worktreeId);
+    if (!map?.delete(windowIndex)) return;
+    if (map.size === 0) this.aliases.delete(worktreeId);
+    this.persistAliases();
+  }
+
+  private persistAliases(): void {
+    const out: Record<string, Record<string, string>> = {};
+    for (const [id, map] of this.aliases.entries()) {
+      if (map.size > 0) out[id] = Object.fromEntries(map.entries());
+    }
+    this.globalState.update(AgentSessionManager.ALIAS_KEY, out);
   }
 
   /** Persist a user-chosen display order (list of window indexes) for a worktree. */
@@ -530,6 +589,7 @@ export class AgentSessionManager {
     const sessionName = TmuxManager.sessionName(worktreeId);
     await this.tmux.killWindow(sessionName, windowIndex);
     this.windows.get(worktreeId)?.delete(windowIndex);
+    this.forgetAlias(worktreeId, windowIndex);
     const order = this.orders.get(worktreeId);
     if (order?.includes(windowIndex)) {
       this.setSessionOrder(worktreeId, order.filter((i) => i !== windowIndex));
@@ -567,6 +627,8 @@ export class AgentSessionManager {
     const sessionName = TmuxManager.sessionName(worktreeId);
     await this.tmux.killSession(sessionName);
     this.windows.delete(worktreeId);
+    this.aliases.delete(worktreeId);
+    this.persistAliases();
     this.viewers.get(worktreeId)?.dispose();
     this.viewers.delete(worktreeId);
     this.persistState(worktreeId);

@@ -536,7 +536,7 @@ function SessionRow({
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             flex: 1, minWidth: 0,
           }}>
-            {session.name}
+            {session.alias ?? session.name}
           </span>
           {/* right slot: state label pinned to the edge; action buttons slide in
               from the right on hover (collapsed to zero width when idle, so the
@@ -549,11 +549,24 @@ function SessionRow({
             )}
             <span style={{
               display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden',
-              maxWidth: hov ? 40 : 0, opacity: hov ? 1 : 0,
+              maxWidth: hov ? 60 : 0, opacity: hov ? 1 : 0,
               marginLeft: hov ? 6 : 0,
               transition: 'max-width .12s ease, opacity .1s, margin-left .12s ease',
               pointerEvents: hov ? 'auto' : 'none',
             }}>
+              <button
+                title="Rename session"
+                onClick={(e) => { e.stopPropagation(); send({ type: 'renameSession', worktreeId, index: session.index }); }}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 12, height: 12, border: 'none', background: 'transparent', color: T.textMuted,
+                  cursor: 'pointer', padding: 0,
+                }}
+              >
+                <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11.5 1.5l3 3L5 14H2v-3z" />
+                </svg>
+              </button>
               <button
                 title="Kill session"
                 onClick={(e) => { e.stopPropagation(); send({ type: 'killSession', worktreeId, index: session.index }); }}
