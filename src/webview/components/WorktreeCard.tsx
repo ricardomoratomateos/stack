@@ -67,7 +67,9 @@ export function WorktreeCard({
 
   const cardStyle: React.CSSProperties = {
     borderRadius: 6,
-    border: `1px solid ${hasPerm ? `color-mix(in srgb, ${T.amber} 35%, transparent)` : isSelected ? T.borderStrong : 'transparent'}`,
+    // Selection is carried by the background alone, like a native list row —
+    // a focusBorder outline on top read as a stray focus ring.
+    border: `1px solid ${hasPerm ? `color-mix(in srgb, ${T.amber} 35%, transparent)` : 'transparent'}`,
     padding: '9px 10px',
     cursor: deleting ? 'default' : 'pointer',
     background: hasPerm

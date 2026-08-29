@@ -41,7 +41,10 @@ export const T = {
   // themes with a black sidebar, and sideBar-background made the menu vanish
   // into the panel. The border matches the fill rather than drawing a
   // contrasting line — the drop shadow is what lifts it off the card.
-  menuBg:      'var(--vscode-list-activeSelectionBackground, var(--vscode-editorWidget-background))',
+  // Painted OVER an opaque widget base: in many themes the selection colour
+  // carries alpha, and used bare it let the card underneath bleed through the
+  // menu. The gradient trick keeps the tint while the base guarantees opacity.
+  menuBg:      'linear-gradient(var(--vscode-list-activeSelectionBackground, transparent), var(--vscode-list-activeSelectionBackground, transparent)), var(--vscode-editorWidget-background, var(--vscode-sideBar-background))',
   menuFg:      'var(--vscode-list-activeSelectionForeground, var(--vscode-foreground))',
   menuBorder:  'var(--vscode-list-activeSelectionBackground, var(--vscode-editorWidget-background))',
   menuSepBg:   'color-mix(in srgb, var(--vscode-foreground) 12%, transparent)',
