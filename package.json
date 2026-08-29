@@ -59,7 +59,8 @@
         {
           "id": "unmess-drop-zone",
           "name": "Screenshot drop",
-          "initialSize": 1
+          "initialSize": 1,
+          "when": "!unmess.tmuxMissing"
         }
       ]
     },

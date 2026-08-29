@@ -225,25 +225,6 @@ describe('message dispatch', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// native view header: title description + the "+" that opens the modal
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('openNewTask', () => {
-  it('reveals the view and asks the webview to open its new-task modal', () => {
-    const h = makeHarness();
-    const { view } = resolve(h);
-    h.provider.openNewTask();
-    expect(view.show).toHaveBeenCalledWith(true);
-    expect(view.webview.postMessage).toHaveBeenCalledWith({ type: 'openNewTask' });
-  });
-
-  it('is a no-op before the view has been resolved', () => {
-    const h = makeHarness();
-    expect(() => h.provider.openNewTask()).not.toThrow();
-  });
-});
-
 describe('header description', () => {
   it('summarises the live counts on every push', () => {
     const h = makeHarness();

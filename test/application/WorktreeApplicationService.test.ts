@@ -55,6 +55,8 @@ interface HarnessOpts {
    * Pass [] deliberately to test that case.
    */
   workspaceFolders?: string[];
+  /** initial display names for workspace folders, keyed by path. */
+  workspaceFolderNames?: Record<string, string>;
   /** paths for which host.isDirectory returns true. Defaults to ['/repo/.git']. */
   gitDirs?: string[];
   /** paths for which host.exists returns true */
@@ -155,18 +157,22 @@ function makeHarness(o: HarnessOpts = {}) {
   const breakpointManager = { activate: vi.fn() };
 
   const folders = [...(o.workspaceFolders ?? ['/repo'])];
+  const folderNames = new Map<string, string>(o.workspaceFolderNames ? Object.entries(o.workspaceFolderNames) : []);
   const terminalsCreated: Array<{ name: string; cwd: string; show: ReturnType<typeof vi.fn>; sendText: ReturnType<typeof vi.fn> }> = [];
   let activeTerminal: unknown;
   const host = {
     workspaceFolderPaths: vi.fn(() => [...folders]),
-    removeWorkspaceFolder: vi.fn((i: number) => { calls.push(`host.removeWorkspaceFolder:${i}`); folders.splice(i, 1); }),
+    removeWorkspaceFolder: vi.fn((i: number) => { calls.push(`host.removeWorkspaceFolder:${i}`); folderNames.delete(folders[i]); folders.splice(i, 1); }),
     addWorkspaceFolders: vi.fn((...fs: Array<{ path: string; name: string }>) => {
       calls.push(`host.addWorkspaceFolders:${fs.map(f => `${f.path}=${f.name}`).join('|')}`);
       folders.push(...fs.map(f => f.path));
+      for (const f of fs) folderNames.set(f.path, f.name);
     }),
     renameWorkspaceFolder: vi.fn((i: number, f: { path: string; name: string }) => {
       calls.push(`host.renameWorkspaceFolder:${i}:${f.path}=${f.name}`);
+      folderNames.set(f.path, f.name);
     }),
+    workspaceFolderName: vi.fn((p: string) => folderNames.get(p)),
     saveAll: vi.fn(async (u: boolean) => { calls.push(`host.saveAll:${u}`); }),
     moveEditorToFirstInGroup: vi.fn(async () => { calls.push('host.moveEditorToFirstInGroup'); }),
     createTerminal: vi.fn((opts: { name: string; cwd: string }) => {
@@ -1296,6 +1302,49 @@ describe('loadWorktreesForRepo', () => {
     await h.service.loadWorktreesForRepo('/repo');
     expect(h.host.addWorkspaceFolders).not.toHaveBeenCalled();
     expect(h.host.removeWorkspaceFolder).not.toHaveBeenCalled();
+  });
+
+  it('relabels the main repo folder to its branch once the window is multi-root', async () => {
+    const a = makeWorktree({ id: 'a', path: '/repo', branch: 'develop', isMain: true });
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({
+      worktrees: [a, b],
+      workspaceFolders: ['/repo', '/repo/zer/feat-b'],
+      workspaceFolderNames: { '/repo': 'repo' },
+    });
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(h.host.renameWorkspaceFolder).toHaveBeenCalledWith(0, { path: '/repo', name: 'develop' });
+  });
+
+  it('relabels the main folder on first load too, even in a single-folder window', async () => {
+    const a = makeWorktree({ id: 'a', path: '/repo', branch: 'develop', isMain: true });
+    const h = makeHarness({ worktrees: [a], workspaceFolders: ['/repo'], workspaceFolderNames: { '/repo': 'repo' } });
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(h.host.renameWorkspaceFolder).toHaveBeenCalledWith(0, { path: '/repo', name: 'develop' });
+  });
+
+  it('defers the relabel to the folders-changed event while a worktree folder add is in flight', async () => {
+    const a = makeWorktree({ id: 'a', path: '/repo', branch: 'develop', isMain: true });
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({ worktrees: [a, b], workspaceFolders: ['/repo'], workspaceFolderNames: { '/repo': 'repo' } });
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(h.host.addWorkspaceFolders).toHaveBeenCalledOnce();
+    expect(h.host.renameWorkspaceFolder).not.toHaveBeenCalled();
+    // …and the event handler picks it up once the folder has registered.
+    h.service.syncMainFolderLabel();
+    expect(h.host.renameWorkspaceFolder).toHaveBeenCalledWith(0, { path: '/repo', name: 'develop' });
+  });
+
+  it('does not rename the main folder again once its label already matches (no folders-changed loop)', async () => {
+    const a = makeWorktree({ id: 'a', path: '/repo', branch: 'develop', isMain: true });
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({
+      worktrees: [a, b],
+      workspaceFolders: ['/repo', '/repo/zer/feat-b'],
+      workspaceFolderNames: { '/repo': 'develop' },
+    });
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(h.host.renameWorkspaceFolder).not.toHaveBeenCalled();
   });
 
   it('docker poll callback pushes webview state; pr poll callback pushes too', async () => {

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useReducer, useState } from 'react';
 import { T } from './tokens';
 import { WorktreeCard } from './components/WorktreeCard';
-import { NewTaskModal } from './components/NewTaskModal';
 import { StatusPanel } from './components/StatusPanel';
 import { send } from './vscode';
 import type { ExtMessage, UnmessState, WorktreeItem } from './types';
@@ -17,13 +16,11 @@ export function App() {
   const [state, dispatch] = useReducer(reducer, EMPTY);
   const [loaded, setLoaded] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
-  const [newTask, setNewTask] = useState(false);
 
   useEffect(() => {
     const handler = (e: MessageEvent) => {
       try {
         const msg = e.data as ExtMessage;
-        if (msg.type === 'openNewTask') { setNewTask(true); return; }
         dispatch(msg);
         setLoaded(true);
       } catch { /* ignore */ }
@@ -85,7 +82,7 @@ export function App() {
             {!loaded ? (
               <LoadingState />
             ) : state.worktrees.length === 0 ? (
-              <EmptyState onNew={() => setNewTask(true)} />
+              <EmptyState onNew={() => send({ type: 'openNewTask' })} />
             ) : (
               state.worktrees.map(wt => (
                 <WorktreeCard
@@ -110,15 +107,6 @@ export function App() {
           {/* Status panel for selected worktree */}
           {selectedWt && <StatusPanel wt={selectedWt} />}
       </div>
-
-      {/* New task modal */}
-      {newTask && (
-        <NewTaskModal
-          branches={state.branches}
-          baseBranch={state.baseBranch}
-          onClose={() => setNewTask(false)}
-        />
-      )}
     </div>
   );
 }

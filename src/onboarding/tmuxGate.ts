@@ -1,12 +1,8 @@
-import * as vscode from 'vscode';
-
 /** A package-manager command that installs tmux on the user's system. */
 export interface TmuxInstall {
   manager: string;
   command: string;
 }
-
-const GUIDE_URL = 'https://github.com/tmux/tmux/wiki/Installing';
 
 /**
  * Pick the install command for tmux given the platform and which package
@@ -37,54 +33,3 @@ export function tmuxInstallCommand(
 
 /** Package managers worth probing for, in the order tmuxInstallCommand prefers them. */
 export const PACKAGE_MANAGERS = ['brew', 'apt-get', 'dnf', 'pacman', 'zypper', 'apk'] as const;
-
-/**
- * Actionable "you need tmux" prompt shown when the extension is gated off.
- *
- * We install in a visible VSCode terminal rather than shelling out silently:
- * most managers need sudo (an interactive password prompt the extension can't
- * drive), and the user should see exactly what runs. tmux is assumed available
- * from activation, so once it's installed the clean way to enable Unmess is a
- * window reload.
- */
-export async function promptTmuxInstall(
-  platform: NodeJS.Platform,
-  has: (bin: string) => boolean,
-): Promise<void> {
-  const suggestion = tmuxInstallCommand(platform, has);
-
-  if (!suggestion) {
-    const pick = await vscode.window.showWarningMessage(
-      'Unmess needs tmux to run agents, and it was not found on your system.',
-      'Open install guide',
-    );
-    if (pick === 'Open install guide') {
-      await vscode.env.openExternal(vscode.Uri.parse(GUIDE_URL));
-    }
-    return;
-  }
-
-  const pick = await vscode.window.showWarningMessage(
-    `Unmess needs tmux to run agents. Install it with ${suggestion.manager}?`,
-    'Install tmux',
-    'Copy command',
-  );
-
-  if (pick === 'Copy command') {
-    await vscode.env.clipboard.writeText(suggestion.command);
-    return;
-  }
-
-  if (pick === 'Install tmux') {
-    const term = vscode.window.createTerminal('Install tmux');
-    term.show();
-    term.sendText(suggestion.command);
-    const done = await vscode.window.showInformationMessage(
-      'When the install finishes, reload the window to enable Unmess.',
-      'Reload window',
-    );
-    if (done === 'Reload window') {
-      await vscode.commands.executeCommand('workbench.action.reloadWindow');
-    }
-  }
-}

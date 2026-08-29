@@ -37,6 +37,8 @@ export interface IWorkspaceHost {
   removeWorkspaceFolder(index: number): void;
   addWorkspaceFolders(...folders: Array<{ path: string; name: string }>): void;
   renameWorkspaceFolder(index: number, folder: { path: string; name: string }): void;
+  /** Current display name of the workspace folder at a path, if it is in the workspace. */
+  workspaceFolderName(path: string): string | undefined;
   saveAll(includeUntitled: boolean): Promise<void>;
   moveEditorToFirstInGroup(): Promise<void>;
   createTerminal(options: { name: string; cwd: string }): HostTerminal;
@@ -61,6 +63,8 @@ export interface UiBridge {
   syncDecorations(worktrees: Worktree[], activeWorktreeId: string | undefined): void;
   /** Open (or reveal) the diff-review panel for a worktree. */
   openDiffPanel(worktreeId: string): void;
+  /** Open (or reveal) the full-screen new-agent panel. */
+  openNewTask(): void;
 }
 
 interface GlobalStateLike {
@@ -89,7 +93,7 @@ export interface WorktreeAppDeps {
   installedProviders?: (config: UnmessConfig) => ProviderId[];
 }
 
-const NO_UI: UiBridge = { pushWebview() {}, syncDecorations() {}, openDiffPanel() {} };
+const NO_UI: UiBridge = { pushWebview() {}, syncDecorations() {}, openDiffPanel() {}, openNewTask() {} };
 
 /** One strategy per webview message type; exhaustive over the WebMessage union. */
 type MessageHandlers = {
@@ -356,6 +360,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     renameWorktree: (msg) => this.renameWorktree(this.findWorktree(msg.worktreeId)),
     initWorktree: (msg) => this.initWorktree(this.findWorktree(msg.worktreeId)),
     openDiff: (msg) => this.ui.openDiffPanel(msg.worktreeId),
+    openNewTask: () => this.ui.openNewTask(),
     createWorktree: (msg) => this.createWorktree({
       branch: msg.branch, title: msg.title, description: msg.description, baseBranch: msg.baseBranch,
     }),
@@ -706,6 +711,13 @@ export class WorktreeApplicationService implements DiffPanelHost {
     return findRepoRoot(folders, (p) => this.deps.host.isDirectory(p));
   }
 
+  /** Branch list + preselected base for the new-agent panel's "from" selector. */
+  newTaskBranchOptions(): { branches: string[]; baseBranch: string } {
+    const root = this.findRepoRoot();
+    if (!root) return { branches: [], baseBranch: 'main' };
+    return { branches: this.deps.git.listBranches(root), baseBranch: this.resolveBaseBranch(root) };
+  }
+
   async start(): Promise<void> {
     const root = this.findRepoRoot();
     if (root) await this.loadWorktreesForRepo(root);
@@ -790,6 +802,11 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const toAdd = mine.filter((wt) => !existing.some((p) => p === wt.path));
     if (toAdd.length > 0) {
       this.deps.host.addWorkspaceFolders(...toAdd.map((wt) => ({ path: wt.path, name: displayLabel(wt) })));
+    } else {
+      // With an add in flight the relabel waits for the folders-changed event
+      // (two workspace mutations back to back is unsupported); with nothing
+      // pending it can run right now.
+      this.syncMainFolderLabel();
     }
 
     // The compose project is derived from the worktree's directory name, so a
@@ -810,6 +827,35 @@ export class WorktreeApplicationService implements DiffPanelHost {
     this.ui.pushWebview();
     this.refreshDecorations();
     this.syncSearchScoping();
+  }
+
+  /**
+   * Label the main repo's own folder by its branch/alias, so the Explorer root
+   * reads the same as the sidebar ("develop", not the on-disk "aside"). A pure
+   * display-name change through the workspace API — nothing is written into the
+   * project and the directory keeps its real name.
+   *
+   * In a single-folder window VSCode can't relabel the root in place: the
+   * rename turns the window into an untitled workspace (folder already named
+   * "develop") and restarts the extension host once. That is the same
+   * transition adding the first worktree folder triggers, so it is simply
+   * brought forward to the first activation. Guarded on the label actually
+   * changing, so the folders-changed event the rename itself fires cannot loop
+   * back here.
+   */
+  syncMainFolderLabel(): void {
+    const root = this.findRepoRoot();
+    if (!root) return;
+    const normalizedRoot = canonicalPath(root);
+    const folderPaths = this.deps.host.workspaceFolderPaths();
+    const main = worktreesInRepo(this.deps.manager.list(), root)
+      .find((wt) => canonicalPath(wt.path) === normalizedRoot);
+    if (!main) return;
+    const label = displayLabel(main);
+    const idx = folderPaths.findIndex((p) => canonicalPath(p) === normalizedRoot);
+    if (idx !== -1 && this.deps.host.workspaceFolderName(main.path) !== label) {
+      this.deps.host.renameWorkspaceFolder(idx, { path: main.path, name: label });
+    }
   }
 
   // ── Create ─────────────────────────────────────────────────────────────────

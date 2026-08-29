@@ -27,8 +27,10 @@ import { TabManager } from './worktree/TabManager';
 import { BreakpointManager } from './worktree/BreakpointManager';
 import { WorktreeApplicationService, IWorkspaceHost, HostTerminal } from './application/WorktreeApplicationService';
 import { DiffPanelManager } from './diff/DiffPanelManager';
+import { NewTaskPanelManager } from './newtask/NewTaskPanelManager';
 import { SIDEBAR_VIEW_ID } from './constants';
-import { PACKAGE_MANAGERS, promptTmuxInstall } from './onboarding/tmuxGate';
+import { PACKAGE_MANAGERS, tmuxInstallCommand } from './onboarding/tmuxGate';
+import { TmuxGateView } from './onboarding/TmuxGateView';
 import { findRepoRoot } from './worktree/findRepoRoot';
 import { worktreesInRepo } from './worktree/worktreesInRepo';
 
@@ -144,6 +146,9 @@ class VsCodeWorkspaceHost implements IWorkspaceHost {
   renameWorkspaceFolder(index: number, folder: { path: string; name: string }): void {
     vscode.workspace.updateWorkspaceFolders(index, 1, { uri: vscode.Uri.file(folder.path), name: folder.name });
   }
+  workspaceFolderName(path: string): string | undefined {
+    return (vscode.workspace.workspaceFolders ?? []).find((f) => f.uri.fsPath === path)?.name;
+  }
   async saveAll(includeUntitled: boolean): Promise<void> {
     await vscode.workspace.saveAll(includeUntitled);
   }
@@ -203,13 +208,23 @@ class VsCodeWorkspaceHost implements IWorkspaceHost {
 export async function activate(ctx: vscode.ExtensionContext) {
   // Tmux is required for terminal session management — it's how agents survive
   // window reloads and get multiplexed per worktree. Without it there's nothing
-  // meaningful to run, so we hard-gate: prompt the user to install it and abort
-  // activation. Once installed, a window reload re-enters here with tmux present.
+  // meaningful to run, so we hard-gate and abort the rest of activation. Rather
+  // than leave the panel spinning on an empty shell behind a toast that's easy to
+  // miss, we register a gate view that states the requirement and installs tmux in
+  // one click. Once installed, a window reload re-enters here with tmux present.
   if (!(await TmuxManager.isAvailable())) {
     const present = await detectBinaries(PACKAGE_MANAGERS);
-    void promptTmuxInstall(process.platform, (bin) => present.has(bin));
+    const install = tmuxInstallCommand(process.platform, (bin) => present.has(bin));
+    // Hides the screenshot drop-zone view (its `when` clause), which is useless
+    // until the extension is really running and otherwise renders a bare
+    // "no data provider registered" placeholder.
+    void vscode.commands.executeCommand('setContext', 'unmess.tmuxMissing', true);
+    ctx.subscriptions.push(
+      vscode.window.registerWebviewViewProvider(SIDEBAR_VIEW_ID, new TmuxGateView(install)),
+    );
     return;
   }
+  void vscode.commands.executeCommand('setContext', 'unmess.tmuxMissing', false);
 
   // Resolved per read, not captured: the user can add or remove the folder that
   // holds the repository at any point in a window's life.
@@ -298,6 +313,12 @@ export async function activate(ctx: vscode.ExtensionContext) {
 
   const diffPanelManager = new DiffPanelManager(ctx.extensionUri, service);
 
+  const newTaskPanel = new NewTaskPanelManager(ctx.extensionUri, {
+    branchOptions: () => service.newTaskBranchOptions(),
+    createWorktree: (opts) => service.createWorktree(opts),
+  });
+  ctx.subscriptions.push(newTaskPanel);
+
   const webviewProvider = new UnmessWebviewProvider(ctx.extensionUri, agentManager, gitWatcher, service);
   ctx.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SIDEBAR_VIEW_ID, webviewProvider, {
@@ -377,13 +398,18 @@ export async function activate(ctx: vscode.ExtensionContext) {
     },
     syncDecorations: (worktrees, activeWorktreeId) => dimProvider.update(worktrees, activeWorktreeId),
     openDiffPanel: (worktreeId) => diffPanelManager.open(worktreeId),
+    openNewTask: () => newTaskPanel.open(),
   });
 
   // React when the user opens a folder — load its worktrees if it's a git repo.
   ctx.subscriptions.push(
-    vscode.workspace.onDidChangeWorkspaceFolders((e) =>
-      service.handleAddedWorkspaceFolders(e.added.map((f) => f.uri.fsPath)),
-    ),
+    vscode.workspace.onDidChangeWorkspaceFolders((e) => {
+      void service.handleAddedWorkspaceFolders(e.added.map((f) => f.uri.fsPath));
+      // Folders have actually registered by the time this fires, so the main
+      // repo's folder can now be relabelled to its branch (the async add in
+      // loadWorktreesForRepo still reads a count of 1 and can't).
+      service.syncMainFolderLabel();
+    }),
   );
 
   // Commands.
@@ -393,7 +419,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     ),
     // The "+" in the view header: opens the webview's rich new-task modal
     // (title, branch, base branch, description) rather than a bare input box.
-    vscode.commands.registerCommand('unmess.newTask', () => webviewProvider.openNewTask()),
+    vscode.commands.registerCommand('unmess.newTask', () => newTaskPanel.open()),
     vscode.commands.registerCommand('unmess.createRepoConfig', () => createRepoConfig(config, repoRootOf())),
     vscode.commands.registerCommand('unmess.deleteWorktree', (item) => service.deleteWorktree(item?.worktree)),
     vscode.commands.registerCommand('unmess.renameWorktree', (item) => service.renameWorktree(item?.worktree)),
@@ -441,6 +467,15 @@ export async function activate(ctx: vscode.ExtensionContext) {
   void service.start().catch((e) => {
     vscode.window.showErrorMessage(`Unmess failed to load worktrees: ${String(e)}`);
   });
+
+  // Greet an empty editor with the New agent panel — the same spirit as the
+  // sidebar's empty state, but keyed on open tabs rather than worktrees so it
+  // never shoves a real tab aside. `onStartupFinished` runs after VSCode has
+  // restored the previous session's tabs, so an empty editor here means the user
+  // genuinely has nothing open. Gated on a git repo: there's nothing to create a
+  // worktree in otherwise.
+  const noTabsOpen = vscode.window.tabGroups.all.every((g) => g.tabs.length === 0);
+  if (repoRootOf() && noTabsOpen) newTaskPanel.open();
 }
 
 export function deactivate() {}

@@ -94,9 +94,7 @@ export interface UnmessState {
 
 // Extension → WebView
 export type ExtMessage =
-  | { type: 'state'; payload: UnmessState }
-  /** The native "+" in the view header asks the webview to open its new-task modal. */
-  | { type: 'openNewTask' };
+  | { type: 'state'; payload: UnmessState };
 
 // WebView → Extension
 export type WebMessage =
@@ -122,6 +120,8 @@ export type WebMessage =
   | { type: 'renameWorktree'; worktreeId: string }
   | { type: 'initWorktree'; worktreeId: string }
   | { type: 'openDiff'; worktreeId: string }
+  /** The empty-state "New agent" button opens the full-screen panel. */
+  | { type: 'openNewTask' }
   | { type: 'createWorktree'; branch: string; title?: string; description?: string; baseBranch?: string }
   | { type: 'listBranches' }
   | { type: 'selectWorktree'; worktreeId: string };

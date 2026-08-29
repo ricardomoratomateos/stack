@@ -66,13 +66,6 @@ export class UnmessWebviewProvider implements vscode.WebviewViewProvider {
         : undefined;
   }
 
-  /** Ask the webview to open its new-task modal (the native "+" in the header). */
-  openNewTask(): void {
-    this.view?.show?.(true);
-    const msg: ExtMessage = { type: 'openNewTask' };
-    this.view?.webview.postMessage(msg);
-  }
-
   push(): void {
     if (!this.view?.visible) return;
     const state = this.service.buildState();
