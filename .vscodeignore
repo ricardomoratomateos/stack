@@ -25,6 +25,8 @@ node_modules/**
 # Personal permission allowlist and any other local agent config — this is the
 # developer's machine setup, not part of the extension.
 .claude/**
+.agents/**
+skills-lock.json
 
 # Repo hygiene that has no place in an installable package.
 .gitignore
