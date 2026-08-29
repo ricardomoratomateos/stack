@@ -71,6 +71,11 @@
         "icon": "$(add)"
       },
       {
+        "command": "unmess.openSettings",
+        "title": "Unmess: Settings",
+        "icon": "$(gear)"
+      },
+      {
         "command": "unmess.createWorktree",
         "title": "Unmess: Create Worktree",
         "icon": "$(add)"
@@ -121,6 +126,10 @@
         "command": "unmess.createRepoConfig",
         "title": "Unmess: Create Repo Config File",
         "icon": "$(file-code)"
+      },
+      {
+        "command": "unmess.gettingStarted",
+        "title": "Unmess: Getting Started"
       }
     ],
     "keybindings": [
@@ -146,7 +155,12 @@
         {
           "command": "unmess.newTask",
           "when": "view == unmess-sidebar",
-          "group": "navigation"
+          "group": "navigation@1"
+        },
+        {
+          "command": "unmess.openSettings",
+          "when": "view == unmess-sidebar && !unmess.tmuxMissing",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": []
@@ -279,7 +293,82 @@
           "description": "launch.json template for each worktree. Use {{PORT}} and {{WORKTREE_PATH}} as placeholders Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
         }
       }
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "unmess.gettingStarted",
+        "title": "Get started with Unmess",
+        "description": "Several AI agents in parallel, one git worktree each, and a sidebar that tells you who needs you.",
+        "steps": [
+          {
+            "id": "tmux",
+            "title": "Make sure tmux is there",
+            "description": "Agents run inside tmux so they survive window reloads. If it is missing, the Unmess view offers to install it.\n[Open Unmess](command:workbench.view.extension.unmess-container)",
+            "media": {
+              "markdown": "media/walkthrough/tmux.md"
+            },
+            "completionEvents": [
+              "onContext:unmess.tmuxReady"
+            ]
+          },
+          {
+            "id": "new-agent",
+            "title": "Create a worktree and launch an agent",
+            "description": "One task, one branch, one worktree, one agent. Describe the task; Unmess cuts the branch, creates the worktree and starts the agent in it.\n[New agent](command:unmess.newTask)",
+            "media": {
+              "markdown": "media/walkthrough/new-agent.md"
+            },
+            "completionEvents": [
+              "onCommand:unmess.newTask"
+            ]
+          },
+          {
+            "id": "switch",
+            "title": "Switch between worktrees",
+            "description": "Cmd+Shift+] and Cmd+Shift+[ (Ctrl on Linux) jump between worktrees. Search, Quick Open and breakpoints follow you.\n[Next worktree](command:unmess.focusNextWorktree)",
+            "media": {
+              "markdown": "media/walkthrough/switch.md"
+            },
+            "completionEvents": [
+              "onCommand:unmess.focusNextWorktree"
+            ]
+          },
+          {
+            "id": "review",
+            "title": "Review the diff and talk back",
+            "description": "Each card has a diff button: comment on lines and send them straight to the agent. Drop a screenshot on the sidebar, or press Cmd+Alt+V in the agent terminal to attach the latest one.",
+            "media": {
+              "markdown": "media/walkthrough/review.md"
+            },
+            "completionEvents": [
+              "onCommand:unmess.attachLatestScreenshot"
+            ]
+          },
+          {
+            "id": "configure",
+            "title": "Set up Docker, debugging and scripts",
+            "description": "The gear in the Worktrees header opens settings: a Docker stack per worktree, a debugger port per worktree, setup and teardown scripts. Unmess prefills what it finds in the repo.\n[Open settings](command:unmess.openSettings)",
+            "media": {
+              "markdown": "media/walkthrough/configure.md"
+            },
+            "completionEvents": [
+              "onCommand:unmess.openSettings"
+            ]
+          },
+          {
+            "id": "share",
+            "title": "Share the setup with your team",
+            "description": "Project settings save to .unmess/config.json. Commit it and everyone who clones the repo gets the same worktrees, ports and scripts.\n[Open settings](command:unmess.openSettings)",
+            "media": {
+              "markdown": "media/walkthrough/share.md"
+            },
+            "completionEvents": [
+              "onCommand:unmess.openSettings"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

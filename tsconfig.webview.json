@@ -9,5 +9,5 @@
     "moduleResolution": "Bundler",
     "skipLibCheck": true
   },
-  "include": ["src/webview", "src/diff/webview", "src/diff/types.ts", "src/newtask/webview", "src/newtask/types.ts"]
+  "include": ["src/webview", "src/diff/webview", "src/diff/types.ts", "src/newtask/webview", "src/newtask/types.ts", "src/settings/webview", "src/settings/types.ts", "src/settings/presets.ts"]
 }

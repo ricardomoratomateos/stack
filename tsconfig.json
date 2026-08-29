@@ -14,5 +14,5 @@
     "skipLibCheck": true
   },
   "include": ["src"],
-  "exclude": ["node_modules", "dist", "src/webview", "src/diff/webview", "src/newtask/webview"]
+  "exclude": ["node_modules", "dist", "src/webview", "src/diff/webview", "src/newtask/webview", "src/settings/webview"]
 }

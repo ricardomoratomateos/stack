@@ -55,6 +55,18 @@ const diffPanelConfig = {
   jsx: 'automatic',
 };
 
+const settingsPanelConfig = {
+  entryPoints: ['src/settings/webview/index.tsx'],
+  bundle: true,
+  outfile: 'dist/settingsPanel.js',
+  format: 'iife',
+  platform: 'browser',
+  target: 'es2020',
+  sourcemap: true,
+  minify: !isWatch,
+  jsx: 'automatic',
+};
+
 const newTaskPanelConfig = {
   entryPoints: ['src/newtask/webview/index.tsx'],
   bundle: true,
@@ -69,13 +81,14 @@ const newTaskPanelConfig = {
 
 async function build() {
   if (isWatch) {
-    const [extCtx, webCtx, diffCtx, newTaskCtx] = await Promise.all([
+    const [extCtx, webCtx, diffCtx, newTaskCtx, settingsCtx] = await Promise.all([
       esbuild.context(extensionConfig),
       esbuild.context(webviewConfig),
       esbuild.context(diffPanelConfig),
       esbuild.context(newTaskPanelConfig),
+      esbuild.context(settingsPanelConfig),
     ]);
-    await Promise.all([extCtx.watch(), webCtx.watch(), diffCtx.watch(), newTaskCtx.watch()]);
+    await Promise.all([extCtx.watch(), webCtx.watch(), diffCtx.watch(), newTaskCtx.watch(), settingsCtx.watch()]);
     copyCodeicons();
     copyDiff2HtmlCss();
     console.log('Watching for changes...');
@@ -85,6 +98,7 @@ async function build() {
       esbuild.build(webviewConfig),
       esbuild.build(diffPanelConfig),
       esbuild.build(newTaskPanelConfig),
+      esbuild.build(settingsPanelConfig),
     ]);
     copyCodeicons();
     copyDiff2HtmlCss();

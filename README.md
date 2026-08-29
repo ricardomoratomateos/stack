@@ -45,6 +45,10 @@ Working on several things at once with AI agents gets messy fast: branches colli
 4. Click the agent button on the worktree card to launch Claude Code / opencode in it.
 5. Watch status in the sidebar; switch worktrees to jump between tasks — switching is instant, and search and breakpoints follow you.
 
+The **Get started with Unmess** walkthrough (opens on install; later under *Help → Welcome → Walkthroughs*, or `Unmess: Getting Started`) walks through the same steps inside VS Code.
+
+For the heavier setup — Docker per worktree, a debugger port per worktree, setup/teardown scripts — open **Unmess settings** with the gear next to **+** in the Worktrees header. It prefills what it finds in the repository (compose files, their `${HTTP_PORT}`-style ports, the language stack) and saves the project half to `.unmess/config.json` so the whole team inherits it, and your own preferences to your VS Code settings.
+
 ## Settings
 
 | Setting | Default | Description |

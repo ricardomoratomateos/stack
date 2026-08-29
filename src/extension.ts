@@ -7,7 +7,7 @@ import { WorktreeStore } from './worktree/WorktreeStore';
 import { WorktreeManager } from './worktree/WorktreeManager';
 import { PortAllocator } from './worktree/portAllocator';
 import { ConfigManager } from './config/ConfigManager';
-import { REPO_CONFIG_RELATIVE, renderRepoConfig } from './config/RepoConfig';
+import { REPO_CONFIG_RELATIVE, readRepoConfig, renderRepoConfig, type RepoScopedKey } from './config/RepoConfig';
 import { AgentSessionManager } from './session/AgentSessionManager';
 import { AttentionNotifier } from './session/AttentionNotifier';
 import { ProviderFactory } from './providers/ProviderFactory';
@@ -28,6 +28,10 @@ import { BreakpointManager } from './worktree/BreakpointManager';
 import { WorktreeApplicationService, IWorkspaceHost, HostTerminal } from './application/WorktreeApplicationService';
 import { DiffPanelManager } from './diff/DiffPanelManager';
 import { NewTaskPanelManager } from './newtask/NewTaskPanelManager';
+import { SettingsPanelManager } from './settings/SettingsPanelManager';
+import { detect, type DetectIo } from './settings/detect';
+import { SCRIPT_TEMPLATES } from './settings/scriptTemplates';
+import { installedProviders } from './providers/commandLookup';
 import { SIDEBAR_VIEW_ID } from './constants';
 import { PACKAGE_MANAGERS, tmuxInstallCommand } from './onboarding/tmuxGate';
 import { TmuxGateView } from './onboarding/TmuxGateView';
@@ -225,6 +229,8 @@ export async function activate(ctx: vscode.ExtensionContext) {
     return;
   }
   void vscode.commands.executeCommand('setContext', 'unmess.tmuxMissing', false);
+  // Ticks the walkthrough's first step; the gate above never sets it.
+  void vscode.commands.executeCommand('setContext', 'unmess.tmuxReady', true);
 
   // Resolved per read, not captured: the user can add or remove the folder that
   // holds the repository at any point in a window's life.
@@ -350,6 +356,121 @@ export async function activate(ctx: vscode.ExtensionContext) {
     dropZone,
   );
 
+  // Settings panel: the project half round-trips through `.unmess/config.json`
+  // (written here, read back through the same validator the extension uses, so
+  // the panel reports exactly what the extension would), the personal half
+  // through VS Code's own settings at global scope.
+  const REPO_KEYS: RepoScopedKey[] = [
+    'worktreesDirectory', 'defaultBaseBranch', 'setupScript', 'teardownScript', 'docker', 'debugBasePort', 'debugTemplate',
+  ];
+  const detectIo: DetectIo = {
+    readdir: (dir) => fs.readdirSync(dir),
+    exists: (p) => fs.existsSync(p),
+    read: (p) => fs.readFileSync(p, 'utf8'),
+  };
+  const relativeToRepo = (root: string | undefined, abs: string) =>
+    root && abs.startsWith(root + path.sep) ? path.relative(root, abs) : abs;
+  const settingsPanel = new SettingsPanelManager(ctx.extensionUri, {
+    snapshot: () => {
+      const root = repoRootOf();
+      const effective = config.get();
+      const cfg = vscode.workspace.getConfiguration('unmess');
+      const repoFile = readRepoConfig(root);
+      return {
+        repoRoot: root,
+        project: {
+          worktreesDirectory: effective.worktreesDirectory,
+          defaultBaseBranch: effective.defaultBaseBranch,
+          setupScript: effective.setupScript,
+          teardownScript: effective.teardownScript,
+          docker: effective.docker,
+          debugBasePort: effective.debugBasePort,
+          debugTemplate: effective.debugTemplate,
+        },
+        projectFile: { path: config.repoConfigPath(), present: repoFile.present, problems: repoFile.problems },
+        personalOverrides: REPO_KEYS.filter((key) => {
+          const seen = cfg.inspect(key);
+          return seen?.globalValue !== undefined || seen?.workspaceValue !== undefined || seen?.workspaceFolderValue !== undefined;
+        }),
+        user: {
+          defaultProvider: effective.defaultProvider,
+          claudeCommand: effective.claudeCommand,
+          codexCommand: effective.codexCommand,
+          grokCommand: effective.grokCommand,
+          opencodeCommand: effective.opencodeCommand,
+          notifyOnAttention: effective.notifyOnAttention,
+          focusMode: effective.focusMode,
+          scopeSearchToActiveWorktree: effective.scopeSearchToActiveWorktree,
+        },
+        installedProviders: installedProviders(effective),
+        branches: root ? git.listBranches(root) : [],
+        detected: root ? detect(root, detectIo) : { composeFiles: [], portVars: [] },
+      };
+    },
+    pickFile: async (field) => {
+      const root = repoRootOf();
+      const isCompose = field === 'composeFile' || field === 'overrideFile';
+      const picked = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        canSelectFolders: false,
+        defaultUri: root ? vscode.Uri.file(root) : undefined,
+        openLabel: 'Use this file',
+        filters: isCompose
+          ? { 'Compose files': ['yml', 'yaml'] }
+          : { Scripts: ['sh', 'bash', 'zsh', 'js', 'ts', 'py'], 'All files': ['*'] },
+      });
+      const abs = picked?.[0]?.fsPath;
+      return abs ? relativeToRepo(root, abs) : undefined;
+    },
+    createScript: async (kind) => {
+      const root = repoRootOf();
+      if (!root) throw new Error('Open a git repository first.');
+      const rel = path.join('.unmess', `${kind}.sh`);
+      const abs = path.join(root, rel);
+      if (!fs.existsSync(abs)) {
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, SCRIPT_TEMPLATES[kind], { mode: 0o755 });
+      }
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(abs), {
+        preview: false,
+        viewColumn: vscode.ViewColumn.Beside,
+      });
+      return rel;
+    },
+    saveProject: async (values) => {
+      const root = repoRootOf();
+      if (!root) return ['Open a git repository first.'];
+      const file = path.join(root, REPO_CONFIG_RELATIVE);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, renderRepoConfig({ ...config.get(), ...values }));
+      webviewProvider.push();
+      return readRepoConfig(root).problems;
+    },
+    saveUser: async (values) => {
+      const cfg = vscode.workspace.getConfiguration('unmess');
+      for (const [key, value] of Object.entries(values)) {
+        await cfg.update(key, value, vscode.ConfigurationTarget.Global);
+      }
+      webviewProvider.push();
+    },
+    clearPersonalOverrides: async () => {
+      const cfg = vscode.workspace.getConfiguration('unmess');
+      for (const key of REPO_KEYS) {
+        await cfg.update(key, undefined, vscode.ConfigurationTarget.Global);
+        // Workspace scope only exists inside a workspace; elsewhere the update throws.
+        await cfg.update(key, undefined, vscode.ConfigurationTarget.Workspace).then(undefined, () => {});
+      }
+      webviewProvider.push();
+    },
+    openProjectFile: async () => {
+      const file = config.repoConfigPath();
+      if (file && fs.existsSync(file)) {
+        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file));
+      }
+    },
+  });
+  ctx.subscriptions.push(settingsPanel);
+
   // "The agent needs you": sidebar badge always; native OS notification only
   // when VSCode is in the background (inside the window the badge suffices).
   const osaNotify = new OsaNotifyAdapter();
@@ -420,6 +541,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
     // The "+" in the view header: opens the webview's rich new-task modal
     // (title, branch, base branch, description) rather than a bare input box.
     vscode.commands.registerCommand('unmess.newTask', () => newTaskPanel.open()),
+    vscode.commands.registerCommand('unmess.openSettings', () => settingsPanel.open()),
+    vscode.commands.registerCommand('unmess.gettingStarted', () =>
+      vscode.commands.executeCommand('workbench.action.openWalkthrough', 'unmess.unmess#unmess.gettingStarted', false),
+    ),
     vscode.commands.registerCommand('unmess.createRepoConfig', () => createRepoConfig(config, repoRootOf())),
     vscode.commands.registerCommand('unmess.deleteWorktree', (item) => service.deleteWorktree(item?.worktree)),
     vscode.commands.registerCommand('unmess.renameWorktree', (item) => service.renameWorktree(item?.worktree)),
@@ -476,6 +601,28 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // worktree in otherwise.
   const noTabsOpen = vscode.window.tabGroups.all.every((g) => g.tabs.length === 0);
   if (repoRootOf() && noTabsOpen) newTaskPanel.open();
+
+  // First look at a repository that could use the heavier setup — a compose
+  // file, or a PHP stack that wants Xdebug — offer the settings panel once.
+  // Then never again for this repo: it lives behind the gear from here on, and
+  // a repo that already has `.unmess/config.json` was set up by someone.
+  void (async () => {
+    const root = repoRootOf();
+    if (!root) return;
+    const key = `unmess.setupNudged:${root}`;
+    if (ctx.globalState.get<boolean>(key)) return;
+    if (readRepoConfig(root).present) { await ctx.globalState.update(key, true); return; }
+    const found = detect(root, detectIo);
+    if (found.composeFiles.length === 0 && found.stack !== 'php') return;
+    await ctx.globalState.update(key, true);
+    const what = found.composeFiles.length > 0 ? `\`${found.composeFiles[0]}\`` : 'a PHP stack';
+    const pick = await vscode.window.showInformationMessage(
+      `Unmess: this repo has ${what}. Set up a Docker stack and debugger per worktree?`,
+      'Open settings',
+      'Not now',
+    );
+    if (pick === 'Open settings') settingsPanel.open();
+  })();
 }
 
 export function deactivate() {}

@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **A settings panel.** The gear beside **+** in the Worktrees header opens one editor-area page for everything Unmess can be told: the project half (worktree folder, base branch, setup/teardown scripts, a Docker stack per worktree, a debugger per worktree) saves to `.unmess/config.json`; the personal half (primary agent and its commands, notifications, focus mode, search scoping) saves to your own VS Code settings. It prefills from the repository — compose files and the `${HTTP_PORT}`-style variables inside them, the language stack for a debugger preset (Node, PHP/Xdebug, Python, Go) — offers native file pickers, writes starter scripts on request, and reads the saved file back through the same validator the extension uses so problems show up where they were made. It also says when your own settings.json overrides the file for this repo, with a button to clear those.
+- **A Get started walkthrough** (opens on install; later under Help → Welcome, or `Unmess: Getting Started`) covering tmux, the first agent, switching, review, and the settings panel. Steps tick themselves as you do them.
+- **A one-time offer, per repository,** to set up Docker and debugging when Unmess first sees a compose file or a PHP stack and no `.unmess/config.json`.
+- **The New agent form is a full editor panel** instead of a modal squeezed into the sidebar, and opens on its own when a repo window has no tabs open.
+- **Missing tmux is a panel, not a toast.** The Worktrees view states the requirement and installs it in one click; the extension used to abort silently behind a notification that vanished.
+- **The Explorer's root folder is labelled by its branch,** like the sidebar, instead of by the directory name.
+
 ### Changed
 
 - **The per-worktree debugger stopped calling itself Xdebug.** Nothing about it was ever PHP-specific — the port is a slot number and `debugTemplate` is handed to VS Code whole — but every name around it said otherwise: `unmess.xdebugBasePort`, `XDEBUG_PORT`, and a template that shipped `"type": "php"`. Anyone whose stack was not PHP read that as "not for me" and skipped the one thing no other worktree tool does. The setting is now `unmess.debugBasePort`, the docker env var is `DEBUG_PORT`, and the default template attaches to Node. Xdebug is documented as one example among others.
