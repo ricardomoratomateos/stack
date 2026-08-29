@@ -17,7 +17,7 @@ import type { AgentSessionManager } from '../../src/session/AgentSessionManager'
 function makeStoreStub(initial: Worktree[] = []) {
   let worktrees: Worktree[] = initial.map((w) => ({ ...w }));
   const portRegistry: Record<string, number> = {};
-  for (const w of initial) portRegistry[w.path] = w.xdebugPort;
+  for (const w of initial) portRegistry[w.path] = w.debugPort;
   const calls: string[] = [];
   const store: IWorktreeRepository & { calls: string[] } = {
     calls,
@@ -26,7 +26,7 @@ function makeStoreStub(initial: Worktree[] = []) {
     add: async (w: Worktree) => {
       calls.push(`add:${w.branch}`);
       worktrees.push({ ...w });
-      portRegistry[w.path] = w.xdebugPort;
+      portRegistry[w.path] = w.debugPort;
     },
     patch: async (id: string, fields: Partial<Worktree>) => {
       calls.push(`patch:${id}:${JSON.stringify(fields)}`);
@@ -101,7 +101,7 @@ function makeConfigStub(overrides: Partial<UnmessConfig> = {}): ConfigManager {
       setupScript: '',
       teardownScript: '',
       claudeCommand: 'claude',
-      xdebugBasePort: 9898,
+      debugBasePort: 9898,
       debugTemplate: {
         type: 'php',
         request: 'launch',
@@ -131,7 +131,7 @@ function makeWorktree(overrides: Partial<Worktree> = {}): Worktree {
     branch: 'feat/x',
     path: '/repo/zer/feat-x',
     repoRoot: '/repo',
-    xdebugPort: 9899,
+    debugPort: 9899,
     dockerProjectName: 'feat-x',
     createdAt: 1,
     ...overrides,
@@ -305,7 +305,7 @@ describe('create', () => {
       const existingPath = path.join(REPO, 'zer', 'feat-x');
       const tracked: Worktree = {
         id: 'existing-id', branch: 'feat/x', path: existingPath, repoRoot: REPO,
-        xdebugPort: 9950, dockerProjectName: 'feat-x', createdAt: 1,
+        debugPort: 9950, dockerProjectName: 'feat-x', createdAt: 1,
       };
       store = makeStoreStub([tracked]);
       git.listWorktrees.mockReturnValue([{ path: existingPath, branch: 'feat/x', head: 'abc' }]);
@@ -371,7 +371,7 @@ describe('create', () => {
   it('allocates a port', async () => {
     const wt = await mgr().create('feat/x', REPO);
     expect(allocator.allocate).toHaveBeenCalledTimes(1);
-    expect(wt.xdebugPort).toBe(9899);
+    expect(wt.debugPort).toBe(9899);
   });
 });
 
@@ -541,8 +541,8 @@ describe('reconcile', () => {
     const git = makeGitStub([MAIN, LINKED]);
     const mgr = new WorktreeManager(store, allocator, makeConfigStub(), undefined, git, makeFsStub());
     const { current } = await mgr.reconcile(REPO);
-    expect(current.find((w) => w.isMain)?.xdebugPort).toBe(0);
-    expect(current.find((w) => !w.isMain)?.xdebugPort).toBe(9901);
+    expect(current.find((w) => w.isMain)?.debugPort).toBe(0);
+    expect(current.find((w) => !w.isMain)?.debugPort).toBe(9901);
     expect(allocator.allocate).toHaveBeenCalledTimes(1); // never called for main
   });
 
@@ -627,7 +627,7 @@ describe('generateLaunchJson', () => {
     expect(cfg.name).toBe('My Debug');
   });
 
-  it('defaults template name to "Unmess: Xdebug (<branch>)"', async () => {
+  it('defaults template name to "Unmess: Debug (<branch>)"', async () => {
     const config = makeConfigStub({
       debugTemplate: {
         type: 'php',
@@ -644,7 +644,7 @@ describe('generateLaunchJson', () => {
     );
     const wt = await mgr.create('feat/x', REPO);
     const written = JSON.parse(fsStub.files.get(path.join(wt.path, '.vscode/launch.json'))!);
-    expect(written.configurations[0].name).toBe('Unmess: Xdebug (feat/x)');
+    expect(written.configurations[0].name).toBe('Unmess: Debug (feat/x)');
   });
 });
 
@@ -653,17 +653,17 @@ describe('generateLaunchJson', () => {
 /**
  * Allocator double that answers like the real one: `firstBusyPort` reports the
  * first port of the slot's block that is held, `allocate` hands out the next
- * slot. `busy` is keyed by xdebug port.
+ * slot. `busy` is keyed by debug port.
  */
 function makeReallocatingAllocatorStub(busy: Record<number, number>, nextPort = 9900) {
   const allocate = vi.fn(async () => nextPort);
-  const firstBusyPort = vi.fn(async (xdebugPort: number) => busy[xdebugPort]);
+  const firstBusyPort = vi.fn(async (debugPort: number) => busy[debugPort]);
   return { stub: { allocate, firstBusyPort, release: vi.fn() } as unknown as PortAllocator, allocate, firstBusyPort };
 }
 
 describe('ensureFreePorts', () => {
   it('leaves the worktree alone when its whole port block is still bindable', async () => {
-    const wt = makeWorktree({ xdebugPort: 9899 });
+    const wt = makeWorktree({ debugPort: 9899 });
     const store = makeStoreStub([wt]);
     const { stub, allocate } = makeReallocatingAllocatorStub({});
     const mgr = new WorktreeManager(store, stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
@@ -672,11 +672,11 @@ describe('ensureFreePorts', () => {
 
     expect(result).toEqual({ worktree: wt });
     expect(allocate).not.toHaveBeenCalled();
-    expect(store.calls).not.toContain(`patch:${wt.id}:{"xdebugPort":9900}`);
+    expect(store.calls).not.toContain(`patch:${wt.id}:{"debugPort":9900}`);
   });
 
   it('moves the worktree to a new slot and reports which port was taken', async () => {
-    const wt = makeWorktree({ xdebugPort: 9901 });
+    const wt = makeWorktree({ debugPort: 9901 });
     const store = makeStoreStub([wt]);
     // 8083 held by a foreign container — exactly the reported failure.
     const { stub } = makeReallocatingAllocatorStub({ 9901: 8083 }, 9903);
@@ -685,23 +685,23 @@ describe('ensureFreePorts', () => {
     const result = await mgr.ensureFreePorts(wt);
 
     expect(result.movedFrom).toBe(8083);
-    expect(result.worktree.xdebugPort).toBe(9903);
+    expect(result.worktree.debugPort).toBe(9903);
   });
 
   it('persists the new port so the move survives a reload', async () => {
-    const wt = makeWorktree({ xdebugPort: 9901 });
+    const wt = makeWorktree({ debugPort: 9901 });
     const store = makeStoreStub([wt]);
     const { stub } = makeReallocatingAllocatorStub({ 9901: 8083 }, 9903);
     const mgr = new WorktreeManager(store, stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
 
     await mgr.ensureFreePorts(wt);
 
-    expect(store.calls).toContain(`patch:${wt.id}:{"xdebugPort":9903}`);
-    expect(store.get(wt.id)!.xdebugPort).toBe(9903);
+    expect(store.calls).toContain(`patch:${wt.id}:{"debugPort":9903}`);
+    expect(store.get(wt.id)!.debugPort).toBe(9903);
   });
 
-  it('regenerates launch.json so the Xdebug listener follows the new port', async () => {
-    const wt = makeWorktree({ xdebugPort: 9901 });
+  it('regenerates launch.json so the debug listener follows the new port', async () => {
+    const wt = makeWorktree({ debugPort: 9901 });
     const fsStub = makeFsStub();
     const { stub } = makeReallocatingAllocatorStub({ 9901: 8083 }, 9903);
     const mgr = new WorktreeManager(makeStoreStub([wt]), stub, makeConfigStub(), undefined, makeGitStub(), fsStub);
@@ -714,7 +714,7 @@ describe('ensureFreePorts', () => {
   });
 
   it('does not touch the main worktree, whose port 0 means "no stack of its own"', async () => {
-    const main = makeWorktree({ id: 'main', xdebugPort: 0, isMain: true });
+    const main = makeWorktree({ id: 'main', debugPort: 0, isMain: true });
     const { stub, firstBusyPort } = makeReallocatingAllocatorStub({});
     const mgr = new WorktreeManager(makeStoreStub([main]), stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
 
@@ -723,7 +723,7 @@ describe('ensureFreePorts', () => {
   });
 
   it('skips a non-main worktree that has no port allocated yet', async () => {
-    const wt = makeWorktree({ xdebugPort: 0 });
+    const wt = makeWorktree({ debugPort: 0 });
     const { stub, firstBusyPort } = makeReallocatingAllocatorStub({});
     const mgr = new WorktreeManager(makeStoreStub([wt]), stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
 

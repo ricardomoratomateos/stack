@@ -76,13 +76,13 @@ export class WorktreeManager {
       if (storedPaths.has(canonicalPath(wt.path))) continue;
 
       const isMain = canonicalPath(wt.path) === normalizedRepoRoot;
-      const xdebugPort = isMain ? 0 : await this.portAllocator.allocate();
+      const debugPort = isMain ? 0 : await this.portAllocator.allocate();
       const worktree: Worktree = {
         id: randomUUID(),
         branch: wt.branch,
         path: wt.path,
         repoRoot,
-        xdebugPort,
+        debugPort,
         dockerProjectName: wt.branch.replace(/[^a-z0-9-]/gi, '-').toLowerCase(),
         createdAt: Date.now(),
         isMain,
@@ -143,7 +143,7 @@ export class WorktreeManager {
       throw new Error(`git worktree add did not create the directory: ${worktreePath}`);
     }
 
-    const xdebugPort = await this.portAllocator.allocate();
+    const debugPort = await this.portAllocator.allocate();
     try {
       const worktree: Worktree = {
         id: randomUUID(),
@@ -151,7 +151,7 @@ export class WorktreeManager {
         alias: alias || undefined,
         path: worktreePath,
         repoRoot,
-        xdebugPort,
+        debugPort,
         dockerProjectName: branch.replace(/[^a-z0-9-]/gi, '-').toLowerCase(),
         createdAt: Date.now(),
         // Recorded now, because it is unknowable later: git keeps no note of
@@ -169,7 +169,7 @@ export class WorktreeManager {
       // The slot is held from the moment it is handed out until it reaches the
       // store. If we never get there, hand it back rather than sterilise it for
       // the rest of the session.
-      this.portAllocator.release(xdebugPort);
+      this.portAllocator.release(debugPort);
       throw e;
     }
   }
@@ -182,7 +182,7 @@ export class WorktreeManager {
       alias: alias || undefined,
       path: worktreePath,
       repoRoot,
-      xdebugPort: await this.portAllocator.allocate(),
+      debugPort: await this.portAllocator.allocate(),
       dockerProjectName: branch.replace(/[^a-z0-9-]/gi, '-').toLowerCase(),
       createdAt: Date.now(),
     };
@@ -204,20 +204,20 @@ export class WorktreeManager {
    * registry — another project's container, or a leftover stack from a worktree
    * that was deleted without its containers coming down.
    *
-   * Regenerates launch.json so the Xdebug listener follows the new port.
+   * Regenerates launch.json so the debug listener follows the new port.
    * Returns the worktree unchanged when its block is still free.
    */
   async ensureFreePorts(worktree: Worktree): Promise<{ worktree: Worktree; movedFrom?: number }> {
-    if (worktree.isMain || worktree.xdebugPort <= 0) return { worktree };
+    if (worktree.isMain || worktree.debugPort <= 0) return { worktree };
 
-    const busyPort = await this.portAllocator.firstBusyPort(worktree.xdebugPort);
+    const busyPort = await this.portAllocator.firstBusyPort(worktree.debugPort);
     if (busyPort === undefined) return { worktree };
 
     // allocate() skips ports in the registry, and this worktree is still in it,
     // so it can only come back with a different slot.
-    const xdebugPort = await this.portAllocator.allocate();
-    const updated: Worktree = { ...worktree, xdebugPort };
-    await this.store.patch(worktree.id, { xdebugPort });
+    const debugPort = await this.portAllocator.allocate();
+    const updated: Worktree = { ...worktree, debugPort };
+    await this.store.patch(worktree.id, { debugPort });
     this.generateLaunchJson(updated);
     return { worktree: updated, movedFrom: busyPort };
   }
@@ -269,13 +269,13 @@ export class WorktreeManager {
 
   private generateLaunchJson(worktree: Worktree): void {
     const template = this.config.get().debugTemplate;
-    if (!template.name) template.name = `Unmess: Xdebug (${worktree.branch})`;
+    if (!template.name) template.name = `Unmess: Debug (${worktree.branch})`;
 
     const config = JSON.parse(
       JSON.stringify(template)
-        .replace(/"\{\{PORT\}\}"/g, String(worktree.xdebugPort))
+        .replace(/"\{\{PORT\}\}"/g, String(worktree.debugPort))
         .replace(/\{\{WORKTREE_PATH\}\}/g, worktree.path)
-        .replace(/\{\{PORT\}\}/g, String(worktree.xdebugPort)),
+        .replace(/\{\{PORT\}\}/g, String(worktree.debugPort)),
     );
 
     const launchJson = { version: '0.2.0', configurations: [config] };

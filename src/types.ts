@@ -44,7 +44,7 @@ export interface Worktree {
   alias?: string;
   path: string;
   repoRoot: string;
-  xdebugPort: number;
+  debugPort: number;
   dockerProjectName: string;
   createdAt: number;
   isMain?: boolean;
@@ -88,7 +88,7 @@ export interface DockerConfig {
   overrideFile: string;
   /** Env var names to auto-generate a per-worktree port for (e.g. HTTP_PORT). */
   ports: string[];
-  /** First port of the docker range (kept clear of the xdebug range). */
+  /** First port of the docker range (kept clear of the debug range). */
   basePort: number;
   /** Ports owned by each worktree = one contiguous block of this size. */
   portStride: number;
@@ -123,7 +123,7 @@ export interface UnmessConfig {
   focusMode: boolean;
   /** Per-worktree docker orchestration (compose files + auto-generated ports). */
   docker: DockerConfig;
-  xdebugBasePort: number;
+  debugBasePort: number;
   debugTemplate: DebugTemplate;
 }
 

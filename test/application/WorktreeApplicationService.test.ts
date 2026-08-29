@@ -33,7 +33,7 @@ function makeWorktree(over: Partial<Worktree> = {}): Worktree {
     branch,
     path: '/repo/zer/feat-a',
     repoRoot: '/repo',
-    xdebugPort: 9899,
+    debugPort: 9899,
     dockerProjectName: branch.replace(/[^a-z0-9-]/gi, '-').toLowerCase(),
     createdAt: 1,
     ...over,
@@ -98,7 +98,7 @@ function makeHarness(o: HarnessOpts = {}) {
       basePort: 20000,
       portStride: 100,
     },
-    xdebugBasePort: 9898,
+    debugBasePort: 9898,
     debugTemplate: { type: 'php', request: 'launch', name: 'Unmess: Debug', port: '{{PORT}}' },
     ...o.config,
   };
@@ -2183,7 +2183,7 @@ describe('VsCodeNotifyAdapter', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('diff review panel', () => {
-  const wtA = { id: 'wt-a', branch: 'feat/x', alias: 'Fix X', path: '/repo/zer/wt-a', repoRoot: '/repo', xdebugPort: 9898, dockerProjectName: 'wt-a', createdAt: 0 } as unknown as Worktree;
+  const wtA = { id: 'wt-a', branch: 'feat/x', alias: 'Fix X', path: '/repo/zer/wt-a', repoRoot: '/repo', debugPort: 9898, dockerProjectName: 'wt-a', createdAt: 0 } as unknown as Worktree;
 
   it('openDiff message opens the panel for the worktree', async () => {
     const h = makeHarness({ worktrees: [wtA] });
@@ -2272,22 +2272,22 @@ describe('port re-check before setup / compose up', () => {
     docker: {
       composeFile: '.unmess/docker-compose.worktree.yml',
       overrideFile: '',
-      ports: ['WORKTREE_PORT', 'XDEBUG_PORT'],
+      ports: ['WORKTREE_PORT', 'DEBUG_PORT'],
       basePort: 8081,
       portStride: 1,
     },
   };
 
   /** Make the manager report the worktree's block as stolen and hand back a new slot. */
-  function reassignTo(h: ReturnType<typeof makeHarness>, xdebugPort: number, movedFrom: number) {
+  function reassignTo(h: ReturnType<typeof makeHarness>, debugPort: number, movedFrom: number) {
     h.manager.ensureFreePorts.mockImplementation(async (wt: Worktree) => ({
-      worktree: { ...wt, xdebugPort },
+      worktree: { ...wt, debugPort },
       movedFrom,
     }));
   }
 
   it('brings the stack up on the reassigned ports, not the stolen ones', async () => {
-    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b', xdebugPort: 9901 });
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b', debugPort: 9901 });
     const h = makeHarness({ worktrees: [b], config: dockerCfg });
     reassignTo(h, 9903, 8083); // 8083 held by a foreign container
 
@@ -2295,12 +2295,12 @@ describe('port re-check before setup / compose up', () => {
 
     // Slot 4 → WORKTREE_PORT 8085. The old 8083 must appear nowhere.
     expect(h.calls).toContain(
-      'terminal.sendText:WORKTREE_PORT=8085 XDEBUG_PORT=9903 docker compose -p "feat-b" -f "/repo/.unmess/docker-compose.worktree.yml" up -d',
+      'terminal.sendText:WORKTREE_PORT=8085 DEBUG_PORT=9903 docker compose -p "feat-b" -f "/repo/.unmess/docker-compose.worktree.yml" up -d',
     );
   });
 
   it('names the busy port and the new block so the user can see what moved', async () => {
-    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b', xdebugPort: 9901 });
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b', debugPort: 9901 });
     const h = makeHarness({ worktrees: [b], config: dockerCfg });
     reassignTo(h, 9903, 8083);
 
@@ -2321,7 +2321,7 @@ describe('port re-check before setup / compose up', () => {
   });
 
   it('re-runs setup with the reassigned ports, so the .env it writes matches the stack', async () => {
-    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b', xdebugPort: 9901 });
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b', debugPort: 9901 });
     const h = makeHarness({ worktrees: [b], config: { ...dockerCfg, setupScript: '/s.sh' } });
     reassignTo(h, 9903, 8083);
 
@@ -2329,12 +2329,12 @@ describe('port re-check before setup / compose up', () => {
 
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
       'UNMESS_REPO_ROOT="/repo" UNMESS_WORKTREE_PATH="/repo/zer/feat-b" UNMESS_BRANCH="feat/b" ' +
-        'UNMESS_COMPOSE_PROJECT="feat-b" WORKTREE_PORT="8085" XDEBUG_PORT="9903" bash "/s.sh"',
+        'UNMESS_COMPOSE_PROJECT="feat-b" WORKTREE_PORT="8085" DEBUG_PORT="9903" bash "/s.sh"',
     );
   });
 
   it('leaves teardown on the original ports — it must address the stack that is actually up', async () => {
-    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b', xdebugPort: 9901 });
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b', debugPort: 9901 });
     const h = makeHarness({
       worktrees: [b],
       config: { ...dockerCfg, teardownScript: '/t.sh' },
@@ -2355,7 +2355,7 @@ describe('port re-check before setup / compose up', () => {
 
     // Still brings the stack up; docker reports the collision itself if it comes.
     expect(h.calls).toContain(
-      'terminal.sendText:WORKTREE_PORT=8081 XDEBUG_PORT=9899 docker compose -p "feat-b" -f "/repo/.unmess/docker-compose.worktree.yml" up -d',
+      'terminal.sendText:WORKTREE_PORT=8081 DEBUG_PORT=9899 docker compose -p "feat-b" -f "/repo/.unmess/docker-compose.worktree.yml" up -d',
     );
     expect(h.notify.showWarning).not.toHaveBeenCalled();
   });
@@ -2680,7 +2680,7 @@ describe('worktree ports', () => {
     docker: {
       composeFile: 'docker-compose.yml',
       overrideFile: 'docker-compose.worktree.yml',
-      ports: ['HTTP_PORT', 'DB_PORT', 'XDEBUG_PORT'],
+      ports: ['HTTP_PORT', 'DB_PORT', 'DEBUG_PORT'],
       basePort: 20000,
       portStride: 100,
     },
@@ -2694,25 +2694,25 @@ describe('worktree ports', () => {
   it('carry the same numbers the compose env is given', () => {
     // Derived, not stored: the card cannot drift from what the container
     // actually publishes, because both come out of one function.
-    const a = makeWorktree({ id: 'a', xdebugPort: 9899 });
+    const a = makeWorktree({ id: 'a', debugPort: 9899 });
     const h = makeHarness({ worktrees: [a], config: portsCfg });
 
     expect(h.service.buildState().worktrees[0]?.ports).toEqual([
       { name: 'HTTP_PORT', port: 20000, openable: true },
       { name: 'DB_PORT', port: 20001, openable: true },
       // Special-cased to the worktree's own debug port, and not a URL.
-      { name: 'XDEBUG_PORT', port: 9899, openable: false },
+      { name: 'DEBUG_PORT', port: 9899, openable: false },
     ]);
   });
 
   it('move with the worktree when it lands on another slot', () => {
-    const a = makeWorktree({ id: 'a', xdebugPort: 9901 });
+    const a = makeWorktree({ id: 'a', debugPort: 9901 });
     const h = makeHarness({ worktrees: [a], config: portsCfg });
 
     expect(h.service.buildState().worktrees[0]?.ports).toEqual([
       { name: 'HTTP_PORT', port: 20200, openable: true },
       { name: 'DB_PORT', port: 20201, openable: true },
-      { name: 'XDEBUG_PORT', port: 9901, openable: false },
+      { name: 'DEBUG_PORT', port: 9901, openable: false },
     ]);
   });
 

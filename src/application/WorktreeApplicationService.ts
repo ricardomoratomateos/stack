@@ -249,7 +249,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       return wt;
     }
     if (moved.movedFrom !== undefined) {
-      const ports = portBlockFor(moved.worktree.xdebugPort, this.deps.config.get()).join(', ');
+      const ports = portBlockFor(moved.worktree.debugPort, this.deps.config.get()).join(', ');
       this.deps.notify.showWarning(
         `Port ${moved.movedFrom} is already in use — "${displayLabel(moved.worktree)}" moved to ${ports}.`,
       );
@@ -611,7 +611,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * with it.
    *
    * Only the ports the user named in `unmess.docker.ports` — the debug port is
-   * in there when they asked for it (XDEBUG_PORT) and left out otherwise, since
+   * in there when they asked for it (DEBUG_PORT) and left out otherwise, since
    * a debug port nobody configured is Unmess's bookkeeping rather than something
    * the user needs to know.
    */
@@ -622,7 +622,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       port,
       // Everything but the debug port: a debugger listener answers nothing a
       // browser can render, and offering to open it is a dead tab every time.
-      openable: name !== 'XDEBUG_PORT',
+      openable: name !== 'DEBUG_PORT',
     }));
   }
 

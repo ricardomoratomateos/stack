@@ -16,7 +16,7 @@ function makeWorktree(overrides: Partial<Worktree> = {}): Worktree {
     branch: 'feature/foo',
     path: '/tmp/unmess-test/feature-foo',
     repoRoot: '/tmp/unmess-test/repo',
-    xdebugPort: 9004,
+    debugPort: 9004,
     dockerProjectName: 'feature-foo',
     createdAt: 1700000000000,
     ...overrides,
@@ -50,11 +50,11 @@ describe('WorktreeStore (implements IWorktreeRepository)', () => {
     expect(memento.keys()).toEqual([STORE_KEY]);
     expect(memento.get(STORE_KEY)).toEqual({
       worktrees: [wt],
-      portRegistry: { [wt.path]: wt.xdebugPort },
+      portRegistry: { [wt.path]: wt.debugPort },
     });
 
     // Read path: data pre-seeded under the key is what getAll() returns.
-    const other = makeWorktree({ id: 'seeded', path: '/tmp/seeded', xdebugPort: 9010 });
+    const other = makeWorktree({ id: 'seeded', path: '/tmp/seeded', debugPort: 9010 });
     await memento.update(STORE_KEY, {
       worktrees: [other],
       portRegistry: { '/tmp/seeded': 9010 },
@@ -63,7 +63,7 @@ describe('WorktreeStore (implements IWorktreeRepository)', () => {
   });
 
   it('add persists a worktree AND registers its port in portRegistry (by path)', async () => {
-    const wt = makeWorktree({ path: '/tmp/wt-a', xdebugPort: 9005 });
+    const wt = makeWorktree({ path: '/tmp/wt-a', debugPort: 9005 });
     await store.add(wt);
     expect(store.getAll()).toEqual([wt]);
     expect(store.getPortRegistry()).toEqual({ '/tmp/wt-a': 9005 });
@@ -77,8 +77,8 @@ describe('WorktreeStore (implements IWorktreeRepository)', () => {
   });
 
   it('remove deletes by id AND removes its portRegistry entry', async () => {
-    const a = makeWorktree({ id: 'a', path: '/tmp/a', xdebugPort: 9001 });
-    const b = makeWorktree({ id: 'b', path: '/tmp/b', xdebugPort: 9002 });
+    const a = makeWorktree({ id: 'a', path: '/tmp/a', debugPort: 9001 });
+    const b = makeWorktree({ id: 'b', path: '/tmp/b', debugPort: 9002 });
     await store.add(a);
     await store.add(b);
 
@@ -88,7 +88,7 @@ describe('WorktreeStore (implements IWorktreeRepository)', () => {
   });
 
   it('remove is a no-op for unknown id (keeps worktrees and registry intact)', async () => {
-    const a = makeWorktree({ id: 'a', path: '/tmp/a', xdebugPort: 9001 });
+    const a = makeWorktree({ id: 'a', path: '/tmp/a', debugPort: 9001 });
     await store.add(a);
     await store.remove('unknown');
     expect(store.getAll()).toEqual([a]);
@@ -126,13 +126,13 @@ describe('WorktreeStore (implements IWorktreeRepository)', () => {
     // Real behavior: save() runs unconditionally, so the key still exists.
     expect(memento.get(STORE_KEY)).toEqual({
       worktrees: [a],
-      portRegistry: { [a.path]: a.xdebugPort },
+      portRegistry: { [a.path]: a.debugPort },
     });
   });
 
   it('getPortRegistry returns the registry', async () => {
-    await store.add(makeWorktree({ id: 'a', path: '/tmp/a', xdebugPort: 9001 }));
-    await store.add(makeWorktree({ id: 'b', path: '/tmp/b', xdebugPort: 9002 }));
+    await store.add(makeWorktree({ id: 'a', path: '/tmp/a', debugPort: 9001 }));
+    await store.add(makeWorktree({ id: 'b', path: '/tmp/b', debugPort: 9002 }));
     expect(store.getPortRegistry()).toEqual({ '/tmp/a': 9001, '/tmp/b': 9002 });
   });
 
@@ -148,11 +148,11 @@ describe('WorktreeStore (implements IWorktreeRepository)', () => {
     });
 
     it('drops entries whose path is gone (currently unused — keep behavior)', async () => {
-      const alive = makeWorktree({ id: 'alive', path: aliveDir, xdebugPort: 9001 });
+      const alive = makeWorktree({ id: 'alive', path: aliveDir, debugPort: 9001 });
       const gone = makeWorktree({
         id: 'gone',
         path: path.join(os.tmpdir(), 'unmess-definitely-missing-xyz'),
-        xdebugPort: 9002,
+        debugPort: 9002,
       });
       await store.add(alive);
       await store.add(gone);
@@ -166,7 +166,7 @@ describe('WorktreeStore (implements IWorktreeRepository)', () => {
     });
 
     it('does not write when all paths exist', async () => {
-      const alive = makeWorktree({ id: 'alive', path: aliveDir, xdebugPort: 9001 });
+      const alive = makeWorktree({ id: 'alive', path: aliveDir, debugPort: 9001 });
       await store.add(alive);
       const before = memento.get(STORE_KEY);
 
@@ -199,7 +199,7 @@ describe('InMemoryWorktreeRepository parity with WorktreeStore semantics', () =>
   });
 
   it('add registers the port by path', async () => {
-    const wt = makeWorktree({ id: 'a', path: '/tmp/a', xdebugPort: 9001 });
+    const wt = makeWorktree({ id: 'a', path: '/tmp/a', debugPort: 9001 });
     await repo.add(wt);
     expect(repo.getAll()).toEqual([wt]);
     expect(repo.get('a')).toEqual(wt);
@@ -207,8 +207,8 @@ describe('InMemoryWorktreeRepository parity with WorktreeStore semantics', () =>
   });
 
   it('remove drops the worktree and its registry entry', async () => {
-    const a = makeWorktree({ id: 'a', path: '/tmp/a', xdebugPort: 9001 });
-    const b = makeWorktree({ id: 'b', path: '/tmp/b', xdebugPort: 9002 });
+    const a = makeWorktree({ id: 'a', path: '/tmp/a', debugPort: 9001 });
+    const b = makeWorktree({ id: 'b', path: '/tmp/b', debugPort: 9002 });
     await repo.add(a);
     await repo.add(b);
 
@@ -258,18 +258,18 @@ describe('port registry stays in step with the worktrees', () => {
     // reporting the old port: the new one was never reserved and the old one
     // was reserved forever — the exact collision the port work removed.
     const store = makeStore();
-    const wt = makeWorktree({ id: 'a', xdebugPort: 9899 });
+    const wt = makeWorktree({ id: 'a', debugPort: 9899 });
     await store.add(wt);
 
-    await store.patch('a', { xdebugPort: 9903 });
+    await store.patch('a', { debugPort: 9903 });
 
     expect(Object.values(store.getPortRegistry())).toEqual([9903]);
   });
 
   it('never reports a port no worktree holds', async () => {
     const store = makeStore();
-    await store.add(makeWorktree({ id: 'a', xdebugPort: 9899 }));
-    await store.patch('a', { xdebugPort: 9903 });
+    await store.add(makeWorktree({ id: 'a', debugPort: 9899 }));
+    await store.patch('a', { debugPort: 9903 });
 
     expect(Object.values(store.getPortRegistry())).not.toContain(9899);
   });

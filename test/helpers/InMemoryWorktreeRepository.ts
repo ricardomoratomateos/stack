@@ -3,7 +3,7 @@ import { IWorktreeRepository } from '../../src/ports/IWorktreeRepository';
 
 /**
  * In-memory IWorktreeRepository for tests. Mirrors WorktreeStore semantics:
- * - add() registers the worktree's xdebug port in the registry keyed by PATH
+ * - add() registers the worktree's debug port in the registry keyed by PATH
  * - remove() drops both the worktree and its port-registry entry
  * - patch() merges partial fields into an existing worktree (no-op on unknown id)
  * - getPortRegistry() DERIVES from the worktrees, like the real store: a stored
@@ -25,7 +25,7 @@ export class InMemoryWorktreeRepository implements IWorktreeRepository {
 
   async add(worktree: Worktree): Promise<void> {
     this.worktrees.set(worktree.id, worktree);
-    this.portRegistry[worktree.path] = worktree.xdebugPort;
+    this.portRegistry[worktree.path] = worktree.debugPort;
   }
 
   async patch(id: string, fields: Partial<Worktree>): Promise<void> {
@@ -45,6 +45,6 @@ export class InMemoryWorktreeRepository implements IWorktreeRepository {
   }
 
   getPortRegistry(): Record<string, number> {
-    return Object.fromEntries([...this.worktrees.values()].map((w) => [w.path, w.xdebugPort]));
+    return Object.fromEntries([...this.worktrees.values()].map((w) => [w.path, w.debugPort]));
   }
 }

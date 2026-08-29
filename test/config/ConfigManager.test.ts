@@ -45,7 +45,7 @@ describe('ConfigManager', () => {
     expect(workspace.getConfiguration).toHaveBeenCalledWith('unmess');
   });
 
-  it('returns defaults: .worktrees, empty scripts, claude, 9898, php debugTemplate with {{PORT}}', () => {
+  it('returns defaults: .worktrees, empty scripts, claude, 9898, node debugTemplate with {{PORT}}', () => {
     const config = new ConfigManager().get();
 
     expect(config).toEqual({
@@ -68,13 +68,12 @@ describe('ConfigManager', () => {
         basePort: 20000,
         portStride: 100,
       },
-      xdebugBasePort: 9898,
+      debugBasePort: 9898,
       debugTemplate: {
-        type: 'php',
-        request: 'launch',
+        type: 'node',
+        request: 'attach',
         name: 'Unmess: Debug',
         port: '{{PORT}}',
-        pathMappings: {},
       },
     });
   });
@@ -100,7 +99,7 @@ describe('ConfigManager', () => {
         basePort: 30000,
         portStride: 50,
       },
-      xdebugBasePort: 9000,
+      debugBasePort: 9000,
       debugTemplate: {
         type: 'node',
         request: 'attach',
@@ -114,11 +113,11 @@ describe('ConfigManager', () => {
   });
 
   it('mixes user overrides with defaults for unset keys', () => {
-    withSettings({ xdebugBasePort: 7777 });
+    withSettings({ debugBasePort: 7777 });
 
     const config = new ConfigManager().get();
 
-    expect(config.xdebugBasePort).toBe(7777);
+    expect(config.debugBasePort).toBe(7777);
     expect(config.worktreesDirectory).toBe('.worktrees');
     expect(config.setupScript).toBe('');
     expect(config.teardownScript).toBe('');
@@ -211,13 +210,13 @@ describe('ConfigManager', () => {
 
     it('keeps the good keys when one is the wrong type', () => {
       const problems: string[] = [];
-      writeRepoConfig({ defaultBaseBranch: 'trunk', xdebugBasePort: 'nine thousand' });
+      writeRepoConfig({ defaultBaseBranch: 'trunk', debugBasePort: 'nine thousand' });
 
       const config = managerFor(tmpDir, (p) => problems.push(...p)).get();
 
       expect(config.defaultBaseBranch).toBe('trunk');
-      expect(config.xdebugBasePort).toBe(9898);
-      expect(problems[0]).toContain('"xdebugBasePort" must be a whole number');
+      expect(config.debugBasePort).toBe(9898);
+      expect(problems[0]).toContain('"debugBasePort" must be a whole number');
     });
 
     it('reports each distinct problem once, not on every read', () => {

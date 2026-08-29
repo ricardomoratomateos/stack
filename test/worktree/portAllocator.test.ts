@@ -12,15 +12,15 @@ function stubProbe(...busy: number[]) {
   return vi.fn(async (port: number) => !busy.includes(port));
 }
 
-/** Config shaped like the aside one: WORKTREE_PORT 8081+slot, XDEBUG 9898+1+slot. */
+/** Config shaped like the aside one: WORKTREE_PORT 8081+slot, DEBUG_PORT 9898+1+slot. */
 function stubConfig(over: Partial<UnmessConfig['docker']> = {}): () => UnmessConfig {
   return () =>
     ({
-      xdebugBasePort: 9898,
+      debugBasePort: 9898,
       docker: {
         composeFile: '.unmess/docker-compose.worktree.yml',
         overrideFile: '',
-        ports: ['WORKTREE_PORT', 'XDEBUG_PORT'],
+        ports: ['WORKTREE_PORT', 'DEBUG_PORT'],
         basePort: 8081,
         portStride: 1,
         ...over,
@@ -86,10 +86,10 @@ describe('PortAllocator', () => {
       await expect(allocator.allocate()).resolves.toBe(9900);
     });
 
-    it('skips a slot whose derived docker port is taken, even when its xdebug port is free', async () => {
-      // Slot 0 → WORKTREE_PORT 8081 (busy), XDEBUG 9899 (free). The whole block
+    it('skips a slot whose derived docker port is taken, even when its debug port is free', async () => {
+      // Slot 0 → WORKTREE_PORT 8081 (busy), DEBUG_PORT 9899 (free). The whole block
       // has to be free or the slot is unusable — this is the exact shape of the
-      // "port is already allocated" failure: xdebug fine, http port stolen.
+      // "port is already allocated" failure: debug fine, http port stolen.
       const allocator = new PortAllocator(stubStore({}), 9898, {
         config: stubConfig(),
         isPortFree: stubProbe(8081),
@@ -97,7 +97,7 @@ describe('PortAllocator', () => {
       await expect(allocator.allocate()).resolves.toBe(9900);
     });
 
-    it('skips a slot whose xdebug port is taken by a foreign process', async () => {
+    it('skips a slot whose debug port is taken by a foreign process', async () => {
       const allocator = new PortAllocator(stubStore({}), 9898, {
         config: stubConfig(),
         isPortFree: stubProbe(9899),
@@ -110,12 +110,12 @@ describe('PortAllocator', () => {
         config: stubConfig(),
         isPortFree: stubProbe(8081, 8082, 9901, 8084),
       });
-      // slot 0 (8081) busy, slot 1 (8082) busy, slot 2 (xdebug 9901) busy,
+      // slot 0 (8081) busy, slot 1 (8082) busy, slot 2 (debug 9901) busy,
       // slot 3 (8084) busy → slot 4: 8085 + 9903, both free.
       await expect(allocator.allocate()).resolves.toBe(9903);
     });
 
-    it('probes the xdebug port even when no docker ports are configured', async () => {
+    it('probes the debug port even when no docker ports are configured', async () => {
       const probe = stubProbe(9899);
       const allocator = new PortAllocator(stubStore({}), 9898, {
         config: stubConfig({ ports: [] }),
@@ -141,13 +141,13 @@ describe('PortAllocator', () => {
   });
 
   describe('blockFor', () => {
-    it('returns the xdebug port plus its derived docker ports, deduplicated', () => {
+    it('returns the debug port plus its derived docker ports, deduplicated', () => {
       const allocator = new PortAllocator(stubStore({}), 9898, { config: stubConfig() });
-      // XDEBUG_PORT maps back onto the xdebug port itself — it must appear once.
+      // DEBUG_PORT maps back onto the debug port itself — it must appear once.
       expect(allocator.blockFor(9901)).toEqual([9901, 8083]);
     });
 
-    it('falls back to the xdebug port alone when no config is wired in', () => {
+    it('falls back to the debug port alone when no config is wired in', () => {
       const allocator = new PortAllocator(stubStore({}), 9898, FREE);
       expect(allocator.blockFor(9901)).toEqual([9901]);
     });

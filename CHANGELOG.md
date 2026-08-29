@@ -4,6 +4,14 @@ All notable changes to Unmess are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The per-worktree debugger stopped calling itself Xdebug.** Nothing about it was ever PHP-specific — the port is a slot number and `debugTemplate` is handed to VS Code whole — but every name around it said otherwise: `unmess.xdebugBasePort`, `XDEBUG_PORT`, and a template that shipped `"type": "php"`. Anyone whose stack was not PHP read that as "not for me" and skipped the one thing no other worktree tool does. The setting is now `unmess.debugBasePort`, the docker env var is `DEBUG_PORT`, and the default template attaches to Node. Xdebug is documented as one example among others.
+
+  **Breaking.** Rename `unmess.xdebugBasePort` to `unmess.debugBasePort` in your settings and in `.unmess/config.json` — the old key is now reported as unknown rather than read. Rename `XDEBUG_PORT` to `DEBUG_PORT` in `unmess.docker.ports` and in whatever compose file consumes it. Worktrees created by an earlier build carry the old field in the extension's store and will show no debug port until they are recreated.
+
 ## [0.1.3] — 2026-08-28
 
 ### Changed

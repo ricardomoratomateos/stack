@@ -249,7 +249,7 @@
               "items": {
                 "type": "string"
               },
-              "description": "Env var names to auto-generate a per-worktree port for (e.g. HTTP_PORT). Configuring at least one enables the Docker start/stop button. XDEBUG_PORT reuses the worktree's Xdebug port."
+              "description": "Env var names to auto-generate a per-worktree port for (e.g. HTTP_PORT). Configuring at least one enables the Docker start/stop button. DEBUG_PORT reuses the worktree's debug port."
             },
             "basePort": {
               "type": "number",
@@ -262,19 +262,18 @@
           },
           "description": "Per-worktree docker orchestration: compose files and auto-generated ports Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
         },
-        "unmess.xdebugBasePort": {
+        "unmess.debugBasePort": {
           "type": "number",
           "default": 9898,
-          "description": "Base port for Xdebug. Each worktree gets base+N Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
+          "description": "Base port for the debugger. Each worktree gets base+N Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
         },
         "unmess.debugTemplate": {
           "type": "object",
           "default": {
-            "type": "php",
-            "request": "launch",
-            "name": "Unmess: Xdebug",
-            "port": "{{PORT}}",
-            "pathMappings": {}
+            "type": "node",
+            "request": "attach",
+            "name": "Unmess: Debug",
+            "port": "{{PORT}}"
           },
           "description": "launch.json template for each worktree. Use {{PORT}} and {{WORKTREE_PATH}} as placeholders Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
         }

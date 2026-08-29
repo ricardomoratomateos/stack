@@ -37,7 +37,7 @@ export type RepoScopedKey =
   | 'setupScript'
   | 'teardownScript'
   | 'docker'
-  | 'xdebugBasePort'
+  | 'debugBasePort'
   | 'debugTemplate';
 
 export type RepoConfigValues = Partial<Pick<UnmessConfig, RepoScopedKey>>;
@@ -134,7 +134,7 @@ const validators: Record<RepoScopedKey, Validator> = {
   setupScript: asString,
   teardownScript: asString,
   docker: asDocker,
-  xdebugBasePort: asPositiveInt,
+  debugBasePort: asPositiveInt,
   debugTemplate: asDebugTemplate,
 };
 
@@ -229,7 +229,7 @@ export function renderRepoConfig(effective: UnmessConfig): string {
     setupScript: effective.setupScript,
     teardownScript: effective.teardownScript,
     docker: effective.docker,
-    xdebugBasePort: effective.xdebugBasePort,
+    debugBasePort: effective.debugBasePort,
     debugTemplate: effective.debugTemplate,
   };
   return `${JSON.stringify(body, null, 2)}\n`;

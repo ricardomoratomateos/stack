@@ -15,12 +15,12 @@ function makeConfig(over: Partial<UnmessConfig['docker']> = {}): UnmessConfig {
     docker: {
       composeFile: 'docker-compose.yml',
       overrideFile: 'docker-compose.worktree.yml',
-      ports: ['HTTP_PORT', 'DB_PORT', 'XDEBUG_PORT'],
+      ports: ['HTTP_PORT', 'DB_PORT', 'DEBUG_PORT'],
       basePort: 20000,
       portStride: 100,
       ...over,
     },
-    xdebugBasePort: 9898,
+    debugBasePort: 9898,
     debugTemplate: { type: 'php', request: 'launch', name: 'x', port: '{{PORT}}' },
   };
 }
@@ -31,7 +31,7 @@ function makeWorktree(over: Partial<Worktree> = {}): Worktree {
     branch: 'feat/a',
     path: '/repo/zer/feat-a',
     repoRoot: '/repo',
-    xdebugPort: 9899, // slot 0
+    debugPort: 9899, // slot 0
     dockerProjectName: 'feat-a',
     createdAt: 1,
     ...over,
@@ -39,35 +39,35 @@ function makeWorktree(over: Partial<Worktree> = {}): Worktree {
 }
 
 describe('computeDockerPorts', () => {
-  it('assigns block ports by slot (derived from xdebugPort) and index', () => {
-    // slot 0 -> block base 20000; XDEBUG_PORT reuses the worktree xdebug port
-    expect(computeDockerPorts(makeWorktree({ xdebugPort: 9899 }), makeConfig())).toEqual({
+  it('assigns block ports by slot (derived from debugPort) and index', () => {
+    // slot 0 -> block base 20000; DEBUG_PORT reuses the worktree debug port
+    expect(computeDockerPorts(makeWorktree({ debugPort: 9899 }), makeConfig())).toEqual({
       HTTP_PORT: 20000,
       DB_PORT: 20001,
-      XDEBUG_PORT: 9899,
+      DEBUG_PORT: 9899,
     });
   });
 
   it('shifts the whole block by portStride for the next worktree slot', () => {
-    // xdebugPort 9900 -> slot 1 -> block base 20100
-    expect(computeDockerPorts(makeWorktree({ xdebugPort: 9900 }), makeConfig())).toEqual({
+    // debugPort 9900 -> slot 1 -> block base 20100
+    expect(computeDockerPorts(makeWorktree({ debugPort: 9900 }), makeConfig())).toEqual({
       HTTP_PORT: 20100,
       DB_PORT: 20101,
-      XDEBUG_PORT: 9900,
+      DEBUG_PORT: 9900,
     });
   });
 
   it('honours a custom basePort and stride', () => {
     const cfg = makeConfig({ basePort: 30000, portStride: 10, ports: ['A', 'B'] });
-    expect(computeDockerPorts(makeWorktree({ xdebugPort: 9901 }), cfg)).toEqual({ A: 30020, B: 30021 });
+    expect(computeDockerPorts(makeWorktree({ debugPort: 9901 }), cfg)).toEqual({ A: 30020, B: 30021 });
   });
 
   it('returns an empty map when no ports are configured', () => {
     expect(computeDockerPorts(makeWorktree(), makeConfig({ ports: [] }))).toEqual({});
   });
 
-  it('clamps a below-base xdebug port to slot 0 (defensive)', () => {
-    expect(computeDockerPorts(makeWorktree({ xdebugPort: 0 }), makeConfig({ ports: ['HTTP_PORT'] }))).toEqual({
+  it('clamps a below-base debug port to slot 0 (defensive)', () => {
+    expect(computeDockerPorts(makeWorktree({ debugPort: 0 }), makeConfig({ ports: ['HTTP_PORT'] }))).toEqual({
       HTTP_PORT: 20000,
     });
   });
@@ -100,10 +100,10 @@ describe('buildComposeArgs', () => {
 
 describe('dockerEnv', () => {
   it('stringifies the computed ports for a worktree', () => {
-    expect(dockerEnv(makeWorktree({ xdebugPort: 9899 }), makeConfig())).toEqual({
+    expect(dockerEnv(makeWorktree({ debugPort: 9899 }), makeConfig())).toEqual({
       HTTP_PORT: '20000',
       DB_PORT: '20001',
-      XDEBUG_PORT: '9899',
+      DEBUG_PORT: '9899',
     });
   });
 
@@ -113,11 +113,11 @@ describe('dockerEnv', () => {
 });
 
 describe('dockerPortsFor', () => {
-  it('derives the same mapping as computeDockerPorts, keyed by the xdebug port alone', () => {
+  it('derives the same mapping as computeDockerPorts, keyed by the debug port alone', () => {
     // The allocator has to validate a slot before a worktree exists to hold it;
     // the two must never drift apart on which ports a slot owns.
     const config = makeConfig();
-    const worktree = makeWorktree({ xdebugPort: 9901 });
+    const worktree = makeWorktree({ debugPort: 9901 });
     expect(dockerPortsFor(9901, config)).toEqual(computeDockerPorts(worktree, config));
   });
 });
@@ -127,14 +127,14 @@ describe('portBlockFor', () => {
     expect(portBlockFor(9901, makeConfig())).toEqual([9901, 20200, 20201]);
   });
 
-  it('does not repeat the xdebug port, which XDEBUG_PORT maps back onto', () => {
+  it('does not repeat the debug port, which DEBUG_PORT maps back onto', () => {
     const block = portBlockFor(9901, makeConfig());
     expect(block.filter((p) => p === 9901)).toHaveLength(1);
   });
 
-  it('still covers the xdebug port when no docker ports are configured', () => {
+  it('still covers the debug port when no docker ports are configured', () => {
     // VSCode's debug listener binds it even with docker orchestration off, so a
-    // block of nothing would let two worktrees share one Xdebug port.
+    // block of nothing would let two worktrees share one debug port.
     expect(portBlockFor(9901, makeConfig({ ports: [] }))).toEqual([9901]);
   });
 });

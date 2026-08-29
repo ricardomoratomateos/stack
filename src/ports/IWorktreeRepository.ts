@@ -7,6 +7,6 @@ export interface IWorktreeRepository {
   patch(id: string, fields: Partial<Worktree>): Promise<void>;
   setAlias(id: string, alias: string): Promise<void>;
   remove(id: string): Promise<void>;
-  /** xdebug port registry, keyed by worktree PATH. */
+  /** debug port registry, keyed by worktree PATH. */
   getPortRegistry(): Record<string, number>;
 }

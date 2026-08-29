@@ -10,7 +10,7 @@ import type { Worktree } from '../../src/types';
 function wt(over: Partial<Worktree>): Worktree {
   return {
     id: 'x', branch: 'b', path: '/p', repoRoot: '/repo',
-    xdebugPort: 0, dockerProjectName: 'd', createdAt: 0, ...over,
+    debugPort: 0, dockerProjectName: 'd', createdAt: 0, ...over,
   };
 }
 

@@ -454,7 +454,7 @@ function PortRow({ name, port, openable }: PortMapping) {
         </button>
       ) : (
         // The debug port: shown because the user asked for it by naming
-        // XDEBUG_PORT, but a debugger listener answers nothing a browser can
+        // DEBUG_PORT, but a debugger listener answers nothing a browser can
         // render, so there is no click to offer.
         <span title="Debug port">{value}</span>
       )}

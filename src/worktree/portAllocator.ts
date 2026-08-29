@@ -12,7 +12,7 @@ const MAX_SLOTS = 500;
 export interface PortAllocatorOptions {
   /**
    * Current config, re-read on every allocation so the derived docker block is
-   * validated too. Omit and only the Xdebug port itself is checked.
+   * validated too. Omit and only the debug port itself is checked.
    */
   config?: () => UnmessConfig;
   /** OS-level availability probe. Injected in tests to keep them off real sockets. */
@@ -42,7 +42,7 @@ export class PortAllocator {
    * The registry alone is not enough: it only knows worktrees Unmess created,
    * so it cannot see another project's containers, a leftover stack from a
    * deleted worktree, or any other local listener. Every port the slot will
-   * bind is probed, not just the Xdebug one — a slot is only usable if its
+   * bind is probed, not just the debug one — a slot is only usable if its
    * whole block is.
    */
   async allocate(): Promise<number> {
@@ -68,10 +68,10 @@ export class PortAllocator {
     );
   }
 
-  /** Every port a worktree on this slot will bind (Xdebug + its docker block). */
-  blockFor(xdebugPort: number): number[] {
+  /** Every port a worktree on this slot will bind (debug + its docker block). */
+  blockFor(debugPort: number): number[] {
     const config = this.options.config?.();
-    return config ? portBlockFor(xdebugPort, config) : [xdebugPort];
+    return config ? portBlockFor(debugPort, config) : [debugPort];
   }
 
   /**
@@ -80,9 +80,9 @@ export class PortAllocator {
    * after it was picked — a setup script can run for minutes before docker
    * finally reaches for the port.
    */
-  async firstBusyPort(xdebugPort: number): Promise<number | undefined> {
+  async firstBusyPort(debugPort: number): Promise<number | undefined> {
     const probe = this.options.isPortFree ?? probePort;
-    for (const port of this.blockFor(xdebugPort)) {
+    for (const port of this.blockFor(debugPort)) {
       if (!(await probe(port))) return port;
     }
     return undefined;

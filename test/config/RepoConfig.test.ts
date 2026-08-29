@@ -51,7 +51,7 @@ describe('readRepoConfig', () => {
         basePort: 31000,
         portStride: 20,
       },
-      xdebugBasePort: 9001,
+      debugBasePort: 9001,
       debugTemplate: { type: 'php', request: 'launch', name: 'x', port: '{{PORT}}' },
     });
 
@@ -69,7 +69,7 @@ describe('readRepoConfig', () => {
         basePort: 31000,
         portStride: 20,
       },
-      xdebugBasePort: 9001,
+      debugBasePort: 9001,
       debugTemplate: { type: 'php', request: 'launch', name: 'x', port: '{{PORT}}' },
     });
   });
@@ -124,11 +124,11 @@ describe('readRepoConfig', () => {
     });
 
     it('rejects ports outside 1..65535 and non-integers', () => {
-      expect(read({ xdebugBasePort: 0 }).problems[0]).toContain('between 1 and 65535');
-      expect(read({ xdebugBasePort: 70000 }).problems[0]).toContain('between 1 and 65535');
-      expect(read({ xdebugBasePort: 98.6 }).problems[0]).toContain('whole number');
-      expect(read({ xdebugBasePort: '9898' }).problems[0]).toContain('got string');
-      expect(read({ xdebugBasePort: 9898 }).values.xdebugBasePort).toBe(9898);
+      expect(read({ debugBasePort: 0 }).problems[0]).toContain('between 1 and 65535');
+      expect(read({ debugBasePort: 70000 }).problems[0]).toContain('between 1 and 65535');
+      expect(read({ debugBasePort: 98.6 }).problems[0]).toContain('whole number');
+      expect(read({ debugBasePort: '9898' }).problems[0]).toContain('got string');
+      expect(read({ debugBasePort: 9898 }).values.debugBasePort).toBe(9898);
     });
 
     it('requires docker.ports to be strings all the way down', () => {
@@ -177,7 +177,7 @@ describe('readRepoConfig', () => {
       const template = {
         type: 'php',
         request: 'launch',
-        name: 'Xdebug',
+        name: 'debug',
         port: '{{PORT}}',
         pathMappings: { '/var/www': '${workspaceFolder}' },
         xdebugSettings: { max_children: 128 },
@@ -233,7 +233,7 @@ describe('renderRepoConfig', () => {
       basePort: 31000,
       portStride: 20,
     },
-    xdebugBasePort: 9001,
+    debugBasePort: 9001,
     debugTemplate: { type: 'php', request: 'launch', name: 'x', port: '{{PORT}}' },
   };
 
@@ -246,7 +246,7 @@ describe('renderRepoConfig', () => {
       setupScript: '.unmess/setup.sh',
       teardownScript: '.unmess/teardown.sh',
       docker: effective.docker,
-      xdebugBasePort: 9001,
+      debugBasePort: 9001,
       debugTemplate: effective.debugTemplate,
     });
   });

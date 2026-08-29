@@ -15,7 +15,7 @@ const wt: Worktree = {
   branch: 'feat/login',
   path: '/nonexistent/wt-1',
   repoRoot: '/nonexistent/repo',
-  xdebugPort: 9898,
+  debugPort: 9898,
   dockerProjectName: 'feat-login',
   createdAt: 0,
 };
@@ -26,7 +26,7 @@ const wt2: Worktree = {
   branch: 'other',
   path: '/nonexistent/wt-2',
   repoRoot: '/nonexistent/repo',
-  xdebugPort: 9899,
+  debugPort: 9899,
   dockerProjectName: 'other',
   createdAt: 0,
 };

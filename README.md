@@ -24,7 +24,7 @@ Working on several things at once with AI agents gets messy fast: branches colli
 - **State at a glance** — per-session status (working / waiting / needs permission / idle) with live task titles pulled from the agent, plus a sidebar badge and optional native notification when an agent needs you.
 - **Scoped to the active worktree** — text search, Quick Open, and breakpoints are automatically scoped to the worktree you're in, so parallel worktrees don't drown each other out. Editor tabs can be scoped too — see [Switching worktrees](#switching-worktrees).
 - **Diff review panel** — review a worktree's changes with per-line comments and feed them straight back to the agent, no PR round-trip needed.
-- **Per-worktree debugging** *(optional)* — each worktree gets its own `launch.json` on a unique debug port, wired to its container, so you can step-debug several worktrees at once without ports colliding.
+- **Per-worktree debugging** *(optional)* — each worktree gets its own `launch.json` on a unique debug port, wired to its container, so you can step-debug several worktrees at once without ports colliding. Any debugger VS Code supports — Node by default, PHP, Python, Go, whatever your stack runs.
 - **Per-worktree Docker** *(optional)* — start/stop a dedicated compose stack per worktree with auto-generated, collision-free ports.
 - **Per-worktree setup/teardown** *(optional)* — run a repo-local script when a worktree is created or removed (install deps, copy env, boot services).
 
@@ -61,8 +61,8 @@ Working on several things at once with AI agents gets messy fast: branches colli
 | `unmess.focusMode` | `false` | Clean-slate switching: close the other worktrees' editor tabs and agent terminals so only the active worktree is on screen (see [Switching worktrees](#switching-worktrees)) |
 | `unmess.setupScript` / `unmess.teardownScript` | `""` | Script run on worktree create / delete (e.g. `.unmess/setup.sh`) |
 | `unmess.docker` | — | Per-worktree compose file + auto-generated ports (opt-in; see below) |
-| `unmess.xdebugBasePort` | `9898` | First debug port; each worktree takes the next free slot above it |
-| `unmess.debugTemplate` | php/xdebug | `launch.json` template generated per worktree (`{{PORT}}`, `{{WORKTREE_PATH}}`) |
+| `unmess.debugBasePort` | `9898` | First debug port; each worktree takes the next free slot above it |
+| `unmess.debugTemplate` | node attach | `launch.json` template generated per worktree (`{{PORT}}`, `{{WORKTREE_PATH}}`); any debugger, see [Debugging](#per-worktree-debugging) |
 
 ## Agents
 
@@ -110,11 +110,38 @@ For heavier setups (dedicated Docker stack, dependency prep, debug), point the `
 
 When it runs your setup script, Unmess exports `UNMESS_REPO_ROOT`, `UNMESS_WORKTREE_PATH`, `UNMESS_BRANCH`, `UNMESS_COMPOSE_PROJECT` and the worktree's auto-generated ports, and the matching debug port is wired into the generated `launch.json`. Relative paths resolve against the worktree first, then the main repo.
 
-Each worktree's ports are listed on its card, under Docker, and clicking one opens `http://localhost:<port>` — the numbers are derived from the same function that builds the compose environment, so the card cannot drift from what the container actually publishes. The debug port is shown when you name `XDEBUG_PORT` but is not clickable; a debugger listener answers nothing a browser can render.
+Each worktree's ports are listed on its card, under Docker, and clicking one opens `http://localhost:<port>` — the numbers are derived from the same function that builds the compose environment, so the card cannot drift from what the container actually publishes. The debug port is shown when you name `DEBUG_PORT` but is not clickable; a debugger listener answers nothing a browser can render.
 
 Ports are checked against the machine, not just against Unmess's own bookkeeping: every port a worktree will bind is probed before the slot is handed out, and probed again right before a setup script or `compose up` runs. If something has taken one in the meantime — another project's container, a leftover stack from a deleted worktree, a local dev server — the worktree moves to a free slot, its `launch.json` follows, and you get a toast naming the port that was busy. Re-run your setup script afterwards if it bakes the port into a generated file such as `.env`.
 
 > A `.unmess/` folder is a handy place to keep these together. Scripts and compose files can live anywhere; only `.unmess/config.json` below is a fixed path.
+
+## Per-worktree debugging
+
+Every worktree is handed a debug port of its own — `unmess.debugBasePort` plus the worktree's slot — and a `.vscode/launch.json` generated from `unmess.debugTemplate` with that port substituted in. Five worktrees means five listeners on five ports, so you can sit on a breakpoint in one while another keeps running.
+
+The template is passed through whole. Unmess substitutes `{{PORT}}` and `{{WORKTREE_PATH}}`, fills in a `name` if you left one out, and reads nothing else — so any debugger VS Code supports works the same way. The shipped default attaches to Node:
+
+```json
+{
+  "type": "node",
+  "request": "attach",
+  "port": "{{PORT}}"
+}
+```
+
+PHP with Xdebug against a container, for comparison:
+
+```json
+{
+  "type": "php",
+  "request": "launch",
+  "port": "{{PORT}}",
+  "pathMappings": { "/var/www": "{{WORKTREE_PATH}}" }
+}
+```
+
+Name `DEBUG_PORT` in `unmess.docker.ports` and the container is handed the same number in its environment, so what your compose file publishes and what the listener waits on cannot drift apart.
 
 ## Sharing the setup with your team
 
@@ -136,7 +163,7 @@ Put them in **`.unmess/config.json`** instead and commit it:
     "basePort": 20000,
     "portStride": 100
   },
-  "xdebugBasePort": 9898
+  "debugBasePort": 9898
 }
 ```
 
@@ -144,7 +171,7 @@ Run **Unmess: Create Repo Config File** from the command palette to generate it 
 
 **Precedence** is *your explicit setting* → *the repo file* → *the shipped default*. So the repo file gives everyone a sane starting point, and anyone who deliberately sets a value in their own `settings.json` keeps it. Only an explicitly-set value counts; a key you never touched doesn't shadow the repo's.
 
-**Which keys it accepts:** `worktreesDirectory`, `defaultBaseBranch`, `setupScript`, `teardownScript`, `docker`, `xdebugBasePort`, `debugTemplate`. Every key is optional, and `docker` merges key by key — naming just your compose file won't reset `basePort`.
+**Which keys it accepts:** `worktreesDirectory`, `defaultBaseBranch`, `setupScript`, `teardownScript`, `docker`, `debugBasePort`, `debugTemplate`. Every key is optional, and `docker` merges key by key — naming just your compose file won't reset `basePort`.
 
 **Which it doesn't:** `defaultProvider`, the per-agent commands, `notifyOnAttention`, `focusMode`, `scopeSearchToActiveWorktree`. Which agent you reach for and where its binary lives are properties of your machine, and a repository you cloned has no business overriding them. Put one in the file and Unmess tells you so rather than quietly ignoring it.
 

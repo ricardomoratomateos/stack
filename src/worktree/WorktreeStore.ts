@@ -32,7 +32,7 @@ export class WorktreeStore implements IWorktreeRepository {
   async add(worktree: Worktree): Promise<void> {
     const data = this.load();
     data.worktrees.push(worktree);
-    data.portRegistry[worktree.path] = worktree.xdebugPort;
+    data.portRegistry[worktree.path] = worktree.debugPort;
     await this.save(data);
   }
 
@@ -45,7 +45,7 @@ export class WorktreeStore implements IWorktreeRepository {
       // It is no longer what the allocator consults (see getPortRegistry), but
       // a copy that silently disagreed with the worktrees is exactly how a
       // reassigned port ended up unreserved.
-      data.portRegistry[wt.path] = wt.xdebugPort;
+      data.portRegistry[wt.path] = wt.debugPort;
     }
     await this.save(data);
   }
@@ -79,7 +79,7 @@ export class WorktreeStore implements IWorktreeRepository {
    * remove. Deriving makes the two impossible to disagree.
    */
   getPortRegistry(): Record<string, number> {
-    return Object.fromEntries(this.load().worktrees.map((w) => [w.path, w.xdebugPort]));
+    return Object.fromEntries(this.load().worktrees.map((w) => [w.path, w.debugPort]));
   }
 
   async pruneNonExistent(): Promise<Worktree[]> {

@@ -225,8 +225,8 @@ export async function activate(ctx: vscode.ExtensionContext) {
   });
   const store = new WorktreeStore(ctx);
   // The config getter lets the allocator probe the whole derived docker block,
-  // not just the Xdebug port, before handing a slot out.
-  const portAllocator = new PortAllocator(store, config.get().xdebugBasePort, {
+  // not just the debug port, before handing a slot out.
+  const portAllocator = new PortAllocator(store, config.get().debugBasePort, {
     config: () => config.get(),
   });
   const providerFactory = new ProviderFactory(config, ctx.globalStorageUri.fsPath);
