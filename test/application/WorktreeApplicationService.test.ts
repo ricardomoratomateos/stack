@@ -21,6 +21,7 @@ import type { DockerMonitor } from '../../src/docker/DockerMonitor';
 import type { PrMonitor } from '../../src/pr/PrMonitor';
 import type { IGitPort } from '../../src/ports/IGitPort';
 import type { IWorktreeRepository } from '../../src/ports/IWorktreeRepository';
+import { MAIN_BRANCH_CANDIDATES } from '../../src/constants';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Test doubles
@@ -284,6 +285,7 @@ function makeHarness(o: HarnessOpts = {}) {
     // Kept out of `calls` on purpose so exact call-order assertions stay focused.
     syncDecorations: vi.fn(),
     openDiffPanel: vi.fn((id: string) => { calls.push(`ui.openDiffPanel:${id}`); }),
+    openNewTask: vi.fn(() => { calls.push('ui.openNewTask'); }),
   };
   const config = { get: vi.fn(() => cfg), setDefaultProvider: vi.fn().mockResolvedValue(undefined) };
 
@@ -1364,8 +1366,10 @@ describe('loadWorktreesForRepo', () => {
     const h = makeHarness({ worktrees: [a], workspaceFolders: ['/repo'], withUi: false });
     await expect(h.service.loadWorktreesForRepo('/repo')).resolves.toBeUndefined();
     expect(h.calls).not.toContain('ui.pushWebview');
-    // The default no-op UI also absorbs openDiff without a wired panel.
+    // The default no-op UI also absorbs openDiff and openNewTask without a
+    // wired panel — both are commands a keybinding can fire during activation.
     await expect(h.service.handleMessage({ type: 'openDiff', worktreeId: 'a' })).resolves.toBeUndefined();
+    await expect(h.service.handleMessage({ type: 'openNewTask' })).resolves.toBeUndefined();
   });
 });
 
@@ -2258,8 +2262,25 @@ describe('diff review panel', () => {
   it('getDiff delegates to git.diff with the worktree path', async () => {
     const h = makeHarness({ worktrees: [wtA], diffOutput: 'DIFF!' });
     expect(await h.service.getDiff('wt-a', 'branch')).toBe('DIFF!');
-    expect(h.git.diff).toHaveBeenCalledWith('/repo/zer/wt-a', { base: 'branch' });
+    expect(h.git.diff).toHaveBeenCalledWith('/repo/zer/wt-a', {
+      base: 'branch',
+      mainBranchCandidates: MAIN_BRANCH_CANDIDATES,
+    });
     expect(await h.service.getDiff('missing', 'branch')).toBe('');
+  });
+
+  it('getDiff compares against the branch the worktree was cut from, not main', async () => {
+    // The card measures drift against wt.baseBranch; the panel used to resolve
+    // to the first of main/master/develop that existed, so a worktree cut from
+    // release/3.2 was diffed against main and showed every commit release/3.2
+    // carries over main on top of the ones actually written here.
+    const cut = { ...wtA, baseBranch: 'release/3.2' };
+    const h = makeHarness({ worktrees: [cut], diffOutput: 'DIFF!' });
+    await h.service.getDiff('wt-a', 'branch');
+    expect(h.git.diff).toHaveBeenCalledWith('/repo/zer/wt-a', {
+      base: 'branch',
+      mainBranchCandidates: ['release/3.2', ...MAIN_BRANCH_CANDIDATES],
+    });
   });
 
   const comment = { file: 'src/foo.ts', side: 'new' as const, line: 10, code: 'x', body: 'do it' };
@@ -3069,3 +3090,48 @@ describe('loadWorktreesForRepo keeps to its own repository', () => {
   });
 });
 
+describe('new-agent panel', () => {
+  it('handleMessage openNewTask opens the panel', async () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/feat-a' })] });
+    await h.service.handleMessage({ type: 'openNewTask' });
+    expect(h.ui.openNewTask).toHaveBeenCalled();
+  });
+
+  it('newTaskBranchOptions offers the repo branches with the resolved base preselected', () => {
+    const h = makeHarness({
+      worktrees: [makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/feat-a' })],
+      workspaceFolders: ['/repo'],
+      branches: ['feat/x', 'develop'],
+      config: { defaultBaseBranch: 'develop' },
+    });
+    expect(h.service.newTaskBranchOptions()).toEqual({ branches: ['feat/x', 'develop'], baseBranch: 'develop' });
+    expect(h.git.listBranches).toHaveBeenCalledWith('/repo');
+  });
+
+  it('offers nothing outside a repository rather than guessing', () => {
+    // The panel can still open in a window with no git repo; a branch list read
+    // from nowhere would be a lie, and "main" is only a placeholder for the form.
+    const h = makeHarness({ worktrees: [], workspaceFolders: [] });
+    expect(h.service.newTaskBranchOptions()).toEqual({ branches: [], baseBranch: 'main' });
+    expect(h.git.listBranches).not.toHaveBeenCalled();
+  });
+});
+
+describe('syncMainFolderLabel bails out', () => {
+  it('does nothing with no repository in the window', () => {
+    const h = makeHarness({ worktrees: [], workspaceFolders: [] });
+    h.service.syncMainFolderLabel();
+    expect(h.host.renameWorkspaceFolder).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when the repo root is not one of this window\'s worktrees', () => {
+    // A repository Foreman has never been asked to manage: there is no main
+    // worktree to take a label from, so there is nothing to rename it to.
+    const h = makeHarness({
+      worktrees: [makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' })],
+      workspaceFolders: ['/repo'],
+    });
+    h.service.syncMainFolderLabel();
+    expect(h.host.renameWorkspaceFolder).not.toHaveBeenCalled();
+  });
+});

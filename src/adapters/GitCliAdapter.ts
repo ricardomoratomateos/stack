@@ -1,6 +1,7 @@
 import { exec, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GitWorktreeEntry, IGitPort, DiffOptions } from '../ports/IGitPort';
+import { MAIN_BRANCH_CANDIDATES } from '../constants';
 
 const execAsync = promisify(exec);
 // git worktree add on a huge repo streams a lot of "Updating files" progress to
@@ -89,7 +90,7 @@ export class GitCliAdapter implements IGitPort {
    * Reuses the same resolution the diff already relies on.
    */
   mainBranch(repoRoot: string): string | undefined {
-    const ref = this.resolveMainBranch(repoRoot, ['main', 'master', 'develop']);
+    const ref = this.resolveMainBranch(repoRoot, MAIN_BRANCH_CANDIDATES);
     // Strip the remote prefix: callers want a branch to start FROM, and
     // `git worktree add -b x <path> origin/main` and `... main` differ only in
     // which one exists locally.
@@ -152,7 +153,7 @@ export class GitCliAdapter implements IGitPort {
         const untracked = await this.untrackedDiff(worktreePath);
         return tracked.stdout + untracked;
       }
-      const candidates = opts.mainBranchCandidates ?? ['main', 'master', 'develop'];
+      const candidates = opts.mainBranchCandidates ?? MAIN_BRANCH_CANDIDATES;
       const mainRef = this.resolveMainBranch(worktreePath, candidates);
       // Three-dot: diff from the merge-base, i.e. only what THIS branch introduced.
       // With no main ref (e.g. main itself, or a fresh repo) fall back to vs-HEAD.

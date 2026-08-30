@@ -21,6 +21,7 @@ import { buildCommentPrompt } from '../diff/commentPrompt';
 import { displayLabel, truncateLabel } from '../worktree/displayLabel';
 import { findRepoRoot } from '../worktree/findRepoRoot';
 import { canonicalPath, worktreesInRepo } from '../worktree/worktreesInRepo';
+import { MAIN_BRANCH_CANDIDATES } from '../constants';
 
 export const ACTIVE_WORKTREE_KEY = 'foreman.activeWorktreeId';
 export const WORKTREE_ORDER_KEY = 'foreman.worktreeOrder';
@@ -398,11 +399,14 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * tree) to the active worktree's agent: reveal its viewer and paste the
    * quoted paths unsent, so the user can add prompt text before hitting Enter.
    */
-  async attachDroppedFiles(paths: string[]): Promise<void> {
+  async attachDroppedFiles(paths: string[], targetId?: string): Promise<void> {
     if (paths.length === 0) return;
     const worktrees = this.worktreesInWindow();
-    const wt =
-      this.findWorktree(this.currentWorktreeId ?? '') ?? (worktrees.length === 1 ? worktrees[0] : undefined);
+    // An explicit target is the worktree whose viewer the image was dropped on;
+    // without one (the sidebar drop zone) it goes to whatever is active.
+    const wt = targetId
+      ? this.findWorktree(targetId)
+      : this.findWorktree(this.currentWorktreeId ?? '') ?? (worktrees.length === 1 ? worktrees[0] : undefined);
     if (!wt) {
       this.deps.notify.showWarning('Foreman: select a worktree first, then drop the image again.');
       return;
@@ -667,7 +671,18 @@ export class WorktreeApplicationService implements DiffPanelHost {
   getDiff(worktreeId: string, base: DiffBase): Promise<string> {
     const wt = this.findWorktree(worktreeId);
     if (!wt) return Promise.resolve('');
-    return this.deps.git.diff(wt.path, { base });
+    // The branch this worktree was cut from goes first. `branch` mode answers
+    // "what did I add on top of my base", and without this it resolved to the
+    // first of main/master/develop that existed — so a worktree cut from
+    // release/3.2 in a repo that also has main was diffed against main, showing
+    // every commit release/3.2 carries over main mixed in with the three the
+    // agent wrote, while the card beside it measured drift against the right
+    // branch. The defaults stay behind it, so a base branch deleted since still
+    // resolves to something rather than collapsing to a plain HEAD diff.
+    const mainBranchCandidates = wt.baseBranch
+      ? [wt.baseBranch, ...MAIN_BRANCH_CANDIDATES]
+      : MAIN_BRANCH_CANDIDATES;
+    return this.deps.git.diff(wt.path, { base, mainBranchCandidates });
   }
 
   getContext(worktreeId: string): { label: string; hasLiveAgent: boolean } | undefined {
