@@ -20,6 +20,8 @@ import { PrMonitor } from './pr/PrMonitor';
 import { TmuxManager } from './session/TmuxManager';
 import { WorktreeDimDecorationProvider } from './sidebar/WorktreeDimDecorationProvider';
 import { TerminalFileLinkProvider } from './terminal/TerminalFileLinkProvider';
+import { ImageDropCatcher } from './terminal/ImageDropCatcher';
+import { looksLikeScreenshot } from './terminal/imageDrop';
 import { GitCliAdapter } from './adapters/GitCliAdapter';
 import { OsaNotifyAdapter } from './adapters/OsaNotifyAdapter';
 import { VsCodeNotifyAdapter } from './adapters/VsCodeNotifyAdapter';
@@ -470,6 +472,25 @@ export async function activate(ctx: vscode.ExtensionContext) {
     },
   });
   ctx.subscriptions.push(settingsPanel);
+
+  // Dropping a screenshot on an agent's terminal: VS Code opens it as a tab in
+  // that group; this hands it to the agent in that group instead.
+  const screenshotDirOnce = screenshotDir();
+  ctx.subscriptions.push(new ImageDropCatcher({
+    worktreeIdForTerminalName: (name) => agentManager.getWorktreeIdForTerminalName(name),
+    hasTerminals: (id) => agentManager.hasTerminals(id),
+    labelFor: (id) => { const wt = manager.list().find((w) => w.id === id); return wt ? wt.alias ?? wt.branch : undefined; },
+    activeWorktreeId: () => service.activeWorktreeId(),
+    isScreenshotLike: async (file) => {
+      let mtimeMs: number | undefined;
+      try { mtimeMs = (await fs.promises.stat(file)).mtimeMs; } catch { return false; }
+      return looksLikeScreenshot({ file, mtimeMs, nowMs: Date.now(), screenshotDir: await screenshotDirOnce });
+    },
+    attach: (id, paths) => service.attachDroppedFiles(paths, id),
+    notify: (message, reopen) => {
+      void vscode.window.showInformationMessage(message, 'Open instead').then((pick) => { if (pick === 'Open instead') reopen(); });
+    },
+  }));
 
   // "The agent needs you": sidebar badge always; native OS notification only
   // when VSCode is in the background (inside the window the badge suffices).

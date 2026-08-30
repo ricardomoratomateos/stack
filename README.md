@@ -47,6 +47,8 @@ Working on several things at once with AI agents gets messy fast: branches colli
 
 The **Get started with Foreman** walkthrough (opens on install; later under *Help → Welcome → Walkthroughs*, or `Foreman: Getting Started`) walks through the same steps inside VS Code.
 
+To hand an agent a screenshot, drop the image straight onto its terminal — VS Code opens it as a tab, Foreman closes that tab and attaches the file to the agent in that editor group. `Cmd+Alt+V` in the agent's terminal attaches the latest screenshot from your screenshots folder, and the **Screenshot drop** view in the sidebar works when no viewer is on screen.
+
 For the heavier setup — Docker per worktree, a debugger port per worktree, setup/teardown scripts — open **Foreman settings** with the gear next to **+** in the Worktrees header. It prefills what it finds in the repository (compose files, their `${HTTP_PORT}`-style ports, the language stack) and saves the project half to `.foreman/config.json` so the whole team inherits it, and your own preferences to your VS Code settings.
 
 ## Settings

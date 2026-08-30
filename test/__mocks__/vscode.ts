@@ -81,6 +81,10 @@ export class FileDecoration {
 export class TabInputText {
   constructor(public uri: Uri) {}
 }
+export class TabInputCustom {
+  constructor(public uri: Uri, public viewType: string) {}
+}
+export class TabInputTerminal {}
 
 // ── Debug / breakpoints ──────────────────────────────────────────────────────
 export class Position {

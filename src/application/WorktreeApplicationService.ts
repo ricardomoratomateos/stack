@@ -389,6 +389,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
   // ── External file drops (screenshot drop zone) ─────────────────────────────
 
   /** Display label of the worktree that receives drops (drop-zone hint). */
+  activeWorktreeId(): string | undefined {
+    return this.currentWorktreeId;
+  }
+
   activeWorktreeLabel(): string | undefined {
     const wt = this.currentWorktreeId ? this.findWorktree(this.currentWorktreeId) : undefined;
     return wt ? displayLabel(wt) : undefined;
