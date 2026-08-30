@@ -372,7 +372,6 @@ export async function activate(ctx: vscode.ExtensionContext) {
           defaultProvider: effective.defaultProvider,
           claudeCommand: effective.claudeCommand,
           codexCommand: effective.codexCommand,
-          grokCommand: effective.grokCommand,
           opencodeCommand: effective.opencodeCommand,
           notifyOnAttention: effective.notifyOnAttention,
           focusMode: effective.focusMode,

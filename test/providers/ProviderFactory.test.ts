@@ -5,9 +5,7 @@ import * as os from 'node:os';
 import { ProviderFactory } from '../../src/providers/ProviderFactory';
 import { ClaudeProvider, ConfigSource } from '../../src/providers/claude/ClaudeProvider';
 import { CodexProvider } from '../../src/providers/codex/CodexProvider';
-import { GrokProvider } from '../../src/providers/grok/GrokProvider';
 import { CodexHookInstaller } from '../../src/providers/codex/CodexHookInstaller';
-import { GrokHookInstaller } from '../../src/providers/grok/GrokHookInstaller';
 import { OpenCodeProvider } from '../../src/providers/opencode/OpenCodeProvider';
 import { PROVIDER_IDS, isAgentWindowName, providerForWindowName } from '../../src/ports/IAgentProvider';
 
@@ -18,7 +16,7 @@ describe('ProviderFactory', () => {
 
   const makeConfig = (overrides: Record<string, unknown> = {}): ConfigSource =>
     ({ get: () => ({
-      claudeCommand: 'claude', codexCommand: 'codex', grokCommand: 'grok',
+      claudeCommand: 'claude', codexCommand: 'codex',
       opencodeCommand: 'opencode', defaultProvider: 'claude', ...overrides,
     }) }) as unknown as ConfigSource;
 
@@ -194,7 +192,7 @@ describe('CodexProvider', () => {
   let homeDir: string;
 
   const config = {
-    get: () => ({ codexCommand: 'codex', grokCommand: 'grok', claudeCommand: 'claude', opencodeCommand: 'opencode', defaultProvider: 'claude' }),
+    get: () => ({ codexCommand: 'codex', claudeCommand: 'claude', opencodeCommand: 'opencode', defaultProvider: 'claude' }),
   } as unknown as ConfigSource;
 
   beforeEach(() => {
@@ -293,61 +291,5 @@ describe('CodexProvider', () => {
     fs.writeFileSync(hooksPath(), '{ not json');
     expect(() => make().installHooks('http://127.0.0.1:43110')).not.toThrow();
     expect(Object.keys(readHooks().hooks)).toContain('Stop');
-  });
-});
-
-// ── Grok ─────────────────────────────────────────────────────────────────────
-
-describe('GrokProvider', () => {
-  let tmpDir: string;
-  let storageDir: string;
-  let homeDir: string;
-
-  const config = {
-    get: () => ({ grokCommand: 'grok', codexCommand: 'codex', claudeCommand: 'claude', opencodeCommand: 'opencode', defaultProvider: 'claude' }),
-  } as unknown as ConfigSource;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-grok-'));
-    storageDir = path.join(tmpDir, 'storage');
-    homeDir = path.join(tmpDir, 'home');
-    fs.mkdirSync(homeDir, { recursive: true });
-  });
-  afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
-
-  const make = () => new ProviderFactory(config, storageDir, homeDir).create('grok');
-  const readHooks = () => JSON.parse(fs.readFileSync(path.join(homeDir, '.grok/hooks.json'), 'utf8'));
-
-  it('is built for the "grok" id', () => {
-    const provider = make();
-    expect(provider).toBeInstanceOf(GrokProvider);
-    expect(provider.label).toBe('Grok Build');
-  });
-
-
-  it('buildCommand without a prompt is the bare command', () => {
-    expect(make().buildCommand('wt-1')).toBe('FOREMAN_WORKSPACE_ID="wt-1" grok');
-  });
-
-  it('registers Notification instead of PermissionRequest, which Grok does not emit', () => {
-    make().installHooks('http://127.0.0.1:43110');
-    const events = Object.keys(readHooks().hooks);
-    expect(events).toContain('Notification');
-    expect(events).not.toContain('PermissionRequest');
-  });
-
-  it('registers SessionEnd, which Grok does emit', () => {
-    make().installHooks('http://127.0.0.1:43110');
-    expect(Object.keys(readHooks().hooks)).toContain('SessionEnd');
-  });
-
-  it('uninstall is a no-op when the file was never written', () => {
-    expect(() => make().uninstallHooks()).not.toThrow();
-  });
-
-  it('defaults to ~/.grok/hooks.json when no path is injected', () => {
-    const installer = new GrokHookInstaller(storageDir);
-    expect((installer as unknown as { settingsPath: string }).settingsPath)
-      .toBe(path.join(os.homedir(), '.grok/hooks.json'));
   });
 });

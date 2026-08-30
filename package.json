@@ -159,13 +159,6 @@
       ],
       "view/item/context": []
     },
-    "themes": [
-      {
-        "label": "Foreman Dark",
-        "uiTheme": "vs-dark",
-        "path": "./themes/foreman-dark-color-theme.json"
-      }
-    ],
     "configuration": {
       "title": "Foreman",
       "properties": {
@@ -194,7 +187,6 @@
           "enum": [
             "claude",
             "codex",
-            "grok",
             "opencode"
           ],
           "default": "claude",
@@ -209,11 +201,6 @@
           "type": "string",
           "default": "codex",
           "description": "Command to launch Codex CLI"
-        },
-        "foreman.grokCommand": {
-          "type": "string",
-          "default": "grok",
-          "description": "Command to launch Grok Build"
         },
         "foreman.opencodeCommand": {
           "type": "string",

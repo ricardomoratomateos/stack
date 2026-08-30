@@ -33,7 +33,7 @@ const snapshot: SettingsSnapshot = {
   projectFile: { path: '/repo/.foreman/config.json', present: false, problems: [] },
   personalOverrides: [],
   user: {
-    defaultProvider: 'claude', claudeCommand: 'claude', codexCommand: 'codex', grokCommand: 'grok', opencodeCommand: 'opencode',
+    defaultProvider: 'claude', claudeCommand: 'claude', codexCommand: 'codex', opencodeCommand: 'opencode',
     notifyOnAttention: true, focusMode: false, scopeSearchToActiveWorktree: true,
   },
   installedProviders: ['claude'],

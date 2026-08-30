@@ -12,10 +12,10 @@ import { HookEntry } from '../../types';
  * hash on every window reload, silently untrusting the hook and freezing every
  * agent's state in the sidebar with no error anywhere.
  *
- * The event name is passed as $1 because the three agents disagree on how they
+ * The event name is passed as $1 because the agents disagree on how they
  * announce it (Claude sets HOOK_EVENT_NAME, Codex sends hook_event_name on
- * stdin, Grok sends hookEventName plus GROK_HOOK_EVENT). We register the
- * command ourselves, so an explicit argument sidesteps all three.
+ * stdin). We register the command ourselves, so an explicit argument sidesteps
+ * the difference.
  */
 const SCRIPT = `#!/bin/bash
 # Foreman notify hook — generated, do not edit manually.
@@ -61,9 +61,9 @@ curl -s -X POST "$URL/hook" \\
  * Registers Foreman's notify hook in an agent whose hook config is JSON shaped
  * like `{ "hooks": { "<Event>": [{ "hooks": [{ type, command }] }] } }`.
  *
- * Claude Code, Codex and Grok Build all landed on that same shape, so they
- * share one installer and differ only in which file they read and which events
- * they actually emit.
+ * Claude Code and Codex both landed on that same shape, so they share one
+ * installer and differ only in which file they read and which events they
+ * actually emit.
  */
 export class JsonHookInstaller {
   readonly scriptPath: string;

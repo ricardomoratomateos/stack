@@ -24,7 +24,6 @@ export type UserValues = Pick<
   | 'defaultProvider'
   | 'claudeCommand'
   | 'codexCommand'
-  | 'grokCommand'
   | 'opencodeCommand'
   | 'notifyOnAttention'
   | 'focusMode'

@@ -221,7 +221,6 @@ describe('renderRepoConfig', () => {
     defaultProvider: 'codex',
     claudeCommand: 'claude',
     codexCommand: 'codex',
-    grokCommand: 'grok',
     opencodeCommand: 'opencode',
     notifyOnAttention: false,
     scopeSearchToActiveWorktree: false,

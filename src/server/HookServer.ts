@@ -16,8 +16,8 @@ export const EVENT_TO_STATE: Record<string, AgentSessionState> = {
   Stop:            'waiting',
   SessionEnd:      'terminated',
   PermissionRequest: 'permission',
-  // Grok Build has no PermissionRequest; Notification is its "the agent wants
-  // you" signal, which is what the attention badge exists to surface.
+  // Notification is an agent's generic "the agent wants you" signal, which is
+  // what the attention badge exists to surface.
   Notification:      'permission',
 };
 

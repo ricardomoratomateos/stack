@@ -84,7 +84,6 @@ export class ConfigManager {
       defaultProvider: cfg.get<ProviderId>('defaultProvider', 'claude'),
       claudeCommand: cfg.get<string>('claudeCommand', 'claude'),
       codexCommand: cfg.get<string>('codexCommand', 'codex'),
-      grokCommand: cfg.get<string>('grokCommand', 'grok'),
       opencodeCommand: cfg.get<string>('opencodeCommand', 'opencode'),
       notifyOnAttention: cfg.get<boolean>('notifyOnAttention', true),
       scopeSearchToActiveWorktree: cfg.get<boolean>('scopeSearchToActiveWorktree', true),

@@ -20,7 +20,6 @@ export function installedProviders(
   const commands: Record<ProviderId, string> = {
     claude: config.claudeCommand,
     codex: config.codexCommand,
-    grok: config.grokCommand,
     opencode: config.opencodeCommand,
   };
   return PROVIDER_IDS.filter((id) => isCommandAvailable(commands[id], env));

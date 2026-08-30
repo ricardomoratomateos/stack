@@ -56,7 +56,6 @@ describe('ConfigManager', () => {
       defaultProvider: 'claude',
       claudeCommand: 'claude',
       codexCommand: 'codex',
-      grokCommand: 'grok',
       opencodeCommand: 'opencode',
       notifyOnAttention: true,
       scopeSearchToActiveWorktree: true,
@@ -87,7 +86,6 @@ describe('ConfigManager', () => {
       defaultProvider: 'opencode',
       claudeCommand: 'claude --dangerously-skip-permissions',
       codexCommand: 'codex --full-auto',
-      grokCommand: '/usr/local/bin/grok',
       opencodeCommand: '/usr/local/bin/opencode',
       notifyOnAttention: false,
       scopeSearchToActiveWorktree: false,
@@ -270,11 +268,11 @@ describe('ConfigManager', () => {
       const update = vi.fn().mockResolvedValue(undefined);
       workspace.getConfiguration.mockReturnValue({ get: vi.fn(), update } as never);
 
-      await new ConfigManager().setDefaultProvider('grok');
+      await new ConfigManager().setDefaultProvider('opencode');
 
       // Global, not workspace: which agent you reach for is a property of you,
       // not of the repo you happen to have open.
-      expect(update).toHaveBeenCalledWith('defaultProvider', 'grok', ConfigurationTarget.Global);
+      expect(update).toHaveBeenCalledWith('defaultProvider', 'opencode', ConfigurationTarget.Global);
     });
   });
 });

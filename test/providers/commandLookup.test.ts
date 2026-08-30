@@ -40,13 +40,13 @@ describe('isCommandAvailable', () => {
   });
 
   it('rejects a non-executable file with the right name', () => {
-    put('grok', { executable: false });
-    expect(isCommandAvailable('grok', env)).toBe(false);
+    put('codex', { executable: false });
+    expect(isCommandAvailable('codex', env)).toBe(false);
   });
 
   it('rejects a directory with the right name', () => {
-    fs.mkdirSync(path.join(binDir, 'grok'));
-    expect(isCommandAvailable('grok', env)).toBe(false);
+    fs.mkdirSync(path.join(binDir, 'codex'));
+    expect(isCommandAvailable('codex', env)).toBe(false);
   });
 
   it('resolves an absolute path without consulting PATH', () => {
@@ -69,9 +69,9 @@ describe('isCommandAvailable', () => {
 
   it('searches every PATH entry, not just the first', () => {
     const second = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-bin2-'));
-    fs.writeFileSync(path.join(second, 'grok'), '#!/bin/sh\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(second, 'codex'), '#!/bin/sh\n', { mode: 0o755 });
     try {
-      expect(isCommandAvailable('grok', { PATH: `${binDir}${path.delimiter}${second}` })).toBe(true);
+      expect(isCommandAvailable('codex', { PATH: `${binDir}${path.delimiter}${second}` })).toBe(true);
     } finally {
       fs.rmSync(second, { recursive: true, force: true });
     }
@@ -81,14 +81,13 @@ describe('isCommandAvailable', () => {
 describe('installedProviders', () => {
   const config = (over: Partial<ForemanConfig> = {}) =>
     ({
-      claudeCommand: 'claude', codexCommand: 'codex',
-      grokCommand: 'grok', opencodeCommand: 'opencode', ...over,
+      claudeCommand: 'claude', codexCommand: 'codex', opencodeCommand: 'opencode', ...over,
     }) as ForemanConfig;
 
   it('reports only the agents actually on PATH', () => {
     put('claude');
-    put('grok');
-    expect(installedProviders(config(), env)).toEqual(['claude', 'grok']);
+    put('opencode');
+    expect(installedProviders(config(), env)).toEqual(['claude', 'opencode']);
   });
 
   it('reports none when nothing is installed', () => {
@@ -104,7 +103,6 @@ describe('installedProviders', () => {
     put('opencode');
     put('codex');
     put('claude');
-    put('grok');
-    expect(installedProviders(config(), env)).toEqual(['claude', 'codex', 'grok', 'opencode']);
+    expect(installedProviders(config(), env)).toEqual(['claude', 'codex', 'opencode']);
   });
 });

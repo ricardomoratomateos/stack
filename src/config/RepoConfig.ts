@@ -143,7 +143,6 @@ const USER_SCOPED = new Set([
   'defaultProvider',
   'claudeCommand',
   'codexCommand',
-  'grokCommand',
   'opencodeCommand',
   'notifyOnAttention',
   'focusMode',

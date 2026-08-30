@@ -303,15 +303,6 @@ function CodexMark({ size = 10 }: { size?: number }) {
   );
 }
 
-/** xAI's slashed X. */
-function GrokMark({ size = 10 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
-      <path d="M3 2.6 13 13.4M13 2.6 3 13.4" stroke="#C8CDD6" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 /** Stand-in for a provider this build does not know about (an older session's id). */
 function UnknownMark({ size = 10 }: { size?: number }) {
   return (
@@ -327,7 +318,6 @@ type ProviderVisual = { icon: (props: { size?: number }) => React.ReactElement; 
 const PROVIDER_VISUAL: Record<string, ProviderVisual> = {
   claude:   { icon: ClaudeSpark,  tint: 'color-mix(in srgb, #D97757 16%, transparent)', label: 'claude' },
   codex:    { icon: CodexMark,    tint: 'color-mix(in srgb, #10A37F 16%, transparent)', label: 'codex' },
-  grok:     { icon: GrokMark,     tint: 'color-mix(in srgb, #C8CDD6 14%, transparent)', label: 'grok' },
   opencode: { icon: OpenCodeMark, tint: 'color-mix(in srgb, #9DA5B4 14%, transparent)', label: 'opencode' },
 };
 
@@ -351,7 +341,7 @@ function DefaultProviderIcon({ provider }: { provider?: string }) {
 }
 
 /** Order shown in the dropdown — stable, so the list never reshuffles under the cursor. */
-const PROVIDER_ORDER = ['claude', 'codex', 'grok', 'opencode'] as const;
+const PROVIDER_ORDER = ['claude', 'codex', 'opencode'] as const;
 
 /**
  * The chevron's menu, rendered here rather than through VSCode's QuickPick.

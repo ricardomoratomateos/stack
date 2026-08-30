@@ -55,7 +55,7 @@ Initial public release.
 ### Added
 
 - **Worktree manager** in the sidebar — create, rename, and delete git worktrees, branching off a configurable base (`foreman.defaultBaseBranch`, default `develop`) rather than whatever the main checkout happens to be parked on.
-- **AI agents per worktree** — launch Claude Code, Codex CLI, Grok Build or opencode (pluggable providers); multiple agent and shell sessions per worktree, each tracked separately. The card's split button starts your primary agent and its chevron opens an in-sidebar menu for the others, dimming any whose command is not on `PATH`.
+- **AI agents per worktree** — launch Claude Code, Codex CLI or opencode (pluggable providers); multiple agent and shell sessions per worktree, each tracked separately. The card's split button starts your primary agent and its chevron opens an in-sidebar menu for the others, dimming any whose command is not on `PATH`.
 - **tmux-backed sessions** that survive VS Code window reloads and reconnect automatically.
 - **State at a glance** — per-session status with live task titles, a sidebar attention badge, and an optional native notification when an agent needs you.
 - **Active-worktree scoping** for text search, Quick Open, and breakpoints — plus editor tabs and terminals via the opt-in `foreman.focusMode`.

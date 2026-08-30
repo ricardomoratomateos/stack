@@ -40,7 +40,7 @@ describe('EVENT_TO_STATE', () => {
       Stop: 'waiting',
       SessionEnd: 'terminated',
       PermissionRequest: 'permission',
-      // Grok Build's attention signal — it has no PermissionRequest at all.
+      // An agent's generic "the agent wants you" signal.
       Notification: 'permission',
     });
   });

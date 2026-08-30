@@ -7,7 +7,6 @@ export const NOTIFY_HOOK_SCRIPT = 'notify.sh';
 export const CLAUDE_SETTINGS_PATH = '.claude/settings.json';
 export const OPENCODE_PLUGIN_PATH = '.config/opencode/plugin/foreman-notify.js';
 export const CODEX_HOOKS_PATH = '.codex/hooks.json';
-export const GROK_HOOKS_PATH = '.grok/hooks.json';
 /** Enables Codex's hook system, which is experimental and off by default. */
 export const CODEX_CONFIG_PATH = '.codex/config.toml';
 

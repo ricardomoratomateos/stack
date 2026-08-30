@@ -60,7 +60,6 @@ For the heavier setup — Docker per worktree, a debugger port per worktree, set
 | `foreman.defaultProvider` | `claude` | Primary agent: the one the big launch button starts. The chevron beside it opens the rest |
 | `foreman.claudeCommand` | `claude` | Command to launch Claude Code |
 | `foreman.codexCommand` | `codex` | Command to launch Codex CLI |
-| `foreman.grokCommand` | `grok` | Command to launch Grok Build |
 | `foreman.opencodeCommand` | `opencode` | Command to launch opencode |
 | `foreman.notifyOnAttention` | `true` | Native OS notification when an agent finishes or asks for permission while VS Code is backgrounded (the sidebar badge always shows) |
 | `foreman.scopeSearchToActiveWorktree` | `true` | Hide non-active worktree folders from search and Quick Open |
@@ -72,7 +71,7 @@ For the heavier setup — Docker per worktree, a debugger port per worktree, set
 
 ## Agents
 
-Four are supported: **Claude Code**, **Codex CLI**, **Grok Build** and **opencode**. Each worktree card carries a split button — the big half launches your primary agent (`foreman.defaultProvider`), the chevron opens the rest. Agents whose command isn't on your `PATH` are shown dimmed; clicking one offers the install command instead of launching it.
+Three are supported: **Claude Code**, **Codex CLI** and **opencode**. Each worktree card carries a split button — the big half launches your primary agent (`foreman.defaultProvider`), the chevron opens the rest. Agents whose command isn't on your `PATH` are shown dimmed; clicking one offers the install command instead of launching it.
 
 Any session can be renamed — hover its row and hit the pencil. The shell you started redis in becomes "redis". The name is Foreman's own; the tmux window keeps the name that says what is running in it, because that is what identifies an agent when the window reloads. Clearing the name restores the derived one.
 
@@ -88,9 +87,8 @@ Foreman registers a notify hook with each agent so the sidebar can show live sta
   ```
 
   Codex also has no session-end event, so a Codex session settles on *waiting* rather than ever showing *terminated*.
-- **Codex and Grok require you to trust hooks** before they run (`/hooks` and `/hooks-trust` respectively). Foreman's notify script is byte-identical on every install for exactly this reason — the endpoint lives in a sibling file, so a restart never changes the script's hash and never costs you that trust.
+- **Codex requires you to trust hooks** before they run (`/hooks`). Foreman's notify script is byte-identical on every install for exactly this reason — the endpoint lives in a sibling file, so a restart never changes the script's hash and never costs you that trust.
 
-Grok has no permission-request event; its `Notification` event is what drives the attention badge instead.
 
 ## Switching worktrees
 

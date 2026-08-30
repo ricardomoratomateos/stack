@@ -351,7 +351,7 @@ export function SettingsApp() {
   );
 }
 
-type CommandKey = 'claudeCommand' | 'codexCommand' | 'grokCommand' | 'opencodeCommand';
+type CommandKey = 'claudeCommand' | 'codexCommand' | 'opencodeCommand';
 
 function commandKey(id: ProviderId): CommandKey {
   return `${id}Command` as CommandKey;

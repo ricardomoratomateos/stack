@@ -2497,15 +2497,15 @@ describe('defaultBaseBranch', () => {
 describe('handleMessage pickDefaultProvider', () => {
   it('offers every registered provider and persists the choice', async () => {
     const h = makeHarness();
-    h.host.showQuickPick.mockResolvedValue('grok');
+    h.host.showQuickPick.mockResolvedValue('opencode');
 
     await h.service.handleMessage({ type: 'pickDefaultProvider' });
 
     expect(h.host.showQuickPick).toHaveBeenCalledWith(
-      ['claude', 'codex', 'grok', 'opencode'],
+      ['claude', 'codex', 'opencode'],
       { placeHolder: 'Agent launched by the main button' },
     );
-    expect(h.config.setDefaultProvider).toHaveBeenCalledWith('grok');
+    expect(h.config.setDefaultProvider).toHaveBeenCalledWith('opencode');
   });
 
   it('persists nothing when the picker is dismissed', async () => {
@@ -2534,15 +2534,15 @@ describe('handleMessage showProviderInstall', () => {
   it('copies the command when the user accepts', async () => {
     const h = makeHarness({ confirmResult: 'Copy command' });
 
-    await h.service.handleMessage({ type: 'showProviderInstall', provider: 'grok' });
+    await h.service.handleMessage({ type: 'showProviderInstall', provider: 'opencode' });
 
-    expect(h.host.writeClipboard).toHaveBeenCalledWith('npm i -g @xai-official/grok');
+    expect(h.host.writeClipboard).toHaveBeenCalledWith('npm i -g opencode-ai');
   });
 
   it('copies nothing when the user dismisses', async () => {
     const h = makeHarness({ confirmResult: undefined });
 
-    await h.service.handleMessage({ type: 'showProviderInstall', provider: 'grok' });
+    await h.service.handleMessage({ type: 'showProviderInstall', provider: 'opencode' });
 
     expect(h.host.writeClipboard).not.toHaveBeenCalled();
   });
@@ -2550,8 +2550,8 @@ describe('handleMessage showProviderInstall', () => {
 
 describe('installedProviders in the pushed state', () => {
   it('forwards what the detector reports, so the card can dim the rest', () => {
-    const h = makeHarness({ installedProviders: ['claude', 'grok'] });
-    expect(h.service.buildState().installedProviders).toEqual(['claude', 'grok']);
+    const h = makeHarness({ installedProviders: ['claude', 'opencode'] });
+    expect(h.service.buildState().installedProviders).toEqual(['claude', 'opencode']);
   });
 });
 
@@ -2561,8 +2561,7 @@ describe('installedProviders fallback', () => {
     const h = makeHarness({
       useRealInstalledProviders: true,
       config: {
-        claudeCommand: '/nope/claude', codexCommand: '/nope/codex',
-        grokCommand: '/nope/grok', opencodeCommand: '/nope/opencode',
+        claudeCommand: '/nope/claude', codexCommand: '/nope/codex', opencodeCommand: '/nope/opencode',
       },
     });
     expect(h.service.buildState().installedProviders).toEqual([]);
