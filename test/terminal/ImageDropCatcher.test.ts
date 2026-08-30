@@ -20,7 +20,7 @@ function makeDeps(over: Partial<ImageDropDeps> = {}): ImageDropDeps {
     hasTerminals: vi.fn(() => true),
     labelFor: vi.fn((id) => ({ 'wt-dev': 'develop', 'wt-x': 'feat/x' } as Record<string, string>)[id]),
     activeWorktreeId: vi.fn(() => 'wt-dev'),
-    isScreenshotLike: vi.fn(async () => true),
+    isScreenshotLike: vi.fn(() => true),
     attach: vi.fn(async () => {}),
     notify: vi.fn(),
     ...over,
@@ -85,7 +85,7 @@ describe('ImageDropCatcher', () => {
   });
 
   it('leaves an image that was opened on purpose alone', async () => {
-    const deps = makeDeps({ isScreenshotLike: vi.fn(async () => false) });
+    const deps = makeDeps({ isScreenshotLike: vi.fn(() => false) });
     const h = install(deps);
     const g = group(1, [terminal('claude: develop'), image('/repo/docs/logo.png')]);
     await h.open([g], [g.tabs[1]]);

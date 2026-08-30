@@ -498,34 +498,6 @@ describe('handleMessage killSession', () => {
 });
 
 
-describe('activeWorktreeLabel', () => {
-  it('returns undefined when no worktree is active', () => {
-    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
-    expect(h.service.activeWorktreeLabel()).toBeUndefined();
-  });
-
-  it('returns undefined when the persisted active id no longer exists', () => {
-    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], persistedActiveId: 'gone' });
-    expect(h.service.activeWorktreeLabel()).toBeUndefined();
-  });
-
-  it('prefers the alias of the active worktree', () => {
-    const h = makeHarness({
-      worktrees: [makeWorktree({ id: 'a', alias: 'login fix' })],
-      persistedActiveId: 'a',
-    });
-    expect(h.service.activeWorktreeLabel()).toBe('login fix');
-  });
-
-  it('falls back to the branch when there is no alias', () => {
-    const h = makeHarness({
-      worktrees: [makeWorktree({ id: 'a', branch: 'feat/drop' })],
-      persistedActiveId: 'a',
-    });
-    expect(h.service.activeWorktreeLabel()).toBe('feat/drop');
-  });
-});
-
 describe('attachDroppedFiles', () => {
   it('reveals the active worktree viewer and pastes all paths single-quoted, unsent', async () => {
     const h = makeHarness({
@@ -551,7 +523,7 @@ describe('attachDroppedFiles', () => {
     await h.service.attachDroppedFiles(['/shots/x.png']);
     expect(h.claude.pasteToActiveWindow).toHaveBeenCalledWith('a', "'/shots/x.png' ");
     // The fallback switch makes it the active worktree for the next drop.
-    expect(h.service.activeWorktreeLabel()).toBe('feat/a');
+    expect(h.service.activeWorktreeId()).toBe('a');
   });
 
   it('warns when no worktree is active and several exist', async () => {

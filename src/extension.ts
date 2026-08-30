@@ -15,7 +15,6 @@ import { DockerMonitor } from './docker/DockerMonitor';
 import { GitWatcher } from './git/GitWatcher';
 import { HookServer } from './server/HookServer';
 import { ForemanWebviewProvider } from './sidebar/ForemanWebviewProvider';
-import { ScreenshotDropZone, DROP_ZONE_VIEW_ID } from './sidebar/ScreenshotDropZone';
 import { PrMonitor } from './pr/PrMonitor';
 import { TmuxManager } from './session/TmuxManager';
 import { WorktreeDimDecorationProvider } from './sidebar/WorktreeDimDecorationProvider';
@@ -221,9 +220,8 @@ export async function activate(ctx: vscode.ExtensionContext) {
   if (!(await TmuxManager.isAvailable())) {
     const present = await detectBinaries(PACKAGE_MANAGERS);
     const install = tmuxInstallCommand(process.platform, (bin) => present.has(bin));
-    // Hides the screenshot drop-zone view (its `when` clause), which is useless
-    // until the extension is really running and otherwise renders a bare
-    // "no data provider registered" placeholder.
+    // Hides the settings gear in the view header (its menu `when` clause): the
+    // command behind it is only registered once the extension really runs.
     void vscode.commands.executeCommand('setContext', 'foreman.tmuxMissing', true);
     ctx.subscriptions.push(
       vscode.window.registerWebviewViewProvider(SIDEBAR_VIEW_ID, new TmuxGateView(install)),
@@ -332,30 +330,6 @@ export async function activate(ctx: vscode.ExtensionContext) {
     vscode.window.registerWebviewViewProvider(SIDEBAR_VIEW_ID, webviewProvider, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
-  );
-
-  // OS-file drop target. The sidebar webview can't receive OS drags (sandboxed
-  // iframe) and the editor-area viewer terminal lets VS Code's editor
-  // drop-target open the file instead — a tree view with a drag-and-drop
-  // controller declaring `text/uri-list` + `files` is the sidebar surface the
-  // workbench routes external file drops to.
-  const dropZone = new ScreenshotDropZone({
-    targetLabel: () => service.activeWorktreeLabel(),
-    attach: (paths) => service.attachDroppedFiles(paths),
-    saveTempFile: async (name, data) => {
-      const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'foreman-drop-'));
-      const file = path.join(dir, name || 'dropped-image.png');
-      await fs.promises.writeFile(file, data);
-      return file;
-    },
-    warn: (message) => void vscode.window.showWarningMessage(message),
-  });
-  ctx.subscriptions.push(
-    vscode.window.createTreeView(DROP_ZONE_VIEW_ID, {
-      treeDataProvider: dropZone,
-      dragAndDropController: dropZone,
-    }),
-    dropZone,
   );
 
   // Settings panel: the project half round-trips through `.foreman/config.json`
@@ -475,16 +449,19 @@ export async function activate(ctx: vscode.ExtensionContext) {
 
   // Dropping a screenshot on an agent's terminal: VS Code opens it as a tab in
   // that group; this hands it to the agent in that group instead.
-  const screenshotDirOnce = screenshotDir();
+  // Resolved once, up front: the check must stay synchronous so the tab can be
+  // closed in the same tick it appears (see ImageDropCatcher).
+  let shotsDir: string | undefined;
+  void screenshotDir().then((dir) => { shotsDir = dir; });
   ctx.subscriptions.push(new ImageDropCatcher({
     worktreeIdForTerminalName: (name) => agentManager.getWorktreeIdForTerminalName(name),
     hasTerminals: (id) => agentManager.hasTerminals(id),
     labelFor: (id) => { const wt = manager.list().find((w) => w.id === id); return wt ? wt.alias ?? wt.branch : undefined; },
     activeWorktreeId: () => service.activeWorktreeId(),
-    isScreenshotLike: async (file) => {
+    isScreenshotLike: (file) => {
       let mtimeMs: number | undefined;
-      try { mtimeMs = (await fs.promises.stat(file)).mtimeMs; } catch { return false; }
-      return looksLikeScreenshot({ file, mtimeMs, nowMs: Date.now(), screenshotDir: await screenshotDirOnce });
+      try { mtimeMs = fs.statSync(file).mtimeMs; } catch { return false; }
+      return looksLikeScreenshot({ file, mtimeMs, nowMs: Date.now(), screenshotDir: shotsDir });
     },
     attach: (id, paths) => service.attachDroppedFiles(paths, id),
     notify: (message, reopen) => {
@@ -534,10 +511,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   );
 
   service.setUi({
-    pushWebview: () => {
-      webviewProvider.push();
-      dropZone.refresh(); // keep the "→ target" hint in sync with the active worktree
-    },
+    pushWebview: () => webviewProvider.push(),
     syncDecorations: (worktrees, activeWorktreeId) => dimProvider.update(worktrees, activeWorktreeId),
     openDiffPanel: (worktreeId) => diffPanelManager.open(worktreeId),
     openNewTask: () => newTaskPanel.open(),

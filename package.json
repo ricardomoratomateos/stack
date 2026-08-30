@@ -55,12 +55,6 @@
           "name": "Worktrees",
           "type": "webview",
           "initialSize": 20
-        },
-        {
-          "id": "foreman-drop-zone",
-          "name": "Screenshot drop",
-          "initialSize": 1,
-          "when": "!foreman.tmuxMissing"
         }
       ]
     },
@@ -336,7 +330,7 @@
           {
             "id": "review",
             "title": "Review the diff and talk back",
-            "description": "Each card has a diff button: comment on lines and send them straight to the agent. Drop a screenshot on the sidebar, or press Cmd+Alt+V in the agent terminal to attach the latest one.",
+            "description": "Each card has a diff button: comment on lines and send them straight to the agent. Drop a screenshot onto the agent's terminal to attach it, or press Cmd+Alt+V there to attach the latest one from your screenshots folder.",
             "media": {
               "markdown": "media/walkthrough/review.md"
             },

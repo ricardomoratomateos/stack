@@ -9,8 +9,11 @@ export interface ImageDropDeps {
   labelFor(worktreeId: string): string | undefined;
   /** Fallback when the drop landed in a group with no agent viewer in it. */
   activeWorktreeId(): string | undefined;
-  /** See looksLikeScreenshot — an intentionally opened image must be left alone. */
-  isScreenshotLike(file: string): Promise<boolean>;
+  /**
+   * See looksLikeScreenshot — an intentionally opened image must be left alone.
+   * Synchronous on purpose: see handle().
+   */
+  isScreenshotLike(file: string): boolean;
   attach(worktreeId: string, paths: string[]): Promise<void>;
   /** Tell the user what happened, with a way to get the image back as a tab. */
   notify(message: string, reopen: () => void): void;
@@ -39,11 +42,11 @@ export class ImageDropCatcher implements vscode.Disposable {
     this.snapshotActiveTerminals();
   }
 
-  private async onTabsChanged(e: vscode.TabChangeEvent): Promise<void> {
+  private onTabsChanged(e: vscode.TabChangeEvent): void {
     // Decide with the map as it was BEFORE this change: the image tab is
     // active now, but the terminal it displaced is what identifies the drop.
     for (const tab of e.opened) {
-      await this.handle(tab).catch((err) => console.warn('[foreman] image drop failed', err));
+      try { this.handle(tab); } catch (err) { console.warn('[foreman] image drop failed', err); }
     }
     this.snapshotActiveTerminals();
   }
@@ -57,7 +60,12 @@ export class ImageDropCatcher implements vscode.Disposable {
     }
   }
 
-  private async handle(tab: vscode.Tab): Promise<void> {
+  /**
+   * Everything up to the close runs synchronously inside the tab event: an
+   * await before it yields to the event loop, which is exactly the frame the
+   * image preview needs to paint — the flash the user would otherwise see.
+   */
+  private handle(tab: vscode.Tab): void {
     const uri = uriOf(tab.input);
     if (!uri || uri.scheme !== 'file' || !isImagePath(uri.fsPath)) return;
 
@@ -67,14 +75,16 @@ export class ImageDropCatcher implements vscode.Disposable {
     const label = pickTerminalLabel(labels, this.lastActiveTerminalByGroup.get(tab.group.viewColumn));
     const target = (label && this.deps.worktreeIdForTerminalName(label)) || this.deps.activeWorktreeId();
     if (!target || !this.deps.hasTerminals(target)) return;
-    if (!(await this.deps.isScreenshotLike(uri.fsPath))) return;
+    if (!this.deps.isScreenshotLike(uri.fsPath)) return;
 
-    await vscode.window.tabGroups.close(tab, true);
-    await this.deps.attach(target, [uri.fsPath]);
-    this.deps.notify(
-      `Foreman: attached ${path.basename(uri.fsPath)} to ${this.deps.labelFor(target) ?? 'the agent'}`,
-      () => void vscode.commands.executeCommand('vscode.open', uri),
-    );
+    void vscode.window.tabGroups.close(tab, true);
+    void this.deps
+      .attach(target, [uri.fsPath])
+      .then(() => this.deps.notify(
+        `Foreman: attached ${path.basename(uri.fsPath)} to ${this.deps.labelFor(target) ?? 'the agent'}`,
+        () => void vscode.commands.executeCommand('vscode.open', uri),
+      ))
+      .catch((err) => console.warn('[foreman] image drop failed', err));
   }
 
   dispose(): void {

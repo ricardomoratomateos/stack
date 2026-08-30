@@ -58,11 +58,11 @@ export const T = {
 
 /**
  * Matches VS Code's native pane-header title, which these sections sit directly
- * above (the "Screenshot drop" view is a real one).
+ * below.
  *
  * No `textTransform: uppercase`: current VS Code renders a view's contributed
- * name verbatim, so forcing caps here made our sections shout "AGENTS" next to
- * a native "Screenshot drop" and the imitation gave itself away.
+ * name verbatim, so forcing caps here made our sections shout "AGENTS" under a
+ * native "Worktrees" and the imitation gave itself away.
  */
 export const SECTION_TITLE_STYLE = {
   // Tracks the workbench font size rather than the old hardcoded 11px: the

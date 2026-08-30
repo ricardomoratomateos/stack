@@ -386,28 +386,23 @@ export class WorktreeApplicationService implements DiffPanelHost {
     if (handler) await handler(msg);
   }
 
-  // ── External file drops (screenshot drop zone) ─────────────────────────────
+  // ── External file drops (screenshot on an agent viewer) ────────────────────
 
-  /** Display label of the worktree that receives drops (drop-zone hint). */
+  /** The worktree a drop with no viewer of its own falls back to. */
   activeWorktreeId(): string | undefined {
     return this.currentWorktreeId;
   }
 
-  activeWorktreeLabel(): string | undefined {
-    const wt = this.currentWorktreeId ? this.findWorktree(this.currentWorktreeId) : undefined;
-    return wt ? displayLabel(wt) : undefined;
-  }
-
   /**
-   * Route externally-dropped files (macOS screenshot thumbnail → drop-zone
-   * tree) to the active worktree's agent: reveal its viewer and paste the
+   * Route externally-dropped files (a macOS screenshot thumbnail dropped on an
+   * agent viewer) to that worktree's agent: reveal its viewer and paste the
    * quoted paths unsent, so the user can add prompt text before hitting Enter.
    */
   async attachDroppedFiles(paths: string[], targetId?: string): Promise<void> {
     if (paths.length === 0) return;
     const worktrees = this.worktreesInWindow();
     // An explicit target is the worktree whose viewer the image was dropped on;
-    // without one (the sidebar drop zone) it goes to whatever is active.
+    // without one it goes to whatever is active.
     const wt = targetId
       ? this.findWorktree(targetId)
       : this.findWorktree(this.currentWorktreeId ?? '') ?? (worktrees.length === 1 ? worktrees[0] : undefined);
