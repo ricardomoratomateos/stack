@@ -35,6 +35,12 @@ export interface ImageDropDeps {
 export class ImageDropCatcher implements vscode.Disposable {
   /** The terminal tab that was active in each group before the image took over. */
   private lastActiveTerminalByGroup = new Map<number, string>();
+  /**
+   * Files the user asked to see after all ("Open instead"): the next open of
+   * each is left alone, otherwise the reopen is itself a fresh image tab in a
+   * group with an agent — and gets caught and pasted all over again.
+   */
+  private letThrough = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly subscription: vscode.Disposable;
 
   constructor(private readonly deps: ImageDropDeps) {
@@ -68,6 +74,12 @@ export class ImageDropCatcher implements vscode.Disposable {
   private handle(tab: vscode.Tab): void {
     const uri = uriOf(tab.input);
     if (!uri || uri.scheme !== 'file' || !isImagePath(uri.fsPath)) return;
+    const pass = this.letThrough.get(uri.fsPath);
+    if (pass !== undefined) {
+      clearTimeout(pass);
+      this.letThrough.delete(uri.fsPath);
+      return;
+    }
 
     const labels = tab.group.tabs
       .filter((t) => t.input instanceof vscode.TabInputTerminal)
@@ -82,13 +94,23 @@ export class ImageDropCatcher implements vscode.Disposable {
       .attach(target, [uri.fsPath])
       .then(() => this.deps.notify(
         `Foreman: attached ${path.basename(uri.fsPath)} to ${this.deps.labelFor(target) ?? 'the agent'}`,
-        () => void vscode.commands.executeCommand('vscode.open', uri),
+        () => this.reopen(uri),
       ))
       .catch((err) => console.warn('[foreman] image drop failed', err));
   }
 
+  private reopen(uri: vscode.Uri): void {
+    const key = uri.fsPath;
+    clearTimeout(this.letThrough.get(key));
+    // Consumed by the open below; the timer covers an open that never reports.
+    this.letThrough.set(key, setTimeout(() => this.letThrough.delete(key), 5_000));
+    void vscode.commands.executeCommand('vscode.open', uri);
+  }
+
   dispose(): void {
     this.subscription.dispose();
+    for (const timer of this.letThrough.values()) clearTimeout(timer);
+    this.letThrough.clear();
   }
 }
 

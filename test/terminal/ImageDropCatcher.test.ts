@@ -101,7 +101,7 @@ describe('ImageDropCatcher', () => {
     expect(deps.attach).not.toHaveBeenCalled();
   });
 
-  it('"Open instead" reopens the image', async () => {
+  it('"Open instead" reopens the image, and that reopen is not caught again', async () => {
     const deps = makeDeps();
     const h = install(deps);
     const g = group(1, [terminal('claude: develop'), image('/tmp/s.png')]);
@@ -109,6 +109,17 @@ describe('ImageDropCatcher', () => {
     const reopen = (deps.notify as ReturnType<typeof vi.fn>).mock.calls[0][1] as () => void;
     reopen();
     expect(commands.executeCommand).toHaveBeenCalledWith('vscode.open', expect.objectContaining({ fsPath: '/tmp/s.png' }));
+
+    // The reopened tab lands in the same group, beside the same agent…
+    const again = group(1, [terminal('claude: develop'), image('/tmp/s.png')]);
+    await h.open([again], [again.tabs[1]]);
+    expect(deps.attach).toHaveBeenCalledTimes(1);
+    expect(window.tabGroups.close).toHaveBeenCalledTimes(1);
+
+    // …but a later, genuine drop of the same file is caught as usual.
+    const later = group(1, [terminal('claude: develop'), image('/tmp/s.png')]);
+    await h.open([later], [later.tabs[1]]);
+    expect(deps.attach).toHaveBeenCalledTimes(2);
   });
 
   it('names the agent generically when the worktree has no label', async () => {
