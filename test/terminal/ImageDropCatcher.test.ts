@@ -122,6 +122,30 @@ describe('ImageDropCatcher', () => {
     expect(deps.attach).toHaveBeenCalledTimes(2);
   });
 
+  it('an unconsumed "Open instead" pass expires on its own, and dispose drops a pending one', async () => {
+    const deps = makeDeps();
+    const h = install(deps);
+    const g = group(1, [terminal('claude: develop'), image('/tmp/s.png')]);
+    await h.open([g], [g.tabs[1]]);
+    const reopen = (deps.notify as ReturnType<typeof vi.fn>).mock.calls[0][1] as () => void;
+
+    // Expiry: an open that never reported must not shield the file forever.
+    vi.useFakeTimers();
+    reopen();
+    vi.advanceTimersByTime(5_000);
+    vi.useRealTimers();
+    const later = group(1, [terminal('claude: develop'), image('/tmp/s.png')]);
+    await h.open([later], [later.tabs[1]]);
+    expect(deps.attach).toHaveBeenCalledTimes(2);
+
+    // Dispose: whatever is pending goes with everything else.
+    reopen();
+    h.catcher.dispose();
+    const after = group(1, [terminal('claude: develop'), image('/tmp/s.png')]);
+    await h.open([after], [after.tabs[1]]);
+    expect(deps.attach).toHaveBeenCalledTimes(3);
+  });
+
   it('names the agent generically when the worktree has no label', async () => {
     const deps = makeDeps({ labelFor: vi.fn(() => undefined) });
     const h = install(deps);
