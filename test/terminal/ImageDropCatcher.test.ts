@@ -110,4 +110,59 @@ describe('ImageDropCatcher', () => {
     reopen();
     expect(commands.executeCommand).toHaveBeenCalledWith('vscode.open', expect.objectContaining({ fsPath: '/tmp/s.png' }));
   });
+
+  it('names the agent generically when the worktree has no label', async () => {
+    const deps = makeDeps({ labelFor: vi.fn(() => undefined) });
+    const h = install(deps);
+    const g = group(2, [terminal('claude: feat/x'), image('/Users/me/Desktop/shot.png')]);
+    await h.open([g], [g.tabs[1]]);
+
+    expect(deps.notify).toHaveBeenCalledWith(expect.stringContaining('shot.png to the agent'), expect.any(Function));
+  });
+
+  it('opens an image the user opens as a text tab too', async () => {
+    // Some image types open through TabInputText rather than the custom preview
+    // editor; the drop is the same drop.
+    const deps = makeDeps();
+    const h = install(deps);
+    const g = group(2, [
+      terminal('claude: feat/x'),
+      { label: 'shot.png', input: new TabInputText(Uri.file('/Users/me/Desktop/shot.png')), active: true },
+    ]);
+    await h.open([g], [g.tabs[1]]);
+
+    expect(deps.attach).toHaveBeenCalledWith('wt-x', ['/Users/me/Desktop/shot.png']);
+  });
+
+  it('ignores a tab that is not backed by a file at all', async () => {
+    const deps = makeDeps();
+    const h = install(deps);
+    const g = group(2, [terminal('claude: feat/x'), { label: 'Settings', input: { kind: 'webview' }, active: true }]);
+    await h.open([g], [g.tabs[1]]);
+
+    expect(window.tabGroups.close).not.toHaveBeenCalled();
+    expect(deps.attach).not.toHaveBeenCalled();
+  });
+
+  it('survives a failure while handling one tab', async () => {
+    // The handler runs inside VS Code's tab event; letting it throw would take
+    // out the listener and silently stop catching every later drop.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const deps = makeDeps({
+      worktreeIdForTerminalName: vi.fn(() => { throw new Error('boom'); }),
+    });
+    const h = install(deps);
+    const g = group(2, [terminal('claude: feat/x'), image('/Users/me/Desktop/shot.png')]);
+
+    await expect(h.open([g], [g.tabs[1]])).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith('[foreman] image drop failed', expect.any(Error));
+    warn.mockRestore();
+  });
+
+  it('dispose unhooks the tab listener', () => {
+    const dispose = vi.fn();
+    window.tabGroups.onDidChangeTabs.mockReturnValue({ dispose });
+    new ImageDropCatcher(makeDeps()).dispose();
+    expect(dispose).toHaveBeenCalled();
+  });
 });

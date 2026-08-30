@@ -3107,3 +3107,18 @@ describe('syncMainFolderLabel bails out', () => {
     expect(h.host.renameWorkspaceFolder).not.toHaveBeenCalled();
   });
 });
+
+describe('attachDroppedFiles targeting', () => {
+  it('an explicit target wins over the active worktree', async () => {
+    // The catcher passes the worktree whose viewer the image was dropped on;
+    // that beats "whatever was selected in the sidebar".
+    const a = makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/feat-a' });
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({ worktrees: [a, b], workspaceFolders: ['/repo'], terminalIds: ['a', 'b'] });
+    await h.service.loadWorktreesForRepo('/repo');
+    await h.service.switchToWorktree('a');
+
+    await h.service.attachDroppedFiles(['/tmp/shot.png'], 'b');
+    expect(h.claude.pasteToActiveWindow).toHaveBeenCalledWith('b', expect.stringContaining('/tmp/shot.png'));
+  });
+});

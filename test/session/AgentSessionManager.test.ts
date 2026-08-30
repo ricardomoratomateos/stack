@@ -506,6 +506,15 @@ describe('viewer lifecycle', () => {
     expect(mgr.getWorktreeIdForTerminal({} as never)).toBeUndefined();
   });
 
+  it('getWorktreeIdForTerminalName reverse-maps by the label VS Code shows', async () => {
+    // The image-drop catcher only ever sees a tab label, never the terminal.
+    const { mgr } = create();
+    await mgr.launch(wt);
+    const viewer = mgr.getViewer('wt-1')!;
+    expect(mgr.getWorktreeIdForTerminalName(viewer.name)).toBe('wt-1');
+    expect(mgr.getWorktreeIdForTerminalName('some other tab')).toBeUndefined();
+  });
+
   it('viewer terminal uses /bin/sh -c tmux attach in the Editor area (no exec $SHELL fallback)', async () => {
     const { mgr } = create();
     const viewer = await mgr.getOrCreateViewer(wt) as unknown as MockTerminal;
