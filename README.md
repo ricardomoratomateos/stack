@@ -10,7 +10,7 @@
 
 Foreman turns VS Code into a control panel for delegated work: spin up a git worktree per task, launch an AI coding agent (Claude Code, opencode, …) in it, and keep every session alive, isolated, and glanceable from one sidebar.
 
-<!-- TODO: add a demo GIF here before publishing — e.g. ![Foreman](assets/demo.gif) -->
+![Foreman: a worktree per task, an agent in each, and a sidebar that says who needs you](assets/demo.gif)
 
 ## Why
 

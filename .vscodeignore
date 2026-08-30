@@ -28,6 +28,10 @@ node_modules/**
 .agents/**
 skills-lock.json
 
+# The README's demo — the Marketplace loads it from GitHub, so it need not
+# ride along in every install.
+assets/demo.gif
+
 # Repo hygiene that has no place in an installable package.
 .gitignore
 .vscodeignore
