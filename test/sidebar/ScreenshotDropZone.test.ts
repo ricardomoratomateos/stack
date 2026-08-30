@@ -100,11 +100,11 @@ describe('extractDroppedPaths', () => {
 
   it('persists pathless files via saveTempFile (promised files without a uri)', async () => {
     const bytes = new Uint8Array([1, 2, 3]);
-    const save = vi.fn(async (name: string) => `/tmp/unmess-drop/${name}`);
+    const save = vi.fn(async (name: string) => `/tmp/foreman-drop/${name}`);
     const dt = makeTransfer({
       files: { asFile: () => ({ name: 'shot.png', uri: undefined, data: async () => bytes }) },
     });
-    await expect(extractDroppedPaths(dt, save)).resolves.toEqual(['/tmp/unmess-drop/shot.png']);
+    await expect(extractDroppedPaths(dt, save)).resolves.toEqual(['/tmp/foreman-drop/shot.png']);
     expect(save).toHaveBeenCalledWith('shot.png', bytes);
   });
 
@@ -124,7 +124,7 @@ describe('extractDroppedPaths', () => {
 
 describe('ScreenshotDropZone', () => {
   it('exposes the view id the package.json contribution must use', () => {
-    expect(DROP_ZONE_VIEW_ID).toBe('unmess-drop-zone');
+    expect(DROP_ZONE_VIEW_ID).toBe('foreman-drop-zone');
   });
 
   it('declares text/uri-list and files as accepted drop mimes, and drags nothing', () => {
@@ -178,7 +178,7 @@ describe('ScreenshotDropZone', () => {
     const deps = makeDeps();
     const zone = new ScreenshotDropZone(deps);
     await zone.handleDrop(undefined, makeTransfer({}));
-    expect(deps.warn).toHaveBeenCalledWith('Unmess: that drop did not contain a usable file.');
+    expect(deps.warn).toHaveBeenCalledWith('Foreman: that drop did not contain a usable file.');
     expect(deps.attach).not.toHaveBeenCalled();
   });
 });

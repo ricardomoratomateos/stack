@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { UnmessWebviewProvider } from '../../src/sidebar/UnmessWebviewProvider';
+import { ForemanWebviewProvider } from '../../src/sidebar/ForemanWebviewProvider';
 import { Uri, window, resetVscodeMock } from '../__mocks__/vscode';
 import type { WorktreeApplicationService } from '../../src/application/WorktreeApplicationService';
 import type { AgentSessionManager } from '../../src/session/AgentSessionManager';
 import type { GitWatcher } from '../../src/git/GitWatcher';
-import type { UnmessState, WebMessage } from '../../src/webview/types';
+import type { ForemanState, WebMessage } from '../../src/webview/types';
 
 // ── harness ──────────────────────────────────────────────────────────────────
 
@@ -27,10 +27,10 @@ function makeWebviewView(visible = true) {
   };
 }
 
-const emptyState: UnmessState = { worktrees: [], activeWorktreeId: undefined };
+const emptyState: ForemanState = { worktrees: [], activeWorktreeId: undefined };
 
 /** Minimal WorktreeItem carrying just the agent state the header summarises. */
-function item(id: string, agent: 'idle' | 'active' | 'permission' | 'waiting'): UnmessState['worktrees'][number] {
+function item(id: string, agent: 'idle' | 'active' | 'permission' | 'waiting'): ForemanState['worktrees'][number] {
   return {
     id, branch: `feat/${id}`, path: `/repo/${id}`, isMain: false, deleting: false,
     agent, agentCount: 1, terminalCount: 0, sessions: [],
@@ -51,11 +51,11 @@ function makeHarness() {
   const gitWatcher = { onChange: vi.fn((cb: () => void) => { gitListeners.push(cb); }) };
   const service = {
     handleMessage: vi.fn(async () => {}),
-    buildState: vi.fn((): UnmessState => emptyState),
+    buildState: vi.fn((): ForemanState => emptyState),
     handleActiveTerminalChange: vi.fn(),
   };
 
-  const provider = new UnmessWebviewProvider(
+  const provider = new ForemanWebviewProvider(
     Uri.file('/ext') as never,
     agentManager as unknown as AgentSessionManager,
     gitWatcher as unknown as GitWatcher,
@@ -242,10 +242,10 @@ describe('header description', () => {
     { agents: ['active'] as const, expected: '1 thinking' },
     { agents: ['permission'] as const, expected: '1 needs you' },
   ])('describe($agents) → $expected', ({ agents, expected }) => {
-    const state: UnmessState = {
+    const state: ForemanState = {
       worktrees: agents.map((a, i) => item(String(i), a)),
       activeWorktreeId: undefined,
     };
-    expect(UnmessWebviewProvider.describe(state)).toBe(expected);
+    expect(ForemanWebviewProvider.describe(state)).toBe(expected);
   });
 });

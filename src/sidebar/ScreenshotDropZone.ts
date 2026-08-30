@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { fileURLToPath } from 'node:url';
 
 /** View id of the drop-zone tree — must match the contribution in package.json. */
-export const DROP_ZONE_VIEW_ID = 'unmess-drop-zone';
+export const DROP_ZONE_VIEW_ID = 'foreman-drop-zone';
 
 /** `text/uri-list` — how VS Code delivers path-based drops (Explorer, OS files with a path). */
 const URI_LIST_MIME = 'text/uri-list';
@@ -110,7 +110,7 @@ implements vscode.TreeDataProvider<DropZoneElement>, vscode.TreeDragAndDropContr
   async handleDrop(_target: DropZoneElement | undefined, dataTransfer: vscode.DataTransfer): Promise<void> {
     const paths = await extractDroppedPaths(dataTransfer, this.deps.saveTempFile);
     if (paths.length === 0) {
-      this.deps.warn('Unmess: that drop did not contain a usable file.');
+      this.deps.warn('Foreman: that drop did not contain a usable file.');
       return;
     }
     await this.deps.attach(paths);

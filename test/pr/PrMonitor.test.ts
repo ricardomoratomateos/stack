@@ -272,9 +272,9 @@ describe('defaultRunner', () => {
   });
 
   it('passes cwd, env and timeout through to child_process.exec', async () => {
-    const out = await defaultRunner.exec('echo "$UNMESS_TEST_VAR:$(pwd)"', {
+    const out = await defaultRunner.exec('echo "$FOREMAN_TEST_VAR:$(pwd)"', {
       cwd: '/',
-      env: { ...process.env, UNMESS_TEST_VAR: 'pr-runner' },
+      env: { ...process.env, FOREMAN_TEST_VAR: 'pr-runner' },
       timeout: 10_000,
     });
     expect(out).toBe('pr-runner:/');

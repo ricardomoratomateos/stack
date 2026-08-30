@@ -5,28 +5,28 @@
  */
 export const SCRIPT_TEMPLATES: Record<'setup' | 'teardown', string> = {
   setup: `#!/usr/bin/env bash
-# Runs after Unmess creates a worktree, from inside it.
+# Runs after Foreman creates a worktree, from inside it.
 #
 # Available:
-#   UNMESS_REPO_ROOT        the main checkout
-#   UNMESS_WORKTREE_PATH    this worktree
-#   UNMESS_BRANCH           its branch
-#   UNMESS_COMPOSE_PROJECT  the docker compose project name Unmess uses for it
-#   HTTP_PORT, DB_PORT…     one variable per port configured in Unmess settings
+#   FOREMAN_REPO_ROOT        the main checkout
+#   FOREMAN_WORKTREE_PATH    this worktree
+#   FOREMAN_BRANCH           its branch
+#   FOREMAN_COMPOSE_PROJECT  the docker compose project name Foreman uses for it
+#   HTTP_PORT, DB_PORT…     one variable per port configured in Foreman settings
 set -euo pipefail
-cd "$UNMESS_WORKTREE_PATH"
+cd "$FOREMAN_WORKTREE_PATH"
 
 # Keep what applies:
-# cp "$UNMESS_REPO_ROOT/.env" .env
+# cp "$FOREMAN_REPO_ROOT/.env" .env
 # npm install
 # composer install
 `,
   teardown: `#!/usr/bin/env bash
-# Runs before Unmess deletes a worktree, from inside it. Same variables as setup.
+# Runs before Foreman deletes a worktree, from inside it. Same variables as setup.
 set -euo pipefail
-cd "$UNMESS_WORKTREE_PATH"
+cd "$FOREMAN_WORKTREE_PATH"
 
 # Keep what applies:
-# docker compose -p "$UNMESS_COMPOSE_PROJECT" down -v
+# docker compose -p "$FOREMAN_COMPOSE_PROJECT" down -v
 `,
 };

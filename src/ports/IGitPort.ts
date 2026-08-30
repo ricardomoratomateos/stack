@@ -47,7 +47,7 @@ export interface IGitPort {
   /**
    * `git fetch <remote> <branch>` — refreshes one remote-tracking ref.
    *
-   * Explicit and narrow. Unmess never fetches on its own (see baseDrift), so
+   * Explicit and narrow. Foreman never fetches on its own (see baseDrift), so
    * this only ever runs because the user asked, and it fetches the single branch
    * the answer depends on rather than the whole remote. Rejects on failure so
    * the caller can say why nothing changed.

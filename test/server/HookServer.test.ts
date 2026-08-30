@@ -77,7 +77,7 @@ describe('POST /hook', () => {
     expect(updateState).toHaveBeenCalledWith('ws1', 'waiting', 4);
   });
 
-  it('omits windowIndex when empty or non-numeric (agents launched before UNMESS_WINDOW_INDEX)', async () => {
+  it('omits windowIndex when empty or non-numeric (agents launched before FOREMAN_WINDOW_INDEX)', async () => {
     const url = await startServer();
     await postHook(url, { event: 'Stop', workspaceId: 'ws1', windowIndex: '' });
     await postHook(url, { event: 'Stop', workspaceId: 'ws1', windowIndex: 'junk' });

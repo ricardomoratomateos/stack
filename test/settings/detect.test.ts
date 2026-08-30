@@ -47,9 +47,9 @@ describe('detect', () => {
     expect(detect('/repo', repo(files as Record<string, string>)).stack).toBe(stack);
   });
 
-  it('points at an existing setup/teardown script, preferring .unmess/', () => {
-    const d = detect('/repo', repo({ '.unmess/setup.sh': '', 'scripts/setup.sh': '', 'teardown.sh': '' }));
-    expect(d.setupScript).toBe('.unmess/setup.sh');
+  it('points at an existing setup/teardown script, preferring .foreman/', () => {
+    const d = detect('/repo', repo({ '.foreman/setup.sh': '', 'scripts/setup.sh': '', 'teardown.sh': '' }));
+    expect(d.setupScript).toBe('.foreman/setup.sh');
     expect(d.teardownScript).toBe('teardown.sh');
   });
 

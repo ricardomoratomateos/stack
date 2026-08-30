@@ -30,7 +30,7 @@ export class ProviderFactory {
     return provider;
   }
 
-  /** The provider selected by `unmess.defaultProvider`. */
+  /** The provider selected by `foreman.defaultProvider`. */
   defaultProvider(): IAgentProvider {
     return this.create(this.config.get().defaultProvider);
   }

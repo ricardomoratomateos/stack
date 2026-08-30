@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { CLAUDE_SETTINGS_PATH } from '../../constants';
 import { JsonHookInstaller } from '../shared/JsonHookInstaller';
 
-/** Everything Unmess paints a state from. Claude Code emits all of them. */
+/** Everything Foreman paints a state from. Claude Code emits all of them. */
 const HOOK_EVENTS = [
   'SessionStart',
   'SessionEnd',

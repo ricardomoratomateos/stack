@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { window, Uri, TabInputText, FakeMemento, resetVscodeMock } from '../__mocks__/vscode';
 import { TabManager, findOwner } from '../../src/worktree/TabManager';
 
-const STORE_KEY = 'unmess.tabs';
+const STORE_KEY = 'foreman.tabs';
 
 interface WorktreeRef { id: string; path: string }
 
@@ -158,7 +158,7 @@ describe('liveSnapshot', () => {
     expect(saved['a'].active).toBe('/wt/a/1.ts');
   });
 
-  it('persists to unmess.tabs on every snapshot', () => {
+  it('persists to foreman.tabs on every snapshot', () => {
     const { tabsChanged, activeEditorChanged } = build(memento, () => [wtA]);
     setOpenTabs('/wt/a/1.ts');
     tabsChanged();
@@ -295,7 +295,7 @@ describe('restoreTabs', () => {
   let missing: string;
 
   beforeAll(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-tabs-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-tabs-'));
     fileOne = path.join(tmpDir, 'one.ts');
     fileTwo = path.join(tmpDir, 'two.ts');
     missing = path.join(tmpDir, 'gone.ts');
@@ -484,7 +484,7 @@ describe('updateViewerState', () => {
 // ── constructor ──────────────────────────────────────────────────────────────
 
 describe('constructor', () => {
-  it('hydrates saved state from unmess.tabs on startup', async () => {
+  it('hydrates saved state from foreman.tabs on startup', async () => {
     const memento = new FakeMemento();
     await memento.update(STORE_KEY, {
       a: { uris: ['/wt/a/1.ts'], active: '/wt/a/1.ts', hadViewer: true },

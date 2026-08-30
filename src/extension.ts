@@ -14,7 +14,7 @@ import { ProviderFactory } from './providers/ProviderFactory';
 import { DockerMonitor } from './docker/DockerMonitor';
 import { GitWatcher } from './git/GitWatcher';
 import { HookServer } from './server/HookServer';
-import { UnmessWebviewProvider } from './sidebar/UnmessWebviewProvider';
+import { ForemanWebviewProvider } from './sidebar/ForemanWebviewProvider';
 import { ScreenshotDropZone, DROP_ZONE_VIEW_ID } from './sidebar/ScreenshotDropZone';
 import { PrMonitor } from './pr/PrMonitor';
 import { TmuxManager } from './session/TmuxManager';
@@ -39,7 +39,7 @@ import { findRepoRoot } from './worktree/findRepoRoot';
 import { worktreesInRepo } from './worktree/worktreesInRepo';
 
 /**
- * Surfaces a broken `.unmess/config.json` with a way to go fix it.
+ * Surfaces a broken `.foreman/config.json` with a way to go fix it.
  *
  * A warning rather than an error, and never a modal: whatever is wrong, the
  * extension is already running on the user's own settings, so this is news the
@@ -50,7 +50,7 @@ async function reportRepoConfigProblems(config: ConfigManager, problems: string[
   const head = problems[0] ?? '';
   const rest = problems.length > 1 ? ` (+${problems.length - 1} more)` : '';
   const action = await vscode.window.showWarningMessage(
-    `Unmess: ${REPO_CONFIG_RELATIVE} — ${head}${rest}`,
+    `Foreman: ${REPO_CONFIG_RELATIVE} — ${head}${rest}`,
     ...(file ? ['Open file'] : []),
   );
   if (action === 'Open file' && file) {
@@ -59,16 +59,16 @@ async function reportRepoConfigProblems(config: ConfigManager, problems: string[
 }
 
 /**
- * Writes `.unmess/config.json` from whatever is in effect right now.
+ * Writes `.foreman/config.json` from whatever is in effect right now.
  *
- * The point of the command is the handover: the person who made Unmess work
+ * The point of the command is the handover: the person who made Foreman work
  * here has the answers in their own settings.json, and everyone who clones the
  * repo afterwards has none of them. This lifts them into a file that travels
  * with the code.
  */
 async function createRepoConfig(config: ConfigManager, root: string | undefined): Promise<void> {
   if (!root) {
-    vscode.window.showWarningMessage('Unmess: open a git repository first.');
+    vscode.window.showWarningMessage('Foreman: open a git repository first.');
     return;
   }
   const file = path.join(root, REPO_CONFIG_RELATIVE);
@@ -76,7 +76,7 @@ async function createRepoConfig(config: ConfigManager, root: string | undefined)
     // Never silently overwritten: this file is committed and shared, so the
     // copy on disk may well be a teammate's work rather than a stale draft.
     const overwrite = await vscode.window.showWarningMessage(
-      `Unmess: ${REPO_CONFIG_RELATIVE} already exists.`,
+      `Foreman: ${REPO_CONFIG_RELATIVE} already exists.`,
       'Open it',
       'Overwrite',
     );
@@ -90,7 +90,7 @@ async function createRepoConfig(config: ConfigManager, root: string | undefined)
   fs.writeFileSync(file, renderRepoConfig(config.get()));
   await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file));
   vscode.window.showInformationMessage(
-    `Unmess: wrote ${REPO_CONFIG_RELATIVE}. Commit it and your team gets the same setup.`,
+    `Foreman: wrote ${REPO_CONFIG_RELATIVE}. Commit it and your team gets the same setup.`,
   );
 }
 
@@ -204,7 +204,7 @@ class VsCodeWorkspaceHost implements IWorkspaceHost {
         editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
       }
     } catch {
-      vscode.window.showWarningMessage(`Unmess: could not open ${absPath}`);
+      vscode.window.showWarningMessage(`Foreman: could not open ${absPath}`);
     }
   }
 }
@@ -222,15 +222,15 @@ export async function activate(ctx: vscode.ExtensionContext) {
     // Hides the screenshot drop-zone view (its `when` clause), which is useless
     // until the extension is really running and otherwise renders a bare
     // "no data provider registered" placeholder.
-    void vscode.commands.executeCommand('setContext', 'unmess.tmuxMissing', true);
+    void vscode.commands.executeCommand('setContext', 'foreman.tmuxMissing', true);
     ctx.subscriptions.push(
       vscode.window.registerWebviewViewProvider(SIDEBAR_VIEW_ID, new TmuxGateView(install)),
     );
     return;
   }
-  void vscode.commands.executeCommand('setContext', 'unmess.tmuxMissing', false);
+  void vscode.commands.executeCommand('setContext', 'foreman.tmuxMissing', false);
   // Ticks the walkthrough's first step; the gate above never sets it.
-  void vscode.commands.executeCommand('setContext', 'unmess.tmuxReady', true);
+  void vscode.commands.executeCommand('setContext', 'foreman.tmuxReady', true);
 
   // Resolved per read, not captured: the user can add or remove the folder that
   // holds the repository at any point in a window's life.
@@ -265,7 +265,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
 
   const prMonitor = new PrMonitor();
 
-  // Clickable file paths in unmess terminals — resolves the relative paths
+  // Clickable file paths in foreman terminals — resolves the relative paths
   // Claude prints (src/foo.ts:12) against the terminal's worktree.
   const fileLinkProvider = new TerminalFileLinkProvider({
     resolveBase: (terminal) => {
@@ -325,7 +325,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   });
   ctx.subscriptions.push(newTaskPanel);
 
-  const webviewProvider = new UnmessWebviewProvider(ctx.extensionUri, agentManager, gitWatcher, service);
+  const webviewProvider = new ForemanWebviewProvider(ctx.extensionUri, agentManager, gitWatcher, service);
   ctx.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SIDEBAR_VIEW_ID, webviewProvider, {
       webviewOptions: { retainContextWhenHidden: true },
@@ -341,7 +341,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     targetLabel: () => service.activeWorktreeLabel(),
     attach: (paths) => service.attachDroppedFiles(paths),
     saveTempFile: async (name, data) => {
-      const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'unmess-drop-'));
+      const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'foreman-drop-'));
       const file = path.join(dir, name || 'dropped-image.png');
       await fs.promises.writeFile(file, data);
       return file;
@@ -356,7 +356,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     dropZone,
   );
 
-  // Settings panel: the project half round-trips through `.unmess/config.json`
+  // Settings panel: the project half round-trips through `.foreman/config.json`
   // (written here, read back through the same validator the extension uses, so
   // the panel reports exactly what the extension would), the personal half
   // through VS Code's own settings at global scope.
@@ -374,7 +374,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     snapshot: () => {
       const root = repoRootOf();
       const effective = config.get();
-      const cfg = vscode.workspace.getConfiguration('unmess');
+      const cfg = vscode.workspace.getConfiguration('foreman');
       const repoFile = readRepoConfig(root);
       return {
         repoRoot: root,
@@ -425,7 +425,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     createScript: async (kind) => {
       const root = repoRootOf();
       if (!root) throw new Error('Open a git repository first.');
-      const rel = path.join('.unmess', `${kind}.sh`);
+      const rel = path.join('.foreman', `${kind}.sh`);
       const abs = path.join(root, rel);
       if (!fs.existsSync(abs)) {
         fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -447,14 +447,14 @@ export async function activate(ctx: vscode.ExtensionContext) {
       return readRepoConfig(root).problems;
     },
     saveUser: async (values) => {
-      const cfg = vscode.workspace.getConfiguration('unmess');
+      const cfg = vscode.workspace.getConfiguration('foreman');
       for (const [key, value] of Object.entries(values)) {
         await cfg.update(key, value, vscode.ConfigurationTarget.Global);
       }
       webviewProvider.push();
     },
     clearPersonalOverrides: async () => {
-      const cfg = vscode.workspace.getConfiguration('unmess');
+      const cfg = vscode.workspace.getConfiguration('foreman');
       for (const key of REPO_KEYS) {
         await cfg.update(key, undefined, vscode.ConfigurationTarget.Global);
         // Workspace scope only exists inside a workspace; elsewhere the update throws.
@@ -535,35 +535,35 @@ export async function activate(ctx: vscode.ExtensionContext) {
 
   // Commands.
   ctx.subscriptions.push(
-    vscode.commands.registerCommand('unmess.createWorktree', (opts?: { branch?: string; description?: string }) =>
+    vscode.commands.registerCommand('foreman.createWorktree', (opts?: { branch?: string; description?: string }) =>
       service.createWorktree(opts),
     ),
     // The "+" in the view header: opens the webview's rich new-task modal
     // (title, branch, base branch, description) rather than a bare input box.
-    vscode.commands.registerCommand('unmess.newTask', () => newTaskPanel.open()),
-    vscode.commands.registerCommand('unmess.openSettings', () => settingsPanel.open()),
-    vscode.commands.registerCommand('unmess.gettingStarted', () =>
-      vscode.commands.executeCommand('workbench.action.openWalkthrough', 'unmess.unmess#unmess.gettingStarted', false),
+    vscode.commands.registerCommand('foreman.newTask', () => newTaskPanel.open()),
+    vscode.commands.registerCommand('foreman.openSettings', () => settingsPanel.open()),
+    vscode.commands.registerCommand('foreman.gettingStarted', () =>
+      vscode.commands.executeCommand('workbench.action.openWalkthrough', 'foreman.foreman#foreman.gettingStarted', false),
     ),
-    vscode.commands.registerCommand('unmess.createRepoConfig', () => createRepoConfig(config, repoRootOf())),
-    vscode.commands.registerCommand('unmess.deleteWorktree', (item) => service.deleteWorktree(item?.worktree)),
-    vscode.commands.registerCommand('unmess.renameWorktree', (item) => service.renameWorktree(item?.worktree)),
-    vscode.commands.registerCommand('unmess.initWorktree', (item) => service.initWorktree(item?.worktree)),
-    vscode.commands.registerCommand('unmess.openTerminal', (item) => service.openTerminal(item?.worktree)),
-    vscode.commands.registerCommand('unmess.launchAgent', (item) => service.launchAgent(item?.worktree)),
-    vscode.commands.registerCommand('unmess.focusNextWorktree', () => service.focusNextWorktree()),
-    vscode.commands.registerCommand('unmess.focusPrevWorktree', () => service.focusPrevWorktree()),
-    vscode.commands.registerCommand('unmess.focusSession', (terminal: vscode.Terminal | undefined) => terminal?.show()),
-    vscode.commands.registerCommand('unmess.attachLatestScreenshot', async () => {
+    vscode.commands.registerCommand('foreman.createRepoConfig', () => createRepoConfig(config, repoRootOf())),
+    vscode.commands.registerCommand('foreman.deleteWorktree', (item) => service.deleteWorktree(item?.worktree)),
+    vscode.commands.registerCommand('foreman.renameWorktree', (item) => service.renameWorktree(item?.worktree)),
+    vscode.commands.registerCommand('foreman.initWorktree', (item) => service.initWorktree(item?.worktree)),
+    vscode.commands.registerCommand('foreman.openTerminal', (item) => service.openTerminal(item?.worktree)),
+    vscode.commands.registerCommand('foreman.launchAgent', (item) => service.launchAgent(item?.worktree)),
+    vscode.commands.registerCommand('foreman.focusNextWorktree', () => service.focusNextWorktree()),
+    vscode.commands.registerCommand('foreman.focusPrevWorktree', () => service.focusPrevWorktree()),
+    vscode.commands.registerCommand('foreman.focusSession', (terminal: vscode.Terminal | undefined) => terminal?.show()),
+    vscode.commands.registerCommand('foreman.attachLatestScreenshot', async () => {
       const term = vscode.window.activeTerminal;
       const worktreeId = term ? agentManager.getWorktreeIdForTerminal(term) : undefined;
       if (!worktreeId) {
-        vscode.window.showWarningMessage('Unmess: focus an agent terminal first, then attach the screenshot.');
+        vscode.window.showWarningMessage('Foreman: focus an agent terminal first, then attach the screenshot.');
         return;
       }
       const shot = await findLatestScreenshot();
       if (!shot) {
-        vscode.window.showWarningMessage('Unmess: no screenshot found in your screenshot folder.');
+        vscode.window.showWarningMessage('Foreman: no screenshot found in your screenshot folder.');
         return;
       }
       // Paste the path single-quoted (as a terminal file-drop does), unsent, so
@@ -590,7 +590,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // so activation never blocks — the webview renders immediately and folder
   // mutations (which may reload the window) happen after activate() resolves.
   void service.start().catch((e) => {
-    vscode.window.showErrorMessage(`Unmess failed to load worktrees: ${String(e)}`);
+    vscode.window.showErrorMessage(`Foreman failed to load worktrees: ${String(e)}`);
   });
 
   // Greet an empty editor with the New agent panel — the same spirit as the
@@ -605,11 +605,11 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // First look at a repository that could use the heavier setup — a compose
   // file, or a PHP stack that wants Xdebug — offer the settings panel once.
   // Then never again for this repo: it lives behind the gear from here on, and
-  // a repo that already has `.unmess/config.json` was set up by someone.
+  // a repo that already has `.foreman/config.json` was set up by someone.
   void (async () => {
     const root = repoRootOf();
     if (!root) return;
-    const key = `unmess.setupNudged:${root}`;
+    const key = `foreman.setupNudged:${root}`;
     if (ctx.globalState.get<boolean>(key)) return;
     if (readRepoConfig(root).present) { await ctx.globalState.update(key, true); return; }
     const found = detect(root, detectIo);
@@ -617,7 +617,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     await ctx.globalState.update(key, true);
     const what = found.composeFiles.length > 0 ? `\`${found.composeFiles[0]}\`` : 'a PHP stack';
     const pick = await vscode.window.showInformationMessage(
-      `Unmess: this repo has ${what}. Set up a Docker stack and debugger per worktree?`,
+      `Foreman: this repo has ${what}. Set up a Docker stack and debugger per worktree?`,
       'Open settings',
       'Not now',
     );

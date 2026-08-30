@@ -17,12 +17,12 @@ function git(cmd: string, cwd = repo): string {
 
 beforeAll(() => {
   // realpathSync: macOS tmpdir is a symlink (/var → /private/var); git reports resolved paths
-  tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-gitcli-')));
+  tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-gitcli-')));
   repo = path.join(tmp, 'repo');
   fs.mkdirSync(repo);
   git('init -b main');
-  git('config user.email "test@unmess.dev"');
-  git('config user.name "Unmess Test"');
+  git('config user.email "test@foreman.dev"');
+  git('config user.name "Foreman Test"');
   git('config commit.gpgsign false');
   fs.writeFileSync(path.join(repo, 'README.md'), 'hello\n');
   git('add .');
@@ -316,8 +316,8 @@ describe('NodeProcessRunner (integration)', () => {
   });
 
   it('passes env vars', async () => {
-    const out = await runner.exec('echo "$UNMESS_TEST_VAR"', {
-      env: { ...process.env, UNMESS_TEST_VAR: 'val-42' },
+    const out = await runner.exec('echo "$FOREMAN_TEST_VAR"', {
+      env: { ...process.env, FOREMAN_TEST_VAR: 'val-42' },
     });
     expect(out).toBe('val-42');
   });
@@ -329,22 +329,22 @@ describe('NodeProcessRunner (integration)', () => {
 
 // A branch that lives only on a remote is the "pick up the task I started on
 // the other machine" case. branchExists (rev-parse) does not resolve it, so
-// without remoteBranch() Unmess treated the name as brand new and cut an empty
+// without remoteBranch() Foreman treated the name as brand new and cut an empty
 // branch from the base — silently orphaning what had been pushed.
 describe('GitCliAdapter.remoteBranch (integration, real remote)', () => {
   let remoteTmp: string;
   let clone: string;
 
   beforeAll(() => {
-    remoteTmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-remote-')));
+    remoteTmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-remote-')));
     const bare = path.join(remoteTmp, 'origin.git');
     execSync(`git init --bare -b main "${bare}"`, { stdio: 'pipe' });
 
     const seed = path.join(remoteTmp, 'seed');
     execSync(`git clone "${bare}" "${seed}"`, { stdio: 'pipe' });
     const g = (c: string) => execSync(`git ${c}`, { cwd: seed, stdio: 'pipe' });
-    g('config user.email "test@unmess.dev"');
-    g('config user.name "Unmess Test"');
+    g('config user.email "test@foreman.dev"');
+    g('config user.name "Foreman Test"');
     g('config commit.gpgsign false');
     fs.writeFileSync(path.join(seed, 'a.txt'), 'a\n');
     g('add .');
@@ -403,14 +403,14 @@ describe('GitCliAdapter.mainBranch (integration)', () => {
     // A fresh clone has origin/main but no local main until something checks it
     // out; `worktree add -b x <path> main` and `... origin/main` differ only in
     // which one exists locally, and the caller wants the plain name.
-    const t = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-mainbr-')));
+    const t = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-mainbr-')));
     try {
       const bare = path.join(t, 'origin.git');
       execSync(`git init --bare -b main "${bare}"`, { stdio: 'pipe' });
       const seed = path.join(t, 'seed');
       execSync(`git clone "${bare}" "${seed}"`, { stdio: 'pipe' });
       const g = (c: string) => execSync(`git ${c}`, { cwd: seed, stdio: 'pipe' });
-      g('config user.email "t@unmess.dev"');
+      g('config user.email "t@foreman.dev"');
       g('config user.name "T"');
       g('config commit.gpgsign false');
       fs.writeFileSync(path.join(seed, 'a.txt'), 'a\n');
@@ -425,10 +425,10 @@ describe('GitCliAdapter.mainBranch (integration)', () => {
   });
 
   it('returns undefined in a repo with no main line at all', () => {
-    const t = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-nomain-')));
+    const t = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-nomain-')));
     try {
       execSync('git init -b only-this', { cwd: t, stdio: 'pipe' });
-      execSync('git config user.email "t@unmess.dev"', { cwd: t, stdio: 'pipe' });
+      execSync('git config user.email "t@foreman.dev"', { cwd: t, stdio: 'pipe' });
       execSync('git config user.name "T"', { cwd: t, stdio: 'pipe' });
       execSync('git config commit.gpgsign false', { cwd: t, stdio: 'pipe' });
       execSync('git commit --allow-empty -m init', { cwd: t, stdio: 'pipe' });
@@ -448,8 +448,8 @@ describe('GitCliAdapter.fetchBranch (integration)', () => {
     const upstream = path.join(tmp, 'upstream');
     fs.mkdirSync(upstream);
     git('init -b main', upstream);
-    git('config user.email "test@unmess.dev"', upstream);
-    git('config user.name "Unmess Test"', upstream);
+    git('config user.email "test@foreman.dev"', upstream);
+    git('config user.name "Foreman Test"', upstream);
     git('config commit.gpgsign false', upstream);
     fs.writeFileSync(path.join(upstream, 'a.txt'), 'one\n');
     git('add .', upstream);

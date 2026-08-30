@@ -1,7 +1,7 @@
 import * as net from 'node:net';
 import { describe, it, expect, vi } from 'vitest';
 import { PortAllocator, PortAllocatorOptions } from '../../src/worktree/portAllocator';
-import type { UnmessConfig } from '../../src/types';
+import type { ForemanConfig } from '../../src/types';
 
 function stubStore(registry: Record<string, number>) {
   return { getPortRegistry: () => registry };
@@ -13,19 +13,19 @@ function stubProbe(...busy: number[]) {
 }
 
 /** Config shaped like the aside one: WORKTREE_PORT 8081+slot, DEBUG_PORT 9898+1+slot. */
-function stubConfig(over: Partial<UnmessConfig['docker']> = {}): () => UnmessConfig {
+function stubConfig(over: Partial<ForemanConfig['docker']> = {}): () => ForemanConfig {
   return () =>
     ({
       debugBasePort: 9898,
       docker: {
-        composeFile: '.unmess/docker-compose.worktree.yml',
+        composeFile: '.foreman/docker-compose.worktree.yml',
         overrideFile: '',
         ports: ['WORKTREE_PORT', 'DEBUG_PORT'],
         basePort: 8081,
         portStride: 1,
         ...over,
       },
-    }) as UnmessConfig;
+    }) as ForemanConfig;
 }
 
 /** Default options keep tests off real sockets while leaving the registry logic intact. */
@@ -78,7 +78,7 @@ describe('PortAllocator', () => {
     });
 
     // ── OS-level availability ────────────────────────────────────────────────
-    // The registry only knows worktrees Unmess created. Everything below is the
+    // The registry only knows worktrees Foreman created. Everything below is the
     // class of collision it is structurally blind to.
 
     it('skips a port the registry thinks is free but the machine has taken', async () => {

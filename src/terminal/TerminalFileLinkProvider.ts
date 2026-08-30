@@ -69,7 +69,7 @@ export interface WorktreeFileLink extends vscode.TerminalLink {
 }
 
 /**
- * Makes file paths printed in unmess terminals clickable. VSCode's built-in
+ * Makes file paths printed in foreman terminals clickable. VSCode's built-in
  * link detection can't resolve the relative paths Claude prints (src/foo.ts:12)
  * because the shell runs inside tmux, where cwd tracking is lost — this
  * provider resolves them against the terminal's worktree instead.

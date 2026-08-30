@@ -66,7 +66,7 @@ export class GitCliAdapter implements IGitPort {
    *
    * `branchExists` uses `rev-parse --verify <branch>`, which does NOT resolve a
    * remote-only branch — so typing the name of a branch you pushed from another
-   * machine looked like a brand-new branch, and Unmess cut an empty one from the
+   * machine looked like a brand-new branch, and Foreman cut an empty one from the
    * base under that same name.
    */
   remoteBranch(branch: string, repoRoot: string): string | undefined {
@@ -85,7 +85,7 @@ export class GitCliAdapter implements IGitPort {
   }
 
   /**
-   * The repository's own main line, so Unmess does not have to assume one.
+   * The repository's own main line, so Foreman does not have to assume one.
    * Reuses the same resolution the diff already relies on.
    */
   mainBranch(repoRoot: string): string | undefined {

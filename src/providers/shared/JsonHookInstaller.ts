@@ -18,7 +18,7 @@ import { HookEntry } from '../../types';
  * command ourselves, so an explicit argument sidesteps all three.
  */
 const SCRIPT = `#!/bin/bash
-# Unmess notify hook — generated, do not edit manually.
+# Foreman notify hook — generated, do not edit manually.
 URL_FILE="$(dirname "$0")/hook-url"
 [ -r "$URL_FILE" ] || exit 0
 URL=$(cat "$URL_FILE")
@@ -28,11 +28,11 @@ EVENT_NAME="\${1:-\${HOOK_EVENT_NAME:-}}"
 # reader that never consumes it. We key off the environment instead.
 PAYLOAD=$(cat)
 
-WORKSPACE_ID="\${UNMESS_WORKSPACE_ID:-}"
-WINDOW_INDEX="\${UNMESS_WINDOW_INDEX:-}"
+WORKSPACE_ID="\${FOREMAN_WORKSPACE_ID:-}"
+WINDOW_INDEX="\${FOREMAN_WINDOW_INDEX:-}"
 
 # Ask tmux where we are whenever the launcher did not say. Those variables are
-# baked in when Unmess starts an agent, so an agent the user starts BY HAND —
+# baked in when Foreman starts an agent, so an agent the user starts BY HAND —
 # in a shell window, or after the first one exited — has neither, and every
 # event it sent was dropped for having an empty workspace id. tmux always knows,
 # because the hook runs inside the pane.
@@ -41,24 +41,24 @@ if [ -n "\${TMUX_PANE:-}" ] && command -v tmux >/dev/null 2>&1; then
     WINDOW_INDEX=$(tmux display-message -p -t "$TMUX_PANE" '#{window_index}' 2>/dev/null) || WINDOW_INDEX=""
   fi
   if [ -z "$WORKSPACE_ID" ]; then
-    # Session names are "unmess-<worktree id>". Worktree ids are UUIDs, so they
+    # Session names are "foreman-<worktree id>". Worktree ids are UUIDs, so they
     # survive sessionName()'s sanitising and 50-char cap unchanged and the
     # prefix strip round-trips exactly.
     SESSION=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null) || SESSION=""
     case "$SESSION" in
-      unmess-*) WORKSPACE_ID="\${SESSION#unmess-}" ;;
+      foreman-*) WORKSPACE_ID="\${SESSION#foreman-}" ;;
     esac
   fi
 fi
 
 curl -s -X POST "$URL/hook" \\
   -H "Content-Type: application/json" \\
-  -d "{\\"event\\":\\"$EVENT_NAME\\",\\"terminalId\\":\\"$UNMESS_TERMINAL_ID\\",\\"workspaceId\\":\\"$WORKSPACE_ID\\",\\"windowIndex\\":\\"$WINDOW_INDEX\\"}" \\
+  -d "{\\"event\\":\\"$EVENT_NAME\\",\\"terminalId\\":\\"$FOREMAN_TERMINAL_ID\\",\\"workspaceId\\":\\"$WORKSPACE_ID\\",\\"windowIndex\\":\\"$WINDOW_INDEX\\"}" \\
   > /dev/null 2>&1 || true
 `;
 
 /**
- * Registers Unmess's notify hook in an agent whose hook config is JSON shaped
+ * Registers Foreman's notify hook in an agent whose hook config is JSON shaped
  * like `{ "hooks": { "<Event>": [{ "hooks": [{ type, command }] }] } }`.
  *
  * Claude Code, Codex and Grok Build all landed on that same shape, so they
@@ -74,7 +74,7 @@ export class JsonHookInstaller {
     storagePath: string,
     /** Absolute path to the agent's JSON hook config. */
     private settingsPath: string,
-    /** Events this agent emits, out of the ones Unmess understands. */
+    /** Events this agent emits, out of the ones Foreman understands. */
     private events: readonly string[],
   ) {
     this.scriptPath = path.join(storagePath, 'notify.sh');

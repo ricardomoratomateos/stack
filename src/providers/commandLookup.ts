@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { PROVIDER_IDS, type ProviderId } from '../ports/IAgentProvider';
-import type { UnmessConfig } from '../types';
+import type { ForemanConfig } from '../types';
 
 /**
  * Which agents are actually runnable on this machine, so the card can dim the
@@ -12,7 +12,7 @@ import type { UnmessConfig } from '../types';
  * dimmed until the window was reloaded.
  */
 export function installedProviders(
-  config: UnmessConfig,
+  config: ForemanConfig,
   env: NodeJS.ProcessEnv = process.env,
 ): ProviderId[] {
   // Typed as a full Record, so adding a provider is a compile error here until

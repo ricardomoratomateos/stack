@@ -9,7 +9,7 @@ import {
 } from '../../src/application/WorktreeApplicationService';
 import { VsCodeNotifyAdapter } from '../../src/adapters/VsCodeNotifyAdapter';
 import { window, ProgressLocation, resetVscodeMock } from '../__mocks__/vscode';
-import type { Worktree, UnmessConfig } from '../../src/types';
+import type { Worktree, ForemanConfig } from '../../src/types';
 import type { SessionItem } from '../../src/webview/types';
 import type { ProviderId } from '../../src/ports/IAgentProvider';
 import type { WorktreeManager } from '../../src/worktree/WorktreeManager';
@@ -43,7 +43,7 @@ function makeWorktree(over: Partial<Worktree> = {}): Worktree {
 interface HarnessOpts {
   worktrees?: Worktree[];
   persistedActiveId?: string;
-  config?: Partial<UnmessConfig>;
+  config?: Partial<ForemanConfig>;
   /** worktree ids that currently have an open viewer terminal */
   viewerIds?: string[];
   /** worktree ids for which hasTerminals() returns true */
@@ -85,7 +85,7 @@ interface HarnessOpts {
 function makeHarness(o: HarnessOpts = {}) {
   const calls: string[] = [];
   const worktrees = o.worktrees ?? [];
-  const cfg: UnmessConfig = {
+  const cfg: ForemanConfig = {
     worktreesDirectory: './zer',
     setupScript: '',
     teardownScript: '',
@@ -101,7 +101,7 @@ function makeHarness(o: HarnessOpts = {}) {
       portStride: 100,
     },
     debugBasePort: 9898,
-    debugTemplate: { type: 'php', request: 'launch', name: 'Unmess: Debug', port: '{{PORT}}' },
+    debugTemplate: { type: 'php', request: 'launch', name: 'Foreman: Debug', port: '{{PORT}}' },
     ...o.config,
   };
 
@@ -557,7 +557,7 @@ describe('attachDroppedFiles', () => {
       worktrees: [makeWorktree({ id: 'a' }), makeWorktree({ id: 'b', branch: 'feat/b' })],
     });
     await h.service.attachDroppedFiles(['/shots/x.png']);
-    expect(h.notify.showWarning).toHaveBeenCalledWith('Unmess: select a worktree first, then drop the image again.');
+    expect(h.notify.showWarning).toHaveBeenCalledWith('Foreman: select a worktree first, then drop the image again.');
     expect(h.claude.pasteToActiveWindow).not.toHaveBeenCalled();
   });
 
@@ -568,7 +568,7 @@ describe('attachDroppedFiles', () => {
     });
     await h.service.attachDroppedFiles(['/shots/x.png']);
     expect(h.notify.showWarning).toHaveBeenCalledWith(
-      'Unmess: no agent session in login fix — launch one, then drop the image again.',
+      'Foreman: no agent session in login fix — launch one, then drop the image again.',
     );
     expect(h.claude.pasteToActiveWindow).not.toHaveBeenCalled();
   });
@@ -577,7 +577,7 @@ describe('attachDroppedFiles', () => {
     const h = makeHarness({ worktrees: [makeWorktree({ id: 'a', branch: 'feat/a' })], persistedActiveId: 'a' });
     await h.service.attachDroppedFiles(['/shots/x.png']);
     expect(h.notify.showWarning).toHaveBeenCalledWith(
-      'Unmess: no agent session in feat/a — launch one, then drop the image again.',
+      'Foreman: no agent session in feat/a — launch one, then drop the image again.',
     );
   });
 
@@ -671,18 +671,18 @@ describe('handleMessage dockerUp / dockerDown', () => {
     );
   });
 
-  it('prefers the worktree\'s own compose file when its branch carries .unmess', async () => {
+  it('prefers the worktree\'s own compose file when its branch carries .foreman', async () => {
     const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
     const h = makeHarness({
       worktrees: [b],
       config: {
-        docker: { composeFile: '.unmess/docker-compose.worktree.yml', overrideFile: '', ports: ['WORKTREE_PORT'], basePort: 8081, portStride: 1 },
+        docker: { composeFile: '.foreman/docker-compose.worktree.yml', overrideFile: '', ports: ['WORKTREE_PORT'], basePort: 8081, portStride: 1 },
       },
-      existingPaths: ['/repo/zer/feat-b/.unmess/docker-compose.worktree.yml'],
+      existingPaths: ['/repo/zer/feat-b/.foreman/docker-compose.worktree.yml'],
     });
     await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
     expect(h.calls).toContain(
-      'terminal.sendText:WORKTREE_PORT=8081 docker compose -p "feat-b" -f "/repo/zer/feat-b/.unmess/docker-compose.worktree.yml" up -d',
+      'terminal.sendText:WORKTREE_PORT=8081 docker compose -p "feat-b" -f "/repo/zer/feat-b/.foreman/docker-compose.worktree.yml" up -d',
     );
   });
 
@@ -807,10 +807,10 @@ describe('switchToWorktree', () => {
     expect(h.globalState.update).not.toHaveBeenCalled();
   });
 
-  it('persists activeWorktreeId under unmess.activeWorktreeId before any UI work', async () => {
+  it('persists activeWorktreeId under foreman.activeWorktreeId before any UI work', async () => {
     const { h } = switchHarness();
     await h.service.switchToWorktree('b');
-    expect(h.calls[0]).toBe('globalState.update:unmess.activeWorktreeId:b');
+    expect(h.calls[0]).toBe('globalState.update:foreman.activeWorktreeId:b');
   });
 
   it('creates viewer only when target hasTerminals', async () => {
@@ -843,7 +843,7 @@ describe('switchToWorktree', () => {
       const { h } = switchHarness({ viewerIds: ['a'], terminalIds: ['b'] });
       await h.service.switchToWorktree('b');
       expect(h.calls).toEqual([
-        'globalState.update:unmess.activeWorktreeId:b',
+        'globalState.update:foreman.activeWorktreeId:b',
         'ui.pushWebview',
         'claude.getOrCreateViewer:b',
         'viewer.show:b',
@@ -875,7 +875,7 @@ describe('switchToWorktree', () => {
     });
   });
 
-  // ── unmess.focusMode: the clean-slate teardown behaviour ─────────────────
+  // ── foreman.focusMode: the clean-slate teardown behaviour ─────────────────
   describe('focusMode (clean slate)', () => {
     const focus = (over: HarnessOpts = {}) =>
       switchHarness({ ...over, config: { focusMode: true, ...(over.config ?? {}) } });
@@ -919,7 +919,7 @@ describe('switchToWorktree', () => {
       const { h } = focus({ viewerIds: ['a'], terminalIds: ['b'] });
       await h.service.switchToWorktree('b');
       expect(h.calls).toEqual([
-        'globalState.update:unmess.activeWorktreeId:b',
+        'globalState.update:foreman.activeWorktreeId:b',
         'ui.pushWebview',
         'tab.updateViewerState:a,b,c:a',
         'host.saveAll:false',
@@ -1011,7 +1011,7 @@ describe('activeTerminal sync', () => {
     expect(h.ui.pushWebview).not.toHaveBeenCalled();
   });
 
-  it('ignores terminals that are not unmess viewers', () => {
+  it('ignores terminals that are not foreman viewers', () => {
     const a = makeWorktree({ id: 'a' });
     const h = makeHarness({ worktrees: [a], persistedActiveId: undefined, viewerIds: ['a'] });
     h.service.handleActiveTerminalChange({ name: 'random terminal' });
@@ -1137,7 +1137,7 @@ describe('buildState', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('selection restore after reload', () => {
-  it('constructor hydrates currentWorktreeId from unmess.activeWorktreeId', () => {
+  it('constructor hydrates currentWorktreeId from foreman.activeWorktreeId', () => {
     const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], persistedActiveId: 'a' });
     expect(h.globalState.get).toHaveBeenCalledWith(ACTIVE_WORKTREE_KEY);
     expect(h.service.buildState().activeWorktreeId).toBe('a');
@@ -1265,7 +1265,7 @@ describe('loadWorktreesForRepo', () => {
       worktrees: [a, b],
       workspaceFolders: ['/repo', '/repo/zer/stale-1', '/elsewhere/mine', '/repo/zer/stale-2'],
     });
-    // '/elsewhere/mine' stays. Unmess removes folders it is responsible for — a
+    // '/elsewhere/mine' stays. Foreman removes folders it is responsible for — a
     // stale worktree of this repo, or one it added for another repo — and leaves
     // anything it does not recognise where the user put it.
     h.service.setUi(h.ui);
@@ -1548,7 +1548,7 @@ describe('createWorktree', () => {
     expect(h.calls).toContain('claude.register:new');
     expect(h.calls).toContain('terminal.show:Init: feat/x');
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      'UNMESS_REPO_ROOT="/repo" UNMESS_WORKTREE_PATH="/repo/zer/feat-x" UNMESS_BRANCH="feat/x" UNMESS_COMPOSE_PROJECT="feat-x" bash "/scripts/setup.sh" && echo "✓ Setup complete"',
+      'FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-x" FOREMAN_BRANCH="feat/x" FOREMAN_COMPOSE_PROJECT="feat-x" bash "/scripts/setup.sh" && echo "✓ Setup complete"',
     );
   });
 
@@ -1996,7 +1996,7 @@ describe('initWorktree', () => {
     const a = makeWorktree({ id: 'a' });
     const h = makeHarness({ worktrees: [a] });
     await h.service.initWorktree(a);
-    expect(h.notify.showError).toHaveBeenCalledWith('No setup script configured. Set "unmess.setupScript" in settings.');
+    expect(h.notify.showError).toHaveBeenCalledWith('No setup script configured. Set "foreman.setupScript" in settings.');
     expect(h.host.createTerminal).not.toHaveBeenCalled();
   });
 
@@ -2008,7 +2008,7 @@ describe('initWorktree', () => {
       'host.createTerminal:Init: My task:/repo/zer/feat-a',
       'claude.register:a',
       'terminal.show:Init: My task',
-      'terminal.sendText:UNMESS_REPO_ROOT="/repo" UNMESS_WORKTREE_PATH="/repo/zer/feat-a" UNMESS_BRANCH="feat/a" UNMESS_COMPOSE_PROJECT="feat-a" bash "/scripts/setup.sh"',
+      'terminal.sendText:FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-a" FOREMAN_BRANCH="feat/a" FOREMAN_COMPOSE_PROJECT="feat-a" bash "/scripts/setup.sh"',
     ]);
   });
 
@@ -2017,14 +2017,14 @@ describe('initWorktree', () => {
     const h = makeHarness({
       worktrees: [a],
       config: {
-        setupScript: '.unmess/setup.sh',
-        docker: { composeFile: '.unmess/docker-compose.worktree.yml', overrideFile: '', ports: ['WORKTREE_PORT'], basePort: 8081, portStride: 1 },
+        setupScript: '.foreman/setup.sh',
+        docker: { composeFile: '.foreman/docker-compose.worktree.yml', overrideFile: '', ports: ['WORKTREE_PORT'], basePort: 8081, portStride: 1 },
       },
-      existingPaths: ['/repo/zer/feat-b/.unmess/setup.sh'],
+      existingPaths: ['/repo/zer/feat-b/.foreman/setup.sh'],
     });
     await h.service.initWorktree(a);
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      'UNMESS_REPO_ROOT="/repo" UNMESS_WORKTREE_PATH="/repo/zer/feat-b" UNMESS_BRANCH="feat/b" UNMESS_COMPOSE_PROJECT="feat-b" WORKTREE_PORT="8081" bash "/repo/zer/feat-b/.unmess/setup.sh"',
+      'FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-b" FOREMAN_BRANCH="feat/b" FOREMAN_COMPOSE_PROJECT="feat-b" WORKTREE_PORT="8081" bash "/repo/zer/feat-b/.foreman/setup.sh"',
     );
   });
 
@@ -2033,7 +2033,7 @@ describe('initWorktree', () => {
     const h = makeHarness({ worktrees: [a], config: { setupScript: '/abs/setup.sh' }, existingPaths: ['/abs/setup.sh'] });
     await h.service.initWorktree(a);
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      'UNMESS_REPO_ROOT="/repo" UNMESS_WORKTREE_PATH="/repo/zer/feat-a" UNMESS_BRANCH="feat/a" UNMESS_COMPOSE_PROJECT="feat-a" bash "/abs/setup.sh"',
+      'FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-a" FOREMAN_BRANCH="feat/a" FOREMAN_COMPOSE_PROJECT="feat-a" bash "/abs/setup.sh"',
     );
   });
 
@@ -2042,7 +2042,7 @@ describe('initWorktree', () => {
     const h = makeHarness({ worktrees: [a], config: { setupScript: 'scripts/setup.sh' } }); // present in neither
     await h.service.initWorktree(a);
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      'UNMESS_REPO_ROOT="/repo" UNMESS_WORKTREE_PATH="/repo/zer/feat-a" UNMESS_BRANCH="feat/a" UNMESS_COMPOSE_PROJECT="feat-a" bash "/repo/scripts/setup.sh"',
+      'FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-a" FOREMAN_BRANCH="feat/a" FOREMAN_COMPOSE_PROJECT="feat-a" bash "/repo/scripts/setup.sh"',
     );
   });
 
@@ -2319,7 +2319,7 @@ describe('diff review panel', () => {
 describe('port re-check before setup / compose up', () => {
   const dockerCfg = {
     docker: {
-      composeFile: '.unmess/docker-compose.worktree.yml',
+      composeFile: '.foreman/docker-compose.worktree.yml',
       overrideFile: '',
       ports: ['WORKTREE_PORT', 'DEBUG_PORT'],
       basePort: 8081,
@@ -2344,7 +2344,7 @@ describe('port re-check before setup / compose up', () => {
 
     // Slot 4 → WORKTREE_PORT 8085. The old 8083 must appear nowhere.
     expect(h.calls).toContain(
-      'terminal.sendText:WORKTREE_PORT=8085 DEBUG_PORT=9903 docker compose -p "feat-b" -f "/repo/.unmess/docker-compose.worktree.yml" up -d',
+      'terminal.sendText:WORKTREE_PORT=8085 DEBUG_PORT=9903 docker compose -p "feat-b" -f "/repo/.foreman/docker-compose.worktree.yml" up -d',
     );
   });
 
@@ -2377,8 +2377,8 @@ describe('port re-check before setup / compose up', () => {
     await h.service.initWorktree(b);
 
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      'UNMESS_REPO_ROOT="/repo" UNMESS_WORKTREE_PATH="/repo/zer/feat-b" UNMESS_BRANCH="feat/b" ' +
-        'UNMESS_COMPOSE_PROJECT="feat-b" WORKTREE_PORT="8085" DEBUG_PORT="9903" bash "/s.sh"',
+      'FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-b" FOREMAN_BRANCH="feat/b" ' +
+        'FOREMAN_COMPOSE_PROJECT="feat-b" WORKTREE_PORT="8085" DEBUG_PORT="9903" bash "/s.sh"',
     );
   });
 
@@ -2404,14 +2404,14 @@ describe('port re-check before setup / compose up', () => {
 
     // Still brings the stack up; docker reports the collision itself if it comes.
     expect(h.calls).toContain(
-      'terminal.sendText:WORKTREE_PORT=8081 DEBUG_PORT=9899 docker compose -p "feat-b" -f "/repo/.unmess/docker-compose.worktree.yml" up -d',
+      'terminal.sendText:WORKTREE_PORT=8081 DEBUG_PORT=9899 docker compose -p "feat-b" -f "/repo/.foreman/docker-compose.worktree.yml" up -d',
     );
     expect(h.notify.showWarning).not.toHaveBeenCalled();
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// unmess.defaultBaseBranch — where new worktrees branch from
+// foreman.defaultBaseBranch — where new worktrees branch from
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('defaultBaseBranch', () => {
@@ -2936,7 +2936,7 @@ describe('worktrees are scoped to the window\'s repository', () => {
 
   it('lists only the worktrees of the repo open in this window', () => {
     // The bug this exists for: with the extension installed in every window,
-    // Unmess's own checkout turned up at the top of aside's sidebar.
+    // Foreman's own checkout turned up at the top of aside's sidebar.
     const mine = inRepo('/repo', { id: 'a', path: '/repo/zer/feat-a', branch: 'feat/a' });
     const other = inRepo('/other', { id: 'z', path: '/other', branch: 'main', isMain: true });
     const h = windowOn('/repo', [mine, other]);
@@ -2952,7 +2952,7 @@ describe('worktrees are scoped to the window\'s repository', () => {
     h.service.focusNextWorktree();
 
     // Only one worktree here, so cycling lands back on it rather than on /other.
-    expect(h.calls.filter((c) => c.startsWith('globalState.update:unmess.activeWorktreeId'))
+    expect(h.calls.filter((c) => c.startsWith('globalState.update:foreman.activeWorktreeId'))
       .every((c) => !c.includes('z'))).toBe(true);
   });
 
@@ -3041,7 +3041,7 @@ describe('loadWorktreesForRepo keeps to its own repository', () => {
   });
 
   it('leaves another repository\'s main checkout alone', async () => {
-    // That is a project the user opened, not noise Unmess introduced. Ripping it
+    // That is a project the user opened, not noise Foreman introduced. Ripping it
     // out of their window would be worse than the folders it is cleaning up.
     const mine = makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/feat-a' });
     const h = makeHarness({

@@ -56,7 +56,7 @@ export class TmuxGateView implements vscode.WebviewViewProvider {
            <button class="primary" data-action="install">Install with ${escapeHtml(manager)}</button>
            <button data-action="copy">Copy</button>
          </div>
-         <p class="hint">After it installs, reload the window to enable Unmess.</p>
+         <p class="hint">After it installs, reload the window to enable Foreman.</p>
          <button class="link" data-action="reload">Reload window</button>`
       : `<p class="hint">No supported package manager was found on your system.</p>
          <button class="primary" data-action="guide">Open install guide</button>
@@ -68,7 +68,7 @@ export class TmuxGateView implements vscode.WebviewViewProvider {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}';">
-  <title>Unmess</title>
+  <title>Foreman</title>
   <style nonce="${nonce}">
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -114,7 +114,7 @@ export class TmuxGateView implements vscode.WebviewViewProvider {
   </style>
 </head>
 <body>
-  <h2>Unmess needs tmux</h2>
+  <h2>Foreman needs tmux</h2>
   <p>Agents run inside tmux so they survive window reloads and stay multiplexed per worktree. It's not installed on this machine yet.</p>
   ${actions}
   <script nonce="${nonce}">

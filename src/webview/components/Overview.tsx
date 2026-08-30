@@ -43,7 +43,7 @@ function OvCard({ wt, onSelect }: { wt: WorktreeItem; onSelect: () => void }) {
         cursor: 'pointer',
         transition: 'border-color .15s, transform .15s',
         background: hasPerm ? `color-mix(in srgb, ${T.amber} 3%, transparent)` : T.surface,
-        animation: 'unmess-fadein .2s ease',
+        animation: 'foreman-fadein .2s ease',
       }}
     >
       {/* Head */}

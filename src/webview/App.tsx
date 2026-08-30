@@ -3,11 +3,11 @@ import { T } from './tokens';
 import { WorktreeCard } from './components/WorktreeCard';
 import { StatusPanel } from './components/StatusPanel';
 import { send } from './vscode';
-import type { ExtMessage, UnmessState, WorktreeItem } from './types';
+import type { ExtMessage, ForemanState, WorktreeItem } from './types';
 
-const EMPTY: UnmessState = { worktrees: [] };
+const EMPTY: ForemanState = { worktrees: [] };
 
-function reducer(_: UnmessState, msg: ExtMessage): UnmessState {
+function reducer(_: ForemanState, msg: ExtMessage): ForemanState {
   if (msg.type === 'state') return msg.payload;
   return _;
 }

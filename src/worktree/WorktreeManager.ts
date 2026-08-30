@@ -50,11 +50,11 @@ export class WorktreeManager {
     // Patch isMain and branch on already-stored worktrees.
     // Only the one whose path matches repoRoot exactly is the main worktree.
     // Also sync branch names — a store entry can have a stale branch if the
-    // worktree was switched to a different branch outside of Unmess.
+    // worktree was switched to a different branch outside of Foreman.
     for (const stored of this.store.getAll()) {
       // Another repository's worktree, tracked from another window. Its isMain
       // flag is that repo's business: reconciling aside must not decide
-      // that unmess's checkout has stopped being unmess's main one, and vice
+      // that foreman's checkout has stopped being foreman's main one, and vice
       // versa — which is exactly how opening a second repo demoted the first
       // one's main checkout out of the top slot.
       if (stored.repoRoot && canonicalPath(stored.repoRoot) !== normalizedRepoRoot) continue;
@@ -108,7 +108,7 @@ export class WorktreeManager {
 
   async create(branch: string, repoRoot: string, alias?: string, baseBranch?: string): Promise<Worktree> {
     // If the branch is already checked out in an existing git worktree, don't run
-    // `git worktree add` (it would fail with "already checked out"). Attach Unmess
+    // `git worktree add` (it would fail with "already checked out"). Attach Foreman
     // to the existing worktree instead.
     const existingGit = this.git.listWorktrees(repoRoot).find((wt) => wt.branch === branch);
     if (existingGit) {
@@ -136,7 +136,7 @@ export class WorktreeManager {
     const trackRemote = branchExists ? undefined : this.git.remoteBranch(branch, repoRoot);
     await this.git.createWorktree(worktreePath, branch, repoRoot, !branchExists, baseBranch, trackRemote);
 
-    console.log(`[unmess] create branch=${branch} path=${worktreePath} existsAfterAdd=${this.fs.exists(worktreePath)} branchExisted=${branchExists}`);
+    console.log(`[foreman] create branch=${branch} path=${worktreePath} existsAfterAdd=${this.fs.exists(worktreePath)} branchExisted=${branchExists}`);
     // Guard against git reporting success without actually materializing the
     // worktree (e.g. it created only the branch): never register a phantom entry.
     if (!this.fs.exists(worktreePath)) {
@@ -174,7 +174,7 @@ export class WorktreeManager {
     }
   }
 
-  /** Register a Unmess entry for a git worktree that already exists on disk. */
+  /** Register a Foreman entry for a git worktree that already exists on disk. */
   private async attach(worktreePath: string, branch: string, repoRoot: string, alias?: string): Promise<Worktree> {
     const worktree: Worktree = {
       id: randomUUID(),
@@ -187,7 +187,7 @@ export class WorktreeManager {
       createdAt: Date.now(),
     };
 
-    // The worktree may have been created outside Unmess — only add our config
+    // The worktree may have been created outside Foreman — only add our config
     // files if they're missing, never clobber existing ones.
     if (!this.fs.exists(path.join(worktreePath, LAUNCH_JSON_PATH))) this.generateLaunchJson(worktree);
     if (!this.fs.exists(path.join(worktreePath, SETTINGS_JSON_PATH))) this.generateSettingsJson(worktree);
@@ -269,7 +269,7 @@ export class WorktreeManager {
 
   private generateLaunchJson(worktree: Worktree): void {
     const template = this.config.get().debugTemplate;
-    if (!template.name) template.name = `Unmess: Debug (${worktree.branch})`;
+    if (!template.name) template.name = `Foreman: Debug (${worktree.branch})`;
 
     const config = JSON.parse(
       JSON.stringify(template)

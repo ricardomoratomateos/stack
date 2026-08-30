@@ -9,7 +9,7 @@ export interface SettingsPanelHost {
   pickFile(field: FileField): Promise<string | undefined>;
   /** Write a starter script and return its repo-relative path. */
   createScript(kind: 'setup' | 'teardown'): Promise<string>;
-  /** Write `.unmess/config.json`; resolves to the problems the file reads back with. */
+  /** Write `.foreman/config.json`; resolves to the problems the file reads back with. */
   saveProject(values: ProjectValues): Promise<string[]>;
   saveUser(values: UserValues): Promise<void>;
   clearPersonalOverrides(): Promise<void>;
@@ -18,7 +18,7 @@ export interface SettingsPanelHost {
 
 /**
  * The settings panel: one editor-area webview that walks through the project's
- * setup (worktrees, scripts, Docker, debug — saved to `.unmess/config.json`)
+ * setup (worktrees, scripts, Docker, debug — saved to `.foreman/config.json`)
  * and the user's own preferences (agents, behaviour — saved to VS Code
  * settings), prefilled from what the repository already contains. One panel at
  * a time; a second request reveals it.
@@ -37,8 +37,8 @@ export class SettingsPanelManager {
       return;
     }
     const panel = vscode.window.createWebviewPanel(
-      'unmess.settings',
-      'Unmess settings',
+      'foreman.settings',
+      'Foreman settings',
       vscode.ViewColumn.Active,
       {
         enableScripts: true,
@@ -114,7 +114,7 @@ export class SettingsPanelManager {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline' ${webview.cspSource}; font-src ${webview.cspSource};">
-  <title>Unmess settings</title>
+  <title>Foreman settings</title>
   <link rel="stylesheet" href="${codiconUri}">
 </head>
 <body>

@@ -19,7 +19,7 @@ const wt: Worktree = {
   dockerProjectName: 'feat-login',
   createdAt: 0,
 };
-const SESSION = 'unmess-wt-1'; // TmuxManager.sessionName('wt-1')
+const SESSION = 'foreman-wt-1'; // TmuxManager.sessionName('wt-1')
 
 const wt2: Worktree = {
   id: 'wt-2',
@@ -49,7 +49,7 @@ function makeStub(): ISessionManager {
 
 function makeFactory(claudeCommand = 'claude'): ProviderFactory {
   const config = { get: () => ({ claudeCommand, opencodeCommand: 'opencode', defaultProvider: 'claude' }) } as unknown as ConfigSource;
-  return new ProviderFactory(config, '/tmp/unmess-test-storage');
+  return new ProviderFactory(config, '/tmp/foreman-test-storage');
 }
 
 function create(claudeCommand = 'claude', memento: vscode.Memento = new FakeMemento() as unknown as vscode.Memento) {
@@ -287,12 +287,12 @@ describe('setSessionOrder', () => {
     mgr.setSessionOrder('wt-1', [2, 1]);
     expect(mgr.getSessions('wt-1').map(s => s.index)).toEqual([2, 1]);
     expect(getTerminalsChanges()).toBe(1);
-    expect(memento.get('unmess.sessionOrder')).toEqual({ 'wt-1': [2, 1] });
+    expect(memento.get('foreman.sessionOrder')).toEqual({ 'wt-1': [2, 1] });
   });
 
   it('restores a persisted order from the memento on construction', () => {
     const memento = new FakeMemento() as unknown as vscode.Memento;
-    memento.update('unmess.sessionOrder', { 'wt-1': [2, 1] });
+    memento.update('foreman.sessionOrder', { 'wt-1': [2, 1] });
     const { mgr } = create('claude', memento);
     seed(mgr, 'wt-1', [
       [1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
@@ -326,7 +326,7 @@ describe('launch', () => {
     await mgr.launch(wt);
     expect(stub.ensureSession).toHaveBeenCalledWith(SESSION, wt.path);
     expect(stub.newWindow).toHaveBeenCalledWith(SESSION, 'claude', wt.path);
-    expect(stub.respawnWindow).toHaveBeenCalledWith(SESSION, 5, 'UNMESS_WINDOW_INDEX="5" UNMESS_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"');
+    expect(stub.respawnWindow).toHaveBeenCalledWith(SESSION, 5, 'FOREMAN_WINDOW_INDEX="5" FOREMAN_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"');
     expect(stub.selectWindow).toHaveBeenCalledWith(SESSION, 5);
   });
 
@@ -359,13 +359,13 @@ describe('launch', () => {
 });
 
 describe('launch command line', () => {
-  it('prefixes UNMESS_WORKSPACE_ID and escapes double quotes in the initial prompt', async () => {
+  it('prefixes FOREMAN_WORKSPACE_ID and escapes double quotes in the initial prompt', async () => {
     const { mgr, stub } = create();
     await mgr.launch(wt, { prompt: 'fix "this" bug' });
     expect(stub.respawnWindow).toHaveBeenCalledWith(
       SESSION,
       1,
-      'UNMESS_WINDOW_INDEX="1" UNMESS_WORKSPACE_ID="wt-1" claude "fix \\"this\\" bug"; exec "${SHELL:-/bin/sh}"',
+      'FOREMAN_WINDOW_INDEX="1" FOREMAN_WORKSPACE_ID="wt-1" claude "fix \\"this\\" bug"; exec "${SHELL:-/bin/sh}"',
     );
   });
 
@@ -376,7 +376,7 @@ describe('launch command line', () => {
     expect(stub.respawnWindow).toHaveBeenCalledWith(
       SESSION,
       1,
-      'UNMESS_WINDOW_INDEX="1" UNMESS_WORKSPACE_ID="wt-1" opencode; exec "${SHELL:-/bin/sh}"',
+      'FOREMAN_WINDOW_INDEX="1" FOREMAN_WORKSPACE_ID="wt-1" opencode; exec "${SHELL:-/bin/sh}"',
     );
     expect(mgr.getSessions('wt-1')[0].provider).toBe('opencode');
   });
@@ -387,7 +387,7 @@ describe('launch command line', () => {
     expect(stub.respawnWindow).toHaveBeenCalledWith(
       SESSION,
       1,
-      'UNMESS_WINDOW_INDEX="1" UNMESS_WORKSPACE_ID="wt-1" my-claude "hello"; exec "${SHELL:-/bin/sh}"',
+      'FOREMAN_WINDOW_INDEX="1" FOREMAN_WORKSPACE_ID="wt-1" my-claude "hello"; exec "${SHELL:-/bin/sh}"',
     );
   });
 });
@@ -607,7 +607,7 @@ describe('killWindow', () => {
     mgr.setSessionOrder('wt-1', [2, 1]);
     await mgr.killWindow('wt-1', 2);
     expect(mgr.getSessions('wt-1').map(s => s.index)).toEqual([1]);
-    expect(memento.get('unmess.sessionOrder')).toEqual({ 'wt-1': [1] });
+    expect(memento.get('foreman.sessionOrder')).toEqual({ 'wt-1': [1] });
   });
 
   it('leaves the saved order untouched when the killed window was not in it', async () => {
@@ -618,7 +618,7 @@ describe('killWindow', () => {
     ]);
     mgr.setSessionOrder('wt-1', [1]); // 2 not listed
     await mgr.killWindow('wt-1', 2);
-    expect(memento.get('unmess.sessionOrder')).toEqual({ 'wt-1': [1] });
+    expect(memento.get('foreman.sessionOrder')).toEqual({ 'wt-1': [1] });
   });
 });
 
@@ -874,7 +874,7 @@ describe('reconnect', () => {
 
   it('does NOT restore a persisted "terminated" — the window still exists, so waiting is the recoverable guess', async () => {
     const memento = new FakeMemento() as unknown as vscode.Memento;
-    await memento.update('unmess.claudeStates', { 'wt-1': { 1: 'terminated' } });
+    await memento.update('foreman.claudeStates', { 'wt-1': { 1: 'terminated' } });
     const { mgr, stub, stateEvents } = create('claude', memento);
     (stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValue(true);
     (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 1, name: 'claude' }]);
@@ -948,8 +948,8 @@ describe('session titles', () => {
   });
 
   it('leaves shell windows untitled, but ADOPTS an untracked agent window', async () => {
-    // A window Unmess did not open — the user pressed Ctrl-b c and started an
-    // agent — used to be invisible: the map was only ever written when Unmess
+    // A window Foreman did not open — the user pressed Ctrl-b c and started an
+    // agent — used to be invisible: the map was only ever written when Foreman
     // itself acted. Adoption is limited to windows whose name identifies a
     // provider, so the session's own initial shell never becomes a row.
     const { mgr, stub } = create();
@@ -1054,7 +1054,7 @@ describe('session titles', () => {
 // ── state persistence ─────────────────────────────────────────────────────────
 
 describe('state persistence', () => {
-  it('updateState writes PER-WINDOW states to globalState under unmess.claudeStates', () => {
+  it('updateState writes PER-WINDOW states to globalState under foreman.claudeStates', () => {
     const memento = new FakeMemento() as unknown as vscode.Memento;
     const { mgr } = create('claude', memento);
     seed(mgr, 'wt-1', [
@@ -1062,16 +1062,16 @@ describe('state persistence', () => {
       [2, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
     ]);
     mgr.updateState('wt-1', 'permission', 2);
-    expect(memento.get('unmess.claudeStates')).toEqual({ 'wt-1': { 1: 'waiting', 2: 'permission' } });
+    expect(memento.get('foreman.claudeStates')).toEqual({ 'wt-1': { 1: 'waiting', 2: 'permission' } });
   });
 
   it('launch persists waiting for the new window; killWorktreeSession clears the worktree entry', async () => {
     const memento = new FakeMemento() as unknown as vscode.Memento;
     const { mgr } = create('claude', memento);
     await mgr.launch(wt);
-    expect((memento.get('unmess.claudeStates') as Record<string, unknown>)['wt-1']).toEqual({ 1: 'waiting' });
+    expect((memento.get('foreman.claudeStates') as Record<string, unknown>)['wt-1']).toEqual({ 1: 'waiting' });
     await mgr.killWorktreeSession('wt-1');
-    expect((memento.get('unmess.claudeStates') as Record<string, unknown>)['wt-1']).toEqual({});
+    expect((memento.get('foreman.claudeStates') as Record<string, unknown>)['wt-1']).toEqual({});
   });
 
   it('reconnect restores EACH window to its own pre-reload state', async () => {
@@ -1096,7 +1096,7 @@ describe('state persistence', () => {
 
   it('still understands the legacy aggregate-string format (applies it to every window)', async () => {
     const memento = new FakeMemento() as unknown as vscode.Memento;
-    memento.update('unmess.claudeStates', { 'wt-1': 'permission' });
+    memento.update('foreman.claudeStates', { 'wt-1': 'permission' });
     const { mgr, stub } = create('claude', memento);
     (stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValue(true);
     (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
@@ -1270,7 +1270,7 @@ describe('shell polling', () => {
     await vi.advanceTimersByTimeAsync(2_000);
 
     expect(stub.listWindows).toHaveBeenCalledWith(SESSION);
-    expect(stub.listWindows).not.toHaveBeenCalledWith('unmess-wt-2');
+    expect(stub.listWindows).not.toHaveBeenCalledWith('foreman-wt-2');
     mgr.dispose();
   });
 

@@ -25,7 +25,7 @@ describe('ProviderFactory', () => {
   const makeFactory = (config: ConfigSource = makeConfig()) => new ProviderFactory(config, storageDir, homeDir);
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-providers-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-providers-'));
     storageDir = path.join(tmpDir, 'storage');
     homeDir = path.join(tmpDir, 'home');
     fs.mkdirSync(homeDir, { recursive: true });
@@ -63,15 +63,15 @@ describe('ProviderFactory', () => {
   });
 
   describe('ClaudeProvider', () => {
-    it('buildCommand prefixes UNMESS_WORKSPACE_ID and uses the configured command', () => {
+    it('buildCommand prefixes FOREMAN_WORKSPACE_ID and uses the configured command', () => {
       const provider = makeFactory(makeConfig({ claudeCommand: 'my-claude' })).create('claude');
-      expect(provider.buildCommand('wt-1')).toBe('UNMESS_WORKSPACE_ID="wt-1" my-claude');
+      expect(provider.buildCommand('wt-1')).toBe('FOREMAN_WORKSPACE_ID="wt-1" my-claude');
     });
 
     it('buildCommand appends the initial prompt with escaped double quotes', () => {
       const provider = makeFactory().create('claude');
       expect(provider.buildCommand('wt-1', 'fix "this" bug')).toBe(
-        'UNMESS_WORKSPACE_ID="wt-1" claude "fix \\"this\\" bug"',
+        'FOREMAN_WORKSPACE_ID="wt-1" claude "fix \\"this\\" bug"',
       );
     });
 
@@ -102,7 +102,7 @@ describe('ProviderFactory', () => {
   });
 
   describe('OpenCodeProvider', () => {
-    const pluginPath = () => path.join(homeDir, '.config/opencode/plugin/unmess-notify.js');
+    const pluginPath = () => path.join(homeDir, '.config/opencode/plugin/foreman-notify.js');
 
     it('is created for "opencode"', () => {
       const provider = makeFactory().create('opencode');
@@ -111,15 +111,15 @@ describe('ProviderFactory', () => {
       expect(provider.label).toBe('opencode');
     });
 
-    it('buildCommand prefixes UNMESS_WORKSPACE_ID and uses the configured command', () => {
+    it('buildCommand prefixes FOREMAN_WORKSPACE_ID and uses the configured command', () => {
       const provider = makeFactory(makeConfig({ opencodeCommand: '/opt/opencode' })).create('opencode');
-      expect(provider.buildCommand('wt-1')).toBe('UNMESS_WORKSPACE_ID="wt-1" /opt/opencode');
+      expect(provider.buildCommand('wt-1')).toBe('FOREMAN_WORKSPACE_ID="wt-1" /opt/opencode');
     });
 
     it('buildCommand passes the initial prompt via --prompt with escaped double quotes', () => {
       const provider = makeFactory().create('opencode');
       expect(provider.buildCommand('wt-1', 'fix "this" bug')).toBe(
-        'UNMESS_WORKSPACE_ID="wt-1" opencode --prompt "fix \\"this\\" bug"',
+        'FOREMAN_WORKSPACE_ID="wt-1" opencode --prompt "fix \\"this\\" bug"',
       );
     });
 
@@ -127,7 +127,7 @@ describe('ProviderFactory', () => {
       makeFactory().create('opencode').installHooks('http://127.0.0.1:43110');
       const plugin = fs.readFileSync(pluginPath(), 'utf8');
       expect(plugin).toContain('fetch("http://127.0.0.1:43110/hook"');
-      expect(plugin).toContain('if (!workspaceId) return {};'); // inert outside unmess
+      expect(plugin).toContain('if (!workspaceId) return {};'); // inert outside foreman
       expect(plugin).toContain('"session.idle": "Stop"');
       expect(plugin).toContain('"tool.execute.before": async () => notify("PreToolUse")');
       expect(plugin).toContain('windowIndex');
@@ -160,7 +160,7 @@ describe('ProviderFactory', () => {
       const { OpenCodeHookInstaller } = await import('../../src/providers/opencode/OpenCodeHookInstaller');
       const installer = new OpenCodeHookInstaller();
       const resolved = (installer as unknown as { pluginPath: string }).pluginPath;
-      expect(resolved).toBe(path.join(os.homedir(), '.config/opencode/plugin/unmess-notify.js'));
+      expect(resolved).toBe(path.join(os.homedir(), '.config/opencode/plugin/foreman-notify.js'));
     });
 
     it('uninstallHooks swallows fs errors (best effort)', () => {
@@ -174,10 +174,10 @@ describe('ProviderFactory', () => {
     it('the generated plugin is syntactically valid ESM', async () => {
       makeFactory().create('opencode').installHooks('http://127.0.0.1:43110');
       const mod = await import(/* @vite-ignore */ pluginPath());
-      expect(typeof mod.UnmessNotify).toBe('function');
-      // Without UNMESS_WORKSPACE_ID the plugin must return no hooks at all.
-      delete process.env.UNMESS_WORKSPACE_ID;
-      await expect(mod.UnmessNotify()).resolves.toEqual({});
+      expect(typeof mod.ForemanNotify).toBe('function');
+      // Without FOREMAN_WORKSPACE_ID the plugin must return no hooks at all.
+      delete process.env.FOREMAN_WORKSPACE_ID;
+      await expect(mod.ForemanNotify()).resolves.toEqual({});
     });
   });
 
@@ -210,7 +210,7 @@ describe('CodexProvider', () => {
   } as unknown as ConfigSource;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-codex-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-codex-'));
     storageDir = path.join(tmpDir, 'storage');
     homeDir = path.join(tmpDir, 'home');
     fs.mkdirSync(homeDir, { recursive: true });
@@ -227,13 +227,13 @@ describe('CodexProvider', () => {
     expect(provider.label).toBe('Codex');
   });
 
-  it('buildCommand prefixes UNMESS_WORKSPACE_ID', () => {
-    expect(make().buildCommand('wt-1')).toBe('UNMESS_WORKSPACE_ID="wt-1" codex');
+  it('buildCommand prefixes FOREMAN_WORKSPACE_ID', () => {
+    expect(make().buildCommand('wt-1')).toBe('FOREMAN_WORKSPACE_ID="wt-1" codex');
   });
 
   it('passes the initial prompt as a positional argument, escaping quotes', () => {
     expect(make().buildCommand('wt-1', 'fix "this" bug')).toBe(
-      'UNMESS_WORKSPACE_ID="wt-1" codex "fix \\"this\\" bug"',
+      'FOREMAN_WORKSPACE_ID="wt-1" codex "fix \\"this\\" bug"',
     );
   });
 
@@ -325,7 +325,7 @@ describe('GrokProvider', () => {
   } as unknown as ConfigSource;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-grok-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-grok-'));
     storageDir = path.join(tmpDir, 'storage');
     homeDir = path.join(tmpDir, 'home');
     fs.mkdirSync(homeDir, { recursive: true });
@@ -343,12 +343,12 @@ describe('GrokProvider', () => {
 
   it('seeds the first prompt with -p, which keeps the interactive TUI', () => {
     expect(make().buildCommand('wt-1', 'fix "this" bug')).toBe(
-      'UNMESS_WORKSPACE_ID="wt-1" grok -p "fix \\"this\\" bug"',
+      'FOREMAN_WORKSPACE_ID="wt-1" grok -p "fix \\"this\\" bug"',
     );
   });
 
   it('buildCommand without a prompt is the bare command', () => {
-    expect(make().buildCommand('wt-1')).toBe('UNMESS_WORKSPACE_ID="wt-1" grok');
+    expect(make().buildCommand('wt-1')).toBe('FOREMAN_WORKSPACE_ID="wt-1" grok');
   });
 
   it('registers Notification instead of PermissionRequest, which Grok does not emit', () => {

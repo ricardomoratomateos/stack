@@ -18,7 +18,7 @@ export function utf8LocaleFor(platform: NodeJS.Platform): string {
 
 export class TmuxManager implements ISessionManager {
   static sessionName(worktreeId: string): string {
-    return 'unmess-' + worktreeId
+    return 'foreman-' + worktreeId
       .replace(/[^a-zA-Z0-9-]/g, '-')
       .replace(/-{2,}/g, '-')
       .replace(/^-|-$/g, '')
@@ -66,7 +66,7 @@ export class TmuxManager implements ISessionManager {
       `tmux new-window -t "${session}" -n "${name}" -c "${cwd}" -P -F "#{window_index}"`,
     );
     const index = parseInt(out, 10);
-    // Pin the name we just gave it. Window names are Unmess's identity for a
+    // Pin the name we just gave it. Window names are Foreman's identity for a
     // session — reconnect() decides a window holds an agent by matching its
     // name against the provider ids — and tmux otherwise renames a window after
     // whatever command is running in it, so every agent window would come back
@@ -90,7 +90,7 @@ export class TmuxManager implements ISessionManager {
     // shell-escaping a large multi-line payload, and paste-buffer -p wraps it in
     // bracketed-paste markers so the receiving app (e.g. Claude Code) treats the
     // whole block as one input instead of submitting on every newline.
-    const bufferName = `unmess-paste-${process.pid}`;
+    const bufferName = `foreman-paste-${process.pid}`;
     const tmpFile = path.join(os.tmpdir(), `${bufferName}.txt`);
     await fs.promises.writeFile(tmpFile, text, 'utf8');
     try {
@@ -140,7 +140,7 @@ export class TmuxManager implements ISessionManager {
     // unrecognised shell, which is what reconnect() uses to find agents.
     // Printable ASCII survives any locale, so the parse no longer has a way to
     // half-fail.
-    const SEP = '|:unmess:|';
+    const SEP = '|:foreman:|';
     try {
       const out = await this.run(
         `tmux list-windows -t "${session}" -F "#{window_index}${SEP}#{window_name}${SEP}#{pane_title}${SEP}#{pane_current_command}"`,

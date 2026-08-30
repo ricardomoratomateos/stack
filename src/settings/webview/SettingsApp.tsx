@@ -7,11 +7,11 @@ import { send } from './vscode';
 
 /** Every user-facing string, in one place, so a translation is a mechanical pass. */
 const STR = {
-  title: 'Unmess settings',
+  title: 'Foreman settings',
   subtitle: 'Two kinds of settings: the project’s (shared with everyone who clones it) and yours (this machine only).',
   noRepo: 'Open a git repository to configure a project. Your own settings are below.',
   project: 'Project',
-  projectHint: 'Saved to .unmess/config.json. Commit it and your team gets the same setup.',
+  projectHint: 'Saved to .foreman/config.json. Commit it and your team gets the same setup.',
   openFile: 'Open file',
   fileProblems: 'The file on disk has problems — fix them or save from here to overwrite it:',
   overrides: (keys: string) => `Your settings.json sets ${keys} for this repo. Those win over the file, so what you save here won’t take effect for you until they go.`,
@@ -27,7 +27,7 @@ const STR = {
   teardown: 'Before deleting a worktree',
   choose: 'Choose…',
   createForMe: 'Create one for me',
-  scriptEnv: 'Your script gets UNMESS_REPO_ROOT, UNMESS_WORKTREE_PATH, UNMESS_BRANCH, UNMESS_COMPOSE_PROJECT and one variable per port below.',
+  scriptEnv: 'Your script gets FOREMAN_REPO_ROOT, FOREMAN_WORKTREE_PATH, FOREMAN_BRANCH, FOREMAN_COMPOSE_PROJECT and one variable per port below.',
   docker: 'Docker',
   dockerHint: 'A dedicated compose stack per worktree, on ports that never collide.',
   dockerToggle: 'Docker stack per worktree',
@@ -54,7 +54,7 @@ const STR = {
   templateShape: 'Needs a string "type" and "request".',
   stackHint: (stack: string) => `This looks like a ${stack} project.`,
   usePreset: 'Use that preset',
-  saveProject: 'Save to .unmess/config.json',
+  saveProject: 'Save to .foreman/config.json',
   you: 'You',
   youHint: 'Saved to your VS Code settings. Never travels with the repo.',
   agents: 'Agents',

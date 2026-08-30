@@ -1,11 +1,11 @@
-export const EXTENSION_ID = 'unmess';
-export const STORE_KEY = 'unmess.store';
-export const COMMENTS_KEY_PREFIX = 'unmess.comments.';
-export const SIDEBAR_VIEW_ID = 'unmess-sidebar';
+export const EXTENSION_ID = 'foreman';
+export const STORE_KEY = 'foreman.store';
+export const COMMENTS_KEY_PREFIX = 'foreman.comments.';
+export const SIDEBAR_VIEW_ID = 'foreman-sidebar';
 
 export const NOTIFY_HOOK_SCRIPT = 'notify.sh';
 export const CLAUDE_SETTINGS_PATH = '.claude/settings.json';
-export const OPENCODE_PLUGIN_PATH = '.config/opencode/plugin/unmess-notify.js';
+export const OPENCODE_PLUGIN_PATH = '.config/opencode/plugin/foreman-notify.js';
 export const CODEX_HOOKS_PATH = '.codex/hooks.json';
 export const GROK_HOOKS_PATH = '.grok/hooks.json';
 /** Enables Codex's hook system, which is experimental and off by default. */

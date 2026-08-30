@@ -1,6 +1,6 @@
 import type { RepoScopedKey } from '../config/RepoConfig';
 import type { ProviderId } from '../ports/IAgentProvider';
-import type { UnmessConfig } from '../types';
+import type { ForemanConfig } from '../types';
 
 export type Stack = 'node' | 'php' | 'python' | 'go';
 
@@ -15,12 +15,12 @@ export interface Detection {
   teardownScript?: string;
 }
 
-/** The repository's own settings — what `.unmess/config.json` carries. */
-export type ProjectValues = Pick<UnmessConfig, RepoScopedKey>;
+/** The repository's own settings — what `.foreman/config.json` carries. */
+export type ProjectValues = Pick<ForemanConfig, RepoScopedKey>;
 
 /** The settings that belong to the person, not the repository. */
 export type UserValues = Pick<
-  UnmessConfig,
+  ForemanConfig,
   | 'defaultProvider'
   | 'claudeCommand'
   | 'codexCommand'

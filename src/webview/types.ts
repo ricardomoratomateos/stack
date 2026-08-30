@@ -30,7 +30,7 @@ export interface DockerContainer {
 
 /** One of the worktree's own auto-generated ports. */
 export interface PortMapping {
-  /** Env var name from `unmess.docker.ports`, e.g. HTTP_PORT. */
+  /** Env var name from `foreman.docker.ports`, e.g. HTTP_PORT. */
   name: string;
   port: number;
   /**
@@ -72,19 +72,19 @@ export interface WorktreeItem {
   sessions: SessionItem[];
   git: GitStatus;
   docker: DockerContainer[];
-  /** Ports this worktree owns — empty unless `unmess.docker.ports` is set. */
+  /** Ports this worktree owns — empty unless `foreman.docker.ports` is set. */
   ports: PortMapping[];
   pr?: PrStatus | null;
 }
 
-export interface UnmessState {
+export interface ForemanState {
   worktrees: WorktreeItem[];
   activeWorktreeId?: string;
-  /** Provider launched by the main agent button (unmess.defaultProvider). */
+  /** Provider launched by the main agent button (foreman.defaultProvider). */
   defaultProvider?: ProviderId;
   /** Agents whose command resolves on PATH; the rest are shown dimmed. */
   installedProviders?: ProviderId[];
-  /** Show the docker start/stop button (unmess.docker.ports configured). */
+  /** Show the docker start/stop button (foreman.docker.ports configured). */
   dockerEnabled?: boolean;
   /** Local branches offered as the base for a new worktree (filled on demand). */
   branches?: string[];
@@ -94,7 +94,7 @@ export interface UnmessState {
 
 // Extension → WebView
 export type ExtMessage =
-  | { type: 'state'; payload: UnmessState };
+  | { type: 'state'; payload: ForemanState };
 
 // WebView → Extension
 export type WebMessage =

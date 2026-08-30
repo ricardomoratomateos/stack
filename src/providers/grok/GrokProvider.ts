@@ -16,7 +16,7 @@ export class GrokProvider implements IAgentProvider {
     // `-p` seeds the first prompt while staying in the interactive TUI, which is
     // what the viewer terminal shows. (Headless mode is a different flag set.)
     const cmd = initialPrompt ? `${command} -p "${initialPrompt.replace(/"/g, '\\"')}"` : command;
-    return `UNMESS_WORKSPACE_ID="${worktreeId}" ${cmd}`;
+    return `FOREMAN_WORKSPACE_ID="${worktreeId}" ${cmd}`;
   }
 
   installHooks(hookUrl: string): void {

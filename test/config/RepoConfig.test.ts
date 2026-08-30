@@ -6,7 +6,7 @@ import {
   REPO_CONFIG_RELATIVE,
   REPO_CONFIG_VERSION,
 } from '../../src/config/RepoConfig';
-import { UnmessConfig } from '../../src/types';
+import { ForemanConfig } from '../../src/types';
 
 /** In-memory stand-in for the two fs calls readRepoConfig makes. */
 const fsWith = (files: Record<string, string>) => ({
@@ -15,14 +15,14 @@ const fsWith = (files: Record<string, string>) => ({
 });
 
 const ROOT = path.join('/repo');
-const FILE = path.join(ROOT, '.unmess', 'config.json');
+const FILE = path.join(ROOT, '.foreman', 'config.json');
 
 const read = (body: unknown) =>
   readRepoConfig(ROOT, fsWith({ [FILE]: typeof body === 'string' ? body : JSON.stringify(body) }));
 
 describe('readRepoConfig', () => {
-  it('looks in .unmess/config.json under the repo root', () => {
-    expect(REPO_CONFIG_RELATIVE).toBe(path.join('.unmess', 'config.json'));
+  it('looks in .foreman/config.json under the repo root', () => {
+    expect(REPO_CONFIG_RELATIVE).toBe(path.join('.foreman', 'config.json'));
   });
 
   it('returns nothing when there is no root', () => {
@@ -42,8 +42,8 @@ describe('readRepoConfig', () => {
       version: 1,
       worktreesDirectory: '../wt',
       defaultBaseBranch: 'trunk',
-      setupScript: '.unmess/setup.sh',
-      teardownScript: '.unmess/teardown.sh',
+      setupScript: '.foreman/setup.sh',
+      teardownScript: '.foreman/teardown.sh',
       docker: {
         composeFile: 'compose.yaml',
         overrideFile: 'compose.wt.yaml',
@@ -60,8 +60,8 @@ describe('readRepoConfig', () => {
     expect(result.values).toEqual({
       worktreesDirectory: '../wt',
       defaultBaseBranch: 'trunk',
-      setupScript: '.unmess/setup.sh',
-      teardownScript: '.unmess/teardown.sh',
+      setupScript: '.foreman/setup.sh',
+      teardownScript: '.foreman/teardown.sh',
       docker: {
         composeFile: 'compose.yaml',
         overrideFile: 'compose.wt.yaml',
@@ -196,7 +196,7 @@ describe('readRepoConfig', () => {
     });
 
     it('reads a newer file anyway, saying what it did', () => {
-      // A teammate on a newer Unmess bumping this must not stop the repo working
+      // A teammate on a newer Foreman bumping this must not stop the repo working
       // for everyone still on this build.
       const result = read({ version: REPO_CONFIG_VERSION + 1, defaultBaseBranch: 'trunk' });
       expect(result.values.defaultBaseBranch).toBe('trunk');
@@ -213,11 +213,11 @@ describe('readRepoConfig', () => {
 });
 
 describe('renderRepoConfig', () => {
-  const effective: UnmessConfig = {
+  const effective: ForemanConfig = {
     worktreesDirectory: '../wt',
     defaultBaseBranch: 'trunk',
-    setupScript: '.unmess/setup.sh',
-    teardownScript: '.unmess/teardown.sh',
+    setupScript: '.foreman/setup.sh',
+    teardownScript: '.foreman/teardown.sh',
     defaultProvider: 'codex',
     claudeCommand: 'claude',
     codexCommand: 'codex',
@@ -243,8 +243,8 @@ describe('renderRepoConfig', () => {
       version: REPO_CONFIG_VERSION,
       worktreesDirectory: '../wt',
       defaultBaseBranch: 'trunk',
-      setupScript: '.unmess/setup.sh',
-      teardownScript: '.unmess/teardown.sh',
+      setupScript: '.foreman/setup.sh',
+      teardownScript: '.foreman/teardown.sh',
       docker: effective.docker,
       debugBasePort: 9001,
       debugTemplate: effective.debugTemplate,

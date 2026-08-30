@@ -63,11 +63,11 @@ describe('notify.sh (executed)', () => {
     }
   });
 
-  const TMUX_SESSION = `unmess-notifyexec-${process.pid}`;
+  const TMUX_SESSION = `foreman-notifyexec-${process.pid}`;
 
   beforeEach(() => {
     received = [];
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-notifyexec-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-notifyexec-'));
     // A directory with a space in it, because the real one is
     // "~/Library/Application Support/Code/User/globalStorage/..." on macOS and
     // an unquoted path there is the classic way this breaks for one platform.
@@ -102,7 +102,7 @@ describe('notify.sh (executed)', () => {
     new Promise((resolve) => {
       const child = spawn('bash', argv, {
         // Deliberately NOT process.env: this suite runs inside a terminal that
-        // may well be a tmux pane with UNMESS_* exported, which would mask
+        // may well be a tmux pane with FOREMAN_* exported, which would mask
         // exactly the fallbacks under test.
         env: { PATH: process.env['PATH'] ?? '', HOME: os.tmpdir(), ...env },
       });
@@ -124,9 +124,9 @@ describe('notify.sh (executed)', () => {
 
   it.runIf(canRun)('posts the ids it was handed, to the url in the sibling file', async () => {
     const r = await run(['Stop'], {
-      UNMESS_TERMINAL_ID: 'term-7',
-      UNMESS_WORKSPACE_ID: 'wt-abc',
-      UNMESS_WINDOW_INDEX: '3',
+      FOREMAN_TERMINAL_ID: 'term-7',
+      FOREMAN_WORKSPACE_ID: 'wt-abc',
+      FOREMAN_WINDOW_INDEX: '3',
     });
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1);
@@ -144,7 +144,7 @@ describe('notify.sh (executed)', () => {
   it.runIf(canRun)('falls back to HOOK_EVENT_NAME when invoked without an argument', async () => {
     // Claude Code exports it; we pass $1 ourselves, but a user who registered
     // the hook by hand — or an older install — gets here.
-    const r = await run([], { HOOK_EVENT_NAME: 'PreToolUse', UNMESS_WORKSPACE_ID: 'w' });
+    const r = await run([], { HOOK_EVENT_NAME: 'PreToolUse', FOREMAN_WORKSPACE_ID: 'w' });
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1);
     expect(JSON.parse(received[0]?.body ?? '{}').event).toBe('PreToolUse');
@@ -156,7 +156,7 @@ describe('notify.sh (executed)', () => {
     // agent — not the hook, the AGENT — until it is killed. `PAYLOAD=$(cat)`
     // is the line that prevents it, and this is the only thing that proves it.
     const big = 'x'.repeat(512 * 1024);
-    const r = await run(['Stop'], { UNMESS_WORKSPACE_ID: 'w' }, JSON.stringify({ transcript: big }));
+    const r = await run(['Stop'], { FOREMAN_WORKSPACE_ID: 'w' }, JSON.stringify({ transcript: big }));
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1);
     // Every byte accepted — no EPIPE — which is what "drained" means and what
@@ -168,7 +168,7 @@ describe('notify.sh (executed)', () => {
 
   it.runIf(canRun)('stays silent when the url file is missing', async () => {
     fs.rmSync(path.join(storageDir, 'hook-url'));
-    const r = await run(['Stop'], { UNMESS_WORKSPACE_ID: 'w' });
+    const r = await run(['Stop'], { FOREMAN_WORKSPACE_ID: 'w' });
     // Exit 0 and no request: after the extension shuts down, the hook stays
     // registered in the agent's config and keeps being invoked. It has to be a
     // no-op rather than an error the user sees on every prompt.
@@ -179,7 +179,7 @@ describe('notify.sh (executed)', () => {
 
   it.runIf(canRun)('stays silent when the url file is empty', async () => {
     fs.writeFileSync(path.join(storageDir, 'hook-url'), '');
-    const r = await run(['Stop'], { UNMESS_WORKSPACE_ID: 'w' });
+    const r = await run(['Stop'], { FOREMAN_WORKSPACE_ID: 'w' });
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1, 300);
     expect(received).toHaveLength(0);
@@ -188,7 +188,7 @@ describe('notify.sh (executed)', () => {
   it.runIf(canRun)('succeeds when nothing is listening on the endpoint', async () => {
     // The server is up but this port is not it. curl fails; the agent must not.
     fs.writeFileSync(path.join(storageDir, 'hook-url'), 'http://127.0.0.1:1');
-    const r = await run(['Stop'], { UNMESS_WORKSPACE_ID: 'w' });
+    const r = await run(['Stop'], { FOREMAN_WORKSPACE_ID: 'w' });
     expect(r.status, r.stderr).toBe(0);
   });
 
@@ -202,15 +202,15 @@ describe('notify.sh (executed)', () => {
     const command = settings.hooks['Stop']?.at(-1)?.hooks[0]?.command ?? '';
     expect(command).toContain('Application Support');
 
-    const r = await spawnBash(['-c', command], { UNMESS_WORKSPACE_ID: 'w' }, '{}');
+    const r = await spawnBash(['-c', command], { FOREMAN_WORKSPACE_ID: 'w' }, '{}');
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1);
     expect(JSON.parse(received[0]?.body ?? '{}').event).toBe('Stop');
   });
 
   it.runIf(canRun && hasTmux)('asks tmux for the ids when the launcher did not set them', async () => {
-    // The case that made hand-started agents invisible: an agent Unmess did not
-    // launch has no UNMESS_* in its environment, so every event it sent carried
+    // The case that made hand-started agents invisible: an agent Foreman did not
+    // launch has no FOREMAN_* in its environment, so every event it sent carried
     // an empty workspace id and was dropped on arrival. tmux knows, because the
     // hook runs inside the pane.
     execSync(`tmux new-session -d -s "${TMUX_SESSION}" -c "${os.tmpdir()}"`);
@@ -222,13 +222,13 @@ describe('notify.sh (executed)', () => {
     await waitForPosts(1);
 
     const body = JSON.parse(received[0]?.body ?? '{}');
-    // "unmess-" stripped back off, which is the round-trip sessionName() relies on.
+    // "foreman-" stripped back off, which is the round-trip sessionName() relies on.
     expect(body.workspaceId).toBe(`notifyexec-${process.pid}`);
     expect(body.windowIndex).toMatch(/^\d+$/);
   });
 
   it.runIf(canRun)('does not invent ids when there is no tmux to ask', async () => {
-    // No TMUX_PANE and no UNMESS_*: the fields go out empty rather than the
+    // No TMUX_PANE and no FOREMAN_*: the fields go out empty rather than the
     // script failing. The server decides what to do with an unattributed event.
     const r = await run(['Stop']);
     expect(r.status, r.stderr).toBe(0);

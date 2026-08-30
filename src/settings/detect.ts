@@ -12,8 +12,8 @@ const COMPOSE_FILE = /^(docker-)?compose(\..+)?\.ya?ml$/i;
 // `${HTTP_PORT}`, `${HTTP_PORT:-8080}`, `${HTTP_PORT-8080}` and bare `$HTTP_PORT`.
 const ENV_VAR = /\$\{?([A-Z][A-Z0-9_]*)(?:[:-][^}\s]*)?\}?/g;
 
-const SETUP_CANDIDATES = ['.unmess/setup.sh', 'scripts/setup.sh', 'setup.sh'];
-const TEARDOWN_CANDIDATES = ['.unmess/teardown.sh', 'scripts/teardown.sh', 'teardown.sh'];
+const SETUP_CANDIDATES = ['.foreman/setup.sh', 'scripts/setup.sh', 'setup.sh'];
+const TEARDOWN_CANDIDATES = ['.foreman/teardown.sh', 'scripts/teardown.sh', 'teardown.sh'];
 
 /**
  * What the repository already tells us, so the settings panel can lead with

@@ -45,7 +45,7 @@ export class HookServer {
             const state = EVENT_TO_STATE[data.event ?? ''];
             const id = data.workspaceId ?? data.terminalId;
             if (state && id) {
-              // Empty string = agent launched before UNMESS_WINDOW_INDEX existed.
+              // Empty string = agent launched before FOREMAN_WINDOW_INDEX existed.
               const idx = data.windowIndex ? Number(data.windowIndex) : NaN;
               if (Number.isFinite(idx)) this.agentManager.updateState(id, state, idx);
               else this.agentManager.updateState(id, state);

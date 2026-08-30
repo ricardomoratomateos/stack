@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { computeDockerPorts, dockerPortsFor, portBlockFor, buildComposeArgs, composeProject, dockerEnv } from '../../src/docker/dockerCompose';
-import type { UnmessConfig, Worktree } from '../../src/types';
+import type { ForemanConfig, Worktree } from '../../src/types';
 
-function makeConfig(over: Partial<UnmessConfig['docker']> = {}): UnmessConfig {
+function makeConfig(over: Partial<ForemanConfig['docker']> = {}): ForemanConfig {
   return {
     worktreesDirectory: './zer',
     setupScript: '',
@@ -82,14 +82,14 @@ describe('composeProject', () => {
 
 describe('buildComposeArgs', () => {
   it('pins the project (-p) and layers the override file when one is given', () => {
-    expect(buildComposeArgs(makeWorktree(), '/repo/.unmess/base.yml', '/repo/.unmess/override.yml', 'up -d')).toBe(
-      '-p "feat-a" -f "/repo/.unmess/base.yml" -f "/repo/.unmess/override.yml" up -d',
+    expect(buildComposeArgs(makeWorktree(), '/repo/.foreman/base.yml', '/repo/.foreman/override.yml', 'up -d')).toBe(
+      '-p "feat-a" -f "/repo/.foreman/base.yml" -f "/repo/.foreman/override.yml" up -d',
     );
   });
 
   it('pins the project and runs just the composeFile when no override is given', () => {
-    expect(buildComposeArgs(makeWorktree(), '/repo/.unmess/base.yml', undefined, 'up -d')).toBe(
-      '-p "feat-a" -f "/repo/.unmess/base.yml" up -d',
+    expect(buildComposeArgs(makeWorktree(), '/repo/.foreman/base.yml', undefined, 'up -d')).toBe(
+      '-p "feat-a" -f "/repo/.foreman/base.yml" up -d',
     );
   });
 

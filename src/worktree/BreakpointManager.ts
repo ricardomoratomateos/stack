@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { findOwner } from './TabManager';
 
-const STORE_KEY = 'unmess.breakpoints';
+const STORE_KEY = 'foreman.breakpoints';
 
 interface WorktreeRef { id: string; path: string }
 

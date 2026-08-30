@@ -28,7 +28,7 @@ const watchSpy = vi.mocked(fs.watch);
 const tmpDirs: string[] = [];
 
 function makeTmpDir(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-gitwatcher-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-gitwatcher-'));
   tmpDirs.push(dir);
   return dir;
 }
@@ -47,8 +47,8 @@ function git(cwd: string, args: string): string {
 function makeRealRepo(): string {
   const dir = makeTmpDir();
   git(dir, 'init --initial-branch=main');
-  git(dir, 'config user.email test@unmess.local');
-  git(dir, 'config user.name unmess-test');
+  git(dir, 'config user.email test@foreman.local');
+  git(dir, 'config user.name foreman-test');
   git(dir, 'config commit.gpgsign false');
   git(dir, 'commit --allow-empty -m init');
   return dir;
@@ -426,7 +426,7 @@ describe('linked worktrees', () => {
   it('a gitdir: pointer to a missing directory results in a single watcher', async () => {
     vi.useFakeTimers();
     const dir = makeTmpDir();
-    fs.writeFileSync(path.join(dir, '.git'), 'gitdir: /nonexistent/unmess-test-gitdir\n');
+    fs.writeFileSync(path.join(dir, '.git'), 'gitdir: /nonexistent/foreman-test-gitdir\n');
     const fetchFn = vi.fn(async () => STATUS_A);
     const w = makeWatcher(fetchFn);
     w.watch(dir);
@@ -617,7 +617,7 @@ describe('baseDrift', () => {
   });
 
   it('refuses a base branch that is not ref-shaped', async () => {
-    // The name arrives from .unmess/config.json, which is a file in the repo, and
+    // The name arrives from .foreman/config.json, which is a file in the repo, and
     // it ends up in a shell command. Refused for both candidate refs, so the
     // result is no drift rather than an executed injection.
     const { run, seen } = runner({});

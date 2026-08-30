@@ -15,7 +15,7 @@ export class CodexProvider implements IAgentProvider {
     const command = this.config.get().codexCommand;
     // Codex takes the first prompt as a bare positional argument, like Claude.
     const cmd = initialPrompt ? `${command} "${initialPrompt.replace(/"/g, '\\"')}"` : command;
-    return `UNMESS_WORKSPACE_ID="${worktreeId}" ${cmd}`;
+    return `FOREMAN_WORKSPACE_ID="${worktreeId}" ${cmd}`;
   }
 
   installHooks(hookUrl: string): void {

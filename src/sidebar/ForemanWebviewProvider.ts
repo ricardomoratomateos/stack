@@ -3,13 +3,13 @@ import * as crypto from 'node:crypto';
 import { AgentSessionManager } from '../session/AgentSessionManager';
 import { GitWatcher } from '../git/GitWatcher';
 import { WorktreeApplicationService } from '../application/WorktreeApplicationService';
-import type { ExtMessage, WebMessage, UnmessState } from '../webview/types';
+import type { ExtMessage, WebMessage, ForemanState } from '../webview/types';
 
 /**
  * Thin webview adapter: renders the React sidebar, pushes state, and forwards
  * messages to the application service.
  */
-export class UnmessWebviewProvider implements vscode.WebviewViewProvider {
+export class ForemanWebviewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private badgeCount = 0;
 
@@ -69,7 +69,7 @@ export class UnmessWebviewProvider implements vscode.WebviewViewProvider {
   push(): void {
     if (!this.view?.visible) return;
     const state = this.service.buildState();
-    this.view.description = UnmessWebviewProvider.describe(state);
+    this.view.description = ForemanWebviewProvider.describe(state);
     const msg: ExtMessage = { type: 'state', payload: state };
     this.view.webview.postMessage(msg);
   }
@@ -79,7 +79,7 @@ export class UnmessWebviewProvider implements vscode.WebviewViewProvider {
    * the section header already says "Worktrees", so repeating it inside the
    * webview just wasted a row.
    */
-  static describe(state: UnmessState): string | undefined {
+  static describe(state: ForemanState): string | undefined {
     const parts: string[] = [];
     const active = state.worktrees.filter((w) => w.agent === 'active').length;
     const perm = state.worktrees.filter((w) => w.agent === 'permission').length;
@@ -99,7 +99,7 @@ export class UnmessWebviewProvider implements vscode.WebviewViewProvider {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline' ${webview.cspSource}; font-src ${webview.cspSource};">
-  <title>Unmess</title>
+  <title>Foreman</title>
   <link rel="stylesheet" href="${codiconUri}">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }

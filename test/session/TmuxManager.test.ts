@@ -51,28 +51,28 @@ function captureExec(reply: (cmd: string) => { err?: Error; stdout?: string } = 
 describe('sessionName', () => {
   it('produces a valid tmux session name from a UUID', () => {
     expect(TmuxManager.sessionName('123e4567-e89b-12d3-a456-426614174000'))
-      .toBe('unmess-123e4567-e89b-12d3-a456-426614174000');
+      .toBe('foreman-123e4567-e89b-12d3-a456-426614174000');
   });
 
   it('is deterministic', () => {
     expect(TmuxManager.sessionName('some-id')).toBe(TmuxManager.sessionName('some-id'));
-    expect(TmuxManager.sessionName('some-id')).toBe('unmess-some-id');
+    expect(TmuxManager.sessionName('some-id')).toBe('foreman-some-id');
   });
 
   it('replaces invalid characters with dashes and collapses runs', () => {
-    expect(TmuxManager.sessionName('repo/path worktree_1')).toBe('unmess-repo-path-worktree-1');
-    expect(TmuxManager.sessionName('a//b..c')).toBe('unmess-a-b-c');
+    expect(TmuxManager.sessionName('repo/path worktree_1')).toBe('foreman-repo-path-worktree-1');
+    expect(TmuxManager.sessionName('a//b..c')).toBe('foreman-a-b-c');
   });
 
   it('trims leading/trailing dashes', () => {
-    expect(TmuxManager.sessionName('/x/')).toBe('unmess-x');
-    expect(TmuxManager.sessionName('--x--')).toBe('unmess-x');
+    expect(TmuxManager.sessionName('/x/')).toBe('foreman-x');
+    expect(TmuxManager.sessionName('--x--')).toBe('foreman-x');
   });
 
   it('caps the id portion at 50 characters', () => {
     const name = TmuxManager.sessionName('a'.repeat(60));
-    expect(name).toBe('unmess-' + 'a'.repeat(50));
-    expect(name.length).toBe(57);
+    expect(name).toBe('foreman-' + 'a'.repeat(50));
+    expect(name.length).toBe(58);
   });
 });
 
@@ -164,8 +164,8 @@ describe('command construction', () => {
     const calls = captureExec(() => ({}));
     await tmux.paste('s1:2', 'line one\nline two');
     expect(calls).toHaveLength(3);
-    expect(calls[0]).toMatch(/^tmux load-buffer -b "unmess-paste-\d+" ".*unmess-paste-\d+\.txt"$/);
-    expect(calls[1]).toMatch(/^tmux paste-buffer -d -p -b "unmess-paste-\d+" -t "s1:2"$/);
+    expect(calls[0]).toMatch(/^tmux load-buffer -b "foreman-paste-\d+" ".*foreman-paste-\d+\.txt"$/);
+    expect(calls[1]).toMatch(/^tmux paste-buffer -d -p -b "foreman-paste-\d+" -t "s1:2"$/);
     expect(calls[2]).toBe('tmux send-keys -t "s1:2" Enter');
   });
 
@@ -192,9 +192,9 @@ describe('command construction', () => {
   it('listWindows parses separator-delimited index/name/title/command lines, keeping spaces in names and titles', async () => {
     const calls = captureExec(() => ({
       stdout:
-        '0|:unmess:|zsh|:unmess:|my-host.local|:unmess:|zsh\n' +
-        '1|:unmess:|claude|:unmess:|⠂ Fix login flow bug|:unmess:|node\n' +
-        '2|:unmess:|my window name|:unmess:||:unmess:|npm\n',
+        '0|:foreman:|zsh|:foreman:|my-host.local|:foreman:|zsh\n' +
+        '1|:foreman:|claude|:foreman:|⠂ Fix login flow bug|:foreman:|node\n' +
+        '2|:foreman:|my window name|:foreman:||:foreman:|npm\n',
     }));
     await expect(tmux.listWindows('s1')).resolves.toEqual([
       { index: 0, name: 'zsh', title: 'my-host.local', command: 'zsh' },
@@ -202,7 +202,7 @@ describe('command construction', () => {
       { index: 2, name: 'my window name', title: '', command: 'npm' },
     ]);
     expect(calls).toEqual([
-      'tmux list-windows -t "s1" -F "#{window_index}|:unmess:|#{window_name}|:unmess:|#{pane_title}|:unmess:|#{pane_current_command}"',
+      'tmux list-windows -t "s1" -F "#{window_index}|:foreman:|#{window_name}|:foreman:|#{pane_title}|:foreman:|#{pane_current_command}"',
     ]);
   });
 
@@ -234,7 +234,7 @@ describe('command construction', () => {
 // ── integration (real tmux, guarded) ─────────────────────────────────────────
 
 describe('TmuxManager (integration)', () => {
-  const SES = `unmess-test-${process.pid}`;
+  const SES = `foreman-test-${process.pid}`;
   const tmux = new TmuxManager();
 
   afterAll(() => {

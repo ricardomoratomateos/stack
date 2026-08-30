@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { UnmessConfig, DebugTemplate, DockerConfig } from '../types';
+import { ForemanConfig, DebugTemplate, DockerConfig } from '../types';
 import type { ProviderId } from '../ports/IAgentProvider';
 import {
   REPO_CONFIG_RELATIVE,
@@ -30,14 +30,14 @@ const DOCKER_DEFAULTS: DockerConfig = {
 const DEBUG_TEMPLATE_DEFAULT: DebugTemplate = {
   type: 'node',
   request: 'attach',
-  name: 'Unmess: Debug',
+  name: 'Foreman: Debug',
   port: '{{PORT}}',
 };
 
 const NO_REPO_CONFIG: RepoConfigResult = { values: {}, present: false, problems: [] };
 
 export type ConfigManagerOptions = {
-  /** Repository root to look for `.unmess/config.json` in, resolved per read. */
+  /** Repository root to look for `.foreman/config.json` in, resolved per read. */
   repoRoot?: () => string | undefined;
   /** Called when the repo config's complaints change. Never on every read. */
   onProblems?: (problems: string[]) => void;
@@ -57,7 +57,7 @@ export class ConfigManager {
    */
   async setDefaultProvider(provider: ProviderId): Promise<void> {
     await vscode.workspace
-      .getConfiguration('unmess')
+      .getConfiguration('foreman')
       .update('defaultProvider', provider, vscode.ConfigurationTarget.Global);
   }
 
@@ -72,8 +72,8 @@ export class ConfigManager {
     return root ? path.join(root, REPO_CONFIG_RELATIVE) : undefined;
   }
 
-  get(): UnmessConfig {
-    const cfg = vscode.workspace.getConfiguration('unmess');
+  get(): ForemanConfig {
+    const cfg = vscode.workspace.getConfiguration('foreman');
     const repo = this.repoConfig().values;
 
     return {

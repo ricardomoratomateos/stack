@@ -4,15 +4,15 @@ import * as os from 'node:os';
 import { OPENCODE_PLUGIN_PATH } from '../../constants';
 
 /**
- * Wires opencode to the unmess HookServer by writing a plugin into opencode's
+ * Wires opencode to the foreman HookServer by writing a plugin into opencode's
  * global plugin directory (~/.config/opencode/plugin/). opencode loads every
  * JS file there at startup; the plugin translates opencode bus events into the
  * canonical event names the HookServer already understands, so the server
  * needs no opencode-specific handling.
  *
  * Regenerated on every install because the HookServer port changes per
- * VSCode session. The plugin no-ops when UNMESS_WORKSPACE_ID is absent, so
- * opencode runs outside unmess are unaffected.
+ * VSCode session. The plugin no-ops when FOREMAN_WORKSPACE_ID is absent, so
+ * opencode runs outside foreman are unaffected.
  */
 export class OpenCodeHookInstaller {
   private pluginPath: string;
@@ -44,7 +44,7 @@ export class OpenCodeHookInstaller {
 
   private pluginSource(hookUrl: string): string {
     const lines = [
-      '// Unmess notify plugin — do not edit manually (regenerated on every unmess activation)',
+      '// Foreman notify plugin — do not edit manually (regenerated on every foreman activation)',
       'const EVENT_MAP = {',
       '  "session.created": "SessionStart",',
       '  "session.idle": "Stop",',
@@ -54,11 +54,11 @@ export class OpenCodeHookInstaller {
       '  "permission.replied": "UserPromptSubmit",',
       '};',
       '',
-      'export const UnmessNotify = async () => {',
-      '  const workspaceId = process.env.UNMESS_WORKSPACE_ID;',
-      '  // Loaded by every opencode run — stay inert outside unmess-launched sessions.',
+      'export const ForemanNotify = async () => {',
+      '  const workspaceId = process.env.FOREMAN_WORKSPACE_ID;',
+      '  // Loaded by every opencode run — stay inert outside foreman-launched sessions.',
       '  if (!workspaceId) return {};',
-      '  const windowIndex = process.env.UNMESS_WINDOW_INDEX || "";',
+      '  const windowIndex = process.env.FOREMAN_WINDOW_INDEX || "";',
       '  const notify = (event) => {',
       `    fetch("${hookUrl}/hook", {`,
       '      method: "POST",',

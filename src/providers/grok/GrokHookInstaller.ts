@@ -6,7 +6,7 @@ import { JsonHookInstaller } from '../shared/JsonHookInstaller';
 /**
  * Grok Build has no `PermissionRequest`. Its user-attention signal is
  * `Notification`, which fires when the agent wants the user — exactly what the
- * sidebar's attention badge is for — so that is what Unmess maps to the
+ * sidebar's attention badge is for — so that is what Foreman maps to the
  * "permission" state (see EVENT_TO_STATE). `PermissionDenied` is deliberately
  * not registered: it reports an outcome, not a request for you.
  */

@@ -9,7 +9,7 @@ import * as path from 'node:path';
  *
  * Shared rather than duplicated because two callers need it at different times —
  * the application service on every reconcile, and ConfigManager before the
- * service exists, to find the repository whose `.unmess/config.json` it should
+ * service exists, to find the repository whose `.foreman/config.json` it should
  * be reading. Two copies of this rule would be two chances to disagree about
  * what "the repo" means.
  */

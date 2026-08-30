@@ -1,16 +1,16 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { UnmessConfig, DockerConfig, DebugTemplate } from '../types';
+import { ForemanConfig, DockerConfig, DebugTemplate } from '../types';
 
-/** Where a repository declares how Unmess should treat it. */
-export const REPO_CONFIG_RELATIVE = path.join('.unmess', 'config.json');
+/** Where a repository declares how Foreman should treat it. */
+export const REPO_CONFIG_RELATIVE = path.join('.foreman', 'config.json');
 
 /**
  * The schema version this build writes and understands.
  *
  * A file from the future is read anyway, on the assumption that new keys are
  * additive and the ones we recognise still mean what they meant. It reports the
- * mismatch rather than refusing: a teammate on a newer Unmess bumping the
+ * mismatch rather than refusing: a teammate on a newer Foreman bumping the
  * version must not stop the repo working for everyone still on this one.
  */
 export const REPO_CONFIG_VERSION = 1;
@@ -40,7 +40,7 @@ export type RepoScopedKey =
   | 'debugBasePort'
   | 'debugTemplate';
 
-export type RepoConfigValues = Partial<Pick<UnmessConfig, RepoScopedKey>>;
+export type RepoConfigValues = Partial<Pick<ForemanConfig, RepoScopedKey>>;
 
 export type RepoConfigResult = {
   /** Recognised, correctly typed values. Empty when there is no file. */
@@ -138,7 +138,7 @@ const validators: Record<RepoScopedKey, Validator> = {
   debugTemplate: asDebugTemplate,
 };
 
-/** Keys that exist in UnmessConfig but are the user's, not the repository's. */
+/** Keys that exist in ForemanConfig but are the user's, not the repository's. */
 const USER_SCOPED = new Set([
   'defaultProvider',
   'claudeCommand',
@@ -160,7 +160,7 @@ function describe(v: unknown): string {
   return typeof v;
 }
 
-/** Reads and validates `<repoRoot>/.unmess/config.json`. Never throws. */
+/** Reads and validates `<repoRoot>/.foreman/config.json`. Never throws. */
 export function readRepoConfig(
   repoRoot: string | undefined,
   io: Pick<typeof fs, 'existsSync' | 'readFileSync'> = fs,
@@ -188,8 +188,8 @@ export function readRepoConfig(
     if (typeof version !== 'number') problems.push(`"version" must be a number, got ${describe(version)}`);
     else if (version > REPO_CONFIG_VERSION) {
       problems.push(
-        `${REPO_CONFIG_RELATIVE} declares version ${version}; this Unmess understands ${REPO_CONFIG_VERSION}. ` +
-        'Reading the keys it recognises — update Unmess if something looks wrong.',
+        `${REPO_CONFIG_RELATIVE} declares version ${version}; this Foreman understands ${REPO_CONFIG_VERSION}. ` +
+        'Reading the keys it recognises — update Foreman if something looks wrong.',
       );
     }
   }
@@ -221,7 +221,7 @@ export function readRepoConfig(
  * has a working setup in their own settings.json, and the useful thing is to
  * lift it into the repository verbatim so everyone else inherits it.
  */
-export function renderRepoConfig(effective: UnmessConfig): string {
+export function renderRepoConfig(effective: ForemanConfig): string {
   const body: Record<string, unknown> = {
     version: REPO_CONFIG_VERSION,
     worktreesDirectory: effective.worktreesDirectory,

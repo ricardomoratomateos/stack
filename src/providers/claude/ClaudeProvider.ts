@@ -1,10 +1,10 @@
 import type { IAgentProvider } from '../../ports/IAgentProvider';
-import type { UnmessConfig } from '../../types';
+import type { ForemanConfig } from '../../types';
 import type { ClaudeHookInstaller } from './ClaudeHookInstaller';
 
 /** Anything exposing the extension configuration (structural ConfigManager). */
 export interface ConfigSource {
-  get(): UnmessConfig;
+  get(): ForemanConfig;
 }
 
 export class ClaudeProvider implements IAgentProvider {
@@ -19,7 +19,7 @@ export class ClaudeProvider implements IAgentProvider {
   buildCommand(worktreeId: string, initialPrompt?: string): string {
     const command = this.config.get().claudeCommand;
     const cmd = initialPrompt ? `${command} "${initialPrompt.replace(/"/g, '\\"')}"` : command;
-    return `UNMESS_WORKSPACE_ID="${worktreeId}" ${cmd}`;
+    return `FOREMAN_WORKSPACE_ID="${worktreeId}" ${cmd}`;
   }
 
   installHooks(hookUrl: string): void {

@@ -423,7 +423,7 @@ function prColor(state: string): string {
 /**
  * One of the worktree's own ports.
  *
- * The number was the missing half of per-worktree docker: Unmess assigned each
+ * The number was the missing half of per-worktree docker: Foreman assigned each
  * worktree a block of ports and then never told anyone which, so finding the
  * one you wanted meant reading the generated compose override or guessing from
  * the slot arithmetic.

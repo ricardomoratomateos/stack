@@ -80,7 +80,7 @@ export function WorktreeCard({
       ? T.surface2
       : 'transparent',
     transition: 'background .12s, border-color .12s',
-    animation: 'unmess-fadein .15s ease',
+    animation: 'foreman-fadein .15s ease',
     boxShadow: cardDragOver ? `inset 0 2px 0 ${T.borderStrong}` : 'none',
     opacity: cardDragging ? 0.4 : 1,
     // While tearing down: fade it out and block every interaction.

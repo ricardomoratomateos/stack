@@ -94,7 +94,7 @@ export interface DockerConfig {
   portStride: number;
 }
 
-export interface UnmessConfig {
+export interface ForemanConfig {
   worktreesDirectory: string;
   /**
    * Branch new worktrees start from. Without this, the base was whatever the

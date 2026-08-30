@@ -1,6 +1,6 @@
 import * as path from 'node:path';
-import type { UnmessConfig, Worktree } from '../types';
-import type { UnmessState, WorktreeItem, WebMessage, PortMapping } from '../webview/types';
+import type { ForemanConfig, Worktree } from '../types';
+import type { ForemanState, WorktreeItem, WebMessage, PortMapping } from '../webview/types';
 import type { WorktreeManager } from '../worktree/WorktreeManager';
 import type { AgentSessionManager } from '../session/AgentSessionManager';
 import type { TabManager } from '../worktree/TabManager';
@@ -22,8 +22,8 @@ import { displayLabel, truncateLabel } from '../worktree/displayLabel';
 import { findRepoRoot } from '../worktree/findRepoRoot';
 import { canonicalPath, worktreesInRepo } from '../worktree/worktreesInRepo';
 
-export const ACTIVE_WORKTREE_KEY = 'unmess.activeWorktreeId';
-export const WORKTREE_ORDER_KEY = 'unmess.worktreeOrder';
+export const ACTIVE_WORKTREE_KEY = 'foreman.activeWorktreeId';
+export const WORKTREE_ORDER_KEY = 'foreman.worktreeOrder';
 
 /** A terminal created for setup/teardown scripts (structural subset of vscode.Terminal). */
 export interface HostTerminal {
@@ -90,7 +90,7 @@ export interface WorktreeAppDeps {
    * Which agents are runnable on this machine. Injected so tests do not depend
    * on whatever the developer happens to have on their PATH.
    */
-  installedProviders?: (config: UnmessConfig) => ProviderId[];
+  installedProviders?: (config: ForemanConfig) => ProviderId[];
 }
 
 const NO_UI: UiBridge = { pushWebview() {}, syncDecorations() {}, openDiffPanel() {}, openNewTask() {} };
@@ -139,7 +139,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
    *
    * The store is global to the extension, so every window used to list every
    * worktree of every repo it had ever seen. Invisible while only one project
-   * was ever open; the moment the extension was installed and Unmess's own
+   * was ever open; the moment the extension was installed and Foreman's own
    * checkout was opened beside aside, that checkout arrived at the top of
    * aside's sidebar as "main".
    *
@@ -172,7 +172,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
   /**
    * Run a setup/teardown script in a visible host terminal registered to the
    * worktree. The script path is resolved against the repo (worktree-first,
-   * then main), and the script gets UNMESS_* env plus the worktree's docker
+   * then main), and the script gets FOREMAN_* env plus the worktree's docker
    * ports so it can prepare deps and bring the stack up without guessing.
    */
   private runScriptTerminal(wt: Worktree, script: string, labelPrefix: string, doneMessage?: string): void {
@@ -180,10 +180,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const resolved =
       this.locateRepoFile(wt, script) ?? (path.isAbsolute(script) ? script : path.join(wt.repoRoot, script));
     const env: Record<string, string> = {
-      UNMESS_REPO_ROOT: wt.repoRoot,
-      UNMESS_WORKTREE_PATH: wt.path,
-      UNMESS_BRANCH: wt.branch,
-      UNMESS_COMPOSE_PROJECT: composeProject(wt),
+      FOREMAN_REPO_ROOT: wt.repoRoot,
+      FOREMAN_WORKTREE_PATH: wt.path,
+      FOREMAN_BRANCH: wt.branch,
+      FOREMAN_COMPOSE_PROJECT: composeProject(wt),
       ...(config.docker.ports.length > 0 ? dockerEnv(wt, config) : {}),
     };
     const prefix = Object.entries(env).map(([k, v]) => `${k}="${v}"`).join(' ');
@@ -196,8 +196,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   /**
    * Resolve a repo-relative file, preferring the worktree's own copy (when its
-   * branch carries `.unmess/`) and falling back to the main repo — where
-   * `.unmess/` lives when the branch predates it. Returns undefined if neither
+   * branch carries `.foreman/`) and falling back to the main repo — where
+   * `.foreman/` lives when the branch predates it. Returns undefined if neither
    * has it.
    */
   private locateRepoFile(wt: Worktree, file: string): string | undefined {
@@ -249,7 +249,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     } catch (e) {
       // No free slot at all, or the store rejected the patch. Carry on with the
       // ports we have and let docker report the collision itself.
-      console.error('[unmess] port re-check failed; keeping the current ports:', e);
+      console.error('[foreman] port re-check failed; keeping the current ports:', e);
       return wt;
     }
     if (moved.movedFrom !== undefined) {
@@ -404,12 +404,12 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const wt =
       this.findWorktree(this.currentWorktreeId ?? '') ?? (worktrees.length === 1 ? worktrees[0] : undefined);
     if (!wt) {
-      this.deps.notify.showWarning('Unmess: select a worktree first, then drop the image again.');
+      this.deps.notify.showWarning('Foreman: select a worktree first, then drop the image again.');
       return;
     }
     if (!this.deps.agentManager.hasTerminals(wt.id)) {
       this.deps.notify.showWarning(
-        `Unmess: no agent session in ${wt.alias ?? wt.branch} — launch one, then drop the image again.`,
+        `Foreman: no agent session in ${wt.alias ?? wt.branch} — launch one, then drop the image again.`,
       );
       return;
     }
@@ -428,7 +428,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const target = worktrees.find((w) => w.id === worktreeId);
     if (!target) return;
 
-    console.log(`[unmess] switch to id=${worktreeId} path=${target.path} exists=${this.deps.host.exists(target.path)}`);
+    console.log(`[foreman] switch to id=${worktreeId} path=${target.path} exists=${this.deps.host.exists(target.path)}`);
     this.currentWorktreeId = worktreeId;
     this.deps.globalState.update(ACTIVE_WORKTREE_KEY, worktreeId);
     // Push eagerly — the terminal-change event that normally syncs the webview
@@ -464,7 +464,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     viewer?.show();
   }
 
-  /** Clean-slate switch (unmess.focusMode): only the active worktree on screen. */
+  /** Clean-slate switch (foreman.focusMode): only the active worktree on screen. */
   private async switchWithFocusMode(target: Worktree, worktrees: Worktree[]): Promise<void> {
     const viewerOpenIds = new Set(
       worktrees.filter((wt) => this.deps.agentManager.getViewer(wt.id) !== undefined).map((wt) => wt.id),
@@ -555,7 +555,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
   /**
    * Refreshes the remote ref the drift is measured against, on request.
    *
-   * The only place Unmess touches the network for this. It is a click rather
+   * The only place Foreman touches the network for this. It is a click rather
    * than a timer because the numbers are read off a filesystem watch that fires
    * on every save, and because a repo's remote may be slow or want credentials —
    * neither is something to inflict on someone who just typed.
@@ -615,9 +615,9 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * container is published on. A worktree moved to a free slot takes its card
    * with it.
    *
-   * Only the ports the user named in `unmess.docker.ports` — the debug port is
+   * Only the ports the user named in `foreman.docker.ports` — the debug port is
    * in there when they asked for it (DEBUG_PORT) and left out otherwise, since
-   * a debug port nobody configured is Unmess's bookkeeping rather than something
+   * a debug port nobody configured is Foreman's bookkeeping rather than something
    * the user needs to know.
    */
   private portsFor(wt: Worktree): PortMapping[] {
@@ -631,7 +631,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     }));
   }
 
-  buildState(): UnmessState {
+  buildState(): ForemanState {
     const worktrees = this.orderWorktrees(this.worktreesInWindow());
     const items: WorktreeItem[] = worktrees.map((wt) => ({
       id: wt.id,
@@ -770,7 +770,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const mine = worktreesInRepo(current, repoRoot);
 
     const keep = new Set([repoRoot, ...mine.map((w) => w.path)].map(canonicalPath));
-    // Folders Unmess itself added for some OTHER repository, which are ours to
+    // Folders Foreman itself added for some OTHER repository, which are ours to
     // take back. Deliberately excludes another repo's MAIN checkout: that is a
     // project the user opened, not noise we introduced.
     //
@@ -790,7 +790,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const indicesToRemove = this.deps.host
       .workspaceFolderPaths()
       .map((p, i) => ({ p: canonicalPath(p), i }))
-      // Only folders Unmess is responsible for: another repo's worktree, or a
+      // Only folders Foreman is responsible for: another repo's worktree, or a
       // stale one inside this repository. A folder it does not recognise is the
       // user's own and is left where they put it.
       .filter(({ p }) => !keep.has(p) && (foreign.has(p) || p.startsWith(normalizedRoot + path.sep)))
@@ -810,10 +810,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
     }
 
     // The compose project is derived from the worktree's directory name, so a
-    // stack brought up outside Unmess (or under the branch name instead) is
+    // stack brought up outside Foreman (or under the branch name instead) is
     // invisible to it. Printing the keys makes that mismatch obvious instead of
     // looking like a broken docker integration.
-    console.log(`[unmess] docker projects: ${mine.map((wt) => composeProject(wt)).join(', ')}`);
+    console.log(`[foreman] docker projects: ${mine.map((wt) => composeProject(wt)).join(', ')}`);
     for (const wt of mine) {
       this.deps.gitWatcher.watch(wt.path, this.driftBaseFor(wt));
       this.deps.dockerMonitor.startPolling(composeProject(wt), () => this.ui.pushWebview());
@@ -861,7 +861,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
   // ── Create ─────────────────────────────────────────────────────────────────
 
   /**
-   * The branch a new worktree should start from: `unmess.defaultBaseBranch`
+   * The branch a new worktree should start from: `foreman.defaultBaseBranch`
    * when the repo actually has it, otherwise whatever the main checkout is on.
    *
    * The fallback is what makes the setting safe to ship with a `develop`
@@ -926,7 +926,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
           this.deps.dockerMonitor.startPolling(composeProject(wt), () => this.ui.pushWebview());
           this.deps.prMonitor.startPolling(wt.branch, wt.id, () => this.ui.pushWebview());
         } catch (e) {
-          console.error('[unmess] post-create wiring failed (worktree and setup are unaffected):', e);
+          console.error('[foreman] post-create wiring failed (worktree and setup are unaffected):', e);
         }
         this.ui.pushWebview();
 
@@ -1077,7 +1077,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     if (!wt) return;
     const setupScript = this.deps.config.get().setupScript;
     if (!setupScript) {
-      this.deps.notify.showError('No setup script configured. Set "unmess.setupScript" in settings.');
+      this.deps.notify.showError('No setup script configured. Set "foreman.setupScript" in settings.');
       return;
     }
     // A re-init can happen long after the slot was allocated — re-check before

@@ -34,7 +34,7 @@ describe('ClaudeHookInstaller', () => {
   };
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-notifyhook-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-notifyhook-'));
     storageDir = path.join(tmpDir, 'storage');
     settingsPath = path.join(tmpDir, 'claude', 'settings.json');
     scriptPath = path.join(storageDir, 'notify.sh');
@@ -57,20 +57,20 @@ describe('ClaudeHookInstaller', () => {
       expect(content.startsWith('#!/bin/bash\n')).toBe(true);
       expect(content).toContain('curl -s -X POST "$URL/hook"');
       expect(content).toContain('EVENT_NAME="${1:-${HOOK_EVENT_NAME:-}}"');
-      expect(content).toContain('"{\\"event\\":\\"$EVENT_NAME\\",\\"terminalId\\":\\"$UNMESS_TERMINAL_ID\\",\\"workspaceId\\":\\"$WORKSPACE_ID\\",\\"windowIndex\\":\\"$WINDOW_INDEX\\"}"');
+      expect(content).toContain('"{\\"event\\":\\"$EVENT_NAME\\",\\"terminalId\\":\\"$FOREMAN_TERMINAL_ID\\",\\"workspaceId\\":\\"$WORKSPACE_ID\\",\\"windowIndex\\":\\"$WINDOW_INDEX\\"}"');
     });
 
-    it('falls back to asking tmux when the launcher set no UNMESS variables', () => {
+    it('falls back to asking tmux when the launcher set no FOREMAN variables', () => {
       // An agent the user starts by hand has neither variable, and every event
       // it sent used to be discarded for carrying an empty workspace id.
       makeHook().install(hookUrl);
       const content = fs.readFileSync(scriptPath, 'utf8');
-      expect(content).toContain('WORKSPACE_ID="${UNMESS_WORKSPACE_ID:-}"');
-      expect(content).toContain('WINDOW_INDEX="${UNMESS_WINDOW_INDEX:-}"');
+      expect(content).toContain('WORKSPACE_ID="${FOREMAN_WORKSPACE_ID:-}"');
+      expect(content).toContain('WINDOW_INDEX="${FOREMAN_WINDOW_INDEX:-}"');
       expect(content).toContain("tmux display-message -p -t \"$TMUX_PANE\" '#{window_index}'");
       expect(content).toContain("tmux display-message -p -t \"$TMUX_PANE\" '#{session_name}'");
-      // Session names are "unmess-<worktree id>"; the prefix strip recovers it.
-      expect(content).toContain('unmess-*) WORKSPACE_ID="${SESSION#unmess-}"');
+      // Session names are "foreman-<worktree id>"; the prefix strip recovers it.
+      expect(content).toContain('foreman-*) WORKSPACE_ID="${SESSION#foreman-}"');
     });
 
     it('does nothing outside tmux, where there is no pane to ask about', () => {
@@ -239,7 +239,7 @@ describe('ClaudeHookInstaller', () => {
       expect(hooks['SessionStart']).toEqual([]);
     });
 
-    it('preserves hooks for events unmess does not manage', () => {
+    it('preserves hooks for events foreman does not manage', () => {
       writeSettings({
         hooks: {
           Notification: [{ matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Notification` }] }],

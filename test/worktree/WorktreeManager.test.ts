@@ -5,7 +5,7 @@ import { parseWorktreeList } from '../../src/adapters/GitCliAdapter';
 import { IGitPort, GitWorktreeEntry } from '../../src/ports/IGitPort';
 import { IFileSystem } from '../../src/ports/IFileSystem';
 import { IWorktreeRepository } from '../../src/ports/IWorktreeRepository';
-import { Worktree, DebugTemplate, UnmessConfig } from '../../src/types';
+import { Worktree, DebugTemplate, ForemanConfig } from '../../src/types';
 import { WORKTREE_SETTINGS_EXCLUSIONS } from '../../src/constants';
 import type { PortAllocator } from '../../src/worktree/portAllocator';
 import type { ConfigManager } from '../../src/config/ConfigManager';
@@ -94,9 +94,9 @@ function makeGitStub(entries: GitWorktreeEntry[] = []): IGitPort & {
   };
 }
 
-function makeConfigStub(overrides: Partial<UnmessConfig> = {}): ConfigManager {
+function makeConfigStub(overrides: Partial<ForemanConfig> = {}): ConfigManager {
   return {
-    get: (): UnmessConfig => ({
+    get: (): ForemanConfig => ({
       worktreesDirectory: './zer',
       setupScript: '',
       teardownScript: '',
@@ -105,7 +105,7 @@ function makeConfigStub(overrides: Partial<UnmessConfig> = {}): ConfigManager {
       debugTemplate: {
         type: 'php',
         request: 'launch',
-        name: 'Unmess: Debug',
+        name: 'Foreman: Debug',
         port: '{{PORT}}',
         pathMappings: { '/var/www/html': '{{WORKTREE_PATH}}' },
       } as DebugTemplate,
@@ -627,7 +627,7 @@ describe('generateLaunchJson', () => {
     expect(cfg.name).toBe('My Debug');
   });
 
-  it('defaults template name to "Unmess: Debug (<branch>)"', async () => {
+  it('defaults template name to "Foreman: Debug (<branch>)"', async () => {
     const config = makeConfigStub({
       debugTemplate: {
         type: 'php',
@@ -644,7 +644,7 @@ describe('generateLaunchJson', () => {
     );
     const wt = await mgr.create('feat/x', REPO);
     const written = JSON.parse(fsStub.files.get(path.join(wt.path, '.vscode/launch.json'))!);
-    expect(written.configurations[0].name).toBe('Unmess: Debug (feat/x)');
+    expect(written.configurations[0].name).toBe('Foreman: Debug (feat/x)');
   });
 });
 

@@ -12,7 +12,7 @@ export interface AttentionNotifierDeps {
   sessionTitle(worktreeId: string, windowIndex: number): string | undefined;
   /** True when the user is already looking at this worktree's session. */
   isWatching(worktreeId: string): boolean;
-  /** Config gate for notifications (unmess.notifyOnAttention). The badge is always kept. */
+  /** Config gate for notifications (foreman.notifyOnAttention). The badge is always kept. */
   enabled(): boolean;
   /**
    * Notification sink. Inside VSCode the sidebar badge and state dots already

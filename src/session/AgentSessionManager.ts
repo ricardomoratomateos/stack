@@ -52,11 +52,11 @@ export class AgentSessionManager {
 
   // Persists the last-known aggregate state per worktree so a VSCode reload can
   // restore "needs attention" / "waiting" instead of blindly defaulting to waiting.
-  private static readonly STATE_KEY = 'unmess.claudeStates';
+  private static readonly STATE_KEY = 'foreman.claudeStates';
   // Persists a user-chosen display order (list of tmux window indexes) per
   // worktree. Purely cosmetic — tmux window indexes stay put so state tracking,
   // kill and focus keep working; only getSessions() sorts by this.
-  private static readonly ORDER_KEY = 'unmess.sessionOrder';
+  private static readonly ORDER_KEY = 'foreman.sessionOrder';
 
   /**
    * User-chosen names for sessions, worktreeId → (window index → name).
@@ -68,7 +68,7 @@ export class AgentSessionManager {
    * an agent. The window name says what is running; this says what the user
    * calls it.
    */
-  private static readonly ALIAS_KEY = 'unmess.sessionAliases';
+  private static readonly ALIAS_KEY = 'foreman.sessionAliases';
   // worktreeId → ordered tmux window indexes (display order)
   private orders = new Map<string, number[]>();
 
@@ -190,11 +190,11 @@ export class AgentSessionManager {
   /**
    * Reconcile a worktree's session list against what tmux actually has.
    *
-   * The window map used to be written only when Unmess itself acted — launch,
+   * The window map used to be written only when Foreman itself acted — launch,
    * openTerminal, killWindow — so everything else that happens to a window was
    * invisible: a window the user closed with `exit` stayed on the card forever
    * as a session that could not be focused or killed, and an agent started in a
-   * window Unmess never opened did not exist at all.
+   * window Foreman never opened did not exist at all.
    *
    * Deliberately conservative in what it adopts: only windows whose name
    * identifies a provider. Adopting every unknown window would surface the
@@ -331,10 +331,10 @@ export class AgentSessionManager {
     // can still `tmux attach` to a running session instead of failing to launch
     // with "Starting directory (cwd) does not exist".
     const exists = this.pathExists(worktree.path);
-    console.log(`[unmess] open viewer id=${worktree.id} name="${name}" path=${worktree.path} exists=${exists}`);
+    console.log(`[foreman] open viewer id=${worktree.id} name="${name}" path=${worktree.path} exists=${exists}`);
     const cwd = exists ? worktree.path : undefined;
     if (!exists) {
-      console.warn(`[unmess] worktree directory missing, attaching viewer without cwd: ${worktree.path}`);
+      console.warn(`[foreman] worktree directory missing, attaching viewer without cwd: ${worktree.path}`);
     }
     const terminal = vscode.window.createTerminal({
       name,
@@ -362,12 +362,12 @@ export class AgentSessionManager {
   async launch(worktree: Worktree, opts?: { provider?: ProviderId; prompt?: string }): Promise<vscode.Terminal> {
     const provider = opts?.provider ? this.providers.create(opts.provider) : this.providers.defaultProvider();
     const sessionName = TmuxManager.sessionName(worktree.id);
-    console.log(`[unmess] launch id=${worktree.id} provider=${provider.id} path=${worktree.path} exists=${this.pathExists(worktree.path)}`);
+    console.log(`[foreman] launch id=${worktree.id} provider=${provider.id} path=${worktree.path} exists=${this.pathExists(worktree.path)}`);
     await this.tmux.ensureSession(sessionName, worktree.path);
 
     // Window is named after the provider id so reconnect() can restore ownership.
     const windowIndex = await this.tmux.newWindow(sessionName, provider.id, worktree.path);
-    // UNMESS_WINDOW_INDEX lets hook events target THIS window's state instead
+    // FOREMAN_WINDOW_INDEX lets hook events target THIS window's state instead
     // of lighting up every agent window of the worktree.
     // Respawn (not send-keys): typing the command into the shell flashes the
     // env-var soup at the user until the agent clears the screen. The trailing
@@ -375,7 +375,7 @@ export class AgentSessionManager {
     await this.tmux.respawnWindow(
       sessionName,
       windowIndex,
-      `UNMESS_WINDOW_INDEX="${windowIndex}" ${provider.buildCommand(worktree.id, opts?.prompt)}; exec "\${SHELL:-/bin/sh}"`,
+      `FOREMAN_WINDOW_INDEX="${windowIndex}" ${provider.buildCommand(worktree.id, opts?.prompt)}; exec "\${SHELL:-/bin/sh}"`,
     );
 
     this.windowMap(worktree.id).set(windowIndex, { kind: 'agent', provider: provider.id, state: 'waiting', name: provider.id });
@@ -421,7 +421,7 @@ export class AgentSessionManager {
 
   async openTerminal(worktree: Worktree): Promise<vscode.Terminal> {
     const sessionName = TmuxManager.sessionName(worktree.id);
-    console.log(`[unmess] openTerminal id=${worktree.id} path=${worktree.path} exists=${this.pathExists(worktree.path)}`);
+    console.log(`[foreman] openTerminal id=${worktree.id} path=${worktree.path} exists=${this.pathExists(worktree.path)}`);
     await this.tmux.ensureSession(sessionName, worktree.path);
 
     const windowIndex = await this.tmux.newWindow(sessionName, 'shell', worktree.path);
@@ -470,12 +470,12 @@ export class AgentSessionManager {
       if (!meta) return;
       // A window recorded as a plain shell that starts reporting agent states
       // has an agent running in it — the user launched one by hand in a
-      // terminal Unmess opened. Adopt it instead of dropping every event: the
+      // terminal Foreman opened. Adopt it instead of dropping every event: the
       // provider stays unknown (nothing says which agent it is), which the card
       // renders with a neutral mark rather than guessing.
       map.set(windowIndex, meta.kind === 'agent' ? { ...meta, state } : { ...meta, kind: 'agent', state });
     } else {
-      // Agents launched before UNMESS_WINDOW_INDEX existed: no way to know the
+      // Agents launched before FOREMAN_WINDOW_INDEX existed: no way to know the
       // source window — apply to all agent windows (pre-per-session behavior).
       for (const [idx, meta] of map.entries()) {
         if (meta.kind === 'agent') map.set(idx, { ...meta, state });

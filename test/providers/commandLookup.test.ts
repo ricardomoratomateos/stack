@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { isCommandAvailable, installedProviders } from '../../src/providers/commandLookup';
-import type { UnmessConfig } from '../../src/types';
+import type { ForemanConfig } from '../../src/types';
 
 let binDir: string;
 let env: NodeJS.ProcessEnv;
@@ -16,7 +16,7 @@ function put(name: string, { executable = true } = {}) {
 }
 
 beforeEach(() => {
-  binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-bin-'));
+  binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-bin-'));
   // A PATH of exactly one directory, so nothing the developer has installed
   // can leak into the result.
   env = { PATH: binDir };
@@ -68,7 +68,7 @@ describe('isCommandAvailable', () => {
   });
 
   it('searches every PATH entry, not just the first', () => {
-    const second = fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-bin2-'));
+    const second = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-bin2-'));
     fs.writeFileSync(path.join(second, 'grok'), '#!/bin/sh\n', { mode: 0o755 });
     try {
       expect(isCommandAvailable('grok', { PATH: `${binDir}${path.delimiter}${second}` })).toBe(true);
@@ -79,11 +79,11 @@ describe('isCommandAvailable', () => {
 });
 
 describe('installedProviders', () => {
-  const config = (over: Partial<UnmessConfig> = {}) =>
+  const config = (over: Partial<ForemanConfig> = {}) =>
     ({
       claudeCommand: 'claude', codexCommand: 'codex',
       grokCommand: 'grok', opencodeCommand: 'opencode', ...over,
-    }) as UnmessConfig;
+    }) as ForemanConfig;
 
   it('reports only the agents actually on PATH', () => {
     put('claude');

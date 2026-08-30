@@ -1,22 +1,22 @@
 {
-  "name": "unmess",
-  "displayName": "Unmess",
+  "name": "foreman",
+  "displayName": "Foreman",
   "description": "Run parallel AI coding agents (Claude Code, opencode) across git worktrees, each in its own tmux session.",
   "version": "0.1.3",
-  "publisher": "unmess",
+  "publisher": "foreman",
   "license": "MIT",
   "icon": "assets/icon.png",
   "galleryBanner": {
     "color": "#0a0a0a",
     "theme": "dark"
   },
-  "homepage": "https://github.com/ricardomoratomateos/unmess#readme",
+  "homepage": "https://github.com/ricardomoratomateos/foreman#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ricardomoratomateos/unmess.git"
+    "url": "https://github.com/ricardomoratomateos/foreman.git"
   },
   "bugs": {
-    "url": "https://github.com/ricardomoratomateos/unmess/issues"
+    "url": "https://github.com/ricardomoratomateos/foreman/issues"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -42,109 +42,109 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "unmess-container",
-          "title": "Unmess",
+          "id": "foreman-container",
+          "title": "Foreman",
           "icon": "resources/icon.svg"
         }
       ]
     },
     "views": {
-      "unmess-container": [
+      "foreman-container": [
         {
-          "id": "unmess-sidebar",
+          "id": "foreman-sidebar",
           "name": "Worktrees",
           "type": "webview",
           "initialSize": 20
         },
         {
-          "id": "unmess-drop-zone",
+          "id": "foreman-drop-zone",
           "name": "Screenshot drop",
           "initialSize": 1,
-          "when": "!unmess.tmuxMissing"
+          "when": "!foreman.tmuxMissing"
         }
       ]
     },
     "commands": [
       {
-        "command": "unmess.newTask",
-        "title": "Unmess: New Task",
+        "command": "foreman.newTask",
+        "title": "Foreman: New Task",
         "icon": "$(add)"
       },
       {
-        "command": "unmess.openSettings",
-        "title": "Unmess: Settings",
+        "command": "foreman.openSettings",
+        "title": "Foreman: Settings",
         "icon": "$(gear)"
       },
       {
-        "command": "unmess.createWorktree",
-        "title": "Unmess: Create Worktree",
+        "command": "foreman.createWorktree",
+        "title": "Foreman: Create Worktree",
         "icon": "$(add)"
       },
       {
-        "command": "unmess.deleteWorktree",
-        "title": "Unmess: Delete Worktree",
+        "command": "foreman.deleteWorktree",
+        "title": "Foreman: Delete Worktree",
         "icon": "$(trash)"
       },
       {
-        "command": "unmess.launchAgent",
-        "title": "Unmess: Launch Agent",
+        "command": "foreman.launchAgent",
+        "title": "Foreman: Launch Agent",
         "icon": "$(hubot)"
       },
       {
-        "command": "unmess.openTerminal",
-        "title": "Unmess: Open Terminal",
+        "command": "foreman.openTerminal",
+        "title": "Foreman: Open Terminal",
         "icon": "$(terminal)"
       },
       {
-        "command": "unmess.initWorktree",
-        "title": "Unmess: Init Worktree",
+        "command": "foreman.initWorktree",
+        "title": "Foreman: Init Worktree",
         "icon": "$(zap)"
       },
       {
-        "command": "unmess.renameWorktree",
-        "title": "Unmess: Set Alias",
+        "command": "foreman.renameWorktree",
+        "title": "Foreman: Set Alias",
         "icon": "$(tag)"
       },
       {
-        "command": "unmess.focusSession",
-        "title": "Unmess: Focus Session"
+        "command": "foreman.focusSession",
+        "title": "Foreman: Focus Session"
       },
       {
-        "command": "unmess.focusNextWorktree",
-        "title": "Unmess: Focus Next Worktree"
+        "command": "foreman.focusNextWorktree",
+        "title": "Foreman: Focus Next Worktree"
       },
       {
-        "command": "unmess.focusPrevWorktree",
-        "title": "Unmess: Focus Previous Worktree"
+        "command": "foreman.focusPrevWorktree",
+        "title": "Foreman: Focus Previous Worktree"
       },
       {
-        "command": "unmess.attachLatestScreenshot",
-        "title": "Unmess: Attach Latest Screenshot to Agent",
+        "command": "foreman.attachLatestScreenshot",
+        "title": "Foreman: Attach Latest Screenshot to Agent",
         "icon": "$(file-media)"
       },
       {
-        "command": "unmess.createRepoConfig",
-        "title": "Unmess: Create Repo Config File",
+        "command": "foreman.createRepoConfig",
+        "title": "Foreman: Create Repo Config File",
         "icon": "$(file-code)"
       },
       {
-        "command": "unmess.gettingStarted",
-        "title": "Unmess: Getting Started"
+        "command": "foreman.gettingStarted",
+        "title": "Foreman: Getting Started"
       }
     ],
     "keybindings": [
       {
-        "command": "unmess.focusNextWorktree",
+        "command": "foreman.focusNextWorktree",
         "key": "ctrl+shift+]",
         "mac": "cmd+shift+]"
       },
       {
-        "command": "unmess.focusPrevWorktree",
+        "command": "foreman.focusPrevWorktree",
         "key": "ctrl+shift+[",
         "mac": "cmd+shift+["
       },
       {
-        "command": "unmess.attachLatestScreenshot",
+        "command": "foreman.attachLatestScreenshot",
         "key": "ctrl+alt+v",
         "mac": "cmd+alt+v",
         "when": "terminalFocus"
@@ -153,13 +153,13 @@
     "menus": {
       "view/title": [
         {
-          "command": "unmess.openSettings",
-          "when": "view == unmess-sidebar && !unmess.tmuxMissing",
+          "command": "foreman.openSettings",
+          "when": "view == foreman-sidebar && !foreman.tmuxMissing",
           "group": "navigation@1"
         },
         {
-          "command": "unmess.newTask",
-          "when": "view == unmess-sidebar",
+          "command": "foreman.newTask",
+          "when": "view == foreman-sidebar",
           "group": "navigation@2"
         }
       ],
@@ -167,35 +167,35 @@
     },
     "themes": [
       {
-        "label": "Unmess Dark",
+        "label": "Foreman Dark",
         "uiTheme": "vs-dark",
-        "path": "./themes/unmess-dark-color-theme.json"
+        "path": "./themes/foreman-dark-color-theme.json"
       }
     ],
     "configuration": {
-      "title": "Unmess",
+      "title": "Foreman",
       "properties": {
-        "unmess.worktreesDirectory": {
+        "foreman.worktreesDirectory": {
           "type": "string",
           "default": ".worktrees",
-          "description": "Directory where worktrees are created (relative to the workspace root) Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
+          "description": "Directory where worktrees are created (relative to the workspace root) Can be set for everyone who clones the repo in .foreman/config.json; a value set here wins."
         },
-        "unmess.defaultBaseBranch": {
+        "foreman.defaultBaseBranch": {
           "type": "string",
           "default": "develop",
-          "description": "Branch new worktrees start from, preselected in the New Task form. When this branch does not exist, Unmess uses the repository's own main line (the first of main/master/develop it finds, locally or on a remote), and only then the current branch. Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
+          "description": "Branch new worktrees start from, preselected in the New Task form. When this branch does not exist, Foreman uses the repository's own main line (the first of main/master/develop it finds, locally or on a remote), and only then the current branch. Can be set for everyone who clones the repo in .foreman/config.json; a value set here wins."
         },
-        "unmess.setupScript": {
+        "foreman.setupScript": {
           "type": "string",
           "default": "",
-          "description": "Script to run after creating a worktree Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
+          "description": "Script to run after creating a worktree Can be set for everyone who clones the repo in .foreman/config.json; a value set here wins."
         },
-        "unmess.teardownScript": {
+        "foreman.teardownScript": {
           "type": "string",
           "default": "",
-          "description": "Script to run before deleting a worktree Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
+          "description": "Script to run before deleting a worktree Can be set for everyone who clones the repo in .foreman/config.json; a value set here wins."
         },
-        "unmess.defaultProvider": {
+        "foreman.defaultProvider": {
           "type": "string",
           "enum": [
             "claude",
@@ -206,42 +206,42 @@
           "default": "claude",
           "description": "Primary agent: the one the big launch button on each worktree card starts. The chevron next to it opens the rest."
         },
-        "unmess.claudeCommand": {
+        "foreman.claudeCommand": {
           "type": "string",
           "default": "claude",
           "description": "Command to launch Claude Code"
         },
-        "unmess.codexCommand": {
+        "foreman.codexCommand": {
           "type": "string",
           "default": "codex",
           "description": "Command to launch Codex CLI"
         },
-        "unmess.grokCommand": {
+        "foreman.grokCommand": {
           "type": "string",
           "default": "grok",
           "description": "Command to launch Grok Build"
         },
-        "unmess.opencodeCommand": {
+        "foreman.opencodeCommand": {
           "type": "string",
           "default": "opencode",
           "description": "Command to launch opencode"
         },
-        "unmess.notifyOnAttention": {
+        "foreman.notifyOnAttention": {
           "type": "boolean",
           "default": true,
           "description": "Show a native OS notification when an agent finishes or asks for permission while VS Code is in the background. The sidebar attention badge is always shown regardless."
         },
-        "unmess.focusMode": {
+        "foreman.focusMode": {
           "type": "boolean",
           "default": false,
           "description": "Clean-slate switching: when you switch worktree, close the other worktrees' editor tabs and agent terminals so only the active one is on screen. Off (default) makes switching an instant reveal with no flicker."
         },
-        "unmess.scopeSearchToActiveWorktree": {
+        "foreman.scopeSearchToActiveWorktree": {
           "type": "boolean",
           "default": true,
           "description": "Hide non-active worktree folders from text search and Quick Open (writes search.exclude to each worktree's .vscode/settings.json)"
         },
-        "unmess.docker": {
+        "foreman.docker": {
           "type": "object",
           "default": {
             "composeFile": "docker-compose.yml",
@@ -275,62 +275,62 @@
               "description": "Size of the port block each worktree owns"
             }
           },
-          "description": "Per-worktree docker orchestration: compose files and auto-generated ports Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
+          "description": "Per-worktree docker orchestration: compose files and auto-generated ports Can be set for everyone who clones the repo in .foreman/config.json; a value set here wins."
         },
-        "unmess.debugBasePort": {
+        "foreman.debugBasePort": {
           "type": "number",
           "default": 9898,
-          "description": "Base port for the debugger. Each worktree gets base+N Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
+          "description": "Base port for the debugger. Each worktree gets base+N Can be set for everyone who clones the repo in .foreman/config.json; a value set here wins."
         },
-        "unmess.debugTemplate": {
+        "foreman.debugTemplate": {
           "type": "object",
           "default": {
             "type": "node",
             "request": "attach",
-            "name": "Unmess: Debug",
+            "name": "Foreman: Debug",
             "port": "{{PORT}}"
           },
-          "description": "launch.json template for each worktree. Use {{PORT}} and {{WORKTREE_PATH}} as placeholders Can be set for everyone who clones the repo in .unmess/config.json; a value set here wins."
+          "description": "launch.json template for each worktree. Use {{PORT}} and {{WORKTREE_PATH}} as placeholders Can be set for everyone who clones the repo in .foreman/config.json; a value set here wins."
         }
       }
     },
     "walkthroughs": [
       {
-        "id": "unmess.gettingStarted",
-        "title": "Get started with Unmess",
+        "id": "foreman.gettingStarted",
+        "title": "Get started with Foreman",
         "description": "Several AI agents in parallel, one git worktree each, and a sidebar that tells you who needs you.",
         "steps": [
           {
             "id": "tmux",
             "title": "Make sure tmux is there",
-            "description": "Agents run inside tmux so they survive window reloads. If it is missing, the Unmess view offers to install it.\n[Open Unmess](command:workbench.view.extension.unmess-container)",
+            "description": "Agents run inside tmux so they survive window reloads. If it is missing, the Foreman view offers to install it.\n[Open Foreman](command:workbench.view.extension.foreman-container)",
             "media": {
               "markdown": "media/walkthrough/tmux.md"
             },
             "completionEvents": [
-              "onContext:unmess.tmuxReady"
+              "onContext:foreman.tmuxReady"
             ]
           },
           {
             "id": "new-agent",
             "title": "Create a worktree and launch an agent",
-            "description": "One task, one branch, one worktree, one agent. Describe the task; Unmess cuts the branch, creates the worktree and starts the agent in it.\n[New agent](command:unmess.newTask)",
+            "description": "One task, one branch, one worktree, one agent. Describe the task; Foreman cuts the branch, creates the worktree and starts the agent in it.\n[New agent](command:foreman.newTask)",
             "media": {
               "markdown": "media/walkthrough/new-agent.md"
             },
             "completionEvents": [
-              "onCommand:unmess.newTask"
+              "onCommand:foreman.newTask"
             ]
           },
           {
             "id": "switch",
             "title": "Switch between worktrees",
-            "description": "Cmd+Shift+] and Cmd+Shift+[ (Ctrl on Linux) jump between worktrees. Search, Quick Open and breakpoints follow you.\n[Next worktree](command:unmess.focusNextWorktree)",
+            "description": "Cmd+Shift+] and Cmd+Shift+[ (Ctrl on Linux) jump between worktrees. Search, Quick Open and breakpoints follow you.\n[Next worktree](command:foreman.focusNextWorktree)",
             "media": {
               "markdown": "media/walkthrough/switch.md"
             },
             "completionEvents": [
-              "onCommand:unmess.focusNextWorktree"
+              "onCommand:foreman.focusNextWorktree"
             ]
           },
           {
@@ -341,29 +341,29 @@
               "markdown": "media/walkthrough/review.md"
             },
             "completionEvents": [
-              "onCommand:unmess.attachLatestScreenshot"
+              "onCommand:foreman.attachLatestScreenshot"
             ]
           },
           {
             "id": "configure",
             "title": "Set up Docker, debugging and scripts",
-            "description": "The gear in the Worktrees header opens settings: a Docker stack per worktree, a debugger port per worktree, setup and teardown scripts. Unmess prefills what it finds in the repo.\n[Open settings](command:unmess.openSettings)",
+            "description": "The gear in the Worktrees header opens settings: a Docker stack per worktree, a debugger port per worktree, setup and teardown scripts. Foreman prefills what it finds in the repo.\n[Open settings](command:foreman.openSettings)",
             "media": {
               "markdown": "media/walkthrough/configure.md"
             },
             "completionEvents": [
-              "onCommand:unmess.openSettings"
+              "onCommand:foreman.openSettings"
             ]
           },
           {
             "id": "share",
             "title": "Share the setup with your team",
-            "description": "Project settings save to .unmess/config.json. Commit it and everyone who clones the repo gets the same worktrees, ports and scripts.\n[Open settings](command:unmess.openSettings)",
+            "description": "Project settings save to .foreman/config.json. Commit it and everyone who clones the repo gets the same worktrees, ports and scripts.\n[Open settings](command:foreman.openSettings)",
             "media": {
               "markdown": "media/walkthrough/share.md"
             },
             "completionEvents": [
-              "onCommand:unmess.openSettings"
+              "onCommand:foreman.openSettings"
             ]
           }
         ]

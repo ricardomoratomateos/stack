@@ -342,7 +342,7 @@ describe('DockerMonitor', () => {
 
       await monitor.refresh('proj');
 
-      expect(spy).toHaveBeenCalledWith('[unmess] docker ps failed for "proj": command not found: docker');
+      expect(spy).toHaveBeenCalledWith('[foreman] docker ps failed for "proj": command not found: docker');
       spy.mockRestore();
     });
 
@@ -403,7 +403,7 @@ describe('DockerMonitor', () => {
       const monitor = new DockerMonitor(runner);
 
       await expect(monitor.refresh('proj')).resolves.toEqual([]);
-      expect(spy).toHaveBeenCalledWith('[unmess] docker ps failed for "proj": just a string');
+      expect(spy).toHaveBeenCalledWith('[foreman] docker ps failed for "proj": just a string');
       spy.mockRestore();
     });
   });
@@ -467,9 +467,9 @@ describe('defaultRunner', () => {
   });
 
   it('passes cwd, env and timeout through to child_process.exec', async () => {
-    const out = await defaultRunner.exec('echo "$UNMESS_TEST_VAR:$(pwd)"', {
+    const out = await defaultRunner.exec('echo "$FOREMAN_TEST_VAR:$(pwd)"', {
       cwd: '/',
-      env: { ...process.env, UNMESS_TEST_VAR: 'docker-runner' },
+      env: { ...process.env, FOREMAN_TEST_VAR: 'docker-runner' },
       timeout: 10_000,
     });
     expect(out).toBe('docker-runner:/');

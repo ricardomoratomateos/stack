@@ -3,7 +3,7 @@ import * as net from 'node:net';
 /**
  * Whether a TCP port can actually be bound right now, asked the only way that
  * cannot lie: by binding it. The port registry only knows about worktrees
- * Unmess created, so it happily hands out a port already taken by another
+ * Foreman created, so it happily hands out a port already taken by another
  * project's container, a leftover stack from a deleted worktree, or a plain
  * local process — and the failure surfaces minutes later as a cryptic
  * `Bind for 0.0.0.0:8083 failed: port is already allocated` from docker.

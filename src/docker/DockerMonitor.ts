@@ -91,7 +91,7 @@ export class DockerMonitor {
    * Watch a project closely for a few seconds.
    *
    * The commands that change a stack run in a *visible* terminal so the user can
-   * see pull/build progress, which means Unmess never learns when they
+   * see pull/build progress, which means Foreman never learns when they
    * finished. Without this, bringing a stack up left the badge wrong for up to a
    * full poll interval even though the containers were already serving.
    */
@@ -130,11 +130,11 @@ export class DockerMonitor {
     this.fetchContainers(project).then((containers) => {
       // Logged only on a change, so a steady state does not spam every poll.
       // Without it, "the badge is empty" gives no way to tell a project whose
-      // stack really is down from one Unmess is looking up under a name docker
+      // stack really is down from one Foreman is looking up under a name docker
       // has never heard of.
       const before = this.cache.get(project);
       if (!before || before.length !== containers.length) {
-        console.log(`[unmess] docker "${project}": ${containers.length} container(s)`);
+        console.log(`[foreman] docker "${project}": ${containers.length} container(s)`);
       }
       this.cache.set(project, containers);
       this.callbacks.get(project)?.();
@@ -165,7 +165,7 @@ export class DockerMonitor {
     this.cache.clear();
   }
 
-  // List by explicit project (-p) so it matches exactly what Unmess started and
+  // List by explicit project (-p) so it matches exactly what Foreman started and
   // needs no compose file or cwd — `docker compose -p <name> ps` queries the
   // engine by the project label.
   private fetchContainers(project: string): Promise<DockerContainer[]> {
@@ -187,7 +187,7 @@ export class DockerMonitor {
         const message = err instanceof Error ? err.message.split('\n')[0] : String(err);
         if (this.lastFailure.get(project) !== message) {
           this.lastFailure.set(project, message);
-          console.error(`[unmess] docker ps failed for "${project}": ${message}`);
+          console.error(`[foreman] docker ps failed for "${project}": ${message}`);
         }
         return [];
       },

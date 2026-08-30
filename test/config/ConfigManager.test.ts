@@ -26,23 +26,23 @@ describe('ConfigManager', () => {
   let tmpDir: string;
 
   const writeRepoConfig = (body: unknown): void => {
-    const file = path.join(tmpDir, '.unmess', 'config.json');
+    const file = path.join(tmpDir, '.foreman', 'config.json');
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, typeof body === 'string' ? body : JSON.stringify(body, null, 2));
   };
 
   beforeEach(() => {
     resetVscodeMock();
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unmess-cfg-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-cfg-'));
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('reads the "unmess" configuration section', () => {
+  it('reads the "foreman" configuration section', () => {
     new ConfigManager().get();
-    expect(workspace.getConfiguration).toHaveBeenCalledWith('unmess');
+    expect(workspace.getConfiguration).toHaveBeenCalledWith('foreman');
   });
 
   it('returns defaults: .worktrees, empty scripts, claude, 9898, node debugTemplate with {{PORT}}', () => {
@@ -72,7 +72,7 @@ describe('ConfigManager', () => {
       debugTemplate: {
         type: 'node',
         request: 'attach',
-        name: 'Unmess: Debug',
+        name: 'Foreman: Debug',
         port: '{{PORT}}',
       },
     });
@@ -139,7 +139,7 @@ describe('ConfigManager', () => {
 
   // ── repo config ────────────────────────────────────────────────────────────
 
-  describe('.unmess/config.json', () => {
+  describe('.foreman/config.json', () => {
     const managerFor = (root: string | undefined, onProblems?: (p: string[]) => void) =>
       new ConfigManager({ repoRoot: () => root, onProblems });
 
@@ -249,7 +249,7 @@ describe('ConfigManager', () => {
     });
 
     it('exposes the file path whether or not it exists', () => {
-      const expected = path.join(tmpDir, '.unmess', 'config.json');
+      const expected = path.join(tmpDir, '.foreman', 'config.json');
       expect(managerFor(tmpDir).repoConfigPath()).toBe(expected);
       expect(managerFor(undefined).repoConfigPath()).toBeUndefined();
     });
@@ -266,7 +266,7 @@ describe('ConfigManager', () => {
   });
 
   describe('setDefaultProvider', () => {
-    it('writes unmess.defaultProvider globally', async () => {
+    it('writes foreman.defaultProvider globally', async () => {
       const update = vi.fn().mockResolvedValue(undefined);
       workspace.getConfiguration.mockReturnValue({ get: vi.fn(), update } as never);
 
