@@ -1444,6 +1444,19 @@ describe('createWorktree', () => {
     expect(h.claude.launchWithPrompt).toHaveBeenCalledWith(created, 'do the thing');
   });
 
+  it('activates the new worktree before the agent launches, so its card is selected from the first second', async () => {
+    vi.useFakeTimers();
+    const created = makeWorktree({ id: 'new', branch: 'feat/x', path: '/repo/zer/feat-x' });
+    const h = makeHarness({ workspaceFolders: [root], gitDirs: ['/repo/.git'], worktrees: [created] });
+    h.manager.create.mockResolvedValue(created);
+    let activeAtLaunch: string | undefined;
+    h.claude.launchWithPrompt.mockImplementation(async () => { activeAtLaunch = h.service.activeWorktreeId(); });
+    await h.service.createWorktree({ branch: 'feat/x', description: 'do the thing' });
+    expect(h.service.activeWorktreeId()).toBe('new');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(activeAtLaunch).toBe('new');
+  });
+
   it('passes undefined alias when no title is given', async () => {
     vi.useFakeTimers();
     const { h } = createHarness();

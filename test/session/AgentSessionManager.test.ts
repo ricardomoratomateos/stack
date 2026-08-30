@@ -385,6 +385,17 @@ describe('launch command line', () => {
     expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'fix ${user.id}', true);
   });
 
+  it('shows the viewer before waiting on the agent, so its boot is watched rather than waited out', async () => {
+    const { mgr, stub } = create();
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'claude', command: 'node' },
+    ]);
+    await mgr.launch(wt, { prompt: 'go' });
+    const shown = window.createTerminal.mock.invocationCallOrder[0];
+    const pasted = (stub.paste as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    expect(shown).toBeLessThan(pasted);
+  });
+
   it('waits while the pane is still the shell that launches the agent', async () => {
     const { mgr, stub } = create();
     const listWindows = stub.listWindows as ReturnType<typeof vi.fn>;

@@ -957,6 +957,11 @@ export class WorktreeApplicationService implements DiffPanelHost {
     // the workspace-folder update before we open a new terminal.
     if (createdWt) {
       const wt = createdWt;
+      // The new worktree is what the user is about to work in: select its card,
+      // scope search and breakpoints to it, and in focus mode clear the rest —
+      // exactly what clicking the card would do. Its viewer does not exist yet,
+      // so this reveals nothing; launch() below brings the terminal up.
+      await this.switchToWorktree(wt.id);
       const description = opts?.description;
       setTimeout(() => {
         if (description) this.deps.agentManager.launchWithPrompt(wt, description);

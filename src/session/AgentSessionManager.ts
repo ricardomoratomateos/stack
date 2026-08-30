@@ -407,6 +407,12 @@ export class AgentSessionManager {
 
     await this.tmux.selectWindow(sessionName, windowIndex);
 
+    // The viewer comes up before the prompt is dealt with, so the user watches
+    // the agent boot instead of staring at nothing for the seconds it takes
+    // to be ready for input — the same seconds, but no longer a dead gap.
+    const viewer = await this.getOrCreateViewer(worktree);
+    viewer.show();
+
     // The prompt is pasted, never passed as an argument. See buildCommand: the
     // launch line goes through `sh -c`, which eats `${...}` and backticks — and
     // the review panel wraps every quoted code line in backticks, so sending
@@ -420,8 +426,6 @@ export class AgentSessionManager {
       const started = await this.waitForAgentProcess(sessionName, windowIndex);
       await this.tmux.paste(`${sessionName}:${windowIndex}`, opts.prompt, started);
     }
-    const viewer = await this.getOrCreateViewer(worktree);
-    viewer.show();
 
     this.persistState(worktree.id);
     this.stateChangeEmitter.fire({ worktreeId: worktree.id, state: 'waiting' });
