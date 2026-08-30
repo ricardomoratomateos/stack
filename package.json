@@ -153,13 +153,13 @@
     "menus": {
       "view/title": [
         {
-          "command": "unmess.newTask",
-          "when": "view == unmess-sidebar",
+          "command": "unmess.openSettings",
+          "when": "view == unmess-sidebar && !unmess.tmuxMissing",
           "group": "navigation@1"
         },
         {
-          "command": "unmess.openSettings",
-          "when": "view == unmess-sidebar && !unmess.tmuxMissing",
+          "command": "unmess.newTask",
+          "when": "view == unmess-sidebar",
           "group": "navigation@2"
         }
       ],
