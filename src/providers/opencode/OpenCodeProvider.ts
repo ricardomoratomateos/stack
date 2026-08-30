@@ -11,11 +11,8 @@ export class OpenCodeProvider implements IAgentProvider {
     private hooks: OpenCodeHookInstaller,
   ) {}
 
-  buildCommand(worktreeId: string, initialPrompt?: string): string {
-    const command = this.config.get().opencodeCommand;
-    // The root command starts the TUI; --prompt seeds it with an initial message.
-    const cmd = initialPrompt ? `${command} --prompt "${initialPrompt.replace(/"/g, '\\"')}"` : command;
-    return `FOREMAN_WORKSPACE_ID="${worktreeId}" ${cmd}`;
+  buildCommand(worktreeId: string): string {
+    return `FOREMAN_WORKSPACE_ID="${worktreeId}" ${this.config.get().opencodeCommand}`;
   }
 
   installHooks(hookUrl: string): void {

@@ -20,6 +20,13 @@ type WindowMeta = {
   title?: string;
 };
 
+/**
+ * Commands a freshly respawned agent window reports while it is NOT yet the
+ * agent: `sh` runs the launch line, and the trailing `exec $SHELL` takes over
+ * again if the agent binary is missing or exits at once.
+ */
+const SHELL_COMMANDS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'csh', 'tcsh']);
+
 export class AgentSessionManager {
   // worktreeId → (tmux window index → metadata)
   private windows = new Map<string, Map<number, WindowMeta>>();
@@ -81,6 +88,7 @@ export class AgentSessionManager {
     private tmux: ISessionManager = new TmuxManager(),
     private pathExists: (p: string) => boolean = (p) => fs.existsSync(p),
     private hostname: string = os.hostname(),
+    private sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
   ) {
     vscode.window.onDidCloseTerminal(terminal => {
       for (const [id, viewer] of this.viewers.entries()) {
@@ -304,6 +312,11 @@ export class AgentSessionManager {
    */
   private static readonly SHELL_POLL_MS = 2_000;
 
+  /** How long to wait for a respawned window to be running the agent itself. */
+  private static readonly AGENT_START_TIMEOUT_MS = 10_000;
+
+  private static readonly AGENT_START_POLL_MS = 150;
+
   private aggregateState(worktreeId: string): AgentSessionState {
     const states = [...(this.windows.get(worktreeId) ?? new Map()).values()]
       .filter(w => w.kind === 'agent')
@@ -357,6 +370,18 @@ export class AgentSessionManager {
     return undefined;
   }
 
+  /**
+   * Same lookup by the terminal's NAME. Tab inputs for terminals are opaque
+   * (TabInputTerminal exposes nothing), so a tab can only be matched to its
+   * viewer through the label VS Code shows, which is the terminal's name.
+   */
+  getWorktreeIdForTerminalName(name: string): string | undefined {
+    for (const [id, viewer] of this.viewers) {
+      if (viewer.name === name) return id;
+    }
+    return undefined;
+  }
+
   // ── Public API ────────────────────────────────────────────────────────────
 
   async launch(worktree: Worktree, opts?: { provider?: ProviderId; prompt?: string }): Promise<vscode.Terminal> {
@@ -375,12 +400,26 @@ export class AgentSessionManager {
     await this.tmux.respawnWindow(
       sessionName,
       windowIndex,
-      `FOREMAN_WINDOW_INDEX="${windowIndex}" ${provider.buildCommand(worktree.id, opts?.prompt)}; exec "\${SHELL:-/bin/sh}"`,
+      `FOREMAN_WINDOW_INDEX="${windowIndex}" ${provider.buildCommand(worktree.id)}; exec "\${SHELL:-/bin/sh}"`,
     );
 
     this.windowMap(worktree.id).set(windowIndex, { kind: 'agent', provider: provider.id, state: 'waiting', name: provider.id });
 
     await this.tmux.selectWindow(sessionName, windowIndex);
+
+    // The prompt is pasted, never passed as an argument. See buildCommand: the
+    // launch line goes through `sh -c`, which eats `${...}` and backticks — and
+    // the review panel wraps every quoted code line in backticks, so sending
+    // comments to a new agent used to deliver them with the code missing.
+    //
+    // Pasting means waiting for the agent to own the pane: text sent while `sh`
+    // is still starting it lands nowhere. If it never arrives (binary missing,
+    // instant exit) the text is left unsent rather than submitted, because what
+    // is sitting at that prompt is then a shell, and a prompt is not a command.
+    if (opts?.prompt) {
+      const started = await this.waitForAgentProcess(sessionName, windowIndex);
+      await this.tmux.paste(`${sessionName}:${windowIndex}`, opts.prompt, started);
+    }
     const viewer = await this.getOrCreateViewer(worktree);
     viewer.show();
 
@@ -393,6 +432,26 @@ export class AgentSessionManager {
 
   launchWithPrompt(worktree: Worktree, prompt: string): Promise<vscode.Terminal> {
     return this.launch(worktree, { prompt });
+  }
+
+  /**
+   * Resolves once the window is running something that is not a shell, i.e. the
+   * agent has replaced the `sh` that launched it. False on timeout.
+   */
+  private async waitForAgentProcess(session: string, windowIndex: number): Promise<boolean> {
+    // Counted attempts rather than a wall-clock deadline: the bound is then a
+    // property of the code and not of how fast the machine ran the loop, which
+    // is also what lets a test drive it with an instant sleep.
+    const attempts = Math.ceil(
+      AgentSessionManager.AGENT_START_TIMEOUT_MS / AgentSessionManager.AGENT_START_POLL_MS,
+    );
+    for (let i = 0; i < attempts; i++) {
+      const windows = await this.tmux.listWindows(session).catch(() => []);
+      const command = windows.find((w) => w.index === windowIndex)?.command;
+      if (command && !SHELL_COMMANDS.has(command)) return true;
+      await this.sleep(AgentSessionManager.AGENT_START_POLL_MS);
+    }
+    return false;
   }
 
   /**

@@ -11,11 +11,8 @@ export class CodexProvider implements IAgentProvider {
     private hooks: CodexHookInstaller,
   ) {}
 
-  buildCommand(worktreeId: string, initialPrompt?: string): string {
-    const command = this.config.get().codexCommand;
-    // Codex takes the first prompt as a bare positional argument, like Claude.
-    const cmd = initialPrompt ? `${command} "${initialPrompt.replace(/"/g, '\\"')}"` : command;
-    return `FOREMAN_WORKSPACE_ID="${worktreeId}" ${cmd}`;
+  buildCommand(worktreeId: string): string {
+    return `FOREMAN_WORKSPACE_ID="${worktreeId}" ${this.config.get().codexCommand}`;
   }
 
   installHooks(hookUrl: string): void {

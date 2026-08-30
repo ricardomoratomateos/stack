@@ -16,10 +16,8 @@ export class ClaudeProvider implements IAgentProvider {
     private hooks: ClaudeHookInstaller,
   ) {}
 
-  buildCommand(worktreeId: string, initialPrompt?: string): string {
-    const command = this.config.get().claudeCommand;
-    const cmd = initialPrompt ? `${command} "${initialPrompt.replace(/"/g, '\\"')}"` : command;
-    return `FOREMAN_WORKSPACE_ID="${worktreeId}" ${cmd}`;
+  buildCommand(worktreeId: string): string {
+    return `FOREMAN_WORKSPACE_ID="${worktreeId}" ${this.config.get().claudeCommand}`;
   }
 
   installHooks(hookUrl: string): void {

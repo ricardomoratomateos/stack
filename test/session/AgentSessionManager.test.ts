@@ -55,7 +55,9 @@ function makeFactory(claudeCommand = 'claude'): ProviderFactory {
 function create(claudeCommand = 'claude', memento: vscode.Memento = new FakeMemento() as unknown as vscode.Memento) {
   const stub = makeStub();
   // Default: worktree directories exist, deterministic hostname. Individual tests override as needed.
-  const mgr = new AgentSessionManager(makeFactory(claudeCommand), memento, stub, () => true, 'Test-Host.local');
+  // Instant sleep: waitForAgentProcess is bounded by attempts, so this runs
+  // its whole budget without any wall-clock time.
+  const mgr = new AgentSessionManager(makeFactory(claudeCommand), memento, stub, () => true, 'Test-Host.local', async () => {});
   const stateEvents: Array<{ worktreeId: string; state: AgentSessionState }> = [];
   let terminalsChanges = 0;
   mgr.onStateChange(e => stateEvents.push(e));
@@ -359,14 +361,81 @@ describe('launch', () => {
 });
 
 describe('launch command line', () => {
-  it('prefixes FOREMAN_WORKSPACE_ID and escapes double quotes in the initial prompt', async () => {
+  it('keeps the prompt out of the command line entirely', async () => {
+    // tmux runs the launch line through `sh -c`. A prompt in there is expanded
+    // before the agent sees it: `${...}` aborts the command and the agent never
+    // starts, and backticks substitute away whatever they wrap — which is every
+    // code line buildCommentPrompt attaches, so "send to a new agent" from the
+    // review panel delivered comments with their code silently missing.
     const { mgr, stub } = create();
-    await mgr.launch(wt, { prompt: 'fix "this" bug' });
+    await mgr.launch(wt, { prompt: 'fix ${user.id} and `const x = 1`' });
     expect(stub.respawnWindow).toHaveBeenCalledWith(
       SESSION,
       1,
-      'FOREMAN_WINDOW_INDEX="1" FOREMAN_WORKSPACE_ID="wt-1" claude "fix \\"this\\" bug"; exec "${SHELL:-/bin/sh}"',
+      'FOREMAN_WINDOW_INDEX="1" FOREMAN_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"',
     );
+  });
+
+  it('pastes the prompt, submitted, once the agent owns the pane', async () => {
+    const { mgr, stub } = create();
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'claude', command: 'node' },
+    ]);
+    await mgr.launch(wt, { prompt: 'fix ${user.id}' });
+    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'fix ${user.id}', true);
+  });
+
+  it('waits while the pane is still the shell that launches the agent', async () => {
+    const { mgr, stub } = create();
+    const listWindows = stub.listWindows as ReturnType<typeof vi.fn>;
+    listWindows
+      .mockResolvedValueOnce([{ index: 1, name: 'claude', command: 'sh' }])
+      .mockResolvedValue([{ index: 1, name: 'claude', command: 'node' }]);
+    await mgr.launch(wt, { prompt: 'go' });
+    expect(listWindows.mock.calls.length).toBeGreaterThan(1);
+    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+  });
+
+  it('leaves the prompt unsent when the agent never takes the pane', async () => {
+    // Binary missing, or it exited at once — the trailing `exec $SHELL` owns the
+    // pane. Submitting there would run the prompt as a shell command.
+    const { mgr, stub } = create();
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'claude', command: 'zsh' },
+    ]);
+    await mgr.launch(wt, { prompt: 'rm -rf everything' });
+    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'rm -rf everything', false);
+  });
+
+  it('tolerates tmux failing while it waits for the agent', async () => {
+    const { mgr, stub } = create();
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no server'));
+    await mgr.launch(wt, { prompt: 'go' });
+    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', false);
+  });
+
+  it('waits on a real timer when no sleep is injected', async () => {
+    // Everything else here drives the wait with an instant sleep; this is the
+    // one place the shipped setTimeout default actually runs.
+    const stub = makeStub();
+    (stub.listWindows as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([{ index: 1, name: 'claude', command: 'sh' }])
+      .mockResolvedValue([{ index: 1, name: 'claude', command: 'node' }]);
+    const mgr = new AgentSessionManager(
+      makeFactory(), new FakeMemento() as unknown as vscode.Memento, stub, () => true, 'Test-Host.local',
+    );
+
+    const started = Date.now();
+    await mgr.launch(wt, { prompt: 'go' });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(100);
+    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+  });
+
+  it('does not paste, or wait, when there is no prompt', async () => {
+    const { mgr, stub } = create();
+    await mgr.launch(wt);
+    expect(stub.paste).not.toHaveBeenCalled();
+    expect(stub.listWindows).not.toHaveBeenCalled();
   });
 
   it('launches an explicitly requested provider instead of the default', async () => {
@@ -383,12 +452,16 @@ describe('launch command line', () => {
 
   it('launchWithPrompt delegates to launch with the prompt', async () => {
     const { mgr, stub } = create('my-claude');
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'claude', command: 'node' },
+    ]);
     await mgr.launchWithPrompt(wt, 'hello');
     expect(stub.respawnWindow).toHaveBeenCalledWith(
       SESSION,
       1,
-      'FOREMAN_WINDOW_INDEX="1" FOREMAN_WORKSPACE_ID="wt-1" my-claude "hello"; exec "${SHELL:-/bin/sh}"',
+      'FOREMAN_WINDOW_INDEX="1" FOREMAN_WORKSPACE_ID="wt-1" my-claude; exec "${SHELL:-/bin/sh}"',
     );
+    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'hello', true);
   });
 });
 

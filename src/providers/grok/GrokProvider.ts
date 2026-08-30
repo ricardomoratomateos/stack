@@ -11,12 +11,8 @@ export class GrokProvider implements IAgentProvider {
     private hooks: GrokHookInstaller,
   ) {}
 
-  buildCommand(worktreeId: string, initialPrompt?: string): string {
-    const command = this.config.get().grokCommand;
-    // `-p` seeds the first prompt while staying in the interactive TUI, which is
-    // what the viewer terminal shows. (Headless mode is a different flag set.)
-    const cmd = initialPrompt ? `${command} -p "${initialPrompt.replace(/"/g, '\\"')}"` : command;
-    return `FOREMAN_WORKSPACE_ID="${worktreeId}" ${cmd}`;
+  buildCommand(worktreeId: string): string {
+    return `FOREMAN_WORKSPACE_ID="${worktreeId}" ${this.config.get().grokCommand}`;
   }
 
   installHooks(hookUrl: string): void {

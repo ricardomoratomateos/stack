@@ -34,8 +34,16 @@ export interface IAgentProvider {
   readonly id: ProviderId;
   /** Human-readable name, e.g. "Claude Code". */
   readonly label: string;
-  /** Full shell command to launch the agent in a worktree's tmux window. */
-  buildCommand(worktreeId: string, initialPrompt?: string): string;
+  /**
+   * Full shell command to launch the agent in a worktree's tmux window.
+   *
+   * Deliberately takes no prompt. tmux runs this string through `sh -c`, so a
+   * prompt embedded here is expanded before the agent ever sees it: `${...}`
+   * aborts the whole command and the agent never starts, and backticks silently
+   * substitute away the text they wrap — which is every code line the review
+   * panel attaches. Prompts are pasted into the running agent instead.
+   */
+  buildCommand(worktreeId: string): string;
   /** Wire the provider's hook/plugin system to POST state events to hookUrl. */
   installHooks(hookUrl: string): void;
   uninstallHooks(): void;

@@ -68,12 +68,6 @@ describe('ProviderFactory', () => {
       expect(provider.buildCommand('wt-1')).toBe('FOREMAN_WORKSPACE_ID="wt-1" my-claude');
     });
 
-    it('buildCommand appends the initial prompt with escaped double quotes', () => {
-      const provider = makeFactory().create('claude');
-      expect(provider.buildCommand('wt-1', 'fix "this" bug')).toBe(
-        'FOREMAN_WORKSPACE_ID="wt-1" claude "fix \\"this\\" bug"',
-      );
-    });
 
     it('installHooks writes notify.sh and injects into the claude settings under homeDir', () => {
       const provider = makeFactory().create('claude');
@@ -116,12 +110,6 @@ describe('ProviderFactory', () => {
       expect(provider.buildCommand('wt-1')).toBe('FOREMAN_WORKSPACE_ID="wt-1" /opt/opencode');
     });
 
-    it('buildCommand passes the initial prompt via --prompt with escaped double quotes', () => {
-      const provider = makeFactory().create('opencode');
-      expect(provider.buildCommand('wt-1', 'fix "this" bug')).toBe(
-        'FOREMAN_WORKSPACE_ID="wt-1" opencode --prompt "fix \\"this\\" bug"',
-      );
-    });
 
     it('installHooks writes the plugin into ~/.config/opencode/plugin with the hook URL', () => {
       makeFactory().create('opencode').installHooks('http://127.0.0.1:43110');
@@ -231,11 +219,6 @@ describe('CodexProvider', () => {
     expect(make().buildCommand('wt-1')).toBe('FOREMAN_WORKSPACE_ID="wt-1" codex');
   });
 
-  it('passes the initial prompt as a positional argument, escaping quotes', () => {
-    expect(make().buildCommand('wt-1', 'fix "this" bug')).toBe(
-      'FOREMAN_WORKSPACE_ID="wt-1" codex "fix \\"this\\" bug"',
-    );
-  });
 
   it('registers into ~/.codex/hooks.json', () => {
     make().installHooks('http://127.0.0.1:43110');
@@ -341,11 +324,6 @@ describe('GrokProvider', () => {
     expect(provider.label).toBe('Grok Build');
   });
 
-  it('seeds the first prompt with -p, which keeps the interactive TUI', () => {
-    expect(make().buildCommand('wt-1', 'fix "this" bug')).toBe(
-      'FOREMAN_WORKSPACE_ID="wt-1" grok -p "fix \\"this\\" bug"',
-    );
-  });
 
   it('buildCommand without a prompt is the bare command', () => {
     expect(make().buildCommand('wt-1')).toBe('FOREMAN_WORKSPACE_ID="wt-1" grok');
