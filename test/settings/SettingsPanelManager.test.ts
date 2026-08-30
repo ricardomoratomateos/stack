@@ -133,4 +133,68 @@ describe('SettingsPanelManager', () => {
     m.open();
     expect(window.createWebviewPanel).toHaveBeenCalledTimes(2);
   });
+
+  it('createScript for setup reports the setup field', async () => {
+    // The teardown side is covered above; this is the other half of the ternary
+    // that decides which field the panel fills in.
+    const panel = makePanel();
+    window.createWebviewPanel.mockReturnValue(panel);
+    const host = makeHost({ createScript: vi.fn(async () => '.foreman/setup.sh') });
+    new SettingsPanelManager(extUri, host).open();
+
+    await panel.fire({ type: 'createScript', kind: 'setup' });
+    await flush();
+    expect(panel.posted).toContainEqual({
+      type: 'picked', field: 'setupScript', path: '.foreman/setup.sh',
+    });
+  });
+
+  it('clearPersonalOverrides clears and re-reads, so the panel shows the project values', async () => {
+    const panel = makePanel();
+    window.createWebviewPanel.mockReturnValue(panel);
+    const host = makeHost();
+    new SettingsPanelManager(extUri, host).open();
+    panel.posted.length = 0;
+
+    await panel.fire({ type: 'clearPersonalOverrides' });
+    await flush();
+    expect(host.clearPersonalOverrides).toHaveBeenCalled();
+    expect(panel.posted).toContainEqual({ type: 'snapshot', snapshot });
+  });
+
+  it('still refreshes when clearing the overrides fails', async () => {
+    // Whatever is on screen is now of unknown accuracy either way; re-reading is
+    // the only thing that can make it true again.
+    const panel = makePanel();
+    window.createWebviewPanel.mockReturnValue(panel);
+    const host = makeHost({ clearPersonalOverrides: vi.fn(async () => { throw new Error('nope'); }) });
+    new SettingsPanelManager(extUri, host).open();
+    panel.posted.length = 0;
+
+    await panel.fire({ type: 'clearPersonalOverrides' });
+    await flush();
+    expect(panel.posted).toContainEqual({ type: 'snapshot', snapshot });
+  });
+
+  it('openProjectFile opens it, and survives it not being there', async () => {
+    const panel = makePanel();
+    window.createWebviewPanel.mockReturnValue(panel);
+    const host = makeHost({ openProjectFile: vi.fn(async () => { throw new Error('missing'); }) });
+    new SettingsPanelManager(extUri, host).open();
+
+    await expect(panel.fire({ type: 'openProjectFile' })).resolves.not.toThrow();
+    expect(host.openProjectFile).toHaveBeenCalled();
+  });
+
+  it('dispose closes an open panel and is a no-op without one', () => {
+    const panel = makePanel();
+    window.createWebviewPanel.mockReturnValue(panel);
+    const mgr = new SettingsPanelManager(extUri, makeHost());
+
+    expect(() => mgr.dispose()).not.toThrow();
+    mgr.open();
+    mgr.dispose();
+    expect(panel.dispose).toHaveBeenCalled();
+    expect(() => mgr.dispose()).not.toThrow();
+  });
 });

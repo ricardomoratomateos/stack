@@ -20,9 +20,18 @@ export default defineConfig({
       all: true,
       include: ['src/**/*.ts'],
       exclude: [
-        'src/webview/**',        // React webview — untouched by the refactor, covered by the "never changes" invariant
-        'src/diff/webview/**',   // React diff-review panel — UI, exercised manually like src/webview
-        'src/diff/types.ts',     // type-only message/DTO definitions
+        // React views — UI, exercised manually. `webview/vscode.ts` is the
+        // three-line acquireVsCodeApi shim each of them needs to compile.
+        'src/webview/**',
+        'src/diff/webview/**',
+        'src/newtask/webview/**',
+        'src/settings/webview/**',
+        // Type-only message/DTO definitions: they compile to nothing, so v8
+        // reports every one of them as a wholly uncovered file.
+        'src/types.ts',
+        'src/diff/types.ts',
+        'src/newtask/types.ts',
+        'src/settings/types.ts',
         'src/extension.ts',      // pure wiring after Step 5 — excluded per plan
         'src/ports/**',          // type-only interfaces
       ],
