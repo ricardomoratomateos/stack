@@ -463,9 +463,71 @@ describe('launch command line', () => {
     );
 
     const started = Date.now();
-    await mgr.launch(wt, { prompt: 'go' });
+    const launched = mgr.launch(wt, { prompt: 'go' });
+    // The hook wait is real-timed too (6 s cap): release it once the process poll has slept.
+    await new Promise((r) => setTimeout(r, 200));
+    mgr.updateState('wt-1', 'waiting', 1);
+    await launched;
     expect(Date.now() - started).toBeGreaterThanOrEqual(100);
     expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+  });
+
+  describe('waiting for the agent to listen', () => {
+    /** Process detection succeeds at once; every sleep hangs, so only a hook can release the paste. */
+    function createHung() {
+      const stub = makeStub();
+      (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 1, name: 'claude', command: 'node', pid: 7 }]);
+      const mgr = new AgentSessionManager(
+        makeFactory(), new FakeMemento() as unknown as vscode.Memento, stub, () => true, 'Test-Host.local',
+        () => new Promise<void>(() => {}),
+      );
+      return { mgr, stub };
+    }
+    const flush = () => new Promise((r) => setTimeout(r, 0));
+
+    it("holds the paste until the window's first hook event, then submits", async () => {
+      const { mgr, stub } = createHung();
+      const launched = mgr.launch(wt, { prompt: 'go' });
+      await flush();
+      expect(stub.paste).not.toHaveBeenCalled();
+      mgr.updateState('wt-1', 'waiting', 1);
+      await launched;
+      expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+    });
+
+    it('a hook without a window index releases every waiter of that worktree, and no other', async () => {
+      const { mgr, stub } = createHung();
+      const other = { ...wt, id: 'wt-2', path: '/tmp/wt-2' };
+      const a = mgr.launch(wt, { prompt: 'a' });
+      const b = mgr.launch(other, { prompt: 'b' });
+      await flush();
+      mgr.updateState('wt-1', 'waiting');
+      await a;
+      expect(stub.paste).toHaveBeenCalledTimes(1);
+      mgr.updateState('wt-2', 'waiting', 1);
+      await b;
+      expect(stub.paste).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not wait when the hook already arrived while the process was being detected', async () => {
+      const { mgr, stub } = createHung();
+      // Fired from inside the process poll, once: updateState itself refreshes
+      // titles through listWindows, so an unconditional hook here would recurse.
+      let hookFired = false;
+      (stub.listWindows as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+        if (!hookFired) { hookFired = true; mgr.updateState('wt-1', 'waiting', 1); }
+        return [{ index: 1, name: 'claude', command: 'node', pid: 7 }];
+      });
+      await mgr.launch(wt, { prompt: 'go' }); // would hang here if it waited
+      expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+    });
+
+    it('pastes anyway once the cap passes — hooks the user never trusted do not fire', async () => {
+      const { mgr, stub } = create(); // instant sleep: the cap elapses at once
+      (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 1, name: 'claude', command: 'node', pid: 7 }]);
+      await mgr.launch(wt, { prompt: 'go' });
+      expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+    });
   });
 
   it('does not paste, or wait, when there is no prompt', async () => {

@@ -18,6 +18,8 @@ type WindowMeta = {
   name: string;
   /** Live task title published by the agent through the terminal title (OSC → tmux pane_title). */
   title?: string;
+  /** A hook event has arrived from this window: the agent is initialised and listening. */
+  hookSeen?: boolean;
 };
 
 /**
@@ -316,6 +318,10 @@ export class AgentSessionManager {
   private static readonly AGENT_START_TIMEOUT_MS = 10_000;
 
   private static readonly AGENT_START_POLL_MS = 150;
+  /** How long a launch waits for the agent's first hook before pasting anyway. */
+  private static readonly AGENT_READY_TIMEOUT_MS = 6_000;
+  /** Launches waiting on a window's first hook event, keyed `worktreeId:windowIndex`. */
+  private readyWaiters = new Map<string, () => void>();
 
   private aggregateState(worktreeId: string): AgentSessionState {
     const states = [...(this.windows.get(worktreeId) ?? new Map()).values()]
@@ -424,6 +430,12 @@ export class AgentSessionManager {
     // is sitting at that prompt is then a shell, and a prompt is not a command.
     if (opts?.prompt) {
       const started = await this.waitForAgentProcess(sessionName, windowIndex);
+      // A running process is not yet a listening one: raw input and bracketed
+      // paste come on a beat later, and until then a paste sits in the tty's
+      // line buffer — a multi-line prompt would submit line by line. The
+      // agent's own first hook (SessionStart, which every provider emits) is
+      // the "listening now" signal.
+      if (started) await this.waitForHook(worktree.id, windowIndex);
       await this.tmux.paste(`${sessionName}:${windowIndex}`, opts.prompt, started);
     }
 
@@ -462,6 +474,21 @@ export class AgentSessionManager {
       await this.sleep(AgentSessionManager.AGENT_START_POLL_MS);
     }
     return false;
+  }
+
+  /**
+   * Resolves once the window's agent has sent its first hook event, or after
+   * AGENT_READY_TIMEOUT_MS: hooks the user has not trusted never fire, and a
+   * launch must not hang on them. The window's meta was written by launch()
+   * moments ago, hence the assertion.
+   */
+  private waitForHook(worktreeId: string, windowIndex: number): Promise<boolean> {
+    const meta = this.windowMap(worktreeId).get(windowIndex)!;
+    if (meta.hookSeen) return Promise.resolve(true);
+    const key = `${worktreeId}:${windowIndex}`;
+    const seen = new Promise<boolean>((resolve) => this.readyWaiters.set(key, () => resolve(true)));
+    const capped = this.sleep(AgentSessionManager.AGENT_READY_TIMEOUT_MS).then(() => false);
+    return Promise.race([seen, capped]).finally(() => this.readyWaiters.delete(key));
   }
 
   /**
@@ -542,12 +569,16 @@ export class AgentSessionManager {
       // terminal Foreman opened. Adopt it instead of dropping every event: the
       // provider stays unknown (nothing says which agent it is), which the card
       // renders with a neutral mark rather than guessing.
-      map.set(windowIndex, meta.kind === 'agent' ? { ...meta, state } : { ...meta, kind: 'agent', state });
+      map.set(windowIndex, meta.kind === 'agent' ? { ...meta, state, hookSeen: true } : { ...meta, kind: 'agent', state, hookSeen: true });
+      this.readyWaiters.get(`${workspaceId}:${windowIndex}`)?.();
     } else {
       // Agents launched before FOREMAN_WINDOW_INDEX existed: no way to know the
       // source window — apply to all agent windows (pre-per-session behavior).
       for (const [idx, meta] of map.entries()) {
-        if (meta.kind === 'agent') map.set(idx, { ...meta, state });
+        if (meta.kind === 'agent') map.set(idx, { ...meta, state, hookSeen: true });
+      }
+      for (const [key, release] of this.readyWaiters) {
+        if (key.startsWith(`${workspaceId}:`)) release();
       }
     }
     this.persistState(workspaceId);
