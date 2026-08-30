@@ -5,9 +5,13 @@ export interface TmuxWindow {
   title?: string;
   /**
    * Process running in the active pane right now — `zsh` when the shell is
-   * sitting at a prompt, `npm`/`vim`/`psql` when it is not.
+   * sitting at a prompt, `npm`/`vim`/`psql` when it is not. Reported from the
+   * pane's process group leader, so a child that shares the group (anything a
+   * non-interactive `sh -c` runs) is invisible here; see `pid`.
    */
   command?: string;
+  /** Pid of the pane's process, for looking past `command` at its children. */
+  pid?: number;
 }
 
 /** Port over tmux session operations (implemented by TmuxManager). */
@@ -31,4 +35,6 @@ export interface ISessionManager {
   /** Detaches all clients; the session keeps running. */
   detachClients(sessionName: string): Promise<void>;
   listWindows(session: string): Promise<TmuxWindow[]>;
+  /** Whether a process has at least one child — the way to see an agent a shell started. */
+  hasChildProcess(pid: number): Promise<boolean>;
 }

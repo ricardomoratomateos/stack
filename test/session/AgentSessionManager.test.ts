@@ -44,6 +44,7 @@ function makeStub(): ISessionManager {
     killSession: vi.fn().mockResolvedValue(undefined),
     detachClients: vi.fn().mockResolvedValue(undefined),
     listWindows: vi.fn().mockResolvedValue([]),
+    hasChildProcess: vi.fn().mockResolvedValue(false),
   };
 }
 
@@ -405,6 +406,31 @@ describe('launch command line', () => {
     await mgr.launch(wt, { prompt: 'go' });
     expect(listWindows.mock.calls.length).toBeGreaterThan(1);
     expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+  });
+
+  it('sees the agent through the shell that launched it: command stays a shell, but the pane has a child', async () => {
+    // What tmux really reports for `zsh -c "claude; exec zsh"`: the pane's
+    // command is `zsh` for the agent's whole life, and only the child list moves.
+    const { mgr, stub } = create();
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'claude', command: 'zsh', pid: 4242 },
+    ]);
+    (stub.hasChildProcess as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    await mgr.launch(wt, { prompt: 'go' });
+    expect(stub.hasChildProcess).toHaveBeenCalledWith(4242);
+    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+  });
+
+  it('treats a failing child lookup as "not yet"', async () => {
+    const { mgr, stub } = create();
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'claude', command: 'zsh', pid: 4242 },
+    ]);
+    (stub.hasChildProcess as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no pgrep'));
+    await mgr.launch(wt, { prompt: 'go' });
+    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', false);
   });
 
   it('leaves the prompt unsent when the agent never takes the pane', async () => {

@@ -439,8 +439,13 @@ export class AgentSessionManager {
   }
 
   /**
-   * Resolves once the window is running something that is not a shell, i.e. the
-   * agent has replaced the `sh` that launched it. False on timeout.
+   * Resolves once the agent owns the window. Two signals, either is enough:
+   * the pane's command is no longer a shell (an agent that took over the
+   * process group), or the pane's shell has a child process — which is what
+   * `zsh -c "claude; exec zsh"` actually looks like from tmux, because the
+   * child shares the group and `pane_current_command` never stops saying
+   * `zsh`. Relying on the first alone burned the whole timeout on every
+   * launch and then pasted the prompt unsent. False on timeout.
    */
   private async waitForAgentProcess(session: string, windowIndex: number): Promise<boolean> {
     // Counted attempts rather than a wall-clock deadline: the bound is then a
@@ -451,8 +456,9 @@ export class AgentSessionManager {
     );
     for (let i = 0; i < attempts; i++) {
       const windows = await this.tmux.listWindows(session).catch(() => []);
-      const command = windows.find((w) => w.index === windowIndex)?.command;
-      if (command && !SHELL_COMMANDS.has(command)) return true;
+      const window = windows.find((w) => w.index === windowIndex);
+      if (window?.command && !SHELL_COMMANDS.has(window.command)) return true;
+      if (window?.pid !== undefined && (await this.tmux.hasChildProcess(window.pid).catch(() => false))) return true;
       await this.sleep(AgentSessionManager.AGENT_START_POLL_MS);
     }
     return false;

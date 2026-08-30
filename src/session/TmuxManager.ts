@@ -2,7 +2,7 @@ import { exec } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { ISessionManager } from '../ports/ISessionManager';
+import type { ISessionManager, TmuxWindow } from '../ports/ISessionManager';
 
 /**
  * A UTF-8 locale that actually exists on the given platform.
@@ -126,7 +126,7 @@ export class TmuxManager implements ISessionManager {
     try { await this.run(`tmux kill-window -t "${session}:${windowIndex}"`); } catch { /* may not exist */ }
   }
 
-  async listWindows(session: string): Promise<Array<{ index: number; name: string; title: string }>> {
+  async listWindows(session: string): Promise<TmuxWindow[]> {
     // A PRINTABLE separator, deliberately.
     //
     // This used to be \x01, guarded by forcing a UTF-8 locale — because under
@@ -143,12 +143,31 @@ export class TmuxManager implements ISessionManager {
     const SEP = '|:foreman:|';
     try {
       const out = await this.run(
-        `tmux list-windows -t "${session}" -F "#{window_index}${SEP}#{window_name}${SEP}#{pane_title}${SEP}#{pane_current_command}"`,
+        `tmux list-windows -t "${session}" -F "#{window_index}${SEP}#{window_name}${SEP}#{pane_title}${SEP}#{pane_current_command}${SEP}#{pane_pid}"`,
       );
       return out.split('\n').filter(Boolean).map(line => {
-        const [index, name, title, command] = line.split(SEP);
-        return { index: parseInt(index, 10), name: name ?? '', title: title ?? '', command: command ?? '' };
+        const [index, name, title, command, pid] = line.split(SEP);
+        const pane = parseInt(pid ?? '', 10);
+        return {
+          index: parseInt(index, 10), name: name ?? '', title: title ?? '', command: command ?? '',
+          ...(Number.isNaN(pane) ? {} : { pid: pane }),
+        };
       });
     } catch { return []; }
+  }
+
+  /**
+   * `pgrep -P` rather than tmux: `pane_current_command` names the pane's
+   * process-group leader, and a command run through a non-interactive shell
+   * (`zsh -c "claude; exec zsh"`, which is what respawn-window does) keeps its
+   * child in the same group — so tmux reports `zsh` for as long as the agent
+   * runs. The child list is the only thing that actually changes.
+   */
+  async hasChildProcess(pid: number): Promise<boolean> {
+    try {
+      return (await this.run(`pgrep -P ${pid}`)).trim().length > 0;
+    } catch {
+      return false; // pgrep exits 1 when there is nothing to list
+    }
   }
 }

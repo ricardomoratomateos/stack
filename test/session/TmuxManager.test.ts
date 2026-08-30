@@ -192,17 +192,17 @@ describe('command construction', () => {
   it('listWindows parses separator-delimited index/name/title/command lines, keeping spaces in names and titles', async () => {
     const calls = captureExec(() => ({
       stdout:
-        '0|:foreman:|zsh|:foreman:|my-host.local|:foreman:|zsh\n' +
-        '1|:foreman:|claude|:foreman:|⠂ Fix login flow bug|:foreman:|node\n' +
-        '2|:foreman:|my window name|:foreman:||:foreman:|npm\n',
+        '0|:foreman:|zsh|:foreman:|my-host.local|:foreman:|zsh|:foreman:|100\n' +
+        '1|:foreman:|claude|:foreman:|⠂ Fix login flow bug|:foreman:|node|:foreman:|200\n' +
+        '2|:foreman:|my window name|:foreman:||:foreman:|npm|:foreman:|300\n',
     }));
     await expect(tmux.listWindows('s1')).resolves.toEqual([
-      { index: 0, name: 'zsh', title: 'my-host.local', command: 'zsh' },
-      { index: 1, name: 'claude', title: '⠂ Fix login flow bug', command: 'node' },
-      { index: 2, name: 'my window name', title: '', command: 'npm' },
+      { index: 0, name: 'zsh', title: 'my-host.local', command: 'zsh', pid: 100 },
+      { index: 1, name: 'claude', title: '⠂ Fix login flow bug', command: 'node', pid: 200 },
+      { index: 2, name: 'my window name', title: '', command: 'npm', pid: 300 },
     ]);
     expect(calls).toEqual([
-      'tmux list-windows -t "s1" -F "#{window_index}|:foreman:|#{window_name}|:foreman:|#{pane_title}|:foreman:|#{pane_current_command}"',
+      'tmux list-windows -t "s1" -F "#{window_index}|:foreman:|#{window_name}|:foreman:|#{pane_title}|:foreman:|#{pane_current_command}|:foreman:|#{pane_pid}"',
     ]);
   });
 
@@ -221,6 +221,17 @@ describe('command construction', () => {
   it('listWindows tolerates lines missing name/title fields', async () => {
     captureExec(() => ({ stdout: '3\n' }));
     await expect(tmux.listWindows('s1')).resolves.toEqual([{ index: 3, name: '', title: '', command: '' }]);
+  });
+
+  it('hasChildProcess asks pgrep for the pid\'s children and reads its exit status', async () => {
+    let calls = captureExec(() => ({ stdout: '4243\n' }));
+    await expect(tmux.hasChildProcess(4242)).resolves.toBe(true);
+    expect(calls).toEqual(['pgrep -P 4242']);
+    // pgrep exits 1 (an error to exec) when there is nothing to list.
+    calls = captureExec(() => ({ err: new Error('exit 1') }));
+    await expect(tmux.hasChildProcess(4242)).resolves.toBe(false);
+    captureExec(() => ({ stdout: '\n' }));
+    await expect(tmux.hasChildProcess(4242)).resolves.toBe(false);
   });
 
   it('listWindows returns [] on error or empty output', async () => {
