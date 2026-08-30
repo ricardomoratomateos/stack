@@ -32,6 +32,8 @@ skills-lock.json
 # ride along in every install.
 assets/demo.gif
 
+RELEASING.md
+
 # Repo hygiene that has no place in an installable package.
 .gitignore
 .vscodeignore
