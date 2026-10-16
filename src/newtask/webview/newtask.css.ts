@@ -129,12 +129,18 @@ body.vscode-high-contrast .nt-card:focus-within, body.vscode-high-contrast-light
 .nt-chip[aria-invalid='true'] { color: var(--nt-error); }
 .nt-mark { display: inline-flex; }
 
-.nt-branch-input {
-  height: 28px; padding: 0 8px; min-width: 12ch; max-width: 100%;
-  border: 1px solid var(--nt-ring); border-radius: var(--nt-chip-radius); outline: none;
-  background: var(--nt-bg); color: var(--nt-fg); font-family: var(--nt-mono); font-size: 12px;
+.nt-branch-edit {
+  height: 28px; padding: 0 8px; display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  border: 1px solid var(--nt-ring); border-radius: var(--nt-chip-radius);
+  background: var(--nt-bg); color: var(--nt-dim);
 }
-.nt-branch-input[aria-invalid='true'] { border-color: var(--nt-error); }
+.nt-branch-edit .codicon { font-size: 13px; }
+.nt-branch-edit[data-invalid] { border-color: var(--nt-error); }
+.nt-branch-input {
+  height: 100%; padding: 0; min-width: 12ch; max-width: 100%;
+  border: 0; outline: none; background: transparent;
+  color: var(--nt-fg); font-family: var(--nt-mono); font-size: 12px;
+}
 .nt-reset {
   width: 20px; height: 20px; margin-left: -2px; display: inline-flex; align-items: center; justify-content: center;
   border: 0; border-radius: var(--nt-chip-radius); background: transparent; color: var(--nt-faint); cursor: pointer;

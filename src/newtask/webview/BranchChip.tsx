@@ -41,32 +41,37 @@ export function BranchChip({ name, manual, generated, error, errorId, disabled, 
 
   if (editing) {
     const value = manual ?? '';
+    // Same `→` as the chip, so clicking it reads as editing the chip in place
+    // rather than swapping it for a different control.
     return (
-      <input
-        ref={inputRef}
-        className="nt-branch-input"
-        value={value}
-        style={{ width: `${Math.max(14, value.length + 3)}ch` }}
-        spellCheck={false}
-        autoComplete="off"
-        aria-label="Branch name"
-        aria-invalid={!!error}
-        aria-describedby={error ? errorId : undefined}
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={finish}
-        onKeyDown={(e) => {
-          if (isCancelKey(e.nativeEvent)) {
-            // Esc here undoes the edit; it must not also close the panel.
-            e.preventDefault();
-            e.stopPropagation();
-            onChange(before.current);
-            setEditing(false);
-          } else if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.nativeEvent.isComposing) {
-            e.preventDefault();
-            finish();
-          }
-        }}
-      />
+      <span className="nt-branch-edit" data-invalid={error ? '' : undefined}>
+        <i className="codicon codicon-arrow-right" aria-hidden="true" />
+        <input
+          ref={inputRef}
+          className="nt-branch-input"
+          value={value}
+          style={{ width: `${Math.max(14, value.length + 3)}ch` }}
+          spellCheck={false}
+          autoComplete="off"
+          aria-label="Branch name"
+          aria-invalid={!!error}
+          aria-describedby={error ? errorId : undefined}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={finish}
+          onKeyDown={(e) => {
+            if (isCancelKey(e.nativeEvent)) {
+              // Esc here undoes the edit; it must not also close the panel.
+              e.preventDefault();
+              e.stopPropagation();
+              onChange(before.current);
+              setEditing(false);
+            } else if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              finish();
+            }
+          }}
+        />
+      </span>
     );
   }
 
