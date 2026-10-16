@@ -88,8 +88,7 @@ body.vscode-high-contrast .fm-aside, body.vscode-high-contrast-light .fm-aside {
 }
 
 .as-brand { flex: none; height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 14px; }
-.as-mark { width: 20px; height: 20px; flex: none; border-radius: 4px; background: var(--fm-accent); display: flex; align-items: center; justify-content: center; }
-.as-mark svg { stroke: var(--fm-accent-ink, #0a0a0a); }
+.as-mark { width: 20px; height: 20px; flex: none; border-radius: 4px; background: var(--fm-accent); display: flex; align-items: center; justify-content: center; color: var(--fm-accent-ink, #0a0a0a); }
 .as-wordmark { font-weight: 600; letter-spacing: -.01em; }
 .as-sub { font-family: var(--fm-mono); font-size: 11px; color: var(--fm-text-faint); }
 

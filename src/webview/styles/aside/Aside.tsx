@@ -21,11 +21,34 @@ const NONE: Record<WorktreeGroup, string> = {
   missing: 'No worktree is missing',
 };
 
-/** The brand mark: three commits on a branch, the same drawing as the activity-bar icon. */
+/**
+ * The brand mark: three worktrees stacked, the active one in front with a
+ * prompt cut out of it — the same drawing as the activity-bar icon
+ * (resources/icon.svg) and the Marketplace tile, in the tile's colours (the
+ * lime box is `.as-mark`, the ink is currentColor). The mask ids are prefixed
+ * so they cannot clash with anything else in the webview's one document.
+ */
 function Mark() {
   return (
-    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 64 64" fill="none" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 52V12" /><path d="M18 22h14a8 8 0 0 0 8-8" /><path d="M18 38h10a8 8 0 0 0 8-8" />
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 100 100">
+      <defs>
+        <mask id="as-mark-mid" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+          <rect width="100" height="100" fill="#fff" />
+          <rect x="11" y="31" width="58" height="58" rx="16" fill="#000" />
+        </mask>
+        <mask id="as-mark-back" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+          <rect width="100" height="100" fill="#fff" />
+          <rect x="21" y="21" width="58" height="58" rx="16" fill="#000" />
+        </mask>
+        <mask id="as-mark-front" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+          <rect width="100" height="100" fill="#fff" />
+          <path d="M27.5 52l9 8-9 8" fill="none" stroke="#000" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M42.5 68h11" stroke="#000" strokeWidth="5.5" strokeLinecap="round" />
+        </mask>
+      </defs>
+      <rect x="35" y="15" width="50" height="50" rx="12" fill="currentColor" opacity="0.32" mask="url(#as-mark-back)" />
+      <rect x="25" y="25" width="50" height="50" rx="12" fill="currentColor" opacity="0.6" mask="url(#as-mark-mid)" />
+      <rect x="15" y="35" width="50" height="50" rx="12" fill="currentColor" mask="url(#as-mark-front)" />
     </svg>
   );
 }
