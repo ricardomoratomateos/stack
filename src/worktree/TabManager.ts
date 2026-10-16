@@ -91,6 +91,24 @@ export class TabManager {
     return this.saved.get(worktreeId);
   }
 
+  /**
+   * Forget the saved tabs of every worktree not in `liveIds`.
+   *
+   * Nothing ever removed an entry, so the blob in globalState grew by one
+   * worktree's tab list per worktree ever created, and was rewritten whole on
+   * every tab event. `liveIds` must be the whole store, every repository — a
+   * window only shows its own, and must not prune another project's tabs.
+   */
+  prune(liveIds: ReadonlySet<string>): void {
+    let changed = false;
+    for (const id of [...this.saved.keys()]) {
+      if (liveIds.has(id)) continue;
+      this.saved.delete(id);
+      changed = true;
+    }
+    if (changed) this.persist();
+  }
+
   /** Snapshot hadViewer before closing viewers on a worktree switch. */
   updateViewerState(worktrees: WorktreeRef[], viewerOpenIds: Set<string>): void {
     for (const wt of worktrees) {

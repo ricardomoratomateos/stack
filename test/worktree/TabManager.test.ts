@@ -502,3 +502,33 @@ describe('constructor', () => {
     expect(window.onDidChangeActiveTextEditor).toHaveBeenCalledTimes(1);
   });
 });
+
+// ── prune ────────────────────────────────────────────────────────────────────
+
+describe('prune', () => {
+  it('drops saved tabs of worktrees no longer in the store, and persists', async () => {
+    const memento = new FakeMemento();
+    await memento.update(STORE_KEY, {
+      a: { uris: ['/wt/a/x.ts'] },
+      gone: { uris: ['/wt/gone/y.ts'] },
+    });
+    const { manager } = build(memento, () => [wtA]);
+
+    manager.prune(new Set(['a', 'b']));
+
+    expect(Object.keys(savedState(memento))).toEqual(['a']);
+    expect(manager.getState('gone')).toBeUndefined();
+    expect(manager.getState('a')).toEqual({ uris: ['/wt/a/x.ts'] });
+  });
+
+  it('writes nothing when every entry is still alive', async () => {
+    const memento = new FakeMemento();
+    await memento.update(STORE_KEY, { a: { uris: [] } });
+    const update = vi.spyOn(memento, 'update');
+    const { manager } = build(memento, () => [wtA]);
+
+    manager.prune(new Set(['a']));
+
+    expect(update).not.toHaveBeenCalled();
+  });
+});
