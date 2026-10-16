@@ -138,8 +138,8 @@ function makeHarness(o: HarnessOpts = {}) {
   const prCallbacks = new Map<string, () => void>();
 
   const claude = {
-    launch: vi.fn((w: Worktree) => { calls.push(`claude.launch:${w.id}`); return Promise.resolve(); }),
-    launchWithPrompt: vi.fn((w: Worktree, prompt: string) => { calls.push(`claude.launchWithPrompt:${w.id}:${prompt}`); return Promise.resolve(); }),
+    launch: vi.fn((w: Worktree, _opts?: unknown) => { calls.push(`claude.launch:${w.id}`); return Promise.resolve(); }),
+    launchWithPrompt: vi.fn((w: Worktree, prompt: string, _provider?: string) => { calls.push(`claude.launchWithPrompt:${w.id}:${prompt}`); return Promise.resolve(); }),
     openTerminal: vi.fn((w: Worktree) => { calls.push(`claude.openTerminal:${w.id}`); return Promise.resolve(); }),
     getOrCreateViewer: vi.fn(async (w: Worktree) => {
       calls.push(`claude.getOrCreateViewer:${w.id}`);
@@ -1797,7 +1797,7 @@ describe('createWorktree', () => {
     await h.service.createWorktree({ branch: 'feat/x', title: '  My task  ', description: 'do the thing' });
     expect(h.manager.create).toHaveBeenCalledWith('feat/x', root, 'My task', undefined);
     await vi.advanceTimersByTimeAsync(300);
-    expect(h.claude.launchWithPrompt).toHaveBeenCalledWith(created, 'do the thing');
+    expect(h.claude.launchWithPrompt).toHaveBeenCalledWith(created, 'do the thing', undefined);
   });
 
   it('activates the new worktree before the agent launches, so its card is selected from the first second', async () => {
@@ -1939,6 +1939,63 @@ describe('createWorktree', () => {
     expect(h.notify.showError).not.toHaveBeenCalled();
   });
 
+  it('starts the chosen agent, with the description as its prompt, instead of the default one', async () => {
+    vi.useFakeTimers();
+    const { h, created } = createHarness();
+    await h.service.createWorktree({ branch: 'feat/x', description: 'Fix the bug', provider: 'codex' });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(h.claude.launchWithPrompt).toHaveBeenCalledWith(created, 'Fix the bug', 'codex');
+  });
+
+  it('starts the chosen agent bare when there is no description', async () => {
+    vi.useFakeTimers();
+    const { h, created } = createHarness();
+    await h.service.createWorktree({ branch: 'feat/x', provider: 'opencode' });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(h.claude.launch).toHaveBeenCalledWith(created, { provider: 'opencode' });
+  });
+
+  it('forwards the provider from the webview message', async () => {
+    vi.useFakeTimers();
+    const { h, created } = createHarness();
+    await h.service.handleMessage({ type: 'createWorktree', branch: 'feat/x', provider: 'codex' });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(h.claude.launch).toHaveBeenCalledWith(created, { provider: 'codex' });
+  });
+
+  it('resolves ok once the worktree exists', async () => {
+    vi.useFakeTimers();
+    const { h } = createHarness();
+    expect(await h.service.createWorktree({ branch: 'feat/x' })).toEqual({ ok: true });
+  });
+
+  it('resolves with the reason, and still toasts it, when creation fails', async () => {
+    vi.useFakeTimers();
+    const { h } = createHarness();
+    h.manager.create.mockRejectedValue(new Error('git failed'));
+    expect(await h.service.createWorktree({ branch: 'feat/x' }))
+      .toEqual({ ok: false, error: 'Failed to create worktree: Error: git failed' });
+    expect(h.notify.showError).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the failure to the caller when silent, as the new-task panel does', async () => {
+    vi.useFakeTimers();
+    const { h } = createHarness();
+    h.manager.create.mockRejectedValue(new Error('git failed'));
+    const out = await h.service.createWorktree({ branch: 'feat/x', silent: true });
+    expect(out).toEqual({ ok: false, error: 'Failed to create worktree: Error: git failed' });
+    expect(h.notify.showError).not.toHaveBeenCalled();
+  });
+
+  it('reports a missing repository the same way, and a cancelled branch prompt as a quiet no', async () => {
+    const none = createHarness({ workspaceFolders: ['/nope'], gitDirs: [] });
+    expect(await none.h.service.createWorktree({ branch: 'x', silent: true }))
+      .toEqual({ ok: false, error: 'No git repository found in workspace.' });
+    const { h } = createHarness();
+    h.host.showInputBox.mockResolvedValue(undefined);
+    expect(await h.service.createWorktree()).toEqual({ ok: false });
+  });
+
   it('shows an error and aborts when creation fails (no deferred launch)', async () => {
     vi.useFakeTimers();
     const { h } = createHarness();
@@ -1958,7 +2015,7 @@ describe('createWorktree', () => {
     await vi.advanceTimersByTimeAsync(299);
     expect(h.claude.launch).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
-    expect(h.claude.launch).toHaveBeenCalledWith(created);
+    expect(h.claude.launch).toHaveBeenCalledWith(created, undefined);
   });
 
   it('launches Claude with the description as initial prompt when given', async () => {
@@ -1966,7 +2023,7 @@ describe('createWorktree', () => {
     const { h, created } = createHarness();
     await h.service.createWorktree({ branch: 'feat/x', description: 'Fix the bug' });
     await vi.advanceTimersByTimeAsync(300);
-    expect(h.claude.launchWithPrompt).toHaveBeenCalledWith(created, 'Fix the bug');
+    expect(h.claude.launchWithPrompt).toHaveBeenCalledWith(created, 'Fix the bug', undefined);
     expect(h.claude.launch).not.toHaveBeenCalled();
   });
 
@@ -3072,6 +3129,7 @@ describe('installedProviders fallback', () => {
       },
     });
     expect(h.service.buildState().installedProviders).toEqual([]);
+    expect(h.service.newTaskInit().installedProviders).toEqual([]);
   });
 });
 
@@ -3631,6 +3689,35 @@ describe('new-agent panel', () => {
     const h = makeHarness({ worktrees: [], workspaceFolders: [] });
     expect(h.service.newTaskBranchOptions()).toEqual({ branches: [], baseBranch: 'main' });
     expect(h.git.listBranches).not.toHaveBeenCalled();
+  });
+});
+
+describe('new-task panel inputs', () => {
+  it('newTaskInit adds the accent, default agent and installed agents to the branch options', () => {
+    const h = makeHarness({
+      workspaceFolders: ['/repo'], branches: ['develop'], installedProviders: ['claude', 'codex'],
+      config: { defaultBaseBranch: 'develop', defaultProvider: 'codex', sidebarStyle: 'claude' },
+    });
+    expect(h.service.newTaskInit()).toEqual({
+      branches: ['develop'], baseBranch: 'develop',
+      sidebarStyle: 'claude', defaultProvider: 'codex', installedProviders: ['claude', 'codex'],
+    });
+  });
+
+  it('confirmDiscardNewTask is true only when the user picks Discard', async () => {
+    const h = makeHarness();
+    h.notify.confirm.mockResolvedValueOnce('Discard');
+    expect(await h.service.confirmDiscardNewTask()).toBe(true);
+    h.notify.confirm.mockResolvedValueOnce(undefined);
+    expect(await h.service.confirmDiscardNewTask()).toBe(false);
+    expect(h.notify.confirm).toHaveBeenCalledWith('Discard this task?', expect.any(String), 'Discard');
+  });
+
+  it('showProviderInstall copies the install command when asked', async () => {
+    const h = makeHarness();
+    h.notify.confirm.mockResolvedValueOnce('Copy command');
+    await h.service.showProviderInstall('codex');
+    expect(h.host.writeClipboard).toHaveBeenCalledWith('npm i -g @openai/codex');
   });
 });
 
