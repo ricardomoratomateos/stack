@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as crypto from 'node:crypto';
 import type { DiffBase, SendDestination, DiffComment, DiffPanelMessage, DiffPanelExtMessage } from './types';
+import { DiffError } from '../ports/IGitPort';
 
 /** Business logic the panel needs, provided by the application service. */
 export interface DiffPanelHost {
@@ -77,8 +78,21 @@ export class DiffPanelManager {
       this.post(panel, { type: 'error', message: 'Worktree not found.' });
       return;
     }
-    const unified = await this.host.getDiff(worktreeId, base).catch(() => '');
-    this.post(panel, { type: 'diff', base, unified, hasLiveAgent: ctx.hasLiveAgent, label: ctx.label });
+    // A failure is carried alongside an empty diff rather than swallowed into
+    // one: '' renders "No changes to review", which after a git error is a lie
+    // that sends the reviewer away thinking the agent did nothing. Still a
+    // 'diff' message, so the base toggle and label stay in step with the request.
+    let unified = '';
+    let error: string | undefined;
+    try {
+      unified = await this.host.getDiff(worktreeId, base);
+    } catch (e) {
+      error = e instanceof DiffError ? e.reason : e instanceof Error ? e.message : String(e);
+    }
+    this.post(panel, {
+      type: 'diff', base, unified, hasLiveAgent: ctx.hasLiveAgent, label: ctx.label,
+      ...(error !== undefined ? { error } : {}),
+    });
   }
 
   dispose(): void {
