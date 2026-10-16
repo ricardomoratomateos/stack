@@ -2,6 +2,7 @@ import { IWorktreeRepository } from '../ports/IWorktreeRepository';
 import { portBlockFor } from '../docker/dockerCompose';
 import { isPortFree as probePort } from './portProbe';
 import type { ForemanConfig } from '../types';
+import type { SharedPortReservations } from './portReservations';
 
 /** The only slice of the repository the allocator needs. */
 type PortRegistryReader = Pick<IWorktreeRepository, 'getPortRegistry'>;
@@ -17,6 +18,11 @@ export interface PortAllocatorOptions {
   config?: () => ForemanConfig;
   /** OS-level availability probe. Injected in tests to keep them off real sockets. */
   isPortFree?: (port: number) => Promise<boolean>;
+  /**
+   * Reservations every window can see. Without it, reservations are this
+   * window's alone and two windows creating at once can get the same slot.
+   */
+  shared?: SharedPortReservations;
 }
 
 export class PortAllocator {
@@ -47,7 +53,10 @@ export class PortAllocator {
    */
   async allocate(): Promise<number> {
     const registry = new Set(Object.values(this.store.getPortRegistry()));
-    // Anything that reached the store no longer needs holding.
+    // Anything that reached the store no longer needs holding here. The shared
+    // claim is deliberately left to expire on its own: other windows see this
+    // store write only once globalState has synced to them, and until then the
+    // claim is all that tells them the slot is taken.
     for (const p of this.reserved) if (registry.has(p)) this.reserved.delete(p);
 
     let port = this.basePort + 1;
@@ -59,8 +68,15 @@ export class PortAllocator {
       // be handed the same slot — two worktrees with one block of docker ports,
       // failing minutes later inside `compose up`.
       this.reserved.add(port);
+      // Then across windows: the registry is globalState, which a creation in
+      // another window reaches only after its own allocate() returned.
+      if (this.options.shared && !(await this.options.shared.tryReserve(port))) {
+        this.reserved.delete(port);
+        continue;
+      }
       if ((await this.firstBusyPort(port)) === undefined) return port;
       this.reserved.delete(port);
+      await this.options.shared?.release(port);
     }
     throw new Error(
       `No free port slot found in ${this.basePort + 1}..${this.basePort + MAX_SLOTS} — ` +
@@ -95,5 +111,6 @@ export class PortAllocator {
    */
   release(port: number): void {
     this.reserved.delete(port);
+    void this.options.shared?.release(port);
   }
 }

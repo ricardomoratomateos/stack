@@ -6,6 +6,7 @@ import { exec } from 'node:child_process';
 import { WorktreeStore } from './worktree/WorktreeStore';
 import { WorktreeManager } from './worktree/WorktreeManager';
 import { PortAllocator } from './worktree/portAllocator';
+import { PortReservationFile } from './worktree/portReservations';
 import { ConfigManager } from './config/ConfigManager';
 import { REPO_CONFIG_RELATIVE, readRepoConfig, renderRepoConfig, type RepoScopedKey } from './config/RepoConfig';
 import { AgentSessionManager } from './session/AgentSessionManager';
@@ -251,6 +252,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // not just the debug port, before handing a slot out.
   const portAllocator = new PortAllocator(store, config.get().debugBasePort, {
     config: () => config.get(),
+    shared: new PortReservationFile(ctx.globalStorageUri.fsPath),
   });
   const providerFactory = new ProviderFactory(config, ctx.globalStorageUri.fsPath);
   const agentManager = new AgentSessionManager(providerFactory, ctx.globalState);
