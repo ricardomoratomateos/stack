@@ -582,6 +582,14 @@ describe('launch command line', () => {
     expect(stub.listWindows).not.toHaveBeenCalled();
   });
 
+  it("announces the worktree's aggregate, so a pending permission elsewhere is not read as answered", async () => {
+    const { mgr, stub, stateEvents } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'permission', name: 'claude' }]]);
+    (stub.newWindow as ReturnType<typeof vi.fn>).mockResolvedValue(2);
+    await mgr.launch(wt);
+    expect(stateEvents).toEqual([{ worktreeId: 'wt-1', state: 'permission' }]);
+  });
+
   it('launches an explicitly requested provider instead of the default', async () => {
     const { mgr, stub } = create();
     await mgr.launch(wt, { provider: 'opencode' });
@@ -1357,6 +1365,111 @@ describe('reconnect', () => {
     await mgr.reconnect([wt]);
     expect(mgr.getState('wt-1')).toBe('waiting');
   });
+
+  describe('against what is actually running', () => {
+    const WRAPPER = 'zsh -c FOREMAN_WINDOW_INDEX="1" FOREMAN_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"';
+    async function reloadWith(persisted: Record<number, AgentSessionState>, args: Record<number, string>) {
+      const memento = new FakeMemento() as unknown as vscode.Memento;
+      await memento.update('foreman.claudeStates', { 'wt-1': persisted });
+      const h = create('claude', memento);
+      (h.stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+      (h.stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue(
+        Object.keys(args).map((i) => ({ index: Number(i), name: 'claude', command: 'zsh', pid: 100 + Number(i) })),
+      );
+      (h.stub.processCommandLine as ReturnType<typeof vi.fn>).mockImplementation(async (pid: number) => args[pid - 100]);
+      await h.mgr.reconnect([wt]);
+      return h;
+    }
+    const stateOf = (mgr: AgentSessionManager, index: number) => mgr.getSessions('wt-1').find((s) => s.index === index)?.state;
+
+    it('comes back terminated when the agent exited while Foreman was away', async () => {
+      // Its last hooks went to the previous window's HookServer, which is gone.
+      const { mgr } = await reloadWith({ 1: 'active' }, { 1: '/bin/zsh' });
+      expect(stateOf(mgr, 1)).toBe('terminated');
+      expect(mgr.getAgentCount('wt-1')).toBe(0);
+    });
+
+    it('does not bring back "working" — the agent may well have finished since', async () => {
+      const { mgr } = await reloadWith({ 1: 'active' }, { 1: WRAPPER });
+      expect(stateOf(mgr, 1)).toBe('waiting');
+    });
+
+    it('keeps a permission request, which nobody was there to answer', async () => {
+      const { mgr } = await reloadWith({ 1: 'permission' }, { 1: WRAPPER });
+      expect(stateOf(mgr, 1)).toBe('permission');
+    });
+
+    it('fires ONE event per worktree, carrying the aggregate', async () => {
+      // Per-window events read as permission → waiting to the notifier, which
+      // then cleared a real permission badge.
+      const { stateEvents } = await reloadWith({ 1: 'permission', 2: 'waiting' }, { 1: WRAPPER, 2: WRAPPER });
+      expect(stateEvents).toEqual([{ worktreeId: 'wt-1', state: 'permission' }]);
+    });
+  });
+});
+
+describe('agent liveness polling', () => {
+  const WRAPPER = 'zsh -c FOREMAN_WINDOW_INDEX="1" FOREMAN_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"';
+  function polled(args: string | Error) {
+    vi.useFakeTimers();
+    const h = create();
+    seed(h.mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'active', name: 'claude' }]]);
+    (h.stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 1, name: 'claude', command: 'zsh', pid: 42 }]);
+    const ps = h.stub.processCommandLine as ReturnType<typeof vi.fn>;
+    if (args instanceof Error) ps.mockRejectedValue(args); else ps.mockResolvedValue(args);
+    (h.mgr as unknown as { syncShellPolling(): void }).syncShellPolling();
+    return h;
+  }
+  const timer = (mgr: AgentSessionManager) => (mgr as unknown as { shellTimer?: unknown }).shellTimer;
+
+  it('marks an agent that died without a word terminated, and stops polling for it', async () => {
+    // SIGKILL, a crash, Codex's missing SessionEnd: no hook says so, and the
+    // session used to sit on "working" forever.
+    const { mgr, stateEvents, getTerminalsChanges } = polled('/bin/zsh');
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(mgr.getState('wt-1')).toBe('terminated');
+    expect(stateEvents).toEqual([{ worktreeId: 'wt-1', state: 'terminated' }]);
+    expect(getTerminalsChanges()).toBeGreaterThan(0);
+    expect(timer(mgr)).toBeUndefined();
+    mgr.dispose();
+  });
+
+  it('leaves a running agent alone', async () => {
+    const { mgr, stateEvents } = polled(WRAPPER);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(mgr.getState('wt-1')).toBe('active');
+    expect(stateEvents).toEqual([]);
+    mgr.dispose();
+  });
+
+  it('condemns nothing when ps cannot answer', async () => {
+    const { mgr } = polled(new Error('no ps'));
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(mgr.getState('wt-1')).toBe('active');
+    mgr.dispose();
+  });
+
+  it('is not asked on hook-driven syncs — an agent that just sent a hook is alive', async () => {
+    const { mgr, stub } = polled('/bin/zsh');
+    mgr.updateState('wt-1', 'active', 1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stub.processCommandLine).not.toHaveBeenCalled();
+    mgr.dispose();
+  });
+
+  it('neither prunes nor condemns a window that appeared while tmux was answering', async () => {
+    // The list predates the launch, so the new window is missing from it — not gone.
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'active', name: 'claude' }]]);
+    let answer!: (w: unknown[]) => void;
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockReturnValue(new Promise((r) => { answer = r; }));
+    (stub.processCommandLine as ReturnType<typeof vi.fn>).mockResolvedValue('/bin/zsh');
+    const sync = mgr.syncWindows('wt-1', { liveness: true });
+    seed(mgr, 'wt-1', [[2, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    answer([{ index: 1, name: 'claude', command: 'node', pid: 41 }]);
+    await sync;
+    expect(mgr.getSessions('wt-1').map((s) => [s.index, s.state])).toEqual([[1, 'active'], [2, 'waiting']]);
+  });
 });
 
 // ── session titles (tmux pane_title → SessionItem.title) ─────────────────────
@@ -1681,14 +1794,23 @@ describe('shell polling', () => {
   const timer = (mgr: AgentSessionManager) =>
     (mgr as unknown as { shellTimer?: unknown }).shellTimer;
 
-  it('does not poll when no shell is open', () => {
-    // An agent-only worktree gets its refreshes from hook events; a timer here
-    // would be an exec every two seconds for nothing.
+  it('does not poll when nothing can change: no shell, and every agent already terminated', () => {
     vi.useFakeTimers();
     const { mgr } = create();
-    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'terminated', name: 'claude' }]]);
     (mgr as unknown as { syncShellPolling(): void }).syncShellPolling();
     expect(timer(mgr)).toBeUndefined();
+    mgr.dispose();
+  });
+
+  it('polls an agent-only worktree, for an exit no hook reports', () => {
+    // A SIGKILL, a crash, or Codex (no SessionEnd) sends nothing: hook events
+    // alone left such a session "working" forever.
+    vi.useFakeTimers();
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'active', name: 'claude' }]]);
+    (mgr as unknown as { syncShellPolling(): void }).syncShellPolling();
+    expect(timer(mgr)).toBeDefined();
     mgr.dispose();
   });
 
@@ -1729,7 +1851,7 @@ describe('shell polling', () => {
     vi.useFakeTimers();
     const { mgr, stub } = create();
     seed(mgr, 'wt-1', [[1, { kind: 'shell', state: 'idle', name: 'shell' }]]);
-    seed(mgr, 'wt-2', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    seed(mgr, 'wt-2', [[1, { kind: 'agent', provider: 'claude', state: 'terminated', name: 'claude' }]]);
     (mgr as unknown as { syncShellPolling(): void }).syncShellPolling();
 
     await vi.advanceTimersByTimeAsync(2_000);

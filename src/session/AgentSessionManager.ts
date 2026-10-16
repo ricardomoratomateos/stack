@@ -46,13 +46,14 @@ export class AgentSessionManager {
   private titleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /**
-   * Single timer that keeps shell rows current.
+   * Single timer that keeps shell rows current, and agent rows honest.
    *
    * syncWindows is otherwise only reached from a hook event, which is an
    * AGENT's heartbeat — so a shell in a worktree with no agent running would
    * have been labelled once and then frozen, which is most of the time you have
-   * a shell open. One interval for all worktrees rather than one each, and it
-   * only exists while some worktree actually has a shell.
+   * a shell open; and an agent that died without a last hook would have been
+   * "working" forever. One interval for all worktrees rather than one each,
+   * and it only exists while some worktree needs it (see needsPolling).
    */
   private shellTimer?: ReturnType<typeof setInterval>;
 
@@ -210,26 +211,49 @@ export class AgentSessionManager {
    * identifies a provider. Adopting every unknown window would surface the
    * session's own initial shell (window 0, an artefact of `new-session`) as a
    * session row nobody asked for.
+   *
+   * With `liveness`, also notices agents that are gone (see agentLiveness).
+   * State otherwise only moves on hook events, and some exits send none — a
+   * SIGKILL, a crash, Codex (which has no SessionEnd) — so such a session sat
+   * on "working" or "permission" forever. The poller asks for it; hook-driven
+   * calls do not, an agent that just sent a hook being alive by definition.
    */
-  async syncWindows(worktreeId: string): Promise<void> {
+  async syncWindows(worktreeId: string, opts?: { liveness?: boolean }): Promise<void> {
     const map = this.windows.get(worktreeId);
     if (!map) return;
+    // What the map held when we asked tmux. Anything launched, killed or
+    // repainted while the answer was on its way is newer than the answer, and
+    // must not be pruned or condemned on its strength: a launch that lands
+    // between list-windows and here is not in the list yet, and is not gone.
+    const before = new Map(map);
     const tmuxWindows = await this.tmux.listWindows(TmuxManager.sessionName(worktreeId));
     // An empty list means tmux failed or the session is gone — both return []
     // from listWindows. Pruning on that would wipe every session on a transient
     // error, so treat it as "no information" rather than "nothing is there".
     if (tmuxWindows.length === 0) return;
+    if (this.windows.get(worktreeId) !== map) return; // the session was killed meanwhile
 
     let changed = false;
+    let stateChanged = false;
     const live = new Set(tmuxWindows.map((w) => w.index));
+    const unchanged = (index: number) => map.has(index) && map.get(index) === before.get(index);
 
     for (const index of [...map.keys()]) {
-      if (!live.has(index)) {
+      if (!live.has(index) && unchanged(index)) {
         map.delete(index);
         // The name goes with the window. tmux reuses indexes, so leaving it
         // behind would hang "redis" on whatever opens next in that slot.
         this.forgetAlias(worktreeId, index);
         changed = true;
+      }
+    }
+
+    if (opts?.liveness) {
+      for (const w of tmuxWindows) {
+        const meta = map.get(w.index);
+        if (meta?.kind !== 'agent' || meta.state === 'terminated' || !unchanged(w.index)) continue;
+        if ((await this.agentLiveness(w)) !== 'dead' || !unchanged(w.index)) continue;
+        stateChanged = this.markTerminated(worktreeId, w.index) || stateChanged;
       }
     }
 
@@ -251,10 +275,13 @@ export class AgentSessionManager {
       }
     }
 
-    if (changed) {
+    if (stateChanged) {
+      this.stateChangeEmitter.fire({ worktreeId, state: this.aggregateState(worktreeId) });
+    }
+    if (changed || stateChanged) {
       this.persistState(worktreeId);
       this.syncShellPolling();
-    this.terminalsChangeEmitter.fire();
+      this.terminalsChangeEmitter.fire();
     }
   }
 
@@ -279,31 +306,40 @@ export class AgentSessionManager {
   }
 
   /**
-   * Starts or stops the shell poller to match whether any shell is open.
+   * Starts or stops the poller to match whether anything needs it.
    *
    * Called wherever the window map changes. Idempotent, and a no-op in the
    * common case — an extra `tmux list-windows` every two seconds is worth it
-   * for a label that moves, and worth nothing at all when there is no shell to
-   * label, which is why it is not simply always on.
+   * for a label that moves or an agent that may have died, and worth nothing
+   * at all when there is neither, which is why it is not simply always on.
    */
   private syncShellPolling(): void {
-    const wanted = [...this.windows.entries()]
-      .filter(([, map]) => [...map.values()].some((w) => w.kind === 'shell'))
-      .map(([id]) => id);
+    const wanted = [...this.windows.values()].some((map) => this.needsPolling(map));
 
-    if (wanted.length === 0) {
+    if (!wanted) {
       if (this.shellTimer) { clearInterval(this.shellTimer); this.shellTimer = undefined; }
       return;
     }
     if (this.shellTimer) return;
     this.shellTimer = setInterval(() => {
       for (const [worktreeId, map] of this.windows.entries()) {
-        if (![...map.values()].some((w) => w.kind === 'shell')) continue;
+        if (!this.needsPolling(map)) continue;
         // Failures are ignored on purpose: a tmux hiccup should leave the last
         // known label on screen rather than blanking the row.
-        this.syncWindows(worktreeId).catch(() => {});
+        this.syncWindows(worktreeId, { liveness: true }).catch(() => {});
       }
     }, AgentSessionManager.SHELL_POLL_MS);
+  }
+
+  /**
+   * A shell, for its label — or an agent not yet known to be gone, for its
+   * liveness: hooks say when an agent changes state, but not always when it
+   * dies, and an exit nobody reports would otherwise leave it "working"
+   * forever. Once every agent is terminated and no shell is open, nothing on
+   * the card can change without Foreman doing it, and the poller stops.
+   */
+  private needsPolling(map: Map<number, WindowMeta>): boolean {
+    return [...map.values()].some((w) => w.kind === 'shell' || w.state !== 'terminated');
   }
 
   /**
@@ -451,7 +487,10 @@ export class AgentSessionManager {
     // a prompt in can take the agent's whole boot plus a few seconds of
     // waiting for it to confirm the submit, and the card should not lag that.
     this.persistState(worktree.id);
-    this.stateChangeEmitter.fire({ worktreeId: worktree.id, state: 'waiting' });
+    // The worktree's aggregate, not the new window's 'waiting': with another
+    // agent of the worktree asking for permission, a bare 'waiting' read as
+    // that request being answered and cleared its badge.
+    this.stateChangeEmitter.fire({ worktreeId: worktree.id, state: this.aggregateState(worktree.id) });
     this.syncShellPolling();
     this.terminalsChangeEmitter.fire();
 
@@ -921,6 +960,27 @@ export class AgentSessionManager {
   /** Kept for extension.ts compat (setup/teardown scripts). No-op with tmux. */
   register(_worktreeId: string, _terminal: vscode.Terminal): void {}
 
+  /**
+   * The state an agent window comes back with after a reload.
+   *
+   * The persisted state is from before the reload, and the agent did not
+   * stop in between: its hooks went to the previous window's HookServer,
+   * which is gone, so whatever happened meanwhile — it finished, it died — was
+   * never heard. So the process is asked first: gone is "terminated", which
+   * it really is. Running, the persisted state is kept only where it cannot
+   * have gone stale on its own: "permission" waits for the user, who was not
+   * there to answer. "active" may well have finished since, and restoring it
+   * left the session "working" until the next hook, which an agent sitting at
+   * its prompt never sends; "waiting" is the recoverable guess, and any hook
+   * corrects it. A persisted "terminated" on a running agent is likewise
+   * stale (or left by a past liveness-detection bug), and gets "waiting".
+   */
+  private async restoredState(worktreeId: string, window: TmuxWindow): Promise<AgentSessionState> {
+    if ((await this.agentLiveness(window)) === 'dead') return 'terminated';
+    const persisted = this.persistedState(worktreeId, window.index);
+    return persisted === 'permission' || persisted === 'idle' ? persisted : 'waiting';
+  }
+
   /** On extension reload, scan tmux sessions to restore tracked windows. */
   async reconnect(worktrees: Worktree[]): Promise<void> {
     for (const wt of worktrees) {
@@ -929,30 +989,23 @@ export class AgentSessionManager {
 
       const tmuxWindows = await this.tmux.listWindows(sessionName);
       const wm = this.windowMap(wt.id);
+      let restoredAgents = false;
       for (const w of tmuxWindows) {
         // Skip the default session window (index 0, named after the shell)
         if (w.index === 0 && w.name !== 'shell' && !isAgentWindowName(w.name)) continue;
         const provider = providerForWindowName(w.name);
         const kind: 'agent' | 'shell' = provider ? 'agent' : 'shell';
         const title = kind === 'agent' ? this.cleanTitle(w.title, w.name) : this.commandTitle(w.command);
-        // Restore each window's own pre-reload state (e.g. "permission"),
-        // falling back to "waiting" when nothing was persisted for it.
-        //
-        // "terminated" is deliberately NOT restored. The window is still listed
-        // in tmux, so something is there; whether its agent process is alive is
-        // not knowable here, and "waiting" is the recoverable guess — any hook
-        // event corrects it, whereas a stale "terminated" is a dead end that
-        // paints a live agent as dead until you kill the window. (It also
-        // unpoisons state wrongly persisted by a past liveness-detection bug.)
-        const persisted = kind === 'agent' ? this.persistedState(wt.id, w.index) : undefined;
-        const restoredState = kind === 'agent'
-          ? (persisted && persisted !== 'terminated' ? persisted : 'waiting')
-          : 'idle';
+        const restoredState = kind === 'agent' ? await this.restoredState(wt.id, w) : 'idle';
         wm.set(w.index, { kind, provider, state: restoredState, name: w.name, title });
-        if (kind === 'agent') {
-          this.stateChangeEmitter.fire({ worktreeId: wt.id, state: restoredState });
-        }
+        if (kind === 'agent') restoredAgents = true;
       }
+      // One event per worktree, carrying the aggregate — what every other
+      // emitter sends. One per window, each with its own state, had the
+      // notifier read "permission" then "waiting" from the same worktree as a
+      // transition: it cleared a real permission badge, or announced an agent
+      // "finished" that had only been reloaded.
+      if (restoredAgents) this.stateChangeEmitter.fire({ worktreeId: wt.id, state: this.aggregateState(wt.id) });
     }
 
     // Claim any viewer terminals VSCode auto-restored after reload.
