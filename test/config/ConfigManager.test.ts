@@ -308,6 +308,62 @@ describe('ConfigManager', () => {
     });
   });
 
+  // ── saveUserValues: the personal half of the settings panel ────────────────
+
+  describe('saveUserValues', () => {
+    /** Settings double with real layering: workspace > global > default. */
+    function layered(layers: {
+      global?: Record<string, unknown>;
+      workspace?: Record<string, unknown>;
+      defaults?: Record<string, unknown>;
+    }) {
+      const { global = {}, workspace: ws = {}, defaults = {} } = layers;
+      const update = vi.fn().mockResolvedValue(undefined);
+      workspace.getConfiguration.mockImplementation((_section?: string) => ({
+        get: (key: string, fallback?: unknown) => ws[key] ?? global[key] ?? defaults[key] ?? fallback,
+        inspect: (key: string) => ({
+          key, defaultValue: defaults[key], globalValue: global[key], workspaceValue: ws[key],
+        }),
+        update,
+      }));
+      return update;
+    }
+
+    it('writes only the keys that changed — not a copy of every default', async () => {
+      const update = layered({ defaults: { claudeCommand: 'claude', focusMode: false, notifyOnAttention: true } });
+
+      await new ConfigManager().saveUserValues({ claudeCommand: '/opt/bin/claude', focusMode: false, notifyOnAttention: true });
+
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(update).toHaveBeenCalledWith('claudeCommand', '/opt/bin/claude', ConfigurationTarget.Global);
+    });
+
+    it('writes to the workspace when a workspace value would shadow the global one', async () => {
+      // Written globally, the save "succeeded" and the workspace value kept
+      // winning — nothing the user could see changed.
+      const update = layered({ defaults: { focusMode: false }, workspace: { focusMode: false }, global: { focusMode: true } });
+
+      await new ConfigManager().saveUserValues({ focusMode: true });
+
+      expect(update).toHaveBeenCalledWith('focusMode', true, ConfigurationTarget.Workspace);
+      expect(update).not.toHaveBeenCalledWith('focusMode', true, ConfigurationTarget.Global);
+    });
+
+    it('removes the global key when it is set back to the default, instead of pinning the default', async () => {
+      const update = layered({ defaults: { defaultProvider: 'claude' }, global: { defaultProvider: 'codex' } });
+
+      await new ConfigManager().saveUserValues({ defaultProvider: 'claude' });
+
+      expect(update).toHaveBeenCalledWith('defaultProvider', undefined, ConfigurationTarget.Global);
+    });
+
+    it('writes nothing at all for an unchanged form', async () => {
+      const update = layered({ global: { codexCommand: 'codex-beta' }, defaults: { codexCommand: 'codex' } });
+      await new ConfigManager().saveUserValues({ codexCommand: 'codex-beta' });
+      expect(update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('setDefaultProvider', () => {
     it('writes foreman.defaultProvider globally', async () => {
       const update = vi.fn().mockResolvedValue(undefined);

@@ -421,10 +421,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       return readRepoConfig(root).problems;
     },
     saveUser: async (values) => {
-      const cfg = vscode.workspace.getConfiguration('foreman');
-      for (const [key, value] of Object.entries(values)) {
-        await cfg.update(key, value, vscode.ConfigurationTarget.Global);
-      }
+      await config.saveUserValues(values);
       webviewProvider.push();
     },
     clearPersonalOverrides: async () => {
