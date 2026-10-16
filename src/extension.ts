@@ -8,7 +8,15 @@ import { WorktreeManager } from './worktree/WorktreeManager';
 import { PortAllocator } from './worktree/portAllocator';
 import { PortReservationFile } from './worktree/portReservations';
 import { ConfigManager } from './config/ConfigManager';
-import { REPO_CONFIG_RELATIVE, readRepoConfig, renderRepoConfig, updateRepoConfig, type RepoScopedKey } from './config/RepoConfig';
+import {
+  LEGACY_REPO_CONFIG_RELATIVE,
+  REPO_CONFIG_RELATIVE,
+  readRepoConfig,
+  renderRepoConfig,
+  repoConfigRelative,
+  updateRepoConfig,
+  type RepoScopedKey,
+} from './config/RepoConfig';
 import { AgentSessionManager } from './session/AgentSessionManager';
 import { AttentionNotifier } from './session/AttentionNotifier';
 import { ProviderFactory } from './providers/ProviderFactory';
@@ -43,6 +51,9 @@ import { PACKAGE_MANAGERS, tmuxInstallCommand } from './onboarding/tmuxGate';
 import { TmuxGateView } from './onboarding/TmuxGateView';
 import { findRepoRoot } from './worktree/findRepoRoot';
 import { worktreesInRepo } from './worktree/worktreesInRepo';
+import { migrateLegacySettings, vscodeSettingsHost, type MigratedSetting } from './migration/legacySettings';
+import { migrateLegacyState } from './migration/legacyState';
+import { LEGACY_EXTENSION_ID } from './migration/legacyStorage';
 
 /**
  * Surfaces a broken `.stack/config.json` with a way to go fix it.
@@ -55,8 +66,10 @@ async function reportRepoConfigProblems(config: ConfigManager, problems: string[
   const file = config.repoConfigPath();
   const head = problems[0] ?? '';
   const rest = problems.length > 1 ? ` (+${problems.length - 1} more)` : '';
+  // The file actually read: a legacy .foreman/config.json names itself.
+  const name = file ? path.join(path.basename(path.dirname(file)), path.basename(file)) : REPO_CONFIG_RELATIVE;
   const action = await vscode.window.showWarningMessage(
-    `Stack: ${REPO_CONFIG_RELATIVE} — ${head}${rest}`,
+    `Stack: ${name} — ${head}${rest}`,
     ...(file ? ['Open file'] : []),
   );
   if (action === 'Open file' && file) {
@@ -92,12 +105,49 @@ async function createRepoConfig(config: ConfigManager, root: string | undefined)
     }
     if (overwrite !== 'Overwrite') return;
   }
+  // Rendered before writing: while only a legacy .foreman/config.json exists,
+  // its values are part of what is in effect, so they carry over.
+  const replacesLegacy = fs.existsSync(path.join(root, LEGACY_REPO_CONFIG_RELATIVE));
+  const content = renderRepoConfig(config.get());
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, renderRepoConfig(config.get()));
+  fs.writeFileSync(file, content);
   await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file));
   vscode.window.showInformationMessage(
-    `Stack: wrote ${REPO_CONFIG_RELATIVE}. Commit it and your team gets the same setup.`,
+    replacesLegacy
+      ? `Stack: wrote ${REPO_CONFIG_RELATIVE}; it is read instead of ${LEGACY_REPO_CONFIG_RELATIVE} from now on. Commit it and your team gets the same setup.`
+      : `Stack: wrote ${REPO_CONFIG_RELATIVE}. Commit it and your team gets the same setup.`,
   );
+}
+
+/**
+ * Tells the user, once, what was carried over from Foreman — the name this
+ * extension had before — so a settings.json full of foreman.* entries is not
+ * a mystery, and they know those can go.
+ */
+function reportMigratedSettings(migrated: MigratedSetting[]): void {
+  if (migrated.length === 0) return;
+  const keys = [...new Set(migrated.map((m) => m.key))];
+  void vscode.window.showInformationMessage(
+    `Stack: carried ${keys.length} setting${keys.length === 1 ? '' : 's'} over from Foreman (${keys.join(', ')}). ` +
+    'The old foreman.* entries are left in your settings; remove them whenever you like.',
+  );
+}
+
+/**
+ * Foreman and Stack are the same extension under two ids, so both installed
+ * means two of everything — sidebars, hook servers, hooks re-registered by
+ * each on every start, one renaming the other's tmux sessions. Offer the fix.
+ */
+async function warnIfLegacyInstalled(): Promise<void> {
+  if (!vscode.extensions.getExtension(LEGACY_EXTENSION_ID)) return;
+  const pick = await vscode.window.showWarningMessage(
+    'Stack: Foreman — Stack under its old name — is still installed. With both running they fight over the same hooks and tmux sessions. Uninstall Foreman; your agents keep running and Stack takes them over.',
+    'Uninstall Foreman',
+  );
+  if (pick !== 'Uninstall Foreman') return;
+  await vscode.commands.executeCommand('workbench.extensions.uninstallExtension', LEGACY_EXTENSION_ID);
+  const reload = await vscode.window.showInformationMessage('Stack: Foreman was uninstalled. Reload the window to finish.', 'Reload');
+  if (reload === 'Reload') await vscode.commands.executeCommand('workbench.action.reloadWindow');
 }
 
 /** Resolve which of the given binaries are on PATH (via `which`). */
@@ -222,6 +272,20 @@ class VsCodeWorkspaceHost implements IWorkspaceHost {
 }
 
 export async function activate(ctx: vscode.ExtensionContext) {
+  // Before anything reads them: what Foreman — this extension's old name —
+  // left in settings and in this extension's mementos moves to Stack's names.
+  // Never fatal; the worst case is starting from defaults, as a new install.
+  try {
+    await migrateLegacyState(ctx.globalState);
+    await migrateLegacyState(ctx.workspaceState);
+  } catch (e) {
+    console.error('[stack] carrying Foreman state over failed:', e);
+  }
+  const migratedSettings = await migrateLegacySettings(vscodeSettingsHost(), ctx.globalState, ctx.workspaceState)
+    .catch((e: unknown): MigratedSetting[] => { console.error('[stack] carrying Foreman settings over failed:', e); return []; });
+  reportMigratedSettings(migratedSettings);
+  void warnIfLegacyInstalled();
+
   // Tmux is required for terminal session management — it's how agents survive
   // window reloads and get multiplexed per worktree. Without it there's nothing
   // meaningful to run, so we hard-gate and abort the rest of activation. Rather
@@ -415,6 +479,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       const effective = config.get();
       const cfg = vscode.workspace.getConfiguration('stack');
       const repoFile = readRepoConfig(root);
+      const relative = root ? repoConfigRelative(root) : REPO_CONFIG_RELATIVE;
       return {
         repoRoot: root,
         // The file's own values, NOT `effective`: that one has this user's
@@ -422,7 +487,13 @@ export async function activate(ctx: vscode.ExtensionContext) {
         // writes into the committed file. Personal overrides are listed below
         // so the panel can say why what runs here differs.
         project: config.projectValues(),
-        projectFile: { path: config.repoConfigPath(), present: repoFile.present, problems: repoFile.problems },
+        projectFile: {
+          path: config.repoConfigPath(),
+          relative,
+          legacy: relative === LEGACY_REPO_CONFIG_RELATIVE,
+          present: repoFile.present,
+          problems: repoFile.problems,
+        },
         personalOverrides: REPO_KEYS.filter((key) => {
           const seen = cfg.inspect(key);
           return seen?.globalValue !== undefined || seen?.workspaceValue !== undefined || seen?.workspaceFolderValue !== undefined;
@@ -476,7 +547,9 @@ export async function activate(ctx: vscode.ExtensionContext) {
     saveProject: async (values) => {
       const root = repoRootOf();
       if (!root) return ['Open a git repository first.'];
-      const file = path.join(root, REPO_CONFIG_RELATIVE);
+      // The file in use: a legacy .foreman/config.json is saved in place, not
+      // forked into a .stack/config.json that would silently take over from it.
+      const file = path.join(root, repoConfigRelative(root));
       fs.mkdirSync(path.dirname(file), { recursive: true });
       // Written INTO the existing file, so keys from a newer Stack and its
       // higher version survive a save from this one (see updateRepoConfig).
@@ -598,7 +671,9 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // Docker polling follows the setting without a reload — from settings.json,
   // or from `.stack/config.json` saved by the panel, edited by hand or
   // changed by a checkout (which no configuration event reports).
-  const repoConfigWatcher = vscode.workspace.createFileSystemWatcher(`**/${REPO_CONFIG_RELATIVE}`);
+  // Both names: creating .stack/config.json beside a legacy .foreman/config.json
+  // switches which one is read.
+  const repoConfigWatcher = vscode.workspace.createFileSystemWatcher('**/{.stack,.foreman}/config.json');
   const resyncDocker = () => {
     service.syncDockerPolling();
     webviewProvider.push();
@@ -706,6 +781,25 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // file, or a PHP stack that wants Xdebug — offer the settings panel once.
   // Then never again for this repo: it lives behind the gear from here on, and
   // a repo that already has `.stack/config.json` was set up by someone.
+  // A repository configured under Foreman, this extension's old name: its
+  // .foreman/config.json is read (no .stack/config.json exists), and the
+  // user is told so once per repository, with how to move it.
+  void (async () => {
+    const root = repoRootOf();
+    if (!root || repoConfigRelative(root) !== LEGACY_REPO_CONFIG_RELATIVE) return;
+    const key = `stack.legacyRepoConfigNoticed:${root}`;
+    if (ctx.globalState.get<boolean>(key)) return;
+    await ctx.globalState.update(key, true);
+    const pick = await vscode.window.showInformationMessage(
+      `Stack: this repository's settings are read from ${LEGACY_REPO_CONFIG_RELATIVE}, where Foreman (Stack's old name) kept them. ` +
+      'Rename the .foreman folder to .stack — and the script paths in it that point into .foreman/ — once nobody on the team runs Foreman any more.',
+      'Open file',
+    );
+    if (pick === 'Open file') {
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(path.join(root, LEGACY_REPO_CONFIG_RELATIVE)));
+    }
+  })();
+
   void (async () => {
     const root = repoRootOf();
     if (!root) return;

@@ -42,7 +42,15 @@ export type UserValues = Pick<
 export interface SettingsSnapshot {
   repoRoot?: string;
   project: ProjectValues;
-  projectFile: { path?: string; present: boolean; problems: string[] };
+  projectFile: {
+    path?: string;
+    /** The file in use relative to the repo: `.stack/config.json`, or a legacy `.foreman/config.json`. */
+    relative: string;
+    /** True while it is the legacy `.foreman/config.json` that is read (and saved to). */
+    legacy: boolean;
+    present: boolean;
+    problems: string[];
+  };
   /**
    * Repo-scoped keys the user has set in their own settings.json. Those win
    * over the file, so a value saved here would not take effect for them until

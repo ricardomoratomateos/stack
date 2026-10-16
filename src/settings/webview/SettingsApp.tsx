@@ -12,7 +12,8 @@ const STR = {
   subtitle: 'Two kinds of settings: the project’s (shared with everyone who clones it) and yours (this machine only).',
   noRepo: 'Open a git repository to configure a project. Your own settings are below.',
   project: 'Project',
-  projectHint: 'Saved to .stack/config.json. Commit it and your team gets the same setup.',
+  projectHint: (file: string) => `Saved to ${file}. Commit it and your team gets the same setup.`,
+  legacyFile: (file: string) => `This repository's settings are in ${file}, where Foreman (Stack's old name) kept them. Stack reads and saves that file until it finds a .stack/config.json: rename the .foreman folder to .stack — and the script paths that point into it — once nobody on the team runs Foreman any more.`,
   openFile: 'Open file',
   fileProblems: 'The file on disk has problems — fix them or save from here to overwrite it:',
   overrides: (keys: string) => `Your settings.json sets ${keys} for this repo. Those win over the file, so what you save here won’t take effect for you until they go.`,
@@ -55,7 +56,7 @@ const STR = {
   templateShape: 'Needs a string "type" and "request".',
   stackHint: (stack: string) => `This looks like a ${stack} project.`,
   usePreset: 'Use that preset',
-  saveProject: 'Save to .stack/config.json',
+  saveProject: (file: string) => `Save to ${file}`,
   you: 'You',
   youHint: 'Saved to your VS Code settings. Never travels with the repo.',
   agents: 'Agents',
@@ -191,11 +192,12 @@ export function SettingsApp() {
         {hasRepo && (
           <Card
             title={STR.project}
-            hint={STR.projectHint}
+            hint={STR.projectHint(snap.projectFile.relative)}
             action={snap.projectFile.present ? (
               <button className="u-btn small" onClick={() => send({ type: 'openProjectFile' })}>{STR.openFile}</button>
             ) : null}
           >
+            {snap.projectFile.legacy && <Banner tone="info">{STR.legacyFile(snap.projectFile.relative)}</Banner>}
             {snap.projectFile.problems.length > 0 && (
               <Banner tone="warn">
                 <div>{STR.fileProblems}</div>
@@ -312,7 +314,7 @@ export function SettingsApp() {
               dirty={projectDirty}
               blocked={!!template.error}
               busy={saving === 'project'}
-              label={STR.saveProject}
+              label={STR.saveProject(snap.projectFile.relative)}
               notice={notice?.scope === 'project' ? notice : null}
               onSave={saveProject}
             />

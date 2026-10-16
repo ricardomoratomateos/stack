@@ -3,7 +3,9 @@ import * as path from 'node:path';
 import {
   readRepoConfig,
   renderRepoConfig,
+  repoConfigRelative,
   updateRepoConfig,
+  LEGACY_REPO_CONFIG_RELATIVE,
   REPO_CONFIG_RELATIVE,
   REPO_CONFIG_VERSION,
 } from '../../src/config/RepoConfig';
@@ -24,6 +26,38 @@ const read = (body: unknown) =>
 describe('readRepoConfig', () => {
   it('looks in .stack/config.json under the repo root', () => {
     expect(REPO_CONFIG_RELATIVE).toBe(path.join('.stack', 'config.json'));
+  });
+
+  describe("Foreman's .foreman/config.json (the extension's old name)", () => {
+    const LEGACY = path.join(ROOT, '.foreman', 'config.json');
+
+    it('is read when there is no .stack/config.json, and says so', () => {
+      const result = readRepoConfig(ROOT, fsWith({ [LEGACY]: JSON.stringify({ defaultBaseBranch: 'trunk' }) }));
+      expect(result).toEqual({ values: { defaultBaseBranch: 'trunk' }, present: true, legacy: true, problems: [] });
+    });
+
+    it('loses to a .stack/config.json beside it', () => {
+      const result = readRepoConfig(ROOT, fsWith({
+        [LEGACY]: JSON.stringify({ defaultBaseBranch: 'old' }),
+        [FILE]: JSON.stringify({ defaultBaseBranch: 'new' }),
+      }));
+      expect(result).toEqual({ values: { defaultBaseBranch: 'new' }, present: true, problems: [] });
+    });
+
+    it('names itself in its complaints', () => {
+      expect(readRepoConfig(ROOT, fsWith({ [LEGACY]: '{ nope' })).problems[0]).toMatch(/^\.foreman[\\/]config\.json is not valid JSON/);
+      expect(readRepoConfig(ROOT, fsWith({ [LEGACY]: '[]' })).problems).toEqual([`${LEGACY_REPO_CONFIG_RELATIVE} must contain a JSON object`]);
+      expect(readRepoConfig(ROOT, fsWith({ [LEGACY]: '{"version": 99}' })).problems[0]).toContain(`${LEGACY_REPO_CONFIG_RELATIVE} declares version 99`);
+    });
+
+    it('resolves which file is in use: .stack, else an existing .foreman, else .stack for a new one', () => {
+      const exists = (files: string[]) => (p: string) => files.includes(p);
+      expect(repoConfigRelative(ROOT, exists([FILE, LEGACY]))).toBe(REPO_CONFIG_RELATIVE);
+      expect(repoConfigRelative(ROOT, exists([LEGACY]))).toBe(LEGACY_REPO_CONFIG_RELATIVE);
+      expect(repoConfigRelative(ROOT, exists([]))).toBe(REPO_CONFIG_RELATIVE);
+      // The default checks the real disk: nothing at a root that does not exist.
+      expect(repoConfigRelative('/definitely/not/a/repo')).toBe(REPO_CONFIG_RELATIVE);
+    });
   });
 
   it('returns nothing when there is no root', () => {

@@ -181,6 +181,8 @@ export const ViewColumn = { Active: -1, Beside: -2, One: 1 } as const;
 // ── workspace ────────────────────────────────────────────────────────────────
 export const workspace = {
   workspaceFolders: undefined as Array<{ uri: Uri; name: string; index: number }> | undefined,
+  /** The .code-workspace file of a multi-root workspace; undefined for a single folder. */
+  workspaceFile: undefined as Uri | undefined,
   updateWorkspaceFolders: vi.fn(),
   saveAll: vi.fn().mockResolvedValue(true),
   getConfiguration: vi.fn((_section?: string) => ({
@@ -227,6 +229,7 @@ export function resetVscodeMock(): void {
   window.activeTextEditor = undefined;
   window.tabGroups.all = [];
   workspace.workspaceFolders = undefined;
+  workspace.workspaceFile = undefined;
   vi.clearAllMocks();
   window.tabGroups.close.mockResolvedValue(true);
   window.withProgress.mockImplementation(async (_o: unknown, task: (p: { report: (v: unknown) => void }) => Promise<unknown>) =>
