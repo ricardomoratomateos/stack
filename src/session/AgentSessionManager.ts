@@ -990,9 +990,14 @@ export class AgentSessionManager {
       const tmuxWindows = await this.tmux.listWindows(sessionName);
       const wm = this.windowMap(wt.id);
       let restoredAgents = false;
+      // The session's own first window, which new-session creates and nobody
+      // asked for. It sits at tmux's base-index — 0 by default, but 1 under
+      // the common `set -g base-index 1`, where a hard-coded 0 used to let it
+      // through as a stray "shell" row on every reload.
+      const anchor = Math.min(...tmuxWindows.map((w) => w.index));
       for (const w of tmuxWindows) {
-        // Skip the default session window (index 0, named after the shell)
-        if (w.index === 0 && w.name !== 'shell' && !isAgentWindowName(w.name)) continue;
+        // Skip the default session window (the first one, named after the shell)
+        if (w.index === anchor && w.name !== 'shell' && !isAgentWindowName(w.name)) continue;
         const provider = providerForWindowName(w.name);
         const kind: 'agent' | 'shell' = provider ? 'agent' : 'shell';
         const title = kind === 'agent' ? this.cleanTitle(w.title, w.name) : this.commandTitle(w.command);

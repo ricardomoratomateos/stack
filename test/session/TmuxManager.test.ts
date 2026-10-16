@@ -107,10 +107,12 @@ describe('command construction', () => {
     await expect(tmux.hasSession('s1')).resolves.toBe(false);
   });
 
-  it('ensureSession does nothing when the session exists', async () => {
+  const RENUMBER_OFF = ['tmux', 'set-option', '-t', 's1', 'renumber-windows', 'off'];
+
+  it('ensureSession creates nothing when the session exists, but still pins renumber-windows off', async () => {
     const calls = captureExec(() => ({}));
     await tmux.ensureSession('s1', '/some/cwd');
-    expect(calls).toEqual([['tmux', 'has-session', '-t', 's1']]);
+    expect(calls).toEqual([['tmux', 'has-session', '-t', 's1'], RENUMBER_OFF]);
   });
 
   it('ensureSession creates a detached session with -c cwd when missing', async () => {
@@ -119,7 +121,31 @@ describe('command construction', () => {
     expect(calls).toEqual([
       ['tmux', 'has-session', '-t', 's1'],
       ['tmux', 'new-session', '-d', '-s', 's1', '-c', '/some/cwd'],
+      RENUMBER_OFF,
     ]);
+  });
+
+  it('ensureSession accepts losing the creation race: "duplicate session" means it exists', async () => {
+    // Two launches into one worktree both saw no session and both created it.
+    let probes = 0;
+    captureExec(cmd =>
+      cmd.startsWith('tmux has-session') ? (probes++ === 0 ? { err: new Error('no session') } : {})
+      : cmd.startsWith('tmux new-session') ? { err: new Error('duplicate session: s1') }
+      : {});
+    await expect(tmux.ensureSession('s1', '/some/cwd')).resolves.toBeUndefined();
+  });
+
+  it('ensureSession still fails when the session really could not be created', async () => {
+    captureExec(cmd =>
+      cmd.startsWith('tmux has-session') ? { err: new Error('no session') }
+      : cmd.startsWith('tmux new-session') ? { err: new Error('no server running') }
+      : {});
+    await expect(tmux.ensureSession('s1', '/some/cwd')).rejects.toThrow('no server running');
+  });
+
+  it('ensureSession tolerates a tmux that rejects the renumber option', async () => {
+    captureExec(cmd => (cmd.includes('renumber-windows') ? { err: new Error('unknown option') } : {}));
+    await expect(tmux.ensureSession('s1', '/some/cwd')).resolves.toBeUndefined();
   });
 
   it('pins the new window name so tmux cannot rename it out from under us', async () => {
@@ -339,6 +365,7 @@ describe('TmuxManager (integration)', () => {
     expect(await tmux.hasSession(SES)).toBe(true);
     await tmux.ensureSession(SES, os.tmpdir()); // second call must not throw
     expect(await tmux.hasSession(SES)).toBe(true);
+    expect(execSync(`tmux show-options -t "${SES}" -v renumber-windows`).toString().trim()).toBe('off');
   });
 
   it.runIf(hasTmux)('newWindow/listWindows/selectWindow/killWindow round-trip', async () => {
@@ -422,6 +449,16 @@ describe('TmuxManager (integration)', () => {
     } finally {
       delete process.env.FOREMAN_INJECT_MARKER;
       fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it.runIf(hasTmux)('two launches creating the same session at once both succeed', async () => {
+    const name = `foreman-race-${process.pid}`;
+    try {
+      await Promise.all([tmux.ensureSession(name, os.tmpdir()), tmux.ensureSession(name, os.tmpdir())]);
+      expect(await tmux.hasSession(name)).toBe(true);
+    } finally {
+      await tmux.killSession(name);
     }
   });
 

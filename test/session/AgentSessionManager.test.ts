@@ -1261,6 +1261,18 @@ describe('reconnect', () => {
     expect(mgr.getSessions('wt-1').map(s => s.index)).toEqual([1]);
   });
 
+  it('finds that first window at base-index 1 too (a common ~/.tmux.conf setting)', async () => {
+    const { mgr, stub } = create();
+    (stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'zsh' },
+      { index: 2, name: 'claude' },
+      { index: 3, name: 'vim' },
+    ]);
+    await mgr.reconnect([wt]);
+    expect(mgr.getSessions('wt-1').map(s => s.index)).toEqual([2, 3]);
+  });
+
   it('keeps window 0 when named shell or claude*', async () => {
     const { mgr, stub } = create();
     (stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValue(true);

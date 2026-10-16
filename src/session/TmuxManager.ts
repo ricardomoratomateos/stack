@@ -75,8 +75,27 @@ export class TmuxManager implements ISessionManager {
 
   async ensureSession(name: string, cwd: string): Promise<void> {
     if (!(await this.hasSession(name))) {
-      await this.tmux('new-session', '-d', '-s', name, '-c', cwd);
+      try {
+        await this.tmux('new-session', '-d', '-s', name, '-c', cwd);
+      } catch (e) {
+        // Two launches into one worktree can both see no session and both
+        // create it; the second fails with "duplicate session". The session
+        // exists, which is all this promised — only a session that is still
+        // missing makes the failure real.
+        if (!(await this.hasSession(name))) throw e;
+      }
     }
+    // Foreman keys everything on window indexes — its window map, the
+    // FOREMAN_WINDOW_INDEX baked into each agent's environment, the hook
+    // routing built on it — so a ~/.tmux.conf with `renumber-windows on`
+    // would shift them under a running agent the first time a window closed,
+    // and every later hook would land on the wrong session. Pinned per
+    // session, like automatic-rename per window; the user's other sessions
+    // keep their setting. (`base-index` needs no pin: indexes are read back
+    // from tmux, and reconnect finds the session's first window wherever it
+    // starts.) Best-effort, on every call so sessions from older versions
+    // get it too.
+    await this.tmux('set-option', '-t', name, 'renumber-windows', 'off').catch(() => {});
   }
 
   /** Creates a new window and returns its index. */
