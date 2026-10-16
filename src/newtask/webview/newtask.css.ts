@@ -9,6 +9,12 @@
  * themes exist for).
  */
 export const NEWTASK_CSS = `
+/* An app, not a document: text in the chrome is not selectable and shows the
+   normal cursor; only real inputs take a caret. A stray drag used to highlight
+   labels, and the I-beam over every name read as "editable". */
+.nt { -webkit-user-select: none; user-select: none; cursor: default; } /* both inherit: set once, on the root */
+.nt input, .nt textarea, .nt [contenteditable='true'] { -webkit-user-select: text; user-select: text; cursor: text; }
+.nt button:not(:disabled), .nt a[href], .nt select, .nt [role='button'], .nt [draggable='true'] { cursor: pointer; }
 html, body { background: var(--vscode-editor-background); }
 
 .nt {

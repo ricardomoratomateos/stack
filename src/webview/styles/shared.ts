@@ -10,6 +10,12 @@ import { T } from '../tokens';
  * instead of three copies of them.
  */
 export const SHARED_CSS = `
+/* An app, not a document: text in the chrome is not selectable and shows the
+   normal cursor; only real inputs take a caret. A stray drag used to highlight
+   labels, and the I-beam over every name read as "editable". */
+.fm { -webkit-user-select: none; user-select: none; cursor: default; } /* both inherit: set once, on the root */
+.fm input, .fm textarea, .fm [contenteditable='true'] { -webkit-user-select: text; user-select: text; cursor: text; }
+.fm button:not(:disabled), .fm a[href], .fm select, .fm [role='button'], .fm [draggable='true'] { cursor: pointer; }
 .fm {
   height: 100%; min-height: 0; position: relative;
   display: flex; flex-direction: column;
