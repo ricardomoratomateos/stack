@@ -279,6 +279,14 @@ describe('command construction', () => {
     await expect(tmux.hasChildProcess(4242)).resolves.toBe(false);
   });
 
+  it('processCommandLine reads the full, untruncated command line of a pid', async () => {
+    const calls = captureExec(() => ({ stdout: 'zsh -c FOREMAN_WINDOW_INDEX="1" claude; exec zsh\n' }));
+    await expect(tmux.processCommandLine(4242)).resolves.toBe('zsh -c FOREMAN_WINDOW_INDEX="1" claude; exec zsh');
+    expect(calls).toEqual(['ps -ww -o args= -p 4242']);
+    captureExec(() => ({ err: new Error('exit 1') }));
+    await expect(tmux.processCommandLine(4242)).rejects.toThrow();
+  });
+
   it('listWindows returns [] on error or empty output', async () => {
     captureExec(() => ({ err: new Error('no session') }));
     await expect(tmux.listWindows('s1')).resolves.toEqual([]);
@@ -351,6 +359,26 @@ describe('TmuxManager (integration)', () => {
 
     await tmux.sendKeys(`${SES}:${idx}`, 'sleep 30');
     expect(await settle(c => c === 'sleep')).toBe('sleep');
+
+    await tmux.killWindow(SES, idx);
+  });
+
+  it.runIf(hasTmux)('the pane process runs `<shell> -c` while the launched command lives, and a bare shell after', async () => {
+    // What AgentSessionManager's liveness check rests on: the launch line ends
+    // in `exec $SHELL`, which replaces the wrapper under the same pid.
+    const idx = await tmux.newWindow(SES, 'livewin', os.tmpdir());
+    await tmux.respawnWindow(SES, idx, 'sleep 1; exec /bin/sh');
+    const pid = async () => (await tmux.listWindows(SES)).find((w) => w.index === idx)?.pid;
+    const args = async () => { const p = await pid(); return p === undefined ? '<gone>' : tmux.processCommandLine(p).catch(() => '<gone>'); };
+
+    expect(await args()).toMatch(/(^|\s)-c\s/);
+    let after = '';
+    for (let i = 0; i < 40; i++) {
+      after = await args();
+      if (!/(^|\s)-c\s/.test(after)) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(after).toMatch(/(^|\/)sh$/);
 
     await tmux.killWindow(SES, idx);
   });

@@ -47,6 +47,7 @@ function makeStub(): ISessionManager {
     detachClients: vi.fn().mockResolvedValue(undefined),
     listWindows: vi.fn().mockResolvedValue([]),
     hasChildProcess: vi.fn().mockResolvedValue(false),
+    processCommandLine: vi.fn().mockRejectedValue(new Error('no ps in unit tests')),
   };
 }
 
@@ -72,6 +73,13 @@ function create(claudeCommand = 'claude', memento: vscode.Memento = new FakeMeme
 function seed(mgr: AgentSessionManager, worktreeId: string, entries: Array<[number, { kind: 'agent' | 'shell'; provider?: ProviderId; state: AgentSessionState; name: string; hookSeen?: boolean; title?: string }]>) {
   const map = (mgr as unknown as { windowMap(id: string): Map<number, unknown> }).windowMap(worktreeId);
   for (const [idx, meta] of entries) map.set(idx, meta);
+}
+
+/** tmux reports these windows with an agent in the foreground — running, by any measure. */
+function live(stub: ISessionManager, ...indexes: number[]) {
+  (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue(
+    indexes.map((index) => ({ index, name: 'claude', command: 'node', pid: 100 + index })),
+  );
 }
 
 /** The prompt was pasted into `target` and Enter was pressed there afterwards. */
@@ -334,6 +342,18 @@ describe('counts', () => {
     expect(mgr.getAgentCount('wt-1')).toBe(1);
     expect(mgr.getShellCount('wt-1')).toBe(1);
     expect(mgr.hasTerminals('wt-1')).toBe(true);
+  });
+
+  it('getAgentCount counts only agents that are still running', () => {
+    // The review panel offers "paste into the live session" on this count.
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [
+      [1, { kind: 'agent', provider: 'claude', state: 'terminated', name: 'claude' }],
+      [2, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
+    ]);
+    expect(mgr.getAgentCount('wt-1')).toBe(1);
+    mgr.updateState('wt-1', 'terminated', 2);
+    expect(mgr.getAgentCount('wt-1')).toBe(0);
   });
 });
 
@@ -933,6 +953,7 @@ describe('sendPromptToAgent', () => {
   it('pastes into a ready agent window and selects it', async () => {
     const { mgr, stub } = create();
     seed(mgr, 'wt-1', [[3, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    live(stub, 3);
     expect(await mgr.sendPromptToAgent(wt, 'review this')).toBe(true);
     expect(stub.selectWindow).toHaveBeenCalledWith(SESSION, 3);
     expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:3`, 'review this');
@@ -944,6 +965,7 @@ describe('sendPromptToAgent', () => {
       [1, { kind: 'agent', provider: 'claude', state: 'active', name: 'claude' }],
       [2, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
     ]);
+    live(stub, 1, 2);
     await mgr.sendPromptToAgent(wt, 'x');
     expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:2`, 'x');
   });
@@ -954,8 +976,105 @@ describe('sendPromptToAgent', () => {
       [4, { kind: 'agent', provider: 'claude', state: 'active', name: 'claude' }],
       [5, { kind: 'agent', provider: 'claude', state: 'active', name: 'claude' }],
     ]);
+    live(stub, 4, 5);
     await mgr.sendPromptToAgent(wt, 'x');
     expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:4`, 'x');
+  });
+
+  it('prefers an agent at its prompt over one asking for permission', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [
+      [1, { kind: 'agent', provider: 'claude', state: 'permission', name: 'claude' }],
+      [2, { kind: 'agent', provider: 'claude', state: 'idle', name: 'claude' }],
+    ]);
+    live(stub, 1, 2);
+    await mgr.sendPromptToAgent(wt, 'x');
+    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:2`, 'x');
+  });
+
+  describe('only into a running agent', () => {
+    /** Window 3: tmux says `zsh`, and the pane process's command line is `args`. */
+    function paneRunning(stub: ISessionManager, args: string) {
+      (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 3, name: 'claude', command: 'zsh', pid: 42 }]);
+      (stub.processCommandLine as ReturnType<typeof vi.fn>).mockResolvedValue(args);
+    }
+    const waiting = { kind: 'agent' as const, provider: 'claude' as const, state: 'waiting' as const, name: 'claude' };
+
+    it('never pastes into a window whose agent has exited — what is left there is a shell', async () => {
+      // The launch line ends in `exec $SHELL`; review prompts quote code in
+      // backticks, which that shell would run as command substitution.
+      const { mgr, stub, stateEvents } = create();
+      seed(mgr, 'wt-1', [[3, waiting]]);
+      paneRunning(stub, '/bin/zsh');
+      expect(await mgr.sendPromptToAgent(wt, 'fix `rm -rf ~`')).toBe(false);
+      expect(stub.paste).not.toHaveBeenCalled();
+      expect(stub.pressEnter).not.toHaveBeenCalled();
+      expect(stub.processCommandLine).toHaveBeenCalledWith(42);
+      // Found dead on the way: the card says so, and the panel stops offering it.
+      expect(mgr.getSessions('wt-1')[0].state).toBe('terminated');
+      expect(stateEvents).toContainEqual({ worktreeId: 'wt-1', state: 'terminated' });
+      expect(mgr.getAgentCount('wt-1')).toBe(0);
+    });
+
+    it('is not fooled by a shell that has children of its own', async () => {
+      // An interactive zsh keeps helpers such as gitstatusd as children, so
+      // "the pane has a child" is true of a dead agent window too.
+      const { mgr, stub } = create();
+      seed(mgr, 'wt-1', [[3, waiting]]);
+      paneRunning(stub, 'zsh');
+      (stub.hasChildProcess as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+      expect(await mgr.sendPromptToAgent(wt, 'x')).toBe(false);
+      expect(stub.paste).not.toHaveBeenCalled();
+    });
+
+    it('sees a running agent through its launch wrapper, which tmux reports as the shell', async () => {
+      const { mgr, stub } = create();
+      seed(mgr, 'wt-1', [[3, waiting]]);
+      paneRunning(stub, 'zsh -c FOREMAN_WINDOW_INDEX="3" FOREMAN_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"');
+      expect(await mgr.sendPromptToAgent(wt, 'x')).toBe(true);
+      expectSubmitted(stub, `${SESSION}:3`, 'x');
+    });
+
+    it('moves on from a dead window to a live one', async () => {
+      const { mgr, stub } = create();
+      seed(mgr, 'wt-1', [
+        [3, waiting],
+        [4, { ...waiting, state: 'active' }],
+      ]);
+      (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { index: 3, name: 'claude', command: 'zsh', pid: 42 },
+        { index: 4, name: 'claude', command: 'node', pid: 43 },
+      ]);
+      (stub.processCommandLine as ReturnType<typeof vi.fn>).mockResolvedValue('zsh');
+      expect(await mgr.sendPromptToAgent(wt, 'x')).toBe(true);
+      expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:4`, 'x');
+      expect(mgr.getSessions('wt-1').find((s) => s.index === 3)?.state).toBe('terminated');
+    });
+
+    it('sends nothing, and condemns nothing, when tmux cannot say', async () => {
+      const { mgr, stub } = create();
+      seed(mgr, 'wt-1', [[3, waiting]]);
+      (stub.listWindows as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no server'));
+      expect(await mgr.sendPromptToAgent(wt, 'x')).toBe(false);
+      expect(stub.paste).not.toHaveBeenCalled();
+      expect(mgr.getSessions('wt-1')[0].state).toBe('waiting');
+    });
+
+    it('treats an unreadable command line as unknown, not as dead', async () => {
+      const { mgr, stub } = create();
+      seed(mgr, 'wt-1', [[3, waiting]]);
+      (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 3, name: 'claude', command: 'zsh', pid: 42 }]);
+      expect(await mgr.sendPromptToAgent(wt, 'x')).toBe(false);
+      expect(mgr.getSessions('wt-1')[0].state).toBe('waiting');
+    });
+
+    it('skips a window already known to be terminated', async () => {
+      const { mgr, stub } = create();
+      seed(mgr, 'wt-1', [[3, { ...waiting, state: 'terminated' }]]);
+      live(stub, 3);
+      expect(await mgr.sendPromptToAgent(wt, 'x')).toBe(false);
+      expect(stub.listWindows).not.toHaveBeenCalled();
+    });
   });
 
   it('pasteToActiveWindow pastes to the session (active pane) without submitting', async () => {
@@ -991,8 +1110,9 @@ describe('submitting a prompt', () => {
   }
 
   it('lets the paste settle before pressing Enter — an Enter during the paste is swallowed', async () => {
-    const { mgr, log } = createRecorded();
+    const { mgr, stub, log } = createRecorded();
     seed(mgr, 'wt-1', [[3, { ...listening, hookSeen: false }]]);
+    live(stub, 3);
     await mgr.sendPromptToAgent(wt, 'review this');
     expect(log).toEqual(['paste', 'sleep 250', 'enter']);
   });
@@ -1000,14 +1120,16 @@ describe('submitting a prompt', () => {
   it('stops at the first Enter the agent confirms', async () => {
     const { mgr, stub } = create();
     seed(mgr, 'wt-1', [[3, listening]]);
+    live(stub, 3);
     confirmOn(stub, mgr, 1);
     await mgr.sendPromptToAgent(wt, 'review this');
     expect(stub.pressEnter).toHaveBeenCalledTimes(1);
   });
 
   it('presses Enter again when no confirmation comes, at most twice more', async () => {
-    const { mgr, log } = createRecorded();
+    const { mgr, stub, log } = createRecorded();
     seed(mgr, 'wt-1', [[3, listening]]);
+    live(stub, 3);
     await mgr.sendPromptToAgent(wt, 'review this');
     // Each wait is armed before its Enter, so a confirmation cannot slip in between.
     expect(log).toEqual(['paste', 'sleep 250', 'sleep 2000', 'enter', 'sleep 2000', 'enter', 'sleep 2000', 'enter']);
@@ -1016,6 +1138,7 @@ describe('submitting a prompt', () => {
   it('a retry that gets confirmed ends the retries', async () => {
     const { mgr, stub } = create();
     seed(mgr, 'wt-1', [[3, listening]]);
+    live(stub, 3);
     confirmOn(stub, mgr, 2);
     await mgr.sendPromptToAgent(wt, 'review this');
     expect(stub.pressEnter).toHaveBeenCalledTimes(2);
@@ -1024,6 +1147,7 @@ describe('submitting a prompt', () => {
   it('takes a permission request as confirmation too — the agent is working on it', async () => {
     const { mgr, stub } = create();
     seed(mgr, 'wt-1', [[3, listening]]);
+    live(stub, 3);
     (stub.pressEnter as ReturnType<typeof vi.fn>).mockImplementation(async () => mgr.updateState('wt-1', 'permission', 3));
     await mgr.sendPromptToAgent(wt, 'review this');
     expect(stub.pressEnter).toHaveBeenCalledTimes(1);
@@ -1032,6 +1156,7 @@ describe('submitting a prompt', () => {
   it('accepts a confirmation from an agent that sends no window index', async () => {
     const { mgr, stub } = create();
     seed(mgr, 'wt-1', [[3, listening]]);
+    live(stub, 3);
     confirmOn(stub, mgr, 1, undefined);
     await mgr.sendPromptToAgent(wt, 'review this');
     expect(stub.pressEnter).toHaveBeenCalledTimes(1);
@@ -1040,6 +1165,7 @@ describe('submitting a prompt', () => {
   it("ignores another window's events", async () => {
     const { mgr, stub } = create();
     seed(mgr, 'wt-1', [[3, listening], [4, { ...listening, state: 'active' }]]);
+    live(stub, 3, 4);
     confirmOn(stub, mgr, 1, 4);
     await mgr.sendPromptToAgent(wt, 'review this');
     expect(stub.pressEnter).toHaveBeenCalledTimes(3);
@@ -1048,6 +1174,7 @@ describe('submitting a prompt', () => {
   it('presses once when no hook from this window has arrived — silence then proves nothing', async () => {
     const { mgr, stub } = create();
     seed(mgr, 'wt-1', [[3, { ...listening, hookSeen: false }]]);
+    live(stub, 3);
     await mgr.sendPromptToAgent(wt, 'review this');
     expect(stub.pressEnter).toHaveBeenCalledTimes(1);
   });
@@ -1055,6 +1182,7 @@ describe('submitting a prompt', () => {
   it('presses once for opencode, which has no submit hook to confirm with', async () => {
     const { mgr, stub } = create();
     seed(mgr, 'wt-1', [[3, { ...listening, provider: 'opencode', name: 'opencode' }]]);
+    live(stub, 3);
     await mgr.sendPromptToAgent(wt, 'review this');
     expect(stub.pressEnter).toHaveBeenCalledTimes(1);
   });
@@ -1062,6 +1190,7 @@ describe('submitting a prompt', () => {
   it('never presses again into a window asking for permission — an Enter there is a "yes"', async () => {
     const { mgr, stub } = create();
     seed(mgr, 'wt-1', [[3, { ...listening, state: 'permission' }]]);
+    live(stub, 3);
     await mgr.sendPromptToAgent(wt, 'review this');
     expect(stub.pressEnter).toHaveBeenCalledTimes(1);
   });
@@ -1069,6 +1198,7 @@ describe('submitting a prompt', () => {
   it('stops pressing once the window is gone', async () => {
     const { mgr, stub } = create();
     seed(mgr, 'wt-1', [[3, listening]]);
+    live(stub, 3);
     (stub.pressEnter as ReturnType<typeof vi.fn>).mockImplementation(async () => {
       (mgr as unknown as { windows: Map<string, Map<number, unknown>> }).windows.get('wt-1')!.delete(3);
     });

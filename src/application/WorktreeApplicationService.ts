@@ -704,8 +704,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
       await this.deps.host.writeClipboard(prompt);
       return true;
     }
-    if (destination === 'live') {
-      return this.deps.agentManager.sendPromptToAgent(wt, prompt);
+    // 'live' finds no running agent when the one the panel saw has exited
+    // since — the comments then go to a fresh agent rather than nowhere.
+    if (destination === 'live' && (await this.deps.agentManager.sendPromptToAgent(wt, prompt))) {
+      return true;
     }
     // 'new' — launch a fresh agent seeded with the comments.
     await this.deps.agentManager.launchWithPrompt(wt, prompt);

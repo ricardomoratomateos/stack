@@ -2276,9 +2276,17 @@ describe('diff review panel', () => {
     expect(h.claude.sendPromptToAgent).toHaveBeenCalled();
   });
 
-  it('send → live returns false when no agent is running', async () => {
+  it('send → live launches a fresh agent when none is running any more', async () => {
+    // The panel offered "live" when it rendered; the agent can have exited since.
     const h = makeHarness({ worktrees: [wtA], liveAgentAccepts: false });
-    expect(await h.service.send('wt-a', 'live', [comment])).toBe(false);
+    expect(await h.service.send('wt-a', 'live', [comment])).toBe(true);
+    expect(h.claude.launchWithPrompt).toHaveBeenCalledWith(expect.objectContaining({ id: 'wt-a' }), expect.stringContaining('src/foo.ts:10'));
+  });
+
+  it('send → live does not also launch when the running agent took the prompt', async () => {
+    const h = makeHarness({ worktrees: [wtA], liveAgentAccepts: true });
+    await h.service.send('wt-a', 'live', [comment]);
+    expect(h.claude.launchWithPrompt).not.toHaveBeenCalled();
   });
 
   it('send → new launches a fresh agent with the prompt', async () => {

@@ -195,6 +195,11 @@ export class TmuxManager implements ISessionManager {
    * child in the same group — so tmux reports `zsh` for as long as the agent
    * runs. The child list is the only thing that actually changes.
    */
+  /** `ps` with -ww so a long launch line is not cut at the terminal width. Rejects when the pid is gone. */
+  async processCommandLine(pid: number): Promise<string> {
+    return this.run(`ps -ww -o args= -p ${pid}`);
+  }
+
   async hasChildProcess(pid: number): Promise<boolean> {
     try {
       return (await this.run(`pgrep -P ${pid}`)).trim().length > 0;

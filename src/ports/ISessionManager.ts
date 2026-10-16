@@ -39,4 +39,6 @@ export interface ISessionManager {
   listWindows(session: string): Promise<TmuxWindow[]>;
   /** Whether a process has at least one child — the way to see an agent a shell started. */
   hasChildProcess(pid: number): Promise<boolean>;
+  /** A process's full command line (argv joined). Rejects when it cannot be read. */
+  processCommandLine(pid: number): Promise<string>;
 }

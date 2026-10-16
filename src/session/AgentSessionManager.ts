@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { AgentSessionState, Worktree } from '../types';
 import { TmuxManager } from './TmuxManager';
-import type { ISessionManager } from '../ports/ISessionManager';
+import type { ISessionManager, TmuxWindow } from '../ports/ISessionManager';
 import type { ProviderId } from '../ports/IAgentProvider';
 import { isAgentWindowName, providerForWindowName } from '../ports/IAgentProvider';
 import type { ProviderFactory } from '../providers/ProviderFactory';
@@ -598,21 +598,82 @@ export class AgentSessionManager {
   }
 
   /**
+   * Whether a window's agent is still running, from what tmux and ps say now.
+   *
+   * Launched agents run inside `<shell> -c "…agent…; exec $SHELL"`, and the
+   * pane's process IS that wrapper for exactly as long as the agent runs:
+   * when the agent exits — /exit, a crash, SIGKILL — the wrapper execs the
+   * interactive shell, and the same pid's command line becomes a bare shell.
+   * That is the signal used here rather than "the pane has a child", which a
+   * dead window satisfies too: an interactive zsh keeps helpers such as
+   * powerlevel10k's gitstatusd as children, and pasting into that shell is
+   * the very thing this exists to prevent.
+   *
+   * A non-shell foreground command is enough on its own — it is how an agent
+   * the user started by hand in a shell window looks. 'unknown' when tmux or
+   * ps cannot say; callers must not read it as either answer.
+   */
+  private async agentLiveness(window: TmuxWindow | undefined): Promise<'alive' | 'dead' | 'unknown'> {
+    if (!window) return 'unknown';
+    const command = (window.command ?? '').replace(/^-/, '');
+    if (command && !SHELL_COMMANDS.has(command)) return 'alive';
+    if (!command || window.pid === undefined) return 'unknown';
+    let args: string;
+    try {
+      args = await this.tmux.processCommandLine(window.pid);
+    } catch {
+      return 'unknown';
+    }
+    return /(^|\s)-c(\s|$)/.test(args) ? 'alive' : 'dead';
+  }
+
+  /** Record agents found dead; returns whether anything changed. Callers persist and fire. */
+  private markTerminated(worktreeId: string, windowIndex: number): boolean {
+    const meta = this.windows.get(worktreeId)?.get(windowIndex);
+    if (meta?.kind !== 'agent' || meta.state === 'terminated') return false;
+    this.windows.get(worktreeId)!.set(windowIndex, { ...meta, state: 'terminated' });
+    console.log(`[foreman] agent gone id=${worktreeId} window=${windowIndex}`);
+    return true;
+  }
+
+  /**
    * Paste a prompt into a worktree's live agent window and bring it to the front.
-   * Picks a window that is ready for input (waiting/idle/permission) when one
-   * exists, else the first agent window. Returns false if the worktree has no
-   * agent window at all — the caller then decides to launch a fresh agent.
+   *
+   * Picks, in order, an agent at its prompt, one asking for permission, then
+   * a busy one — but only one that is actually running. This used to fall
+   * back to the first agent window whatever it held, and a window whose agent
+   * has exited holds the shell the launch line execs afterwards: the prompt
+   * was pasted into zsh and submitted, and review prompts quote code in
+   * backticks, which zsh runs as command substitution.
+   *
+   * Returns false when no agent is running — the caller then launches a
+   * fresh one. Windows found dead on the way are marked terminated.
    */
   async sendPromptToAgent(worktree: Worktree, prompt: string): Promise<boolean> {
     const map = this.windows.get(worktree.id);
     if (!map) return false;
-    const agents = [...map.entries()].filter(([, m]) => m.kind === 'agent');
-    if (agents.length === 0) return false;
-
-    const ready = agents.find(([, m]) => m.state === 'waiting' || m.state === 'idle' || m.state === 'permission');
-    const [windowIndex] = ready ?? agents[0];
+    const rank = (s: AgentSessionState) => (s === 'waiting' || s === 'idle' ? 0 : s === 'permission' ? 1 : 2);
+    const candidates = [...map.entries()]
+      .filter(([, m]) => m.kind === 'agent' && m.state !== 'terminated')
+      .sort(([, a], [, b]) => rank(a.state) - rank(b.state));
+    if (candidates.length === 0) return false;
 
     const sessionName = TmuxManager.sessionName(worktree.id);
+    const tmuxWindows = await this.tmux.listWindows(sessionName).catch((): TmuxWindow[] => []);
+    let windowIndex: number | undefined;
+    let died = false;
+    for (const [index] of candidates) {
+      const liveness = await this.agentLiveness(tmuxWindows.find((w) => w.index === index));
+      if (liveness === 'alive') { windowIndex = index; break; }
+      if (liveness === 'dead') died = this.markTerminated(worktree.id, index) || died;
+    }
+    if (died) {
+      this.persistState(worktree.id);
+      this.stateChangeEmitter.fire({ worktreeId: worktree.id, state: this.aggregateState(worktree.id) });
+      this.terminalsChangeEmitter.fire();
+    }
+    if (windowIndex === undefined) return false;
+
     await this.tmux.selectWindow(sessionName, windowIndex);
     await this.submitPrompt(worktree.id, windowIndex, prompt, true);
 
@@ -763,9 +824,15 @@ export class AgentSessionManager {
     this.terminalsChangeEmitter.fire();
   }
 
+  /**
+   * Agents that are, as far as we know, still running. A terminated window
+   * stays on the card until it is closed, but it is not an agent anyone can
+   * talk to — the review panel offers "paste into the live session" on this
+   * count, and offering it for a dead window sent the prompt to its shell.
+   */
   getAgentCount(worktreeId: string): number {
-    return [...(this.windows.get(worktreeId) ?? new Map()).values()]
-      .filter(w => w.kind === 'agent').length;
+    return [...(this.windows.get(worktreeId) ?? new Map<number, WindowMeta>()).values()]
+      .filter(w => w.kind === 'agent' && w.state !== 'terminated').length;
   }
 
   getShellCount(worktreeId: string): number {
