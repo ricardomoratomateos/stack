@@ -98,6 +98,16 @@ export class PortReservationFile implements SharedPortReservations {
     const fd = await this.acquire();
     if (fd === undefined) return undefined;
     try {
+      return this.rewrite(fn);
+    } finally {
+      fs.closeSync(fd);
+      try { fs.rmSync(this.lock, { force: true }); } catch { /* gone */ }
+    }
+  }
+
+  /** update()'s work, with the lock held. Undefined when the file could not be written. */
+  private rewrite(fn: (entries: Record<number, Entry>) => boolean): boolean | undefined {
+    try {
       const entries = this.read();
       for (const [port, e] of Object.entries(entries)) {
         if (this.now() - e.at > CLAIM_TTL_MS || !this.isAlive(e.pid)) delete entries[Number(port)];
@@ -109,9 +119,6 @@ export class PortReservationFile implements SharedPortReservations {
       return result;
     } catch {
       return undefined;
-    } finally {
-      fs.closeSync(fd);
-      try { fs.rmSync(this.lock, { force: true }); } catch { /* gone */ }
     }
   }
 
@@ -142,12 +149,20 @@ export class PortReservationFile implements SharedPortReservations {
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code !== 'EEXIST') return undefined;
       }
+      // lstat, not stat: a dangling symlink at the lock path makes open('wx')
+      // say EEXIST while stat says ENOENT — and "released meanwhile, retry at
+      // once" then spun forever, never reaching the deadline below. lstat sees
+      // the link itself, so a stale one ages out and is removed like a file.
       try {
-        if (Date.now() - fs.statSync(this.lock).mtimeMs > STALE_LOCK_MS) {
+        if (Date.now() - fs.lstatSync(this.lock).mtimeMs > STALE_LOCK_MS) {
           fs.rmSync(this.lock, { force: true });
           continue;
         }
-      } catch { /* released meanwhile: retry at once */ continue; }
+      } catch {
+        // Released meanwhile: retry at once — but never past the deadline.
+        if (Date.now() > deadline) return undefined;
+        continue;
+      }
       if (Date.now() > deadline) return undefined;
       await new Promise((r) => setTimeout(r, 5 + Math.random() * 10));
     }

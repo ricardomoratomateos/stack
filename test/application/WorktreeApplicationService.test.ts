@@ -1314,6 +1314,7 @@ describe('buildState', () => {
         path: '/repo/zer/feat-a',
         isMain: true,
         deleting: false,
+        since: expect.any(Number),
         agent: 'idle',
         agentCount: 2,
         terminalCount: 1,
@@ -1355,6 +1356,63 @@ describe('buildState', () => {
     const off = makeHarness();
     off.dockerMonitor.unavailable.mockReturnValue('Cannot connect to the Docker daemon');
     expect(off.service.buildState().dockerUnavailable).toBeUndefined();
+  });
+
+  it('passes the configured sidebar style through', () => {
+    const h = makeHarness({ config: { sidebarStyle: 'mission' } });
+    expect(h.service.buildState().sidebarStyle).toBe('mission');
+  });
+
+  it('flags a worktree whose directory is gone', () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({ worktrees: [a], missingIds: ['a'] });
+    return h.service.start().then(() => {
+      expect(h.service.buildState().worktrees[0].missing).toBe(true);
+    });
+  });
+
+  describe('since', () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    const agent = (state: 'permission' | 'active' | 'waiting') =>
+      ({ name: 'claude', kind: 'agent' as const, provider: 'claude' as const, state, index: 1 });
+
+    it('is when this window first saw the group, and is kept while the group does not change', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(1_000);
+      const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
+      h.claude.getSessions.mockReturnValue([agent('active')]);
+      expect(h.service.buildState().worktrees[0].since).toBe(1_000);
+
+      vi.setSystemTime(61_000);
+      expect(h.service.buildState().worktrees[0].since).toBe(1_000);
+    });
+
+    it('restarts when the worktree moves to another group', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(1_000);
+      const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
+      h.claude.getSessions.mockReturnValue([agent('active')]);
+      h.service.buildState();
+
+      vi.setSystemTime(5_000);
+      h.claude.getSessions.mockReturnValue([agent('permission')]);
+      expect(h.service.buildState().worktrees[0].since).toBe(5_000);
+    });
+
+    it('forgets a worktree that has left, so it starts fresh if it comes back', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(1_000);
+      const a = makeWorktree({ id: 'a' });
+      const h = makeHarness({ worktrees: [a] });
+      h.service.buildState();
+      h.worktrees.splice(0, 1);
+      h.service.buildState();
+
+      vi.setSystemTime(9_000);
+      h.worktrees.push(a);
+      expect(h.service.buildState().worktrees[0].since).toBe(9_000);
+    });
   });
 
   it('maps missing PR status to null', () => {
@@ -2670,14 +2728,15 @@ describe('diff review panel', () => {
 
   it('send → live pastes into the running agent', async () => {
     const h = makeHarness({ worktrees: [wtA], liveAgentAccepts: true });
-    expect(await h.service.send('wt-a', 'live', [comment])).toBe(true);
+    expect(await h.service.send('wt-a', 'live', [comment])).toBe('live');
     expect(h.claude.sendPromptToAgent).toHaveBeenCalled();
   });
 
   it('send → live launches a fresh agent when none is running any more', async () => {
     // The panel offered "live" when it rendered; the agent can have exited since.
     const h = makeHarness({ worktrees: [wtA], liveAgentAccepts: false });
-    expect(await h.service.send('wt-a', 'live', [comment])).toBe(true);
+    // ...and says so: it went to a NEW agent, not the one the panel offered.
+    expect(await h.service.send('wt-a', 'live', [comment])).toBe('new');
     expect(h.claude.launchWithPrompt).toHaveBeenCalledWith(expect.objectContaining({ id: 'wt-a' }), expect.stringContaining('src/foo.ts:10'));
   });
 
@@ -2689,13 +2748,13 @@ describe('diff review panel', () => {
 
   it('send → new launches a fresh agent with the prompt', async () => {
     const h = makeHarness({ worktrees: [wtA] });
-    expect(await h.service.send('wt-a', 'new', [comment])).toBe(true);
+    expect(await h.service.send('wt-a', 'new', [comment])).toBe('new');
     expect(h.claude.launchWithPrompt).toHaveBeenCalled();
   });
 
   it('send → clipboard writes the prompt', async () => {
     const h = makeHarness({ worktrees: [wtA] });
-    expect(await h.service.send('wt-a', 'clipboard', [comment])).toBe(true);
+    expect(await h.service.send('wt-a', 'clipboard', [comment])).toBe('clipboard');
     expect(h.host.writeClipboard).toHaveBeenCalledWith(expect.stringContaining('src/foo.ts:10'));
   });
 
@@ -4023,5 +4082,50 @@ describe('the drift base is resolved once, not once per worktree', () => {
     await h.service.loadWorktreesForRepo('/repo');
     await h.service.refreshDrift('a');
     expect(h.git.branchExists).toHaveBeenCalledTimes(2);
+  });
+});
+
+
+describe('focusNextAttention', () => {
+  const asking = { name: 'claude', kind: 'agent' as const, provider: 'claude' as const, state: 'permission' as const, index: 1 };
+
+  /** Three worktrees: a is asking, b is quiet, c is asking too (and has waited less). */
+  function setup(persistedActiveId: string | null = 'b') {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const a = makeWorktree({ id: 'a', path: '/repo/zer/a', branch: 'a' });
+    const b = makeWorktree({ id: 'b', path: '/repo/zer/b', branch: 'b' });
+    const c = makeWorktree({ id: 'c', path: '/repo/zer/c', branch: 'c' });
+    const h = makeHarness({ worktrees: [a, b, c], persistedActiveId });
+    h.claude.getSessions.mockImplementation((id: string) => (id === 'b' ? [] : [asking]));
+    h.service.buildState(); // a and c first seen at t=1000
+    return h;
+  }
+
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('goes to the worktree that has waited longest, when you are not in the queue', async () => {
+    const h = setup('b');
+    await h.service.focusNextAttention();
+    await flushMicrotasks();
+    expect(h.viewers.get('a')!.show).toHaveBeenCalled();
+  });
+
+  it('moves on to the next one in the queue, and wraps around', async () => {
+    const h = setup('a');
+    await h.service.focusNextAttention();
+    await flushMicrotasks();
+    expect(h.viewers.get('c')!.show).toHaveBeenCalled();
+
+    await h.service.focusNextAttention();
+    await flushMicrotasks();
+    expect(h.viewers.get('a')!.show).toHaveBeenCalled();
+  });
+
+  it('says so when nothing is waiting', async () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
+    await h.service.focusNextAttention();
+    expect(h.notify.showInfo).toHaveBeenCalledWith('Foreman: nothing is waiting on you.');
+    expect(h.claude.getOrCreateViewer).not.toHaveBeenCalled();
   });
 });

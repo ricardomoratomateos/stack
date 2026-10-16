@@ -11,6 +11,8 @@ import {
   isGitIndexChange,
   fetchStatus,
   baseDrift,
+  parseNumstat,
+  diffLines,
   DEFAULT_STATUS,
   FILE_DEBOUNCE_MS,
   MAX_DEBOUNCE_WAIT_MS,
@@ -211,6 +213,8 @@ describe('fetchStatus (real git repos)', () => {
     const status = await fetchStatus(repo);
     expect(status).toEqual({
       hasChanges: true, staged: 1, unstaged: 1, untracked: 1, ahead: 0, behind: 0,
+      // The staged file (1 line, new to HEAD) and the edit to zzz.txt (1 in, 1 out).
+      lines: { added: 2, removed: 1 },
     });
   });
 
@@ -971,3 +975,78 @@ describe('GitWatcher leaks', () => {
   });
 });
 
+
+
+// ---------------------------------------------------------------------------
+// diffLines — the "+40 −9" on a row
+// ---------------------------------------------------------------------------
+
+describe('parseNumstat', () => {
+  it('sums added and removed lines over every file', () => {
+    expect(parseNumstat('3\t1\ta.ts\n10\t0\tb/c.ts\n')).toEqual({ added: 13, removed: 1 });
+  });
+
+  it('skips binary files, which print dashes instead of counts', () => {
+    expect(parseNumstat('-\t-\timg.png\n2\t2\ta.ts\n')).toEqual({ added: 2, removed: 2 });
+  });
+
+  it('reads nothing as zero', () => {
+    expect(parseNumstat('')).toEqual({ added: 0, removed: 0 });
+  });
+});
+
+describe('diffLines', () => {
+  const SHA = 'a'.repeat(40);
+
+  it('measures from the merge base when there is a base, not from the base tip', async () => {
+    const seen: string[] = [];
+    const run = async (cmd: string) => {
+      seen.push(cmd);
+      return cmd.startsWith('git merge-base') ? `${SHA}\n` : '4\t2\tx.ts\n';
+    };
+    await expect(diffLines('/wt', { ref: 'origin/develop', ahead: 1, behind: 9 }, run)).resolves.toEqual({ added: 4, removed: 2 });
+    expect(seen).toEqual(['git merge-base HEAD "origin/develop"', `git diff --numstat ${SHA}`]);
+  });
+
+  it('diffs against HEAD in the main checkout, which has no base', async () => {
+    const seen: string[] = [];
+    await diffLines('/wt', undefined, async (cmd) => { seen.push(cmd); return '1\t0\tx.ts\n'; });
+    expect(seen).toEqual(['git diff --numstat HEAD']);
+  });
+
+  it('answers nothing when there is nothing to count, or git cannot say', async () => {
+    await expect(diffLines('/wt', undefined, async () => '')).resolves.toBeUndefined();
+    await expect(diffLines('/wt', undefined, async () => { throw new Error('bad revision'); })).resolves.toBeUndefined();
+    // A merge base that is not a hash (an error message on stdout, say) is not trusted.
+    await expect(diffLines('/wt', { ref: 'develop', ahead: 0, behind: 0 }, async () => 'fatal: nope')).resolves.toBeUndefined();
+    // And a base ref that is not ref-shaped never reaches a shell.
+    await expect(diffLines('/wt', { ref: 'x; rm -rf', ahead: 0, behind: 0 }, async () => SHA)).resolves.toBeUndefined();
+  });
+
+  it('counts a branch\'s committed and uncommitted work together in a real repo', async () => {
+    const repo = makeRealRepo();
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'one\ntwo\n');
+    git(repo, 'add a.txt');
+    git(repo, 'commit -m base');
+    git(repo, 'branch develop');
+    git(repo, 'checkout -b feature');
+    fs.writeFileSync(path.join(repo, 'b.txt'), 'x\ny\nz\n');
+    git(repo, 'add b.txt');
+    git(repo, 'commit -m mine');
+    // The base moves on: this must not read as work the branch deleted.
+    git(repo, 'checkout develop');
+    fs.writeFileSync(path.join(repo, 'c.txt'), '1\n2\n3\n4\n');
+    git(repo, 'add c.txt');
+    git(repo, 'commit -m theirs');
+    git(repo, 'checkout feature');
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'one\n');
+
+    const status = await fetchStatus(repo, 'develop');
+    expect(status.lines).toEqual({ added: 3, removed: 1 });
+  });
+
+  it('is left out of the status when the tree is clean', async () => {
+    const repo = makeRealRepo();
+    expect('lines' in (await fetchStatus(repo))).toBe(false);
+  });
+});

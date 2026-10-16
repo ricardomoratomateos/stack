@@ -132,7 +132,7 @@ export class JsonHookInstaller {
     /** Events this agent emits, out of the ones Foreman understands. */
     private events: readonly string[],
     /** Provider id, passed to the script as $2 so the server knows whose payload it is. */
-    private agent?: string,
+    private agent: string,
   ) {
     this.scriptPath = path.join(storagePath, 'notify.sh');
     this.routes = new HookRoutes(storagePath);
@@ -161,9 +161,9 @@ export class JsonHookInstaller {
     return this.routes.launchEnv(worktreeId, this.hookUrl);
   }
 
-  /** `"<script>" <Event> [agent]` — quoted so paths like "Application Support" survive. */
+  /** `"<script>" <Event> <agent>` — quoted so paths like "Application Support" survive. */
   protected commandFor(event: string): string {
-    return this.agent ? `"${this.scriptPath}" ${event} ${this.agent}` : `"${this.scriptPath}" ${event}`;
+    return `"${this.scriptPath}" ${event} ${this.agent}`;
   }
 
   private writeScript(): void {

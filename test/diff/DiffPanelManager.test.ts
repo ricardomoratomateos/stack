@@ -45,7 +45,7 @@ function makeHost(over: Partial<DiffPanelHost> = {}): DiffPanelHost {
   return {
     getDiff: vi.fn(async () => 'DIFF'),
     getContext: vi.fn(() => ({ label: 'Fix X', hasLiveAgent: true })),
-    send: vi.fn(async () => true),
+    send: vi.fn(async (_id: string, destination: string) => destination),
     openFile: vi.fn(async () => {}),
     ...over,
   };
@@ -149,6 +149,16 @@ describe('DiffPanelManager', () => {
     expect(panel.posted.at(-1)).toMatchObject({ type: 'diff', base: 'working', unified: '', error: 'git boom' });
   });
 
+  it('reports a failure that is not even an Error as what was thrown', async () => {
+    const panel = makePanel();
+    window.createWebviewPanel.mockReturnValue(panel);
+    const host = makeHost({ getDiff: vi.fn(async () => { throw 'git vanished'; }) });
+    new DiffPanelManager(extUri, host).open('wt-1');
+
+    await panel.fire({ type: 'requestDiff', base: 'working' });
+    expect(panel.posted.at(-1)).toMatchObject({ type: 'diff', base: 'working', unified: '', error: 'git vanished' });
+  });
+
   it('carries no error field on success, so a clean tree still reads "no changes"', async () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
@@ -168,6 +178,26 @@ describe('DiffPanelManager', () => {
     await panel.fire({ type: 'send', destination: 'new', comments });
     expect(host.send).toHaveBeenCalledWith('wt-1', 'new', comments);
     expect(panel.posted).toContainEqual({ type: 'sent', destination: 'new', ok: true });
+  });
+
+  it('reports where the comments went when a live agent had exited and a new one was launched', async () => {
+    const panel = makePanel();
+    window.createWebviewPanel.mockReturnValue(panel);
+    const host = makeHost({ send: vi.fn(async () => 'new' as const) });
+    new DiffPanelManager(extUri, host).open('wt-1');
+
+    await panel.fire({ type: 'send', destination: 'live', comments: [] });
+    expect(panel.posted).toContainEqual({ type: 'sent', destination: 'new', ok: true, fellBack: true });
+  });
+
+  it('reports ok:false when nothing was sent', async () => {
+    const panel = makePanel();
+    window.createWebviewPanel.mockReturnValue(panel);
+    const host = makeHost({ send: vi.fn(async () => false as const) });
+    new DiffPanelManager(extUri, host).open('wt-1');
+
+    await panel.fire({ type: 'send', destination: 'clipboard', comments: [] });
+    expect(panel.posted).toContainEqual({ type: 'sent', destination: 'clipboard', ok: false });
   });
 
   it('reports ok:false when send throws', async () => {

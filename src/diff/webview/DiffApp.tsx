@@ -58,7 +58,7 @@ export function DiffApp() {
         if (msg.ok) {
           clearAnchors();
           setComments([]);
-          setToast(sentMessage(msg.destination));
+          setToast(sentMessage(msg.destination, msg.fellBack === true));
         } else {
           setToast('Nothing sent — no target available.');
         }
@@ -383,8 +383,10 @@ function SendModal({
   );
 }
 
-function sentMessage(d: SendDestination): string {
+function sentMessage(d: SendDestination, fellBack: boolean): string {
   if (d === 'live') return 'Sent to the running agent.';
+  // The agent the panel offered has exited since, so the comments went to a new one.
+  if (d === 'new' && fellBack) return 'The agent had exited, so a new one was launched with your comments.';
   if (d === 'new') return 'Launched a new agent with your comments.';
   return 'Prompt copied to clipboard.';
 }

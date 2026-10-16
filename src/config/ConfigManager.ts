@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { ForemanConfig, DebugTemplate, DockerConfig } from '../types';
 import type { ProviderId } from '../ports/IAgentProvider';
+import { normalizeSidebarStyle } from '../sidebarStyle';
 import {
   REPO_CONFIG_RELATIVE,
   RepoConfigResult,
@@ -137,6 +138,7 @@ export class ConfigManager {
       // Anything but the legacy value is the default: a typo in settings.json
       // should not silently cost the user their tabs.
       sessionTabs: cfg.get<string>('sessionTabs', 'perSession') === 'single' ? 'single' : 'perSession',
+      sidebarStyle: normalizeSidebarStyle(cfg.get<string>('sidebarStyle')),
       // Object settings get no deep merge from VSCode and none from the repo
       // file either, so all three layers are folded key by key. A repo naming
       // only its compose file must not reset basePort to the default.

@@ -304,6 +304,13 @@ describe('updateRepoConfig', () => {
     expect(Object.keys(parsed).slice(0, 4)).toEqual(['version', '$schema', 'agentsDirectory', 'worktreesDirectory']);
   });
 
+  it('leaves a key it was given no value for as the file has it', () => {
+    const existing = JSON.stringify({ version: 1, setupScript: 'make setup', worktreesDirectory: '.worktrees' });
+    const parsed = JSON.parse(updateRepoConfig(existing, { ...values, setupScript: undefined }));
+    expect(parsed.setupScript).toBe('make setup');
+    expect(parsed.worktreesDirectory).toBe('../wt');
+  });
+
   it('never takes the version down', () => {
     const existing = JSON.stringify({ version: REPO_CONFIG_VERSION + 2, worktreesDirectory: '.worktrees' });
     expect(JSON.parse(updateRepoConfig(existing, values)).version).toBe(REPO_CONFIG_VERSION + 2);

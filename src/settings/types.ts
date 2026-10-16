@@ -34,6 +34,8 @@ export type UserValues = Pick<
   | 'opencodeCommand'
   | 'notifyOnAttention'
   | 'focusMode'
+  | 'sidebarStyle'
+  | 'sessionTabs'
   | 'scopeSearchToActiveWorktree'
 >;
 

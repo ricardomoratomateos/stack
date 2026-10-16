@@ -83,7 +83,8 @@ export class HookServer {
     private soundExec: (cmd: string) => void = (cmd) => { exec(cmd); },
   ) {
     this.server = http.createServer((req, res) => {
-      const url = new URL(req.url ?? '/', 'http://localhost');
+      // Always set on a request a server received; only client-side messages lack it.
+      const url = new URL(req.url!, 'http://localhost');
       if (req.method !== 'POST' || url.pathname !== '/hook') {
         res.writeHead(404);
         res.end();
