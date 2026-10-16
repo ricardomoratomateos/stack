@@ -16,7 +16,7 @@ export function openAsking(d: Described, select: () => void): void {
  * There is deliberately no "Allow" here: approving a command from a sidebar,
  * without seeing the agent's context, is a decision for its terminal.
  */
-export function AskBox({ d, select, openLabel = 'Open' }: { d: Described; select: () => void; openLabel?: string }) {
+export function AskBox({ d, select, openLabel = 'Open the session that is asking' }: { d: Described; select: () => void; openLabel?: string }) {
   const ask = d.attention;
   return (
     <div className="fm-ask">
@@ -28,8 +28,8 @@ export function AskBox({ d, select, openLabel = 'Open' }: { d: Described; select
         <span className="fm-ask-text fm-ask-quiet">{d.line}</span>
       )}
       <div className="fm-ask-actions">
-        <button type="button" className="fm-btn fm-btn-needs" onClick={() => openAsking(d, select)}>
-          {openLabel}
+        <button type="button" className="fm-btn fm-btn-icon fm-btn-needs" aria-label={openLabel} title={openLabel} onClick={() => openAsking(d, select)}>
+          <i className="codicon codicon-arrow-right" aria-hidden="true" />
         </button>
       </div>
     </div>
@@ -40,8 +40,8 @@ export function AskBox({ d, select, openLabel = 'Open' }: { d: Described; select
 export function ReviewActions({ d, buttonClass }: { d: Described; buttonClass: string }) {
   return (
     <div className="fm-row-actions">
-      <button type="button" className={`fm-btn ${buttonClass}`} onClick={() => send({ type: 'openDiff', worktreeId: d.wt.id })}>
-        Review diff
+      <button type="button" className={`fm-btn fm-btn-icon ${buttonClass}`} aria-label="Review diff" title="Review diff & comment" onClick={() => send({ type: 'openDiff', worktreeId: d.wt.id })}>
+        <i className="codicon codicon-git-compare" aria-hidden="true" />
       </button>
       {d.pr && <PrBadge pr={d.pr} />}
     </div>
@@ -54,11 +54,12 @@ export function ForgetActions({ d }: { d: Described }) {
     <div className="fm-row-actions">
       <button
         type="button"
-        className="fm-btn"
-        title="Drop this entry. Nothing on disk is touched."
+        className="fm-btn fm-btn-icon"
+        aria-label="Forget this worktree"
+        title="Forget — drop this entry. Nothing on disk is touched."
         onClick={() => send({ type: 'forgetWorktree', worktreeId: d.wt.id })}
       >
-        Forget
+        <i className="codicon codicon-close" aria-hidden="true" />
       </button>
     </div>
   );

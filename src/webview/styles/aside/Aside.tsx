@@ -160,11 +160,14 @@ function Row({ d, selected, now, state, select, drag }: {
               wt={wt}
               defaultProvider={state.defaultProvider}
               installedProviders={state.installedProviders}
-              label="+ Agent"
               tone="solid"
             />
-            <button type="button" className="fm-btn" onClick={() => send({ type: 'openTerminal', worktreeId: wt.id })}>Shell</button>
-            <button type="button" className="fm-btn" onClick={() => send({ type: 'openDiff', worktreeId: wt.id })}>Diff</button>
+            <button type="button" className="fm-btn fm-btn-icon" aria-label="Open terminal" title="Open terminal" onClick={() => send({ type: 'openTerminal', worktreeId: wt.id })}>
+              <i className="codicon codicon-terminal" aria-hidden="true" />
+            </button>
+            <button type="button" className="fm-btn fm-btn-icon" aria-label="Review diff" title="Review diff & comment" onClick={() => send({ type: 'openDiff', worktreeId: wt.id })}>
+              <i className="codicon codicon-git-compare" aria-hidden="true" />
+            </button>
             <MoreMenu wt={wt} dockerEnabled={state.dockerEnabled} />
           </div>
         </div>

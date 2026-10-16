@@ -178,7 +178,9 @@ function Card({ d, selected, now, state, select, drag }: {
             {d.group !== 'working' && d.group !== 'idle' && (
               <LaunchSplit wt={wt} defaultProvider={state.defaultProvider} installedProviders={state.installedProviders} />
             )}
-            <button type="button" className="fm-btn fm-btn-icon ms-mono" aria-label="Open terminal" title="Open terminal" onClick={() => send({ type: 'openTerminal', worktreeId: wt.id })}>&gt;_</button>
+            <button type="button" className="fm-btn fm-btn-icon" aria-label="Open terminal" title="Open terminal" onClick={() => send({ type: 'openTerminal', worktreeId: wt.id })}>
+              <i className="codicon codicon-terminal" aria-hidden="true" />
+            </button>
             <button type="button" className="fm-btn fm-btn-icon" aria-label="Review diff" title="Review diff & comment" onClick={() => send({ type: 'openDiff', worktreeId: wt.id })}>
               <i className="codicon codicon-git-compare" aria-hidden="true" />
             </button>
@@ -213,16 +215,15 @@ function shortBase(d: Described): string {
 function Primary({ d, state, select }: { d: Described; state: LayoutProps['state']; select: () => void }) {
   switch (d.group) {
     case 'needs':
-      return <button type="button" className="fm-btn fm-btn-needs" onClick={() => openAsking(d, select)}>Answer</button>;
+      return <button type="button" className="fm-btn fm-btn-icon fm-btn-needs" aria-label="Answer the agent" title="Answer the agent" onClick={() => openAsking(d, select)}><i className="codicon codicon-comment-discussion" aria-hidden="true" /></button>;
     case 'review':
-      return <button type="button" className="fm-btn fm-btn-ok" onClick={() => send({ type: 'openDiff', worktreeId: d.wt.id })}>Review diff</button>;
+      return <button type="button" className="fm-btn fm-btn-icon fm-btn-ok" aria-label="Review diff" title="Review diff & comment" onClick={() => send({ type: 'openDiff', worktreeId: d.wt.id })}><i className="codicon codicon-git-compare" aria-hidden="true" /></button>;
     default:
       return (
         <LaunchSplit
           wt={d.wt}
           defaultProvider={state.defaultProvider}
           installedProviders={state.installedProviders}
-          label={visualFor(state.defaultProvider).label}
           tone="solid"
         />
       );
