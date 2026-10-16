@@ -37,7 +37,9 @@ describe('HookRoutes', () => {
     const past = new Date(Date.now() - 60_000);
     fs.utimesSync(file, past, past);
     routes.claim(['wt-1'], A);
-    expect(fs.statSync(file).mtimeMs).toBe(past.getTime());
+    // Not toBe(past): utimes round-trips through seconds as a float, and ext4
+    // hands back 1792181598437.999 for …438. Untouched means still a minute old.
+    expect(fs.statSync(file).mtimeMs).toBeLessThan(Date.now() - 30_000);
   });
 
   it('closing a window withdraws only what still points at it', () => {
