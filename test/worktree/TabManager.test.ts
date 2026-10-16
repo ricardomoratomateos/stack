@@ -502,3 +502,26 @@ describe('constructor', () => {
     expect(window.onDidChangeActiveTextEditor).toHaveBeenCalledTimes(1);
   });
 });
+
+// ── Two windows, one globalState ─────────────────────────────────────────────
+
+describe('two windows sharing globalState', () => {
+  it("each window's writes keep the other window's saved tabs", () => {
+    // Both windows read the store once at activation; writing the whole
+    // in-memory map back made the last writer erase what the other had saved.
+    const memento = new FakeMemento();
+    new TabManager(memento as never, () => [wtA]);
+    const windowA = window.tabGroups.onDidChangeTabs.mock.calls[0][0] as () => void;
+    new TabManager(memento as never, () => [wtB]);
+    const windowB = window.tabGroups.onDidChangeTabs.mock.calls[1][0] as () => void;
+
+    setOpenTabs('/wt/a/1.ts');
+    windowA();
+    setOpenTabs('/wt/b/2.ts');
+    windowB();
+
+    const saved = savedState(memento);
+    expect(saved['a']?.uris).toEqual(['/wt/a/1.ts']);
+    expect(saved['b']?.uris).toEqual(['/wt/b/2.ts']);
+  });
+});

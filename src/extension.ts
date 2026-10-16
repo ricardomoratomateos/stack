@@ -340,6 +340,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     dockerMonitor,
     prMonitor,
     globalState: ctx.globalState,
+    workspaceState: ctx.workspaceState,
   });
 
   const diffPanelManager = new DiffPanelManager(ctx.extensionUri, service);

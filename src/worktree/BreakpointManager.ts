@@ -26,6 +26,9 @@ interface SavedBreakpoint {
 export class BreakpointManager {
   private saved = new Map<string, SavedBreakpoint[]>();
 
+  /** Worktrees whose stash changed since the last persist — the only ones written. */
+  private dirty = new Set<string>();
+
   constructor(
     private globalState: vscode.Memento,
     private getWorktrees: () => WorktreeRef[],
@@ -54,6 +57,7 @@ export class BreakpointManager {
         const list = this.saved.get(owner.id) ?? [];
         list.push(this.serialize(bp));
         this.saved.set(owner.id, list);
+        this.dirty.add(owner.id);
         toStash.push(bp);
       }
     }
@@ -63,6 +67,7 @@ export class BreakpointManager {
     if (restore && restore.length > 0) {
       vscode.debug.addBreakpoints(restore.map((s) => this.deserialize(s)));
       this.saved.delete(targetId);
+      this.dirty.add(targetId);
     }
 
     this.persist();
@@ -86,9 +91,22 @@ export class BreakpointManager {
     return new vscode.SourceBreakpoint(location, s.enabled, s.condition, s.hitCondition, s.logMessage);
   }
 
+  /**
+   * Writes back only the worktrees this window changed, over what is stored now.
+   *
+   * globalState is shared by every window, and this used to write the whole
+   * in-memory map, read once at activation: two windows open meant the last
+   * one to switch worktrees overwrote the other's stash, and the breakpoints
+   * stashed there were gone for good.
+   */
   private persist(): void {
-    const obj: Record<string, SavedBreakpoint[]> = {};
-    for (const [id, bps] of this.saved.entries()) obj[id] = bps;
-    this.globalState.update(STORE_KEY, obj);
+    const stored = { ...this.globalState.get<Record<string, SavedBreakpoint[]>>(STORE_KEY, {}) };
+    for (const id of this.dirty) {
+      const bps = this.saved.get(id);
+      if (bps && bps.length > 0) stored[id] = bps;
+      else delete stored[id];
+    }
+    this.dirty.clear();
+    this.globalState.update(STORE_KEY, stored);
   }
 }

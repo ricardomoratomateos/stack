@@ -30,6 +30,8 @@ function openFileTabs(): vscode.Tab[] {
 
 export class TabManager {
   private saved = new Map<string, TabState>();
+  /** Worktrees whose state changed since the last persist — the only ones written. */
+  private dirty = new Set<string>();
   private closingProgrammatically = 0;
 
   constructor(
@@ -76,15 +78,29 @@ export class TabManager {
       const ownerOfActive = activeFsPath ? findOwner(activeFsPath, worktrees) : undefined;
       const active = ownerOfActive?.id === id ? activeFsPath : current.active;
       this.saved.set(id, { ...current, uris, active });
+      this.dirty.add(id);
     }
 
     this.persist();
   }
 
+  /**
+   * Writes back only the worktrees this window changed, over what is stored now.
+   *
+   * globalState is shared by every window, and this used to write the whole
+   * in-memory map, read once at activation — so each window's every tab change
+   * reverted the other windows' saved tabs to whatever they were when it
+   * started.
+   */
   private persist(): void {
-    const obj: Record<string, TabState> = {};
-    for (const [id, state] of this.saved.entries()) obj[id] = state;
-    this.globalState.update(STORE_KEY, obj);
+    const stored = { ...this.globalState.get<Record<string, TabState>>(STORE_KEY, {}) };
+    for (const id of this.dirty) {
+      const state = this.saved.get(id);
+      if (state) stored[id] = state;
+      else delete stored[id];
+    }
+    this.dirty.clear();
+    this.globalState.update(STORE_KEY, stored);
   }
 
   getState(worktreeId: string): TabState | undefined {
@@ -96,6 +112,7 @@ export class TabManager {
     for (const wt of worktrees) {
       const current = this.saved.get(wt.id) ?? { uris: [] };
       this.saved.set(wt.id, { ...current, hadViewer: viewerOpenIds.has(wt.id) });
+      this.dirty.add(wt.id);
     }
     this.persist();
   }
