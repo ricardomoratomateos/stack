@@ -30,9 +30,27 @@ export function shouldIgnore(filename: string): boolean {
     filename.includes('.git/objects') ||
     filename.includes('.git/lfs') ||
     filename.includes('.git/logs') ||
+    // The main checkout's .git holds every linked worktree's own index and
+    // HEAD under worktrees/<name>/. Staging in a worktree is that worktree's
+    // news (its own gitdir watcher sees it), not a reason to re-read main.
+    filename.startsWith('.git/worktrees/') ||
     filename.endsWith('FETCH_HEAD')
   );
 }
+
+/** Debounce for plain file edits — git status badges don't need sub-second updates. */
+export const FILE_DEBOUNCE_MS = 10_000;
+/** Debounce for index/HEAD changes — staging and committing should show a bit faster. */
+export const INDEX_DEBOUNCE_MS = 3_000;
+/**
+ * Longest a refresh may be pushed back by a stream of events.
+ *
+ * The debounce is trailing-only, so anything that writes more often than every
+ * ten seconds — a dev server's build output, a log, an agent editing file after
+ * file — re-armed it forever and the badge never updated while the worktree was
+ * busy, which is exactly when it is worth looking at.
+ */
+export const MAX_DEBOUNCE_WAIT_MS = 30_000;
 
 export function isGitIndexChange(filename: string): boolean {
   return filename === '.git' || filename.startsWith('.git/index') || filename.startsWith('.git/HEAD');
@@ -115,9 +133,17 @@ export async function fetchStatus(worktreePath: string, baseBranch?: string): Pr
 
 export class GitWatcher {
   private watchers = new Map<string, fs.FSWatcher[]>();
-  private debounceTimers = new Map<string, NodeJS.Timeout>();
+  /** Pending refresh per path, and the latest it may fire (see MAX_DEBOUNCE_WAIT_MS). */
+  private debounceTimers = new Map<string, { timer: NodeJS.Timeout; deadline: number }>();
   private handlers: ChangeHandler[] = [];
   private statusCache = new Map<string, GitStatus>();
+  /**
+   * Per-path token for in-flight reads. unwatch() drops it, so a status that
+   * was being computed when the worktree stopped being watched is thrown away
+   * instead of re-populating the cache it just cleared — the entry otherwise
+   * outlived the worktree for the life of the window.
+   */
+  private readTokens = new Map<string, object>();
 
   /**
    * Base branch to measure each worktree against, by path.
@@ -161,33 +187,76 @@ export class GitWatcher {
     if (!fs.existsSync(gitEntry)) return;
 
     const fsWatchers: fs.FSWatcher[] = [];
+    try {
+      const wtWatcher = this.watchFn(worktreePath, { recursive: true }, (_, filename) => {
+        if (!filename || shouldIgnore(filename)) return;
+        if (this.belongsToNestedWorktree(worktreePath, filename)) return;
+        this.scheduleRefresh(worktreePath, isGitIndexChange(filename) ? INDEX_DEBOUNCE_MS : FILE_DEBOUNCE_MS);
+      });
+      fsWatchers.push(this.guard(worktreePath, wtWatcher));
 
-    const wtWatcher = this.watchFn(worktreePath, { recursive: true }, (_, filename) => {
-      if (!filename || shouldIgnore(filename)) return;
-      // File changes: debounce 10s — git status badges don't need sub-second updates
-      // Git index changes: debounce 3s — staging/committing should reflect a bit faster
-      this.scheduleRefresh(worktreePath, isGitIndexChange(filename) ? 3000 : 10000);
-    });
-    fsWatchers.push(wtWatcher);
-
-    const stat = fs.statSync(gitEntry);
-    if (stat.isFile()) {
-      const content = fs.readFileSync(gitEntry, 'utf8');
-      const match = content.match(/^gitdir:\s*(.+)$/m);
-      if (match?.[1]) {
-        const realGitDir = match[1].trim();
-        if (fs.existsSync(realGitDir)) {
-          const gitDirWatcher = this.watchFn(realGitDir, { recursive: true }, (_, filename) => {
-            if (!filename || shouldIgnore(filename)) return;
-            this.scheduleRefresh(worktreePath, 3000);
-          });
-          fsWatchers.push(gitDirWatcher);
+      const stat = fs.statSync(gitEntry);
+      if (stat.isFile()) {
+        const content = fs.readFileSync(gitEntry, 'utf8');
+        const match = content.match(/^gitdir:\s*(.+)$/m);
+        if (match?.[1]) {
+          const realGitDir = match[1].trim();
+          if (fs.existsSync(realGitDir)) {
+            const gitDirWatcher = this.watchFn(realGitDir, { recursive: true }, (_, filename) => {
+              if (!filename || shouldIgnore(filename)) return;
+              this.scheduleRefresh(worktreePath, INDEX_DEBOUNCE_MS);
+            });
+            fsWatchers.push(this.guard(worktreePath, gitDirWatcher));
+          }
         }
       }
+    } catch (e) {
+      // EMFILE, ENOSPC (inotify's watch limit), a directory vanishing between
+      // the existsSync and the watch… The caller is a loop over every worktree,
+      // and the throw used to abort it: one unwatchable worktree left all the
+      // ones after it unwatched and unpolled. Skip this one, say why.
+      for (const w of fsWatchers) w.close();
+      console.error(`[foreman] cannot watch ${worktreePath}; its git status will not update:`, e);
+      return;
     }
 
     this.watchers.set(worktreePath, fsWatchers);
     this.refresh(worktreePath);
+  }
+
+  /**
+   * An FSWatcher with no 'error' listener throws its error out of the event
+   * loop — a watched directory deleted from under it is enough. On error the
+   * worktree's watchers are closed and forgotten, so a later watch() can retry.
+   */
+  private guard(worktreePath: string, watcher: fs.FSWatcher): fs.FSWatcher {
+    watcher.on('error', (e) => {
+      console.error(`[foreman] watcher for ${worktreePath} failed; no longer watching it:`, e);
+      const owned = this.watchers.get(worktreePath);
+      if (!owned?.includes(watcher)) return;
+      for (const w of owned) w.close();
+      this.watchers.delete(worktreePath);
+    });
+    return watcher;
+  }
+
+  /**
+   * Whether a change seen by `root`'s recursive watcher is inside another
+   * watched worktree nested under it.
+   *
+   * Worktrees usually live inside the main checkout (`.worktrees/`, `zer/`), so
+   * its watcher saw every save in every worktree and re-ran `git status` on
+   * main for each — three git processes for a change main's status cannot
+   * reflect, since git ignores nested worktrees. The nested worktree's own
+   * watcher reports it.
+   */
+  private belongsToNestedWorktree(root: string, filename: string): boolean {
+    if (this.watchers.size < 2) return false;
+    const full = path.join(root, filename);
+    for (const other of this.watchers.keys()) {
+      if (other !== root && full.startsWith(other + path.sep) && other.startsWith(root + path.sep)) return true;
+    }
+    return false;
   }
 
   unwatch(worktreePath: string): void {
@@ -196,17 +265,28 @@ export class GitWatcher {
       watchers.forEach((w) => w.close());
       this.watchers.delete(worktreePath);
     }
-    const timer = this.debounceTimers.get(worktreePath);
-    if (timer) {
-      clearTimeout(timer);
+    const pending = this.debounceTimers.get(worktreePath);
+    if (pending) {
+      clearTimeout(pending.timer);
       this.debounceTimers.delete(worktreePath);
     }
     this.statusCache.delete(worktreePath);
     this.bases.delete(worktreePath);
+    this.readTokens.delete(worktreePath);
   }
 
-  onChange(handler: ChangeHandler): void {
+  /**
+   * Subscribe to status changes. Returns the way back out: the sidebar view
+   * re-subscribes every time VS Code re-resolves it, and with no way to leave,
+   * each resolve added a listener that re-rendered the whole sidebar.
+   */
+  onChange(handler: ChangeHandler): { dispose(): void } {
     this.handlers.push(handler);
+    return {
+      dispose: () => {
+        this.handlers = this.handlers.filter((h) => h !== handler);
+      },
+    };
   }
 
   /** Synchronous cache read — never blocks the event loop. */
@@ -216,21 +296,29 @@ export class GitWatcher {
 
   dispose(): void {
     for (const watchers of this.watchers.values()) watchers.forEach((w) => w.close());
-    for (const timer of this.debounceTimers.values()) clearTimeout(timer);
+    for (const pending of this.debounceTimers.values()) clearTimeout(pending.timer);
     this.watchers.clear();
     this.debounceTimers.clear();
     this.statusCache.clear();
     this.bases.clear();
+    this.readTokens.clear();
   }
 
+  /**
+   * Trailing debounce with a ceiling: each event pushes the refresh back by
+   * `delay`, but never past MAX_DEBOUNCE_WAIT_MS after the first event of the
+   * burst.
+   */
   private scheduleRefresh(worktreePath: string, delay: number): void {
+    const now = Date.now();
     const existing = this.debounceTimers.get(worktreePath);
-    if (existing) clearTimeout(existing);
+    if (existing) clearTimeout(existing.timer);
+    const deadline = existing?.deadline ?? now + MAX_DEBOUNCE_WAIT_MS;
     const timer = setTimeout(() => {
       this.debounceTimers.delete(worktreePath);
       this.refresh(worktreePath);
-    }, delay);
-    this.debounceTimers.set(worktreePath, timer);
+    }, Math.max(0, Math.min(delay, deadline - now)));
+    this.debounceTimers.set(worktreePath, { timer, deadline });
   }
 
   /**
@@ -239,11 +327,19 @@ export class GitWatcher {
    * The awaitable half of refresh(), for the explicit "check again" on the card:
    * the caller has just fetched and needs the new numbers on screen, not on the
    * next filesystem event.
+   *
+   * Handlers hear about it only when the status actually changed: each one
+   * rebuilds and re-sends the whole sidebar, and most refreshes — a save that
+   * leaves a file as modified as it already was — change nothing.
    */
   async refreshNow(worktreePath: string): Promise<void> {
+    const token = this.readTokens.get(worktreePath) ?? {};
+    this.readTokens.set(worktreePath, token);
     const status = await this.fetchStatusFn(worktreePath, this.bases.get(worktreePath)).catch(() => undefined);
-    if (!status) return;
+    if (!status || this.readTokens.get(worktreePath) !== token) return;
+    const previous = this.statusCache.get(worktreePath);
     this.statusCache.set(worktreePath, status);
+    if (previous && JSON.stringify(previous) === JSON.stringify(status)) return;
     for (const handler of this.handlers) handler(worktreePath, status);
   }
 

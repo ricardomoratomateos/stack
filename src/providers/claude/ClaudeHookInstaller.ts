@@ -20,6 +20,7 @@ export class ClaudeHookInstaller extends JsonHookInstaller {
       extensionStoragePath,
       claudeSettingsPath ?? path.join(os.homedir(), CLAUDE_SETTINGS_PATH),
       HOOK_EVENTS,
+      'claude',
     );
   }
 }

@@ -242,7 +242,7 @@
             },
             "overrideFile": {
               "type": "string",
-              "description": "Worktree-only override merged on top; use ${HTTP_PORT} etc. for the auto-generated ports"
+              "description": "Worktree-only override layered on top of composeFile; use ${HTTP_PORT} etc. for the auto-generated ports. Compose appends its `ports` to the compose file's instead of replacing them, so a port hard-coded there is published by every worktree: use a variable there, or `ports: !override` here."
             },
             "ports": {
               "type": "array",

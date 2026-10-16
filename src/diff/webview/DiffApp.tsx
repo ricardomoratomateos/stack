@@ -18,6 +18,9 @@ export function DiffApp() {
   const [label, setLabel] = useState<string>('');
   const [hasLiveAgent, setHasLiveAgent] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Why the diff could not be computed, if it could not — shown in place of
+  // "No changes", which would otherwise be the panel's answer to a git error.
+  const [diffError, setDiffError] = useState<string | undefined>(undefined);
   const [comments, setComments] = useState<Comment[]>([]);
   const [filesOpen, setFilesOpen] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -45,6 +48,7 @@ export function DiffApp() {
       const msg = e.data as DiffPanelExtMessage;
       if (msg.type === 'diff') {
         setUnified(msg.unified);
+        setDiffError(msg.error);
         setBase(msg.base);
         setHasLiveAgent(msg.hasLiveAgent);
         setLabel(msg.label);
@@ -240,6 +244,8 @@ export function DiffApp() {
         <div className="u-diff-scroll" ref={scrollRef}>
           {loading ? (
             <div className="u-empty">Loading diff…</div>
+          ) : diffError ? (
+            <div className="u-empty">Couldn't compute the diff: {diffError}</div>
           ) : rendered ? (
             <DiffHtml html={rendered} containerRef={diffRef} onRowClick={addComment} />
           ) : (

@@ -3,7 +3,8 @@ import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { GitCliAdapter } from '../../src/adapters/GitCliAdapter';
+import { GitCliAdapter, parseWorktreePaths, reasonOf } from '../../src/adapters/GitCliAdapter';
+import { DiffError } from '../../src/ports/IGitPort';
 import { NodeFileSystem } from '../../src/adapters/NodeFileSystem';
 import { NodeProcessRunner } from '../../src/adapters/NodeProcessRunner';
 
@@ -67,6 +68,75 @@ describe('GitCliAdapter (integration, real temp git repo)', () => {
       fs.mkdirSync(notARepo, { recursive: true });
       expect(adapter.listWorktrees(notARepo)).toEqual([]);
     });
+
+    it('flags a worktree whose directory was deleted by hand as prunable', () => {
+      const wtPath = path.join(tmp, 'wt-rmrf');
+      git(`worktree add -b rmrf "${wtPath}"`);
+      fs.rmSync(wtPath, { recursive: true, force: true });
+      expect(adapter.listWorktrees(repo).find((w) => w.path === wtPath)?.prunable).toBe(true);
+      expect(adapter.listWorktrees(repo).find((w) => w.path === repo)?.prunable).toBeUndefined();
+      git('worktree prune');
+      git('branch -D rmrf');
+    });
+  });
+
+  describe('listWorktreePaths', () => {
+    it('lists every worktree, detached ones included', async () => {
+      const wtPath = path.join(tmp, 'wt-paths-detached');
+      git(`worktree add --detach "${wtPath}"`);
+      const list = await adapter.listWorktreePaths(repo);
+      expect(list).toContainEqual({ path: repo, prunable: false });
+      expect(list).toContainEqual({ path: wtPath, prunable: false });
+      git(`worktree remove --force "${wtPath}"`);
+    });
+
+    it('marks a worktree deleted by hand as prunable', async () => {
+      const wtPath = path.join(tmp, 'wt-paths-rmrf');
+      git(`worktree add --detach "${wtPath}"`);
+      fs.rmSync(wtPath, { recursive: true, force: true });
+      expect(await adapter.listWorktreePaths(repo)).toContainEqual({ path: wtPath, prunable: true });
+      git('worktree prune');
+    });
+
+    it('resolves undefined — not [] — when git fails', async () => {
+      const notARepo = path.join(tmp, 'not-a-repo-either');
+      fs.mkdirSync(notARepo, { recursive: true });
+      expect(await adapter.listWorktreePaths(notARepo)).toBeUndefined();
+    });
+  });
+
+  describe('parseWorktreePaths', () => {
+    it('keeps blocks without a branch line and reads a bare "prunable"', () => {
+      const out = [
+        'worktree /repo\nHEAD a\nbranch refs/heads/main',
+        'worktree /repo/wt\nHEAD b\ndetached\nprunable',
+        'garbage without a worktree line',
+      ].join('\n\n');
+      expect(parseWorktreePaths(out)).toEqual([
+        { path: '/repo', prunable: false },
+        { path: '/repo/wt', prunable: true },
+      ]);
+    });
+  });
+
+  describe('reasonOf', () => {
+    it("is git's first stderr line, without its fatal:/error: prefix", () => {
+      expect(reasonOf({ stderr: Buffer.from('\nfatal: bad revision\nmore'), message: 'Command failed' })).toBe('bad revision');
+    });
+
+    it('falls back to the message when stderr says nothing', () => {
+      expect(reasonOf({ stderr: '  ', message: 'error: spawn git ENOENT' })).toBe('spawn git ENOENT');
+      expect(reasonOf(new Error('Command failed: git diff'))).toBe('Command failed: git diff');
+    });
+
+    it('describes whatever else was thrown', () => {
+      expect(reasonOf(undefined)).toBe('undefined');
+      expect(reasonOf('git exploded')).toBe('git exploded');
+    });
+
+    it('keeps a reason made only of blank lines as it is', () => {
+      expect(reasonOf({ message: ' \n ' })).toBe('');
+    });
   });
 
   describe('createWorktree', () => {
@@ -109,6 +179,56 @@ describe('GitCliAdapter (integration, real temp git repo)', () => {
       // The file that only exists on the base branch came along.
       expect(fs.existsSync(path.join(wtPath, 'base-only.txt'))).toBe(true);
       git(`worktree remove --force "${wtPath}"`);
+    });
+  });
+
+  describe('createWorktree: branch names', () => {
+    // The worktree directory is named after the branch, and from there the path
+    // reaches tmux, docker and terminal command lines. Git accepts `$(…)` in a
+    // ref; Foreman does not make a worktree for one.
+    it.each([
+      'feat/$(touch pwned)',
+      'feat/`id`',
+      'a;b',
+      'a|b',
+      'a&b',
+      "it's",
+      'say"hi"',
+    ])('refuses %j before git runs, with a reason', async (name) => {
+      const wtPath = path.join(tmp, 'wt-refused');
+      await expect(adapter.createWorktree(wtPath, name, repo, true)).rejects.toThrow(/shell/);
+      expect(fs.existsSync(wtPath)).toBe(false);
+      expect(adapter.branchExists(name, repo)).toBe(false);
+    });
+
+    it.each(['-x', 'a..b', 'a b', 'trailing.lock'])(
+      'refuses %j by git\'s own check-ref-format rule',
+      async (name) => {
+        await expect(adapter.createWorktree(path.join(tmp, 'wt-bad-ref'), name, repo, true))
+          .rejects.toThrow(/not a valid git branch name/);
+      },
+    );
+
+    it('still accepts the ordinary punctuation real branches use', async () => {
+      const wtPath = path.join(tmp, 'wt-hash');
+      await adapter.createWorktree(wtPath, 'fix/#123-a+b_c.d', repo, true);
+      expect(git('branch --show-current', wtPath).trim()).toBe('fix/#123-a+b_c.d');
+      await adapter.deleteWorktree(wtPath, repo);
+      adapter.deleteBranch('fix/#123-a+b_c.d', repo);
+      expect(adapter.branchExists('fix/#123-a+b_c.d', repo)).toBe(false);
+    });
+
+    it('takes a worktree path containing shell syntax as a plain path', async () => {
+      // Paths come from config (worktreesDirectory) and the branch; with no
+      // shell in the way, "$(…)" in one is just characters on disk.
+      const marker = path.join(tmp, 'pwned-by-path');
+      const wtPath = path.join(tmp, `dir $(touch ${marker})`);
+      await adapter.createWorktree(wtPath, 'odd-path', repo, true);
+      expect(fs.existsSync(path.join(wtPath, 'README.md'))).toBe(true);
+      expect(fs.existsSync(marker)).toBe(false);
+      await adapter.deleteWorktree(wtPath, repo);
+      expect(fs.existsSync(wtPath)).toBe(false);
+      adapter.deleteBranch('odd-path', repo);
     });
   });
 
@@ -176,6 +296,10 @@ describe('GitCliAdapter (integration, real temp git repo)', () => {
 
     it('returns false for a missing branch', () => {
       expect(adapter.branchExists('definitely-not-a-branch', repo)).toBe(false);
+    });
+
+    it('reads a name starting with "-" as a name, not an option', () => {
+      expect(adapter.branchExists('--all', repo)).toBe(false);
     });
   });
 
@@ -264,10 +388,68 @@ describe('GitCliAdapter (integration, real temp git repo)', () => {
       git('branch -D diff-nomain');
     });
 
-    it('returns "" outside a git repo', async () => {
+    it('rejects with a DiffError carrying git\'s reason outside a git repo', async () => {
+      // This used to resolve '' — which the panel renders as "No changes to
+      // review", the one answer that sends a reviewer away for the wrong reason.
       const notARepo = path.join(tmp, 'not-a-repo-diff');
       fs.mkdirSync(notARepo, { recursive: true });
-      expect(await adapter.diff(notARepo, { base: 'working' })).toBe('');
+      const err = await adapter.diff(notARepo, { base: 'working' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(DiffError);
+      expect((err as DiffError).reason).toMatch(/not a git repository/i);
+      // git's "fatal: " prefix is noise in a sentence shown to a person.
+      expect((err as DiffError).reason).not.toMatch(/^fatal/);
+    });
+
+    it('rejects in branch mode too, rather than claiming a clean branch', async () => {
+      const gone = path.join(tmp, 'removed-under-the-panel');
+      fs.mkdirSync(gone, { recursive: true });
+      await expect(adapter.diff(gone, { base: 'branch' })).rejects.toBeInstanceOf(DiffError);
+    });
+
+    it('still resolves "" for a worktree with genuinely nothing to show', async () => {
+      const wtPath = path.join(tmp, 'wt-diff-clean');
+      git(`worktree add -b diff-clean "${wtPath}"`);
+      expect(await adapter.diff(wtPath, { base: 'working' })).toBe('');
+      git(`worktree remove --force "${wtPath}"`);
+      git('branch -D diff-clean');
+    });
+
+    it.skipIf(process.getuid?.() === 0)('working: skips an untracked file git cannot read, and shows the rest', async () => {
+      const wtPath = path.join(tmp, 'wt-diff-unreadable');
+      git(`worktree add -b diff-unreadable "${wtPath}"`);
+      fs.writeFileSync(path.join(wtPath, 'kept.txt'), 'still here\n');
+      const locked = path.join(wtPath, 'locked.txt');
+      fs.writeFileSync(locked, 'secret\n');
+      fs.chmodSync(locked, 0o000);
+      try {
+        const out = await adapter.diff(wtPath, { base: 'working' });
+        expect(out).toContain('+still here');
+        expect(out).not.toContain('locked.txt');
+      } finally {
+        fs.chmodSync(locked, 0o644);
+        git(`worktree remove --force "${wtPath}"`);
+        git('branch -D diff-unreadable');
+      }
+    });
+
+    // The injection this file used to have: untracked names went into
+    // `git diff --no-index -- /dev/null "<file>"` through a shell, and inside
+    // double quotes $(…) and backticks run. An agent controls those names.
+    it('working: an untracked file named like a command substitution is diffed, not run', async () => {
+      const wtPath = path.join(tmp, 'wt-diff-hostile');
+      git(`worktree add -b diff-hostile "${wtPath}"`);
+      const marker = 'pwned-by-diff';
+      fs.writeFileSync(path.join(wtPath, `$(touch ${marker}).txt`), 'payload one\n');
+      fs.writeFileSync(path.join(wtPath, `\`touch ${marker}\`.txt`), 'payload two\n');
+
+      const out = await adapter.diff(wtPath, { base: 'working' });
+      // The substitution would have run with the worktree as its cwd.
+      expect(fs.existsSync(path.join(wtPath, marker))).toBe(false);
+      expect(out).toContain('+payload one');
+      expect(out).toContain('+payload two');
+
+      git(`worktree remove --force "${wtPath}"`);
+      git('branch -D diff-hostile');
     });
   });
 });

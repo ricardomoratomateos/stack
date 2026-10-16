@@ -7,6 +7,7 @@ import { ProviderFactory } from '../../src/providers/ProviderFactory';
 import type { ConfigSource } from '../../src/providers/claude/ClaudeProvider';
 import type { ISessionManager } from '../../src/ports/ISessionManager';
 import type { AgentSessionState, Worktree } from '../../src/types';
+import type { ProviderId } from '../../src/ports/IAgentProvider';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,7 @@ function makeStub(): ISessionManager {
     newWindow: vi.fn().mockResolvedValue(1),
     sendKeys: vi.fn().mockResolvedValue(undefined),
     paste: vi.fn().mockResolvedValue(undefined),
+    pressEnter: vi.fn().mockResolvedValue(undefined),
     respawnWindow: vi.fn().mockResolvedValue(undefined),
     selectWindow: vi.fn().mockResolvedValue(undefined),
     killWindow: vi.fn().mockResolvedValue(undefined),
@@ -45,6 +47,7 @@ function makeStub(): ISessionManager {
     detachClients: vi.fn().mockResolvedValue(undefined),
     listWindows: vi.fn().mockResolvedValue([]),
     hasChildProcess: vi.fn().mockResolvedValue(false),
+    processCommandLine: vi.fn().mockRejectedValue(new Error('no ps in unit tests')),
   };
 }
 
@@ -67,9 +70,31 @@ function create(claudeCommand = 'claude', memento: vscode.Memento = new FakeMeme
 }
 
 /** Seed the private windows map directly (state combinations unreachable via public API). */
-function seed(mgr: AgentSessionManager, worktreeId: string, entries: Array<[number, { kind: 'agent' | 'shell'; provider?: 'claude'; state: AgentSessionState; name: string }]>) {
+function seed(mgr: AgentSessionManager, worktreeId: string, entries: Array<[number, { kind: 'agent' | 'shell'; provider?: ProviderId; state: AgentSessionState; name: string; hookSeen?: boolean; title?: string }]>) {
   const map = (mgr as unknown as { windowMap(id: string): Map<number, unknown> }).windowMap(worktreeId);
   for (const [idx, meta] of entries) map.set(idx, meta);
+}
+
+/** tmux reports these windows with an agent in the foreground — running, by any measure. */
+function live(stub: ISessionManager, ...indexes: number[]) {
+  (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue(
+    indexes.map((index) => ({ index, name: 'claude', command: 'node', pid: 100 + index })),
+  );
+}
+
+/** The prompt was pasted into `target` and Enter was pressed there afterwards. */
+function expectSubmitted(stub: ISessionManager, target: string, text: string) {
+  expect(stub.paste).toHaveBeenCalledWith(target, text);
+  expect(stub.pressEnter).toHaveBeenCalledWith(target);
+  const pasted = (stub.paste as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+  const entered = (stub.pressEnter as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+  expect(pasted).toBeLessThan(entered);
+}
+
+/** The prompt was pasted into `target` and left there: no Enter at all. */
+function expectUnsent(stub: ISessionManager, target: string, text: string) {
+  expect(stub.paste).toHaveBeenCalledWith(target, text);
+  expect(stub.pressEnter).not.toHaveBeenCalled();
 }
 
 beforeEach(() => {
@@ -318,6 +343,18 @@ describe('counts', () => {
     expect(mgr.getShellCount('wt-1')).toBe(1);
     expect(mgr.hasTerminals('wt-1')).toBe(true);
   });
+
+  it('getAgentCount counts only agents that are still running', () => {
+    // The review panel offers "paste into the live session" on this count.
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [
+      [1, { kind: 'agent', provider: 'claude', state: 'terminated', name: 'claude' }],
+      [2, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
+    ]);
+    expect(mgr.getAgentCount('wt-1')).toBe(1);
+    mgr.updateState('wt-1', 'terminated', 2);
+    expect(mgr.getAgentCount('wt-1')).toBe(0);
+  });
 });
 
 // ── launch ────────────────────────────────────────────────────────────────────
@@ -383,7 +420,7 @@ describe('launch command line', () => {
       { index: 1, name: 'claude', command: 'node' },
     ]);
     await mgr.launch(wt, { prompt: 'fix ${user.id}' });
-    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'fix ${user.id}', true);
+    expectSubmitted(stub, `${SESSION}:1`, 'fix ${user.id}');
   });
 
   it('shows the viewer before waiting on the agent, so its boot is watched rather than waited out', async () => {
@@ -405,7 +442,7 @@ describe('launch command line', () => {
       .mockResolvedValue([{ index: 1, name: 'claude', command: 'node' }]);
     await mgr.launch(wt, { prompt: 'go' });
     expect(listWindows.mock.calls.length).toBeGreaterThan(1);
-    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+    expectSubmitted(stub, `${SESSION}:1`, 'go');
   });
 
   it('sees the agent through the shell that launched it: command stays a shell, but the pane has a child', async () => {
@@ -420,7 +457,7 @@ describe('launch command line', () => {
       .mockResolvedValue(true);
     await mgr.launch(wt, { prompt: 'go' });
     expect(stub.hasChildProcess).toHaveBeenCalledWith(4242);
-    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+    expectSubmitted(stub, `${SESSION}:1`, 'go');
   });
 
   it('treats a failing child lookup as "not yet"', async () => {
@@ -430,7 +467,7 @@ describe('launch command line', () => {
     ]);
     (stub.hasChildProcess as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no pgrep'));
     await mgr.launch(wt, { prompt: 'go' });
-    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', false);
+    expectUnsent(stub, `${SESSION}:1`, 'go');
   });
 
   it('leaves the prompt unsent when the agent never takes the pane', async () => {
@@ -441,14 +478,14 @@ describe('launch command line', () => {
       { index: 1, name: 'claude', command: 'zsh' },
     ]);
     await mgr.launch(wt, { prompt: 'rm -rf everything' });
-    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'rm -rf everything', false);
+    expectUnsent(stub, `${SESSION}:1`, 'rm -rf everything');
   });
 
   it('tolerates tmux failing while it waits for the agent', async () => {
     const { mgr, stub } = create();
     (stub.listWindows as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no server'));
     await mgr.launch(wt, { prompt: 'go' });
-    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', false);
+    expectUnsent(stub, `${SESSION}:1`, 'go');
   });
 
   it('waits on a real timer when no sleep is injected', async () => {
@@ -462,24 +499,32 @@ describe('launch command line', () => {
       makeFactory(), new FakeMemento() as unknown as vscode.Memento, stub, () => true, 'Test-Host.local',
     );
 
+    // The agent confirms the submit the way Claude Code does: UserPromptSubmit → 'active'.
+    (stub.pressEnter as ReturnType<typeof vi.fn>).mockImplementation(async () => mgr.updateState('wt-1', 'active', 1));
+
     const started = Date.now();
     const launched = mgr.launch(wt, { prompt: 'go' });
     // The hook wait is real-timed too (6 s cap): release it once the process poll has slept.
     await new Promise((r) => setTimeout(r, 200));
     mgr.updateState('wt-1', 'waiting', 1);
     await launched;
-    expect(Date.now() - started).toBeGreaterThanOrEqual(100);
-    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+    // Process poll, then the input-ready and paste settle delays, all real.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(200 + 500 + 250 - 20);
+    expectSubmitted(stub, `${SESSION}:1`, 'go');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
   });
 
   describe('waiting for the agent to listen', () => {
-    /** Process detection succeeds at once; every sleep hangs, so only a hook can release the paste. */
+    /**
+     * Process detection succeeds at once; the hook wait's cap never elapses, so
+     * only a hook can release the paste. Every other sleep is instant.
+     */
     function createHung() {
       const stub = makeStub();
       (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 1, name: 'claude', command: 'node', pid: 7 }]);
       const mgr = new AgentSessionManager(
         makeFactory(), new FakeMemento() as unknown as vscode.Memento, stub, () => true, 'Test-Host.local',
-        () => new Promise<void>(() => {}),
+        (ms) => (ms === 6_000 ? new Promise<void>(() => {}) : Promise.resolve()),
       );
       return { mgr, stub };
     }
@@ -492,7 +537,7 @@ describe('launch command line', () => {
       expect(stub.paste).not.toHaveBeenCalled();
       mgr.updateState('wt-1', 'waiting', 1);
       await launched;
-      expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+      expectSubmitted(stub, `${SESSION}:1`, 'go');
     });
 
     it('a hook without a window index releases every waiter of that worktree, and no other', async () => {
@@ -519,14 +564,47 @@ describe('launch command line', () => {
         return [{ index: 1, name: 'claude', command: 'node', pid: 7 }];
       });
       await mgr.launch(wt, { prompt: 'go' }); // would hang here if it waited
-      expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+      expectSubmitted(stub, `${SESSION}:1`, 'go');
     });
 
     it('pastes anyway once the cap passes — hooks the user never trusted do not fire', async () => {
       const { mgr, stub } = create(); // instant sleep: the cap elapses at once
       (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 1, name: 'claude', command: 'node', pid: 7 }]);
       await mgr.launch(wt, { prompt: 'go' });
-      expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+      expectSubmitted(stub, `${SESSION}:1`, 'go');
+    });
+
+    it('stops waiting, and pastes nothing, when the window is closed meanwhile', async () => {
+      const { mgr, stub } = createHung();
+      const launched = mgr.launch(wt, { prompt: 'go' });
+      await flush();
+      await mgr.killWindow('wt-1', 1);
+      await launched; // released by the kill, not by the (never-ending) cap
+      expect(stub.paste).not.toHaveBeenCalled();
+    });
+
+    it('stops waiting, and pastes nothing, when the whole session is killed meanwhile', async () => {
+      const { mgr, stub } = createHung();
+      const launched = mgr.launch(wt, { prompt: 'go' });
+      await flush();
+      await mgr.killWorktreeSession('wt-1');
+      await launched; // released by the kill, not by the (never-ending) cap
+      expect(stub.paste).not.toHaveBeenCalled();
+    });
+
+    it('survives the worktree being deleted mid-launch, and does not resurrect its entry', async () => {
+      // waitForHook asserted the window's meta was there (a TypeError) and
+      // looked it up through windowMap(), which re-created the worktree.
+      const { mgr, stub } = create();
+      let killed = false;
+      (stub.listWindows as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+        if (!killed) { killed = true; await mgr.killWorktreeSession('wt-1'); }
+        return [{ index: 1, name: 'claude', command: 'node', pid: 7 }];
+      });
+      await expect(mgr.launch(wt, { prompt: 'go' })).resolves.toBeDefined();
+      expect(stub.paste).not.toHaveBeenCalled();
+      expect(mgr.hasTerminals('wt-1')).toBe(false);
+      expect((mgr as unknown as { windows: Map<string, unknown> }).windows.has('wt-1')).toBe(false);
     });
   });
 
@@ -535,6 +613,14 @@ describe('launch command line', () => {
     await mgr.launch(wt);
     expect(stub.paste).not.toHaveBeenCalled();
     expect(stub.listWindows).not.toHaveBeenCalled();
+  });
+
+  it("announces the worktree's aggregate, so a pending permission elsewhere is not read as answered", async () => {
+    const { mgr, stub, stateEvents } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'permission', name: 'claude' }]]);
+    (stub.newWindow as ReturnType<typeof vi.fn>).mockResolvedValue(2);
+    await mgr.launch(wt);
+    expect(stateEvents).toEqual([{ worktreeId: 'wt-1', state: 'permission' }]);
   });
 
   it('launches an explicitly requested provider instead of the default', async () => {
@@ -560,7 +646,7 @@ describe('launch command line', () => {
       1,
       'FOREMAN_WINDOW_INDEX="1" FOREMAN_WORKSPACE_ID="wt-1" my-claude; exec "${SHELL:-/bin/sh}"',
     );
-    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'hello', true);
+    expectSubmitted(stub, `${SESSION}:1`, 'hello');
   });
 });
 
@@ -908,6 +994,7 @@ describe('sendPromptToAgent', () => {
   it('pastes into a ready agent window and selects it', async () => {
     const { mgr, stub } = create();
     seed(mgr, 'wt-1', [[3, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    live(stub, 3);
     expect(await mgr.sendPromptToAgent(wt, 'review this')).toBe(true);
     expect(stub.selectWindow).toHaveBeenCalledWith(SESSION, 3);
     expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:3`, 'review this');
@@ -919,6 +1006,7 @@ describe('sendPromptToAgent', () => {
       [1, { kind: 'agent', provider: 'claude', state: 'active', name: 'claude' }],
       [2, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
     ]);
+    live(stub, 1, 2);
     await mgr.sendPromptToAgent(wt, 'x');
     expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:2`, 'x');
   });
@@ -929,14 +1017,295 @@ describe('sendPromptToAgent', () => {
       [4, { kind: 'agent', provider: 'claude', state: 'active', name: 'claude' }],
       [5, { kind: 'agent', provider: 'claude', state: 'active', name: 'claude' }],
     ]);
+    live(stub, 4, 5);
     await mgr.sendPromptToAgent(wt, 'x');
     expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:4`, 'x');
+  });
+
+  it('shows the viewer before submitting, which can take a few seconds of confirmation', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    live(stub, 3);
+    await mgr.sendPromptToAgent(wt, 'x');
+    const shown = window.createTerminal.mock.invocationCallOrder[0];
+    const pasted = (stub.paste as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    expect(shown).toBeLessThan(pasted);
+  });
+
+  it('prefers an agent at its prompt over one asking for permission', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [
+      [1, { kind: 'agent', provider: 'claude', state: 'permission', name: 'claude' }],
+      [2, { kind: 'agent', provider: 'claude', state: 'idle', name: 'claude' }],
+    ]);
+    live(stub, 1, 2);
+    await mgr.sendPromptToAgent(wt, 'x');
+    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:2`, 'x');
+  });
+
+  describe('only into a running agent', () => {
+    /** Window 3: tmux says `zsh`, and the pane process's command line is `args`. */
+    function paneRunning(stub: ISessionManager, args: string) {
+      (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 3, name: 'claude', command: 'zsh', pid: 42 }]);
+      (stub.processCommandLine as ReturnType<typeof vi.fn>).mockResolvedValue(args);
+    }
+    const waiting = { kind: 'agent' as const, provider: 'claude' as const, state: 'waiting' as const, name: 'claude' };
+
+    it('never pastes into a window whose agent has exited — what is left there is a shell', async () => {
+      // The launch line ends in `exec $SHELL`; review prompts quote code in
+      // backticks, which that shell would run as command substitution.
+      const { mgr, stub, stateEvents } = create();
+      seed(mgr, 'wt-1', [[3, waiting]]);
+      paneRunning(stub, '/bin/zsh');
+      expect(await mgr.sendPromptToAgent(wt, 'fix `rm -rf ~`')).toBe(false);
+      expect(stub.paste).not.toHaveBeenCalled();
+      expect(stub.pressEnter).not.toHaveBeenCalled();
+      expect(stub.processCommandLine).toHaveBeenCalledWith(42);
+      // Found dead on the way: the card says so, and the panel stops offering it.
+      expect(mgr.getSessions('wt-1')[0].state).toBe('terminated');
+      expect(stateEvents).toContainEqual({ worktreeId: 'wt-1', state: 'terminated' });
+      expect(mgr.getAgentCount('wt-1')).toBe(0);
+    });
+
+    it('is not fooled by a shell that has children of its own', async () => {
+      // An interactive zsh keeps helpers such as gitstatusd as children, so
+      // "the pane has a child" is true of a dead agent window too.
+      const { mgr, stub } = create();
+      seed(mgr, 'wt-1', [[3, waiting]]);
+      paneRunning(stub, 'zsh');
+      (stub.hasChildProcess as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+      expect(await mgr.sendPromptToAgent(wt, 'x')).toBe(false);
+      expect(stub.paste).not.toHaveBeenCalled();
+    });
+
+    it('sees a running agent through its launch wrapper, which tmux reports as the shell', async () => {
+      const { mgr, stub } = create();
+      seed(mgr, 'wt-1', [[3, waiting]]);
+      paneRunning(stub, 'zsh -c FOREMAN_WINDOW_INDEX="3" FOREMAN_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"');
+      expect(await mgr.sendPromptToAgent(wt, 'x')).toBe(true);
+      expectSubmitted(stub, `${SESSION}:3`, 'x');
+    });
+
+    it('moves on from a dead window to a live one', async () => {
+      const { mgr, stub } = create();
+      seed(mgr, 'wt-1', [
+        [3, waiting],
+        [4, { ...waiting, state: 'active' }],
+      ]);
+      (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { index: 3, name: 'claude', command: 'zsh', pid: 42 },
+        { index: 4, name: 'claude', command: 'node', pid: 43 },
+      ]);
+      (stub.processCommandLine as ReturnType<typeof vi.fn>).mockResolvedValue('zsh');
+      expect(await mgr.sendPromptToAgent(wt, 'x')).toBe(true);
+      expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:4`, 'x');
+      expect(mgr.getSessions('wt-1').find((s) => s.index === 3)?.state).toBe('terminated');
+    });
+
+    it('sends nothing, and condemns nothing, when tmux cannot say', async () => {
+      const { mgr, stub } = create();
+      seed(mgr, 'wt-1', [[3, waiting]]);
+      (stub.listWindows as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no server'));
+      expect(await mgr.sendPromptToAgent(wt, 'x')).toBe(false);
+      expect(stub.paste).not.toHaveBeenCalled();
+      expect(mgr.getSessions('wt-1')[0].state).toBe('waiting');
+    });
+
+    it('treats an unreadable command line as unknown, not as dead', async () => {
+      const { mgr, stub } = create();
+      seed(mgr, 'wt-1', [[3, waiting]]);
+      (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 3, name: 'claude', command: 'zsh', pid: 42 }]);
+      expect(await mgr.sendPromptToAgent(wt, 'x')).toBe(false);
+      expect(mgr.getSessions('wt-1')[0].state).toBe('waiting');
+    });
+
+    it('does not announce an end twice when the agent reports it while ps is being asked', async () => {
+      const { mgr, stub, stateEvents } = create();
+      seed(mgr, 'wt-1', [[3, waiting]]);
+      (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 3, name: 'claude', command: 'zsh', pid: 42 }]);
+      (stub.processCommandLine as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+        mgr.updateState('wt-1', 'terminated', 3); // SessionEnd, on its way already
+        return '/bin/zsh';
+      });
+      expect(await mgr.sendPromptToAgent(wt, 'x')).toBe(false);
+      expect(stub.paste).not.toHaveBeenCalled();
+      expect(stateEvents.filter((e) => e.state === 'terminated')).toHaveLength(1);
+    });
+
+    it('skips a window already known to be terminated', async () => {
+      const { mgr, stub } = create();
+      seed(mgr, 'wt-1', [[3, { ...waiting, state: 'terminated' }]]);
+      live(stub, 3);
+      expect(await mgr.sendPromptToAgent(wt, 'x')).toBe(false);
+      expect(stub.listWindows).not.toHaveBeenCalled();
+    });
   });
 
   it('pasteToActiveWindow pastes to the session (active pane) without submitting', async () => {
     const { mgr, stub } = create();
     await mgr.pasteToActiveWindow('wt-1', "'/x/shot.png' ");
-    expect(stub.paste).toHaveBeenCalledWith(SESSION, "'/x/shot.png' ", false);
+    expectUnsent(stub, SESSION, "'/x/shot.png' ");
+  });
+});
+
+// ── submitting a prompt (settle, Enter, confirmation) ────────────────────────
+
+describe('submitting a prompt', () => {
+  /** A manager whose sleeps are instant but recorded, interleaved with the tmux calls. */
+  function createRecorded() {
+    const log: string[] = [];
+    const stub = makeStub();
+    (stub.paste as ReturnType<typeof vi.fn>).mockImplementation(async () => { log.push('paste'); });
+    (stub.pressEnter as ReturnType<typeof vi.fn>).mockImplementation(async () => { log.push('enter'); });
+    const mgr = new AgentSessionManager(
+      makeFactory(), new FakeMemento() as unknown as vscode.Memento, stub, () => true, 'Test-Host.local',
+      async (ms) => { log.push(`sleep ${ms}`); },
+    );
+    return { mgr, stub, log };
+  }
+  /** A claude window at its prompt whose hooks have been reaching us. */
+  const listening = { kind: 'agent' as const, provider: 'claude' as const, state: 'waiting' as const, name: 'claude', hookSeen: true };
+  /**
+   * The agent confirms the Nth Enter (1-based) the way Claude Code does: UserPromptSubmit → 'active'.
+   * 'none': the event carries no window index (an agent launched before FOREMAN_WINDOW_INDEX).
+   */
+  function confirmOn(stub: ISessionManager, mgr: AgentSessionManager, nth: number, windowIndex: number | 'none' = 3) {
+    let presses = 0;
+    (stub.pressEnter as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      if (++presses === nth) mgr.updateState('wt-1', 'active', windowIndex === 'none' ? undefined : windowIndex);
+    });
+  }
+
+  it('lets the paste settle before pressing Enter — an Enter during the paste is swallowed', async () => {
+    const { mgr, stub, log } = createRecorded();
+    seed(mgr, 'wt-1', [[3, { ...listening, hookSeen: false }]]);
+    live(stub, 3);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(log).toEqual(['paste', 'sleep 250', 'enter']);
+  });
+
+  it('stops at the first Enter the agent confirms', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, listening]]);
+    live(stub, 3);
+    confirmOn(stub, mgr, 1);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it('presses Enter again when no confirmation comes, at most twice more', async () => {
+    const { mgr, stub, log } = createRecorded();
+    seed(mgr, 'wt-1', [[3, listening]]);
+    live(stub, 3);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    // Each wait is armed before its Enter, so a confirmation cannot slip in between.
+    expect(log).toEqual(['paste', 'sleep 250', 'sleep 2000', 'enter', 'sleep 2000', 'enter', 'sleep 2000', 'enter']);
+  });
+
+  it('a retry that gets confirmed ends the retries', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, listening]]);
+    live(stub, 3);
+    confirmOn(stub, mgr, 2);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(2);
+  });
+
+  it('takes a permission request as confirmation too — the agent is working on it', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, listening]]);
+    live(stub, 3);
+    (stub.pressEnter as ReturnType<typeof vi.fn>).mockImplementation(async () => mgr.updateState('wt-1', 'permission', 3));
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops pressing when the agent ends instead — there is nothing left to submit to', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, listening]]);
+    live(stub, 3);
+    (stub.pressEnter as ReturnType<typeof vi.fn>).mockImplementation(async () => mgr.updateState('wt-1', 'terminated', 3));
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not take an event that says the agent is still at its prompt as confirmation', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, listening]]);
+    live(stub, 3);
+    (stub.pressEnter as ReturnType<typeof vi.fn>).mockImplementation(async () => mgr.updateState('wt-1', 'waiting', 3));
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(3);
+  });
+
+  it('accepts a confirmation from an agent that sends no window index', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, listening]]);
+    live(stub, 3);
+    confirmOn(stub, mgr, 1, 'none');
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores another window's events", async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, listening], [4, { ...listening, state: 'active' }]]);
+    live(stub, 3, 4);
+    confirmOn(stub, mgr, 1, 4);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(3);
+  });
+
+  it('presses once when no hook from this window has arrived — silence then proves nothing', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, { ...listening, hookSeen: false }]]);
+    live(stub, 3);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it('presses once for opencode, which has no submit hook to confirm with', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, { ...listening, provider: 'opencode', name: 'opencode' }]]);
+    live(stub, 3);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it('never presses again into a window asking for permission — an Enter there is a "yes"', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, { ...listening, state: 'permission' }]]);
+    live(stub, 3);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops pressing once the window is gone', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, listening]]);
+    live(stub, 3);
+    (stub.pressEnter as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      (mgr as unknown as { windows: Map<string, Map<number, unknown>> }).windows.get('wt-1')!.delete(3);
+    });
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it('a launch waits for the input box after SessionStart, then settles the paste, then submits', async () => {
+    const { mgr, stub, log } = createRecorded();
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 1, name: 'claude', command: 'node', pid: 7 }]);
+    // SessionStart arrives while the process is being detected.
+    let started = false;
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      if (!started) { started = true; mgr.updateState('wt-1', 'waiting', 1); }
+      return [{ index: 1, name: 'claude', command: 'node', pid: 7 }];
+    });
+    (stub.pressEnter as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      log.push('enter');
+      mgr.updateState('wt-1', 'active', 1);
+    });
+    await mgr.launch(wt, { prompt: 'go' });
+    expect(log).toEqual(['sleep 500', 'paste', 'sleep 250', 'sleep 2000', 'enter']);
   });
 });
 
@@ -967,6 +1336,18 @@ describe('reconnect', () => {
     ]);
     await mgr.reconnect([wt]);
     expect(mgr.getSessions('wt-1').map(s => s.index)).toEqual([1]);
+  });
+
+  it('finds that first window at base-index 1 too (a common ~/.tmux.conf setting)', async () => {
+    const { mgr, stub } = create();
+    (stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'zsh' },
+      { index: 2, name: 'claude' },
+      { index: 3, name: 'vim' },
+    ]);
+    await mgr.reconnect([wt]);
+    expect(mgr.getSessions('wt-1').map(s => s.index)).toEqual([2, 3]);
   });
 
   it('keeps window 0 when named shell or claude*', async () => {
@@ -1072,6 +1453,142 @@ describe('reconnect', () => {
     (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 1, name: 'claude' }]);
     await mgr.reconnect([wt]);
     expect(mgr.getState('wt-1')).toBe('waiting');
+  });
+
+  describe('against what is actually running', () => {
+    const WRAPPER = 'zsh -c FOREMAN_WINDOW_INDEX="1" FOREMAN_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"';
+    async function reloadWith(persisted: Record<number, AgentSessionState>, args: Record<number, string>) {
+      const memento = new FakeMemento() as unknown as vscode.Memento;
+      await memento.update('foreman.claudeStates', { 'wt-1': persisted });
+      const h = create('claude', memento);
+      (h.stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+      (h.stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue(
+        Object.keys(args).map((i) => ({ index: Number(i), name: 'claude', command: 'zsh', pid: 100 + Number(i) })),
+      );
+      (h.stub.processCommandLine as ReturnType<typeof vi.fn>).mockImplementation(async (pid: number) => args[pid - 100]);
+      await h.mgr.reconnect([wt]);
+      return h;
+    }
+    const stateOf = (mgr: AgentSessionManager, index: number) => mgr.getSessions('wt-1').find((s) => s.index === index)?.state;
+
+    it('comes back terminated when the agent exited while Foreman was away', async () => {
+      // Its last hooks went to the previous window's HookServer, which is gone.
+      const { mgr } = await reloadWith({ 1: 'active' }, { 1: '/bin/zsh' });
+      expect(stateOf(mgr, 1)).toBe('terminated');
+      expect(mgr.getAgentCount('wt-1')).toBe(0);
+    });
+
+    it('does not bring back "working" — the agent may well have finished since', async () => {
+      const { mgr } = await reloadWith({ 1: 'active' }, { 1: WRAPPER });
+      expect(stateOf(mgr, 1)).toBe('waiting');
+    });
+
+    it('keeps a permission request, which nobody was there to answer', async () => {
+      const { mgr } = await reloadWith({ 1: 'permission' }, { 1: WRAPPER });
+      expect(stateOf(mgr, 1)).toBe('permission');
+    });
+
+    it('fires ONE event per worktree, carrying the aggregate', async () => {
+      // Per-window events read as permission → waiting to the notifier, which
+      // then cleared a real permission badge.
+      const { stateEvents } = await reloadWith({ 1: 'permission', 2: 'waiting' }, { 1: WRAPPER, 2: WRAPPER });
+      expect(stateEvents).toEqual([{ worktreeId: 'wt-1', state: 'permission' }]);
+    });
+  });
+});
+
+describe('agent liveness polling', () => {
+  const WRAPPER = 'zsh -c FOREMAN_WINDOW_INDEX="1" FOREMAN_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"';
+  function polled(args: string | Error) {
+    vi.useFakeTimers();
+    const h = create();
+    seed(h.mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'active', name: 'claude' }]]);
+    (h.stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 1, name: 'claude', command: 'zsh', pid: 42 }]);
+    const ps = h.stub.processCommandLine as ReturnType<typeof vi.fn>;
+    if (args instanceof Error) ps.mockRejectedValue(args); else ps.mockResolvedValue(args);
+    (h.mgr as unknown as { syncShellPolling(): void }).syncShellPolling();
+    return h;
+  }
+  const timer = (mgr: AgentSessionManager) => (mgr as unknown as { shellTimer?: unknown }).shellTimer;
+
+  it('marks an agent that died without a word terminated, and stops polling for it', async () => {
+    // SIGKILL, a crash, Codex's missing SessionEnd: no hook says so, and the
+    // session used to sit on "working" forever.
+    const { mgr, stateEvents, getTerminalsChanges } = polled('/bin/zsh');
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(mgr.getState('wt-1')).toBe('terminated');
+    expect(stateEvents).toEqual([{ worktreeId: 'wt-1', state: 'terminated' }]);
+    expect(getTerminalsChanges()).toBeGreaterThan(0);
+    expect(timer(mgr)).toBeUndefined();
+    mgr.dispose();
+  });
+
+  it('leaves a running agent alone', async () => {
+    const { mgr, stateEvents } = polled(WRAPPER);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(mgr.getState('wt-1')).toBe('active');
+    expect(stateEvents).toEqual([]);
+    mgr.dispose();
+  });
+
+  it('condemns nothing when ps cannot answer', async () => {
+    const { mgr } = polled(new Error('no ps'));
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(mgr.getState('wt-1')).toBe('active');
+    mgr.dispose();
+  });
+
+  it('is not asked on hook-driven syncs — an agent that just sent a hook is alive', async () => {
+    const { mgr, stub } = polled('/bin/zsh');
+    mgr.updateState('wt-1', 'active', 1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stub.processCommandLine).not.toHaveBeenCalled();
+    mgr.dispose();
+  });
+
+  it('drops the answer for a session killed while tmux was answering', async () => {
+    const { mgr, stub, stateEvents, getTerminalsChanges } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'active', name: 'claude' }]]);
+    let answer!: (w: unknown[]) => void;
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockReturnValue(new Promise((r) => { answer = r; }));
+    const sync = mgr.syncWindows('wt-1', { liveness: true });
+    await mgr.killWorktreeSession('wt-1');
+    stateEvents.length = 0;
+    const changes = getTerminalsChanges();
+    // A shell the agent left behind, and a window to adopt: both would be news.
+    answer([{ index: 1, name: 'claude', command: 'zsh', pid: 41 }, { index: 2, name: 'codex', command: 'node', pid: 42 }]);
+    await sync;
+    expect(stub.processCommandLine).not.toHaveBeenCalled();
+    expect(stateEvents).toEqual([]);
+    expect(getTerminalsChanges()).toBe(changes);
+    expect(mgr.hasTerminals('wt-1')).toBe(false);
+  });
+
+  it('does not condemn an agent whose session was killed while ps was being asked', async () => {
+    const { mgr, stub, stateEvents } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'active', name: 'claude' }]]);
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 1, name: 'claude', command: 'zsh', pid: 41 }]);
+    (stub.processCommandLine as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      await mgr.killWorktreeSession('wt-1');
+      return '/bin/zsh';
+    });
+    await mgr.syncWindows('wt-1', { liveness: true });
+    expect(stateEvents).toEqual([{ worktreeId: 'wt-1', state: 'idle' }]);
+    expect(mgr.getState('wt-1')).toBe('idle');
+  });
+
+  it('neither prunes nor condemns a window that appeared while tmux was answering', async () => {
+    // The list predates the launch, so the new window is missing from it — not gone.
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'active', name: 'claude' }]]);
+    let answer!: (w: unknown[]) => void;
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockReturnValue(new Promise((r) => { answer = r; }));
+    (stub.processCommandLine as ReturnType<typeof vi.fn>).mockResolvedValue('/bin/zsh');
+    const sync = mgr.syncWindows('wt-1', { liveness: true });
+    seed(mgr, 'wt-1', [[2, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    answer([{ index: 1, name: 'claude', command: 'node', pid: 41 }]);
+    await sync;
+    expect(mgr.getSessions('wt-1').map((s) => [s.index, s.state])).toEqual([[1, 'active'], [2, 'waiting']]);
   });
 });
 
@@ -1304,6 +1821,14 @@ describe('compat API', () => {
     mgr.updateState('wt-1', 'active');
     expect(stateEvents).toEqual([]);
   });
+
+  it('dispose drops its onDidCloseTerminal listener', () => {
+    const { mgr } = create();
+    const subscription = window.onDidCloseTerminal.mock.results.at(-1)?.value as { dispose: ReturnType<typeof vi.fn> };
+    expect(subscription.dispose).not.toHaveBeenCalled();
+    mgr.dispose();
+    expect(subscription.dispose).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ── shell rows labelled with what they are running ───────────────────────────
@@ -1397,14 +1922,23 @@ describe('shell polling', () => {
   const timer = (mgr: AgentSessionManager) =>
     (mgr as unknown as { shellTimer?: unknown }).shellTimer;
 
-  it('does not poll when no shell is open', () => {
-    // An agent-only worktree gets its refreshes from hook events; a timer here
-    // would be an exec every two seconds for nothing.
+  it('does not poll when nothing can change: no shell, and every agent already terminated', () => {
     vi.useFakeTimers();
     const { mgr } = create();
-    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'terminated', name: 'claude' }]]);
     (mgr as unknown as { syncShellPolling(): void }).syncShellPolling();
     expect(timer(mgr)).toBeUndefined();
+    mgr.dispose();
+  });
+
+  it('polls an agent-only worktree, for an exit no hook reports', () => {
+    // A SIGKILL, a crash, or Codex (no SessionEnd) sends nothing: hook events
+    // alone left such a session "working" forever.
+    vi.useFakeTimers();
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'active', name: 'claude' }]]);
+    (mgr as unknown as { syncShellPolling(): void }).syncShellPolling();
+    expect(timer(mgr)).toBeDefined();
     mgr.dispose();
   });
 
@@ -1445,7 +1979,7 @@ describe('shell polling', () => {
     vi.useFakeTimers();
     const { mgr, stub } = create();
     seed(mgr, 'wt-1', [[1, { kind: 'shell', state: 'idle', name: 'shell' }]]);
-    seed(mgr, 'wt-2', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    seed(mgr, 'wt-2', [[1, { kind: 'agent', provider: 'claude', state: 'terminated', name: 'claude' }]]);
     (mgr as unknown as { syncShellPolling(): void }).syncShellPolling();
 
     await vi.advanceTimersByTimeAsync(2_000);

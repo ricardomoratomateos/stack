@@ -12,7 +12,8 @@ import type { PrMonitor } from '../pr/PrMonitor';
 import type { IWorktreeRepository } from '../ports/IWorktreeRepository';
 import { PROVIDER_IDS, PROVIDER_INSTALL, type ProviderId } from '../ports/IAgentProvider';
 import { installedProviders } from '../providers/commandLookup';
-import { buildComposeArgs, composeProject, computeDockerPorts, dockerEnv, portBlockFor } from '../docker/dockerCompose';
+import { composeProject, computeDockerPorts, dockerConfigured, portBlockFor } from '../docker/dockerCompose';
+import { DockerStacks, type DockerOutput } from '../docker/DockerStacks';
 import type { IGitPort, DiffBase } from '../ports/IGitPort';
 import type { INotifyPort } from '../ports/INotifyPort';
 import type { DiffPanelHost } from '../diff/DiffPanelManager';
@@ -22,14 +23,44 @@ import { displayLabel, truncateLabel } from '../worktree/displayLabel';
 import { findRepoRoot } from '../worktree/findRepoRoot';
 import { canonicalPath, worktreesInRepo } from '../worktree/worktreesInRepo';
 import { MAIN_BRANCH_CANDIDATES } from '../constants';
+import { envPrefix, shellQuote } from '../shell/shellQuote';
 
+/**
+ * The selected worktree, in workspaceState: it is a property of a WINDOW.
+ * It used to live in globalState, shared by every window, so one window read
+ * another's selection — an id none of its worktrees has, which scoped search
+ * and dimmed the explorer as if the user had selected nothing at all.
+ */
 export const ACTIVE_WORKTREE_KEY = 'foreman.activeWorktreeId';
 export const WORKTREE_ORDER_KEY = 'foreman.worktreeOrder';
+/**
+ * How long a teardown script may hold up a delete. Generous — a `compose down`
+ * with volumes can take minutes — but finite: a script stuck on a prompt nobody
+ * can see must not leave the card locked as "deleting" forever.
+ */
+export const TEARDOWN_TIMEOUT_MS = 10 * 60 * 1000;
+/** How long a resolved drift base is trusted; see driftBaseFor. */
+const DRIFT_BASE_TTL_MS = 60 * 1000;
 
 /** A terminal created for setup/teardown scripts (structural subset of vscode.Terminal). */
 export interface HostTerminal {
   show(): void;
   sendText(text: string): void;
+  dispose(): void;
+  /** Set once the terminal has closed (vscode.Terminal.exitStatus). */
+  readonly exitStatus?: unknown;
+}
+
+/** A script run headless, so its end can be awaited. */
+export interface HostScriptRun {
+  /** Shown as the heading of the script's output. */
+  label: string;
+  /** Absolute path of the script, run with bash — never through a shell string. */
+  script: string;
+  cwd: string;
+  env: Record<string, string>;
+  /** Give up (and kill the script) after this long. */
+  timeoutMs: number;
 }
 
 /** All VSCode workspace/window operations the service needs, behind a port. */
@@ -43,6 +74,11 @@ export interface IWorkspaceHost {
   saveAll(includeUntitled: boolean): Promise<void>;
   moveEditorToFirstInGroup(): Promise<void>;
   createTerminal(options: { name: string; cwd: string }): HostTerminal;
+  /**
+   * Run a script to completion with its output in an output channel. Resolves
+   * the exit code — null when it was killed or timed out — and never rejects.
+   */
+  runScript(run: HostScriptRun): Promise<number | null>;
   showInputBox(options: { prompt: string; value?: string; placeHolder?: string }): Promise<string | undefined>;
   showQuickPick(items: string[], options: { placeHolder: string }): Promise<string | undefined>;
   /** Set (or clear with undefined) a folder-scoped setting, e.g. 'search.exclude'. */
@@ -87,18 +123,41 @@ export interface WorktreeAppDeps {
   dockerMonitor: DockerMonitor;
   prMonitor: PrMonitor;
   globalState: GlobalStateLike;
+  /** Per-window state (ctx.workspaceState): the selected worktree. */
+  workspaceState: GlobalStateLike;
   /**
    * Which agents are runnable on this machine. Injected so tests do not depend
    * on whatever the developer happens to have on their PATH.
    */
   installedProviders?: (config: ForemanConfig) => ProviderId[];
+  /**
+   * Where compose output goes (the "Foreman: Docker" output channel). Without
+   * one, output goes to the console and failures to a plain error toast.
+   */
+  dockerOutput?: DockerOutput;
 }
 
 const NO_UI: UiBridge = { pushWebview() {}, syncDecorations() {}, openDiffPanel() {}, openNewTask() {} };
 
-/** One strategy per webview message type; exhaustive over the WebMessage union. */
+/**
+ * Messages the extension handles ahead of the webview protocol listing them.
+ *
+ * `forgetWorktree` is the explicit answer to a card flagged `missing`; it lives
+ * here rather than in src/webview/types.ts only because the sidebar is being
+ * redesigned and owns that file — it belongs in WebMessage once the button does.
+ */
+export type PendingWebMessage = { type: 'forgetWorktree'; worktreeId: string };
+export type InboundMessage = WebMessage | PendingWebMessage;
+
+/**
+ * A card's state as pushed to the webview. `missing` is only present (and then
+ * true) for a worktree whose directory is gone — see findMissingWorktrees.
+ */
+export type WorktreeItemState = WorktreeItem & { missing?: true };
+
+/** One strategy per webview message type; exhaustive over the InboundMessage union. */
 type MessageHandlers = {
-  [K in WebMessage['type']]: (msg: Extract<WebMessage, { type: K }>) => void | Promise<void>;
+  [K in InboundMessage['type']]: (msg: Extract<InboundMessage, { type: K }>) => void | Promise<void>;
 };
 
 /**
@@ -117,9 +176,82 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * agent state change and must not shell out to git.
    */
   private branchOptions?: { branches: string[]; base: string };
+  /**
+   * Worktrees whose directory is gone, as of the last reconcile. Shown with a
+   * flag and an explicit "Forget"; never watched, polled or added to the
+   * workspace, and never dropped from the store on Foreman's own initiative.
+   */
+  private missing = new Set<string>();
+  /**
+   * What this window is watching and polling, by worktree id — so a reload can
+   * stop what it no longer shows instead of only ever starting more.
+   */
+  private monitored = new Map<string, Worktree>();
+  /** Script terminals, one per worktree and purpose, reused instead of piling up ptys. */
+  private scriptTerminals = new Map<string, HostTerminal>();
+  /** resolveBaseBranch for drift, which is display-only — see driftBaseFor. */
+  private driftBaseCache = new Map<string, { base: string; at: number }>();
+
+  private readonly stacks: DockerStacks;
 
   constructor(private readonly deps: WorktreeAppDeps) {
-    this.currentWorktreeId = deps.globalState.get<string>(ACTIVE_WORKTREE_KEY);
+    this.currentWorktreeId = this.restoreActiveWorktreeId();
+    this.stacks = new DockerStacks({
+      monitor: deps.dockerMonitor,
+      config: () => deps.config.get(),
+      locate: (wt, file) => this.locateRepoFile(wt, file),
+      exists: (p) => deps.host.exists(p),
+      notify: deps.notify,
+      output: deps.dockerOutput ?? {
+        append: (text) => console.log(`[foreman] docker: ${text.trim()}`),
+        reveal: () => {},
+        showError: (message) => deps.notify.showError(message),
+      },
+      onChange: () => this.ui.pushWebview(),
+    });
+  }
+
+  /**
+   * The selection this window had, from workspaceState.
+   *
+   * One-time migration from the old global key: adopted only when it names one
+   * of THIS window's worktrees — the global value is whichever window selected
+   * last — and then written per window, so it is never consulted again.
+   */
+  private restoreActiveWorktreeId(): string | undefined {
+    const own = this.deps.workspaceState.get<string | null>(ACTIVE_WORKTREE_KEY);
+    if (own !== undefined) return own ?? undefined;
+    const legacy = this.deps.globalState.get<string>(ACTIVE_WORKTREE_KEY);
+    if (!legacy || !this.worktreesInWindow().some((w) => w.id === legacy)) return undefined;
+    void this.deps.workspaceState.update(ACTIVE_WORKTREE_KEY, legacy);
+    return legacy;
+  }
+
+  private setActiveWorktreeId(id: string | undefined): void {
+    this.currentWorktreeId = id;
+    // null rather than undefined: undefined would read back as "never set" and
+    // re-run the migration from the global key.
+    this.deps.workspaceState.update(ACTIVE_WORKTREE_KEY, id ?? null);
+  }
+
+  /** A deleted worktree stops being the selection; search goes back to main. */
+  private forgetActive(deletedId: string): void {
+    if (this.currentWorktreeId !== deletedId) return;
+    this.setActiveWorktreeId(undefined);
+    this.syncSearchScoping();
+  }
+
+  /**
+   * The worktree to treat as active: the selection when it is one of this
+   * window's worktrees, otherwise the main checkout.
+   *
+   * A selection that resolves to nothing — another window's, or a worktree
+   * since deleted — used to be passed on as is, and every consumer reads "no
+   * worktree is X" as "exclude everything": search.exclude `**` on every
+   * folder (search and Quick Open find nothing) and the whole explorer dimmed.
+   */
+  private effectiveActiveId(worktrees: Worktree[] = this.worktreesInWindow()): string | undefined {
+    return worktrees.find((w) => w.id === this.currentWorktreeId)?.id ?? worktrees.find((w) => w.isMain)?.id;
   }
 
   setUi(ui: UiBridge): void {
@@ -132,7 +264,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   /** Push the current worktree list + active worktree to the explorer dimming. */
   private refreshDecorations(): void {
-    this.ui.syncDecorations(this.worktreesInWindow(), this.currentWorktreeId);
+    const worktrees = this.worktreesInWindow();
+    this.ui.syncDecorations(worktrees, this.effectiveActiveId(worktrees));
   }
 
   /**
@@ -174,25 +307,96 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * Run a setup/teardown script in a visible host terminal registered to the
    * worktree. The script path is resolved against the repo (worktree-first,
    * then main), and the script gets FOREMAN_* env plus the worktree's docker
-   * ports so it can prepare deps and bring the stack up without guessing.
+   * ports so it can prepare deps and bring the stack up without guessing —
+   * and COMPOSE_PROJECT_NAME / COMPOSE_FILE, so a plain `docker compose up` in
+   * it lands on the stack Foreman monitors and stops.
    */
   private runScriptTerminal(wt: Worktree, script: string, labelPrefix: string, doneMessage?: string): void {
-    const config = this.deps.config.get();
+    const { resolved, env } = this.scriptInvocation(wt, script);
+    // Typed into the user's shell, so every value is single-quoted (shellQuote).
+    // These used to sit in double quotes, where `$(…)` still runs — and the
+    // branch, which is also the worktree directory's name, may legally contain
+    // exactly that. A branch named `x$(curl …|sh)` ran on "Init worktree".
+    const prefix = envPrefix(env);
+    const terminal = this.scriptTerminal(wt, labelPrefix);
+    this.deps.agentManager.register(wt.id, terminal as never);
+    terminal.show();
+    const cmd = `${prefix} bash ${shellQuote(resolved)}`;
+    terminal.sendText(doneMessage ? `${cmd} && echo ${shellQuote(`✓ ${doneMessage}`)}` : cmd);
+  }
+
+  /**
+   * Where a setup/teardown script lives (worktree-first, then main) and the
+   * FOREMAN_* env plus docker ports it is handed — shared by the terminal run
+   * and the awaited teardown so the two can never disagree.
+   */
+  private scriptInvocation(wt: Worktree, script: string): { resolved: string; env: Record<string, string> } {
     const resolved =
       this.locateRepoFile(wt, script) ?? (path.isAbsolute(script) ? script : path.join(wt.repoRoot, script));
-    const env: Record<string, string> = {
+    const foreman: Record<string, string> = {
       FOREMAN_REPO_ROOT: wt.repoRoot,
       FOREMAN_WORKTREE_PATH: wt.path,
       FOREMAN_BRANCH: wt.branch,
-      FOREMAN_COMPOSE_PROJECT: composeProject(wt),
-      ...(config.docker.ports.length > 0 ? dockerEnv(wt, config) : {}),
+      FOREMAN_COMPOSE_PROJECT: this.stacks.project(wt),
     };
-    const prefix = Object.entries(env).map(([k, v]) => `${k}="${v}"`).join(' ');
-    const terminal = this.deps.host.createTerminal({ name: `${labelPrefix}: ${displayLabel(wt)}`, cwd: wt.path });
-    this.deps.agentManager.register(wt.id, terminal as never);
-    terminal.show();
-    const cmd = `${prefix} bash "${resolved}"`;
-    terminal.sendText(doneMessage ? `${cmd} && echo "✓ ${doneMessage}"` : cmd);
+    const env: Record<string, string> = {
+      ...foreman,
+      // DEPRECATED: the names from when the project was called unmess. Scripts
+      // written then still read them, and under `set -u` an unset one aborts
+      // the script on its first line. Drop once nobody has such a script.
+      ...Object.fromEntries(Object.entries(foreman).map(([k, v]) => [k.replace(/^FOREMAN_/, 'UNMESS_'), v])),
+      ...this.stacks.scriptEnv(wt),
+    };
+    return { resolved, env };
+  }
+
+  /**
+   * The worktree's terminal for one purpose ("Init", "Docker"), reused while it
+   * is open. Each run used to create a new one that nothing ever closed: a pty
+   * per re-init and per `compose up`, for the life of the window. A terminal the
+   * user closed is replaced; a busy one simply queues the next command.
+   */
+  private scriptTerminal(wt: Worktree, purpose: string): HostTerminal {
+    const key = `${wt.id}\0${purpose}`;
+    const open = this.scriptTerminals.get(key);
+    if (open && open.exitStatus === undefined) return open;
+    const terminal = this.deps.host.createTerminal({ name: `${purpose}: ${displayLabel(wt)}`, cwd: wt.path });
+    this.scriptTerminals.set(key, terminal);
+    return terminal;
+  }
+
+  /** Closes a worktree's script terminals: their cwd is about to stop existing. */
+  private disposeScriptTerminals(worktreeId: string): void {
+    for (const [key, terminal] of this.scriptTerminals) {
+      if (!key.startsWith(`${worktreeId}\0`)) continue;
+      terminal.dispose();
+      this.scriptTerminals.delete(key);
+    }
+  }
+
+  /**
+   * Run the teardown script and wait for it to finish.
+   *
+   * It used to be typed into a terminal, which cannot be awaited, and
+   * `git worktree remove --force` ran straight after — pulling the directory
+   * out from under a script whose whole job is to clean up in it. Headless, with
+   * its output in an output channel, deletion now waits for it. A failure is
+   * reported but does not stop the delete the user asked for.
+   */
+  private async runTeardown(wt: Worktree, script: string): Promise<void> {
+    const { resolved, env } = this.scriptInvocation(wt, script);
+    const code = await this.deps.host.runScript({
+      label: `Teardown: ${displayLabel(wt)}`,
+      script: resolved,
+      cwd: wt.path,
+      env,
+      timeoutMs: TEARDOWN_TIMEOUT_MS,
+    });
+    if (code !== 0) {
+      this.deps.notify.showWarning(
+        `Teardown script for "${displayLabel(wt)}" ${code === null ? 'did not finish' : `exited with code ${code}`} — see the Foreman output. Deleting anyway.`,
+      );
+    }
   }
 
   /**
@@ -209,32 +413,14 @@ export class WorktreeApplicationService implements DiffPanelHost {
     return this.deps.host.exists(inRoot) ? inRoot : undefined;
   }
 
-  private dockerComposePaths(wt: Worktree): { composePath: string; overridePath?: string } {
-    const { composeFile, overrideFile } = this.deps.config.get().docker;
-    // Default to the main-repo path even if missing, so docker errors visibly.
-    const composePath = this.locateRepoFile(wt, composeFile) ?? path.join(wt.repoRoot, composeFile);
-    const overridePath =
-      overrideFile && overrideFile !== composeFile ? this.locateRepoFile(wt, overrideFile) : undefined;
-    return { composePath, overridePath };
-  }
-
   /**
-   * Bring a worktree's docker stack up in a visible terminal (so the user sees
-   * pull/build progress), with the auto-generated per-worktree ports injected.
-   * Runs from the worktree dir so ${PWD} in the compose points at the worktree.
+   * Bring a worktree's docker stack up as an awaited child process — output
+   * to the Docker output channel, failure to a toast and the card — after
+   * moving it off ports a stranger took since they were allocated.
    */
   private async dockerUp(worktree: Worktree): Promise<void> {
-    const wt = await this.ensurePortsFree(worktree);
-    const config = this.deps.config.get();
-    const { composePath, overridePath } = this.dockerComposePaths(wt);
-    const args = buildComposeArgs(wt, composePath, overridePath, 'up -d');
-    const prefix = Object.entries(dockerEnv(wt, config)).map(([k, v]) => `${k}=${v}`).join(' ');
-    const terminal = this.deps.host.createTerminal({ name: `Docker: ${displayLabel(wt)}`, cwd: wt.path });
-    terminal.show();
-    terminal.sendText(`${prefix ? prefix + ' ' : ''}docker compose ${args}`);
-    // `up -d` returns in seconds but runs in the terminal, so nothing tells us
-    // when it landed — watch the project closely for a moment instead.
-    this.deps.dockerMonitor.nudge(composeProject(wt));
+    await this.stacks.up(worktree, (wt, own) => this.ensurePortsFree(wt, own));
+    this.ui.pushWebview();
   }
 
   /**
@@ -243,10 +429,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * with docker's "port is already allocated". Deliberately not applied to
    * teardown, which must address the stack on the ports it actually came up on.
    */
-  private async ensurePortsFree(wt: Worktree): Promise<Worktree> {
+  private async ensurePortsFree(wt: Worktree, ownPorts?: Set<number>): Promise<Worktree> {
     let moved: { worktree: Worktree; movedFrom?: number };
     try {
-      moved = await this.deps.manager.ensureFreePorts(wt);
+      moved = await this.deps.manager.ensureFreePorts(wt, ownPorts);
     } catch (e) {
       // No free slot at all, or the store rejected the patch. Carry on with the
       // ports we have and let docker report the collision itself.
@@ -263,15 +449,11 @@ export class WorktreeApplicationService implements DiffPanelHost {
     return moved.worktree;
   }
 
-  /** Bring a worktree's docker stack down silently, then refresh the monitor. */
+  /** Bring a worktree's docker stack down (headless, bounded), then repaint. */
   private async dockerDown(wt: Worktree): Promise<void> {
-    const config = this.deps.config.get();
-    const { composePath, overridePath } = this.dockerComposePaths(wt);
-    const args = buildComposeArgs(wt, composePath, overridePath, 'down');
-    const env = { ...dockerEnv(wt, config), PWD: wt.path };
-    await this.deps.dockerMonitor.runCompose(composeProject(wt), wt.path, args, env).catch(() => {});
-    // runCompose refreshes the cache; without this the fresh cache never
-    // reached the sidebar, so a stopped stack still showed as running.
+    await this.stacks.down(wt);
+    // Without this the fresh listing never reached the sidebar, so a stopped
+    // stack still showed as running.
     this.ui.pushWebview();
   }
 
@@ -375,13 +557,14 @@ export class WorktreeApplicationService implements DiffPanelHost {
     openPort: (msg) => void this.openPort(msg.port),
     refreshDrift: (msg) => void this.refreshDrift(msg.worktreeId),
     selectWorktree: (msg) => this.switchToWorktree(msg.worktreeId),
+    forgetWorktree: (msg) => this.forgetWorktree(msg.worktreeId),
   };
 
-  async handleMessage(msg: WebMessage): Promise<void> {
+  async handleMessage(msg: InboundMessage): Promise<void> {
     // Ignore any action targeting a worktree that is tearing down.
     if ('worktreeId' in msg && this.deleting.has(msg.worktreeId)) return;
     const handler = this.messageHandlers[msg.type] as
-      | ((m: WebMessage) => void | Promise<void>)
+      | ((m: InboundMessage) => void | Promise<void>)
       | undefined;
     if (handler) await handler(msg);
   }
@@ -427,13 +610,16 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   async switchToWorktree(worktreeId: string): Promise<void> {
     if (this.currentWorktreeId === worktreeId) return;
-    const worktrees = this.deps.manager.list();
+    // This window's worktrees only. The whole store used to go to the
+    // breakpoint and tab managers from here, bypassing the scoping they are
+    // otherwise given — so a switch stashed breakpoints and closed tabs that
+    // belonged to other repositories' worktrees.
+    const worktrees = this.worktreesInWindow();
     const target = worktrees.find((w) => w.id === worktreeId);
     if (!target) return;
 
     console.log(`[foreman] switch to id=${worktreeId} path=${target.path} exists=${this.deps.host.exists(target.path)}`);
-    this.currentWorktreeId = worktreeId;
-    this.deps.globalState.update(ACTIVE_WORKTREE_KEY, worktreeId);
+    this.setActiveWorktreeId(worktreeId);
     // Push eagerly — the terminal-change event that normally syncs the webview
     // never fires for a worktree with no sessions to show.
     this.ui.pushWebview();
@@ -505,11 +691,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   handleActiveTerminalChange(terminal: unknown): void {
     if (!terminal) return;
-    for (const wt of this.deps.manager.list()) {
+    for (const wt of this.worktreesInWindow()) {
       if (this.deps.agentManager.getViewer(wt.id) === terminal) {
         if (this.currentWorktreeId !== wt.id) {
-          this.currentWorktreeId = wt.id;
-          this.deps.globalState.update(ACTIVE_WORKTREE_KEY, wt.id);
+          this.setActiveWorktreeId(wt.id);
           this.ui.pushWebview();
           this.refreshDecorations();
           this.syncSearchScoping();
@@ -551,8 +736,26 @@ export class WorktreeApplicationService implements DiffPanelHost {
    */
   private driftBaseFor(wt: Worktree): string | undefined {
     if (wt.isMain) return undefined;
-    const base = wt.baseBranch ?? this.resolveBaseBranch(wt.repoRoot);
+    const base = wt.baseBranch ?? this.cachedBaseBranch(wt.repoRoot);
     return base && base !== wt.branch ? base : undefined;
+  }
+
+  /**
+   * resolveBaseBranch, remembered for a minute per repo and setting.
+   *
+   * It is up to seven synchronous git calls, and loading a repo asked it once
+   * per worktree — a frozen extension host on every window load, scaling with
+   * the number of worktrees, for an answer that is the same each time. Only
+   * drift uses the cache: it is display-only and names the ref it compared, so
+   * a minute of staleness is honest. Creating a worktree still resolves fresh.
+   */
+  private cachedBaseBranch(repoRoot: string): string {
+    const key = `${canonicalPath(repoRoot)}\0${this.deps.config.get().defaultBaseBranch ?? ''}`;
+    const hit = this.driftBaseCache.get(key);
+    if (hit && Date.now() - hit.at < DRIFT_BASE_TTL_MS) return hit.base;
+    const base = this.resolveBaseBranch(repoRoot);
+    this.driftBaseCache.set(key, { base, at: Date.now() });
+    return base;
   }
 
   /**
@@ -565,7 +768,11 @@ export class WorktreeApplicationService implements DiffPanelHost {
    */
   async refreshDrift(worktreeId: string): Promise<void> {
     const wt = this.findWorktree(worktreeId);
-    if (!wt) return;
+    // A missing worktree has nothing to compare, and watching it would undo
+    // keeping it out of the watcher.
+    if (!wt || this.missing.has(wt.id)) return;
+    // An explicit "check again" deserves a fresh answer to "against what?" too.
+    this.driftBaseCache.clear();
     const base = this.driftBaseFor(wt);
     if (!base) return;
     try {
@@ -635,8 +842,11 @@ export class WorktreeApplicationService implements DiffPanelHost {
   }
 
   buildState(): ForemanState {
+    const config = this.deps.config.get();
+    const dockerOn = dockerConfigured(config);
     const worktrees = this.orderWorktrees(this.worktreesInWindow());
-    const items: WorktreeItem[] = worktrees.map((wt) => ({
+    const items = worktrees.map((wt): WorktreeItemState => ({
+      ...(this.missing.has(wt.id) ? { missing: true as const } : {}),
       id: wt.id,
       branch: wt.branch,
       alias: wt.alias,
@@ -648,18 +858,22 @@ export class WorktreeApplicationService implements DiffPanelHost {
       terminalCount: this.deps.agentManager.getShellCount(wt.id),
       sessions: this.deps.agentManager.getSessions(wt.id),
       git: this.deps.gitWatcher.getStatus(wt.path),
-      docker: this.deps.dockerMonitor.getContainers(composeProject(wt)).map((c) => ({ name: c.name, state: c.state })),
+      docker: this.stacks.containers(wt).map((c) => ({
+        name: c.name, state: c.state, service: c.service, exitCode: c.exitCode, status: c.status,
+      })),
+      dockerBusy: this.stacks.status(wt).busy,
+      dockerError: this.stacks.status(wt).error,
       ports: this.portsFor(wt),
       pr: this.deps.prMonitor.getStatus(wt.id) ?? null,
     }));
     const activeWorktreeId = worktrees.find((wt) => wt.id === this.currentWorktreeId)?.id;
-    const config = this.deps.config.get();
     return {
       worktrees: items,
       activeWorktreeId,
       defaultProvider: config.defaultProvider,
       installedProviders: (this.deps.installedProviders ?? installedProviders)(config),
-      dockerEnabled: config.docker.ports.length > 0,
+      dockerEnabled: dockerOn,
+      dockerUnavailable: dockerOn ? this.deps.dockerMonitor.unavailable() : undefined,
       branches: this.branchOptions?.branches,
       baseBranch: this.branchOptions?.base,
     };
@@ -704,8 +918,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
       await this.deps.host.writeClipboard(prompt);
       return true;
     }
-    if (destination === 'live') {
-      return this.deps.agentManager.sendPromptToAgent(wt, prompt);
+    // 'live' finds no running agent when the one the panel saw has exited
+    // since — the comments then go to a fresh agent rather than nowhere.
+    if (destination === 'live' && (await this.deps.agentManager.sendPromptToAgent(wt, prompt))) {
+      return true;
     }
     // 'new' — launch a fresh agent seeded with the comments.
     await this.deps.agentManager.launchWithPrompt(wt, prompt);
@@ -766,22 +982,30 @@ export class WorktreeApplicationService implements DiffPanelHost {
   private syncSearchScoping(): void {
     const enabled = this.deps.config.get().scopeSearchToActiveWorktree;
     const worktrees = this.worktreesInWindow();
-    // With no worktree selected, keep the main repo searchable as the fallback.
-    const activeId = this.currentWorktreeId ?? worktrees.find((w) => w.isMain)?.id;
+    // With no worktree selected — or one that no longer resolves — keep the main
+    // repo searchable as the fallback. And if even that is missing, exclude
+    // nothing: a window where search finds nothing at all is the worst outcome.
+    const activeId = this.effectiveActiveId(worktrees);
     for (const wt of worktrees) {
-      const exclude = enabled && wt.id !== activeId ? { '**': true } : undefined;
+      if (this.missing.has(wt.id)) continue; // no folder to scope
+      const exclude = enabled && activeId !== undefined && wt.id !== activeId ? { '**': true } : undefined;
       void this.deps.host.updateFolderSetting(wt.path, 'search.exclude', exclude).catch(() => {});
     }
   }
 
   async loadWorktreesForRepo(repoRoot: string): Promise<void> {
-    const { current } = await this.deps.manager.reconcile(repoRoot);
+    const { current, missing } = await this.deps.manager.reconcile(repoRoot);
+    this.missing = new Set(missing.map((w) => w.id));
     const normalizedRoot = canonicalPath(repoRoot);
     // The store is global; this window is not. Everything below — the explorer
     // folders, the git watches, the docker and PR polling — used to run against
     // every worktree of every repository the extension had ever seen, which is
     // how a window opened on one project filled up with another one's folders.
-    const mine = worktreesInRepo(current, repoRoot);
+    //
+    // A missing worktree stays on its card (so it can be forgotten) and out of
+    // everything else: a folder that does not exist, a watcher on nothing, and
+    // a `gh` poll every five minutes for a branch nobody is working on.
+    const mine = worktreesInRepo(current, repoRoot).filter((w) => !this.missing.has(w.id));
 
     const keep = new Set([repoRoot, ...mine.map((w) => w.path)].map(canonicalPath));
     // Folders Foreman itself added for some OTHER repository, which are ours to
@@ -827,12 +1051,23 @@ export class WorktreeApplicationService implements DiffPanelHost {
     // stack brought up outside Foreman (or under the branch name instead) is
     // invisible to it. Printing the keys makes that mismatch obvious instead of
     // looking like a broken docker integration.
-    console.log(`[foreman] docker projects: ${mine.map((wt) => composeProject(wt)).join(', ')}`);
-    for (const wt of mine) {
-      this.deps.gitWatcher.watch(wt.path, this.driftBaseFor(wt));
-      this.deps.dockerMonitor.startPolling(composeProject(wt), () => this.ui.pushWebview());
-      this.deps.prMonitor.startPolling(wt.branch, wt.id, () => this.ui.pushWebview());
+    const dockerOn = dockerConfigured(this.deps.config.get());
+    if (dockerOn) console.log(`[foreman] docker projects: ${mine.map((wt) => composeProject(wt)).join(', ')}`);
+    // A diff, not just a start: whatever an earlier load watched and polled
+    // that is no longer in this set — another repository after the window
+    // switched, a worktree gone missing, one forgotten elsewhere — is stopped
+    // instead of running until the window closes.
+    const wanted = new Set(mine.map((w) => w.id));
+    for (const wt of [...this.monitored.values()]) {
+      if (!wanted.has(wt.id)) this.stopMonitoring(wt);
     }
+    for (const wt of mine) this.startMonitoring(wt);
+
+    // Tab and breakpoint stashes are keyed by worktree id and were never
+    // cleaned, so every worktree ever deleted kept its blob in globalState.
+    // Against the whole store, not this window's slice: another repository's
+    // worktrees are alive, just not shown here.
+    this.pruneWorktreeState();
 
     // `mine`, not `current`: reconnecting another repo's worktrees costs a tmux
     // lookup each and leaves the session manager tracking windows this window
@@ -841,6 +1076,93 @@ export class WorktreeApplicationService implements DiffPanelHost {
     this.ui.pushWebview();
     this.refreshDecorations();
     this.syncSearchScoping();
+  }
+
+  /** Watch and poll a worktree (idempotent), remembering it so it can be stopped. */
+  private startMonitoring(wt: Worktree): void {
+    const before = this.monitored.get(wt.id);
+    // Same id under a new path or project: the old watcher and poll would
+    // otherwise be keyed by something nothing will ever stop again.
+    if (before && (before.path !== wt.path || composeProject(before) !== composeProject(wt))) {
+      this.stopMonitoring(before);
+    }
+    this.deps.gitWatcher.watch(wt.path, this.driftBaseFor(wt));
+    // Only with docker configured: polling a repo that has no stack ran
+    // `docker` for every worktree every 20s, for a badge that never shows.
+    if (dockerConfigured(this.deps.config.get())) this.stacks.watch(wt);
+    this.deps.prMonitor.startPolling(wt.branch, wt.id, wt.path, () => this.ui.pushWebview());
+    this.monitored.set(wt.id, wt);
+  }
+
+  private stopMonitoring(wt: Worktree): void {
+    this.monitored.delete(wt.id);
+    this.deps.gitWatcher.unwatch(wt.path);
+    // Compose projects are derived from directory names, so two worktrees can
+    // share one; the poll is the survivor's too.
+    const project = composeProject(wt);
+    if (![...this.monitored.values()].some((w) => composeProject(w) === project)) {
+      this.stacks.unwatch(wt);
+    }
+    // Nothing stopped the PR poll: every deleted worktree left a `gh pr list`
+    // running against a branch that no longer exists, every 5 minutes, until
+    // the window was reloaded.
+    this.deps.prMonitor.stopPolling(wt.id);
+  }
+
+  /** Drop tab and breakpoint stashes of worktrees the store no longer has. */
+  private pruneWorktreeState(): void {
+    const live = new Set(this.deps.manager.list().map((w) => w.id));
+    // A loaded repository always has at least its main checkout in the store,
+    // so an empty store is a read gone wrong, not a licence to wipe everything.
+    if (live.size === 0) return;
+    this.deps.tabManager.prune(live);
+    this.deps.breakpointManager.prune(live);
+  }
+
+  // ── Forget (a missing worktree) ────────────────────────────────────────────
+
+  /**
+   * Drops the store entry of a worktree whose directory is gone — the explicit
+   * answer to a card flagged `missing`, and the only way such an entry leaves.
+   *
+   * Nothing on disk is touched and no git command runs that could change
+   * anything; the manager re-checks that the worktree is really gone first.
+   * If it no longer looks gone — back on disk, back in git's list, or git could
+   * not answer — the flag is cleared and it is monitored again instead: a doubt
+   * always lands on the side of keeping the worktree.
+   */
+  async forgetWorktree(worktreeId: string): Promise<void> {
+    const wt = this.findWorktree(worktreeId);
+    if (!wt || !this.missing.has(wt.id)) return;
+    const forgot = await this.deps.manager.forget(wt.id);
+    this.missing.delete(wt.id);
+    if (forgot) {
+      this.stopMonitoring(wt);
+      this.disposeScriptTerminals(wt.id);
+      await this.deps.agentManager.killWorktreeSession(wt.id);
+      const folderIdx = this.deps.host.workspaceFolderPaths().findIndex((p) => p === wt.path);
+      if (folderIdx !== -1) this.deps.host.removeWorkspaceFolder(folderIdx);
+      this.pruneWorktreeState();
+      this.forgetActive(wt.id);
+    } else {
+      this.deps.notify.showWarning(`"${displayLabel(wt)}" no longer looks gone — keeping it.`);
+      this.startMonitoring(wt);
+    }
+    this.ui.pushWebview();
+    this.refreshDecorations();
+  }
+
+  /**
+   * Start or stop docker polling for this window's worktrees to match the
+   * setting. Idempotent: watching a watched project only refreshes its callback.
+   */
+  syncDockerPolling(): void {
+    const on = dockerConfigured(this.deps.config.get());
+    // A missing worktree has no stack to poll.
+    for (const wt of this.worktreesInWindow().filter((w) => !this.missing.has(w.id))) {
+      if (on) this.stacks.watch(wt);
+      else this.stacks.unwatch(wt);
+    }
   }
 
   /**
@@ -936,9 +1258,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
         // running, so a failure here must not fail the whole creation.
         try {
           this.deps.host.addWorkspaceFolders({ path: wt.path, name: displayLabel(wt) });
-          this.deps.gitWatcher.watch(wt.path, this.driftBaseFor(wt));
-          this.deps.dockerMonitor.startPolling(composeProject(wt), () => this.ui.pushWebview());
-          this.deps.prMonitor.startPolling(wt.branch, wt.id, () => this.ui.pushWebview());
+          this.startMonitoring(wt);
         } catch (e) {
           console.error('[foreman] post-create wiring failed (worktree and setup are unaffected):', e);
         }
@@ -964,8 +1284,13 @@ export class WorktreeApplicationService implements DiffPanelHost {
       await this.switchToWorktree(wt.id);
       const description = opts?.description;
       setTimeout(() => {
-        if (description) this.deps.agentManager.launchWithPrompt(wt, description);
-        else this.deps.agentManager.launch(wt);
+        // Nothing awaits this timer, so a failure must be reported here or it
+        // vanishes as an unhandled rejection — the worktree then simply never
+        // got its agent, with nothing on screen to say why.
+        const launched = description
+          ? this.deps.agentManager.launchWithPrompt(wt, description)
+          : this.deps.agentManager.launch(wt);
+        launched.catch((e) => this.deps.notify.showError(`Failed to launch agent: ${String(e)}`));
       }, 300);
     }
   }
@@ -993,6 +1318,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       // Stale store entry pointing at repoRoot with a mismatched branch — remove
       // from the store only. manager.delete swallows the git error.
       await this.deps.manager.delete(wt.id, false);
+      this.forgetActive(wt.id);
       this.ui.pushWebview();
       this.refreshDecorations();
       return;
@@ -1013,44 +1339,51 @@ export class WorktreeApplicationService implements DiffPanelHost {
     this.ui.pushWebview();
 
     try {
-      this.deps.gitWatcher.unwatch(wt.path);
-      this.deps.dockerMonitor.stopPolling(composeProject(wt));
-      // Nothing stopped the PR poll: every deleted worktree left a `gh pr list`
-      // running against a branch that no longer exists, every 5 minutes, until
-      // the window was reloaded.
-      this.deps.prMonitor.stopPolling(wt.id);
+      this.stopMonitoring(wt);
 
       const teardownScript = this.deps.config.get().teardownScript;
       if (teardownScript && this.deps.host.exists(wt.path)) {
-        this.runScriptTerminal(wt, teardownScript, 'Teardown', 'Teardown complete');
+        await this.runTeardown(wt, teardownScript);
       }
 
       // Bring the stack down ourselves, and WAIT for it.
       //
-      // The teardown script goes to a terminal that cannot be awaited, and the
-      // two seconds it used to be given are far less than a single
+      // The teardown script used to go to a terminal that could not be awaited,
+      // and the two seconds it was given are far less than a single
       // `compose down` — so `git worktree remove` pulled the directory out from
       // under it and the containers outlived the worktree, holding their ports
       // until someone noticed weeks later. This runs headless and is awaited,
-      // so deletion cannot outrun it.
-      if (this.deps.config.get().docker.ports.length > 0) {
-        await this.dockerDown(wt);
-        // Containers left standing mean the stack came up under a different
-        // compose project name than the one derived from this directory — say
-        // so, instead of reporting a clean teardown that removed nothing.
-        const left = await this.deps.dockerMonitor.refresh(composeProject(wt)).catch(() => []);
-        if (left.length > 0) {
+      // so deletion cannot outrun it — but bounded: with a wedged daemon it
+      // used to wait forever and the card sat in "deleting" for good.
+      if (dockerConfigured(this.deps.config.get())) {
+        const outcome = await this.stacks.down(wt, { report: false });
+        if (outcome !== 'ok') {
           this.deps.notify.showWarning(
-            `"${displayLabel(wt)}" left ${left.length} container(s) running. Its stack is registered under a different compose project — check \`docker compose ls\`.`,
+            `"${displayLabel(wt)}": docker compose down ${outcome === 'timeout' ? 'timed out' : 'failed'} (${this.stacks.status(wt).error ?? 'see the Foreman: Docker output'}). Deleting anyway — its containers may still be running; check \`docker compose ls\`.`,
           );
+        } else {
+          // Containers left standing mean the stack came up under a compose
+          // project name Foreman does not know — say so, instead of reporting
+          // a clean teardown that removed nothing.
+          const left = this.stacks.containers(wt);
+          if (left.length > 0) {
+            this.deps.notify.showWarning(
+              `"${displayLabel(wt)}" left ${left.length} container(s) running. Its stack is registered under a different compose project — check \`docker compose ls\`.`,
+            );
+          }
         }
+        this.stacks.forget(wt);
       }
 
       await this.deps.agentManager.killWorktreeSession(wt.id);
+      this.disposeScriptTerminals(wt.id);
       const folderIdx = this.deps.host.workspaceFolderPaths().findIndex((p) => p === wt.path);
       if (folderIdx !== -1) this.deps.host.removeWorkspaceFolder(folderIdx);
       try {
         await this.deps.manager.delete(wt.id, confirm === 'Delete + branch');
+        this.missing.delete(wt.id);
+        this.pruneWorktreeState();
+        this.forgetActive(wt.id);
       } catch (e) {
         // The manager refuses to purge the store while git still registers the
         // worktree, so the card stays and the user is told why — better than a
@@ -1100,8 +1433,14 @@ export class WorktreeApplicationService implements DiffPanelHost {
       return;
     }
     // A re-init can happen long after the slot was allocated — re-check before
-    // paying for the whole script again.
-    this.runScriptTerminal(await this.ensurePortsFree(wt), setupScript, 'Init');
+    // paying for the whole script again. With a fresh listing first, so the
+    // stack's own running containers are not mistaken for squatters.
+    let own: Set<number> | undefined;
+    if (dockerConfigured(this.deps.config.get())) {
+      await this.stacks.refresh();
+      own = this.stacks.ownPorts(wt);
+    }
+    this.runScriptTerminal(await this.ensurePortsFree(wt, own), setupScript, 'Init');
   }
 
   openTerminal(worktree?: Worktree): void {
@@ -1111,7 +1450,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   launchAgent(worktree?: Worktree, provider?: ProviderId): void {
     const wt = this.resolveWorktree(worktree);
-    if (wt) this.deps.agentManager.launch(wt, { provider });
+    if (wt) {
+      this.deps.agentManager.launch(wt, { provider })
+        .catch((e) => this.deps.notify.showError(`Failed to launch agent: ${String(e)}`));
+    }
   }
 
   // ── Cyclic navigation ──────────────────────────────────────────────────────

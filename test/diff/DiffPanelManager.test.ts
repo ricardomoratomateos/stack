@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { window, Uri } from '../__mocks__/vscode';
 import { DiffPanelManager, type DiffPanelHost } from '../../src/diff/DiffPanelManager';
 import type { DiffPanelMessage, DiffPanelExtMessage } from '../../src/diff/types';
+import { DiffError } from '../../src/ports/IGitPort';
 
 interface FakePanel {
   webview: {
@@ -121,14 +122,50 @@ describe('DiffPanelManager', () => {
     expect(panel.posted).toContainEqual({ type: 'error', message: 'Worktree not found.' });
   });
 
-  it('falls back to an empty diff when getDiff throws', async () => {
+  // An empty diff renders "No changes to review". After a git failure that is
+  // the wrong answer, so the reason travels with it and the panel shows that.
+  it('reports why when the diff could not be computed, instead of an empty "no changes"', async () => {
+    const panel = makePanel();
+    window.createWebviewPanel.mockReturnValue(panel);
+    const host = makeHost({
+      getDiff: vi.fn(async () => { throw new DiffError('not a git repository (or any of the parent directories): .git'); }),
+    });
+    new DiffPanelManager(extUri, host).open('wt-1');
+
+    await panel.fire({ type: 'requestDiff', base: 'branch' });
+    expect(panel.posted.at(-1)).toEqual({
+      type: 'diff', base: 'branch', unified: '', hasLiveAgent: true, label: 'Fix X',
+      error: 'not a git repository (or any of the parent directories): .git',
+    });
+  });
+
+  it('reports an unexpected failure by its message', async () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
     const host = makeHost({ getDiff: vi.fn(async () => { throw new Error('git boom'); }) });
     new DiffPanelManager(extUri, host).open('wt-1');
 
-    await panel.fire({ type: 'requestDiff', base: 'branch' });
-    expect(panel.posted.at(-1)).toMatchObject({ type: 'diff', unified: '' });
+    await panel.fire({ type: 'requestDiff', base: 'working' });
+    expect(panel.posted.at(-1)).toMatchObject({ type: 'diff', base: 'working', unified: '', error: 'git boom' });
+  });
+
+  it('reports a failure that is not even an Error as what was thrown', async () => {
+    const panel = makePanel();
+    window.createWebviewPanel.mockReturnValue(panel);
+    const host = makeHost({ getDiff: vi.fn(async () => { throw 'git vanished'; }) });
+    new DiffPanelManager(extUri, host).open('wt-1');
+
+    await panel.fire({ type: 'requestDiff', base: 'working' });
+    expect(panel.posted.at(-1)).toMatchObject({ type: 'diff', base: 'working', unified: '', error: 'git vanished' });
+  });
+
+  it('carries no error field on success, so a clean tree still reads "no changes"', async () => {
+    const panel = makePanel();
+    window.createWebviewPanel.mockReturnValue(panel);
+    new DiffPanelManager(extUri, makeHost({ getDiff: vi.fn(async () => '') })).open('wt-1');
+
+    await panel.fire({ type: 'ready' });
+    expect(panel.posted.at(-1)).not.toHaveProperty('error');
   });
 
   it('on "send" relays the destination and reports ok', async () => {

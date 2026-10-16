@@ -6,8 +6,15 @@ export type Stack = 'node' | 'php' | 'python' | 'go';
 
 /** What a look at the repository suggests, so the panel can prefill rather than ask. */
 export interface Detection {
-  /** Compose files at the repo root, base files before overrides. */
+  /**
+   * Compose files at the repo root and in the usual folders (docker/, deploy/,
+   * .docker/…), repo-relative, shallowest and base files first.
+   */
   composeFiles: string[];
+  /** The one to use as the compose file. */
+  composeBase?: string;
+  /** A sibling named as a worktree/override file, if there is one. */
+  composeOverride?: string;
   /** `${HTTP_PORT}`-style variables named like ports, across those files. */
   portVars: string[];
   stack?: Stack;

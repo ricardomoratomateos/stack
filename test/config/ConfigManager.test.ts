@@ -263,6 +263,107 @@ describe('ConfigManager', () => {
     });
   });
 
+  // ── projectValues: what the project form edits and saves ───────────────────
+
+  describe('projectValues', () => {
+    const managerFor = (root: string | undefined) => new ConfigManager({ repoRoot: () => root });
+
+    it('leaves the user\'s own overrides out, so saving cannot commit them', () => {
+      // The leak: the form was seeded from get(), which already holds the
+      // user's settings.json — one Save and their docker ports and worktree
+      // directory were in the committed file for the whole team.
+      writeRepoConfig({ defaultBaseBranch: 'trunk', docker: { composeFile: 'compose.yaml' } });
+      withSettings({
+        worktreesDirectory: '/Users/me/my-worktrees',
+        defaultBaseBranch: 'my-branch',
+        docker: { ports: ['MY_PORT'], basePort: 40000 },
+        debugBasePort: 7000,
+      });
+      const manager = managerFor(tmpDir);
+
+      // get() is still what runs here — the user's choices win…
+      expect(manager.get().worktreesDirectory).toBe('/Users/me/my-worktrees');
+      // …but none of them reach the project's view.
+      expect(manager.projectValues()).toEqual({
+        worktreesDirectory: '.worktrees',
+        defaultBaseBranch: 'trunk',
+        setupScript: '',
+        teardownScript: '',
+        docker: {
+          composeFile: 'compose.yaml',
+          overrideFile: 'docker-compose.worktree.yml',
+          ports: [],
+          basePort: 20000,
+          portStride: 100,
+        },
+        debugBasePort: 9898,
+        debugTemplate: { type: 'node', request: 'attach', name: 'Foreman: Debug', port: '{{PORT}}' },
+      });
+    });
+
+    it('is the shipped defaults when the repository has no file', () => {
+      withSettings({ setupScript: 'mine.sh' });
+      expect(managerFor(tmpDir).projectValues().setupScript).toBe('');
+      expect(managerFor(undefined).projectValues().worktreesDirectory).toBe('.worktrees');
+    });
+  });
+
+  // ── saveUserValues: the personal half of the settings panel ────────────────
+
+  describe('saveUserValues', () => {
+    /** Settings double with real layering: workspace > global > default. */
+    function layered(layers: {
+      global?: Record<string, unknown>;
+      workspace?: Record<string, unknown>;
+      defaults?: Record<string, unknown>;
+    }) {
+      const { global = {}, workspace: ws = {}, defaults = {} } = layers;
+      const update = vi.fn().mockResolvedValue(undefined);
+      workspace.getConfiguration.mockImplementation((_section?: string) => ({
+        get: (key: string, fallback?: unknown) => ws[key] ?? global[key] ?? defaults[key] ?? fallback,
+        inspect: (key: string) => ({
+          key, defaultValue: defaults[key], globalValue: global[key], workspaceValue: ws[key],
+        }),
+        update,
+      }));
+      return update;
+    }
+
+    it('writes only the keys that changed — not a copy of every default', async () => {
+      const update = layered({ defaults: { claudeCommand: 'claude', focusMode: false, notifyOnAttention: true } });
+
+      await new ConfigManager().saveUserValues({ claudeCommand: '/opt/bin/claude', focusMode: false, notifyOnAttention: true });
+
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(update).toHaveBeenCalledWith('claudeCommand', '/opt/bin/claude', ConfigurationTarget.Global);
+    });
+
+    it('writes to the workspace when a workspace value would shadow the global one', async () => {
+      // Written globally, the save "succeeded" and the workspace value kept
+      // winning — nothing the user could see changed.
+      const update = layered({ defaults: { focusMode: false }, workspace: { focusMode: false }, global: { focusMode: true } });
+
+      await new ConfigManager().saveUserValues({ focusMode: true });
+
+      expect(update).toHaveBeenCalledWith('focusMode', true, ConfigurationTarget.Workspace);
+      expect(update).not.toHaveBeenCalledWith('focusMode', true, ConfigurationTarget.Global);
+    });
+
+    it('removes the global key when it is set back to the default, instead of pinning the default', async () => {
+      const update = layered({ defaults: { defaultProvider: 'claude' }, global: { defaultProvider: 'codex' } });
+
+      await new ConfigManager().saveUserValues({ defaultProvider: 'claude' });
+
+      expect(update).toHaveBeenCalledWith('defaultProvider', undefined, ConfigurationTarget.Global);
+    });
+
+    it('writes nothing at all for an unchanged form', async () => {
+      const update = layered({ global: { codexCommand: 'codex-beta' }, defaults: { codexCommand: 'codex' } });
+      await new ConfigManager().saveUserValues({ codexCommand: 'codex-beta' });
+      expect(update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('setDefaultProvider', () => {
     it('writes foreman.defaultProvider globally', async () => {
       const update = vi.fn().mockResolvedValue(undefined);

@@ -87,7 +87,9 @@ Foreman registers a notify hook with each agent so the sidebar can show live sta
   ```
 
   Codex also has no session-end event, so a Codex session settles on *waiting* rather than ever showing *terminated*.
-- **Codex requires you to trust hooks** before they run (`/hooks`). Foreman's notify script is byte-identical on every install for exactly this reason — the endpoint lives in a sibling file, so a restart never changes the script's hash and never costs you that trust.
+- **Codex requires you to trust hooks** before they run (`/hooks`). Foreman's notify script is byte-identical on every install for exactly this reason — it looks up which window to report to when it runs, so a restart never changes the script's hash and never costs you that trust. (Upgrading from 0.1.0 changes the script once; Codex asks to trust it again.)
+
+The hooks are global — one entry in `~/.claude/settings.json` serves every VS Code window — but each agent reports to the window showing its worktree, so several windows can run side by side, and an agent keeps reporting across a window reload. With no Foreman window open the hook does nothing and exits at once. Foreman never rewrites an agent config it cannot parse: it leaves the file alone and says so, and the first time it changes one it keeps the original as `<file>.foreman-backup`.
 
 
 ## Switching worktrees
@@ -112,7 +114,9 @@ The base is recorded when the worktree is created, so a worktree cut from `relea
 
 For heavier setups (dedicated Docker stack, dependency prep, debug), point the `foreman.setupScript` / `foreman.teardownScript` and `foreman.docker` settings at your own script and compose files — **anywhere in the repo**, wherever you like to keep them.
 
-When it runs your setup script, Foreman exports `FOREMAN_REPO_ROOT`, `FOREMAN_WORKTREE_PATH`, `FOREMAN_BRANCH`, `FOREMAN_COMPOSE_PROJECT` and the worktree's auto-generated ports, and the matching debug port is wired into the generated `launch.json`. Relative paths resolve against the worktree first, then the main repo.
+When it runs your setup script, Foreman exports `FOREMAN_REPO_ROOT`, `FOREMAN_WORKTREE_PATH`, `FOREMAN_BRANCH`, `FOREMAN_COMPOSE_PROJECT` and the worktree's auto-generated ports, and the matching debug port is wired into the generated `launch.json`. With Docker configured it also exports `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE`, so a plain `docker compose up -d` in the script starts the very stack the card shows and deleting the worktree stops (add `--project-directory "$FOREMAN_WORKTREE_PATH"` when the compose file lives in the main repo). Relative paths resolve against the worktree first, then the main repo.
+
+The ▶ on a card runs `docker compose up -d` itself and waits for it: compose's output goes to the **Foreman: Docker** output channel, and a stack that does not come up says why — on the card and in a toast with a *Show output* button. Before starting, Foreman asks compose for the merged configuration and checks every port it will publish. Compose *adds* the override's `ports` to the base file's instead of replacing them, so a port hard-coded in the base file (`"27017:27017"`) is published by every worktree and the second stack fails; write it as `"${DB_PORT:-27017}:27017"` and add `DB_PORT` to the generated ports, or replace the list in the override with `ports: !override`.
 
 Each worktree's ports are listed on its card, under Docker, and clicking one opens `http://localhost:<port>` — the numbers are derived from the same function that builds the compose environment, so the card cannot drift from what the container actually publishes. The debug port is shown when you name `DEBUG_PORT` but is not clickable; a debugger listener answers nothing a browser can render.
 

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import {
   readRepoConfig,
   renderRepoConfig,
+  updateRepoConfig,
   REPO_CONFIG_RELATIVE,
   REPO_CONFIG_VERSION,
 } from '../../src/config/RepoConfig';
@@ -267,5 +268,79 @@ describe('renderRepoConfig', () => {
 
   it('ends with a newline, for the diff of whoever commits it', () => {
     expect(renderRepoConfig(effective).endsWith('}\n')).toBe(true);
+  });
+});
+
+describe('updateRepoConfig', () => {
+  const values = {
+    worktreesDirectory: '../wt',
+    docker: {
+      composeFile: 'compose.yaml',
+      overrideFile: '',
+      ports: ['HTTP_PORT'],
+      basePort: 31000,
+      portStride: 20,
+    },
+  };
+
+  it('keeps keys this build does not know, where they were', () => {
+    // A teammate on a newer Foreman added `agentsDirectory`; saving from this
+    // one used to re-render the file from the keys it knows and drop it.
+    const existing = JSON.stringify({
+      version: 1,
+      $schema: './schema.json',
+      agentsDirectory: '.agents',
+      worktreesDirectory: '.worktrees',
+    });
+    const parsed = JSON.parse(updateRepoConfig(existing, values)) as Record<string, unknown>;
+
+    expect(parsed['agentsDirectory']).toBe('.agents');
+    expect(parsed['$schema']).toBe('./schema.json');
+    expect(parsed['worktreesDirectory']).toBe('../wt');
+    expect(Object.keys(parsed).slice(0, 4)).toEqual(['version', '$schema', 'agentsDirectory', 'worktreesDirectory']);
+  });
+
+  it('leaves a key it was given no value for as the file has it', () => {
+    const existing = JSON.stringify({ version: 1, setupScript: 'make setup', worktreesDirectory: '.worktrees' });
+    const parsed = JSON.parse(updateRepoConfig(existing, { ...values, setupScript: undefined }));
+    expect(parsed.setupScript).toBe('make setup');
+    expect(parsed.worktreesDirectory).toBe('../wt');
+  });
+
+  it('never takes the version down', () => {
+    const existing = JSON.stringify({ version: REPO_CONFIG_VERSION + 2, worktreesDirectory: '.worktrees' });
+    expect(JSON.parse(updateRepoConfig(existing, values)).version).toBe(REPO_CONFIG_VERSION + 2);
+  });
+
+  it('brings an older or missing version up to this one', () => {
+    expect(JSON.parse(updateRepoConfig('{"version":0}', values)).version).toBe(REPO_CONFIG_VERSION);
+    expect(JSON.parse(updateRepoConfig('{}', values)).version).toBe(REPO_CONFIG_VERSION);
+  });
+
+  it('merges docker key by key, so a newer Foreman\'s docker keys survive too', () => {
+    const existing = JSON.stringify({ docker: { composeFile: 'old.yml', networkName: 'shared' } });
+    const parsed = JSON.parse(updateRepoConfig(existing, values));
+    expect(parsed.docker).toEqual({ ...values.docker, networkName: 'shared' });
+  });
+
+  it('replaces a file that is not a JSON object, as the panel says it will', () => {
+    for (const broken of ['{ "worktreesDirectory": ', '[1,2]', 'null']) {
+      const parsed = JSON.parse(updateRepoConfig(broken, values));
+      expect(parsed).toEqual({ version: REPO_CONFIG_VERSION, ...values });
+    }
+  });
+
+  it('writes a new file with version first and a trailing newline', () => {
+    const out = updateRepoConfig(undefined, values);
+    expect(Object.keys(JSON.parse(out))[0]).toBe('version');
+    expect(out.endsWith('}\n')).toBe(true);
+  });
+
+  it('round-trips through readRepoConfig: the known keys read, the new one reported', () => {
+    const existing = JSON.stringify({ version: 1, futureKey: true });
+    const result = readRepoConfig(ROOT, fsWith({ [FILE]: updateRepoConfig(existing, values) }));
+    expect(result.values.worktreesDirectory).toBe('../wt');
+    expect(result.values.docker).toEqual(values.docker);
+    expect(result.problems).toEqual(['unknown key "futureKey"']);
   });
 });

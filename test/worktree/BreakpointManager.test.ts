@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { BreakpointManager } from '../../src/worktree/BreakpointManager';
 import {
   FakeMemento,
@@ -113,5 +113,65 @@ describe('BreakpointManager.activate', () => {
     const mgr = new BreakpointManager(memento as never, () => WORKTREES);
     mgr.activate('b'); // no explicit list
     expect(fsPaths()).toEqual([]);
+  });
+});
+
+describe('BreakpointManager.prune', () => {
+  it('drops the stash of a worktree no longer in the store, and persists', async () => {
+    await memento.update('foreman.breakpoints', {
+      a: [{ uri: '/repo/zer/feat-a/x.php', line: 1, character: 0, enabled: true }],
+      gone: [{ uri: '/repo/zer/gone/y.php', line: 1, character: 0, enabled: true }],
+    });
+    const mgr = new BreakpointManager(memento as never, () => WORKTREES);
+
+    mgr.prune(new Set(['main', 'a', 'b']));
+
+    expect(mgr.getStashed('gone')).toEqual([]);
+    expect(mgr.getStashed('a')).toHaveLength(1);
+    expect(Object.keys(memento.get<Record<string, unknown>>('foreman.breakpoints', {}))).toEqual(['a']);
+  });
+
+  it('writes nothing when every stash is still alive', async () => {
+    await memento.update('foreman.breakpoints', { a: [] });
+    const mgr = new BreakpointManager(memento as never, () => WORKTREES);
+    const update = vi.spyOn(memento, 'update');
+
+    mgr.prune(new Set(['a']));
+
+    expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe('two windows sharing globalState', () => {
+  const OTHER = [{ id: 'x', path: '/other' }, { id: 'y', path: '/other/zer/y' }];
+  const stored = () => memento.get<Record<string, unknown[]>>('foreman.breakpoints', {});
+
+  it("a stash in one window survives the other window's switch", () => {
+    // Each window wrote its whole in-memory map, read at activation, so the
+    // second window to switch erased the first one's stashed breakpoints.
+    const windowA = new BreakpointManager(memento as never, () => WORKTREES);
+    const windowB = new BreakpointManager(memento as never, () => OTHER);
+
+    debug.breakpoints = [bp('/repo/zer/feat-a/x.php')];
+    windowA.activate('b', WORKTREES); // stashes a's breakpoint
+    debug.breakpoints = [bp('/other/zer/y/q.py')];
+    windowB.activate('x', OTHER);     // stashes y's breakpoint
+
+    expect(Object.keys(stored()).sort()).toEqual(['a', 'y']);
+  });
+
+  it('restoring removes only that worktree from the store', async () => {
+    const windowA = new BreakpointManager(memento as never, () => WORKTREES);
+    debug.breakpoints = [bp('/repo/zer/feat-a/x.php')];
+    windowA.activate('b', WORKTREES);
+    // Another window stashed something meanwhile.
+    await memento.update('foreman.breakpoints', {
+      ...stored(),
+      y: [{ uri: '/other/zer/y/q.py', line: 1, character: 0, enabled: true }],
+    });
+
+    windowA.activate('a', WORKTREES);
+
+    expect(Object.keys(stored())).toEqual(['y']);
   });
 });

@@ -12,7 +12,7 @@ export class OpenCodeProvider implements IAgentProvider {
   ) {}
 
   buildCommand(worktreeId: string): string {
-    return `FOREMAN_WORKSPACE_ID="${worktreeId}" ${this.config.get().opencodeCommand}`;
+    return `${this.hooks.launchEnv(worktreeId)} ${this.config.get().opencodeCommand}`;
   }
 
   installHooks(hookUrl: string): void {

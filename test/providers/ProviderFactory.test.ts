@@ -2,11 +2,15 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import * as http from 'node:http';
+import { AddressInfo } from 'node:net';
 import { ProviderFactory } from '../../src/providers/ProviderFactory';
+import { HookRoutes } from '../../src/providers/shared/HookRoutes';
 import { ClaudeProvider, ConfigSource } from '../../src/providers/claude/ClaudeProvider';
 import { CodexProvider } from '../../src/providers/codex/CodexProvider';
 import { CodexHookInstaller } from '../../src/providers/codex/CodexHookInstaller';
 import { OpenCodeProvider } from '../../src/providers/opencode/OpenCodeProvider';
+import { ConfigFileError } from '../../src/providers/shared/configFile';
 import { PROVIDER_IDS, isAgentWindowName, providerForWindowName } from '../../src/ports/IAgentProvider';
 
 describe('ProviderFactory', () => {
@@ -72,12 +76,26 @@ describe('ProviderFactory', () => {
       provider.installHooks('http://127.0.0.1:43110');
 
       const script = fs.readFileSync(path.join(storageDir, 'notify.sh'), 'utf8');
-      expect(script).toContain('curl -s -X POST "$URL/hook"');
+      expect(script).toContain('-X POST "$URL/hook"');
       expect(fs.readFileSync(path.join(storageDir, 'hook-url'), 'utf8')).toBe('http://127.0.0.1:43110');
 
       const settingsPath = path.join(homeDir, '.claude/settings.json');
       const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
       expect(Object.keys(settings.hooks)).toContain('Stop');
+    });
+
+    it("once hooks are installed, launches carry this window's URL and claim the worktree's route", () => {
+      // The launch waits on the agent's first hook, so the route has to point
+      // here before the agent starts — even if another window showing the same
+      // repository claimed it first.
+      new HookRoutes(storageDir).claim(['wt-1'], 'http://127.0.0.1:1111');
+      const provider = makeFactory().create('claude');
+      provider.installHooks('http://127.0.0.1:43110');
+
+      expect(provider.buildCommand('wt-1')).toBe(
+        'FOREMAN_HOOK_URL="http://127.0.0.1:43110" FOREMAN_WORKSPACE_ID="wt-1" claude',
+      );
+      expect(new HookRoutes(storageDir).lookup('wt-1')).toBe('http://127.0.0.1:43110');
     });
 
     it('uninstallHooks removes the injected hooks again', () => {
@@ -109,29 +127,109 @@ describe('ProviderFactory', () => {
     });
 
 
-    it('installHooks writes the plugin into ~/.config/opencode/plugin with the hook URL', () => {
+    it('installHooks writes the plugin into ~/.config/opencode/plugin, URL-free', () => {
       makeFactory().create('opencode').installHooks('http://127.0.0.1:43110');
       const plugin = fs.readFileSync(pluginPath(), 'utf8');
-      expect(plugin).toContain('fetch("http://127.0.0.1:43110/hook"');
+      // Looked up at send time — a literal URL is what froze opencode after a reload.
+      expect(plugin).not.toContain('43110');
+      expect(plugin).toContain(`const STORAGE = ${JSON.stringify(storageDir)};`);
       expect(plugin).toContain('if (!workspaceId) return {};'); // inert outside foreman
       expect(plugin).toContain('"session.idle": "Stop"');
-      expect(plugin).toContain('"tool.execute.before": async () => notify("PreToolUse")');
+      expect(plugin).toContain('"tool.execute.before"');
       expect(plugin).toContain('windowIndex');
     });
 
-    it('does not rewrite the plugin when content is unchanged, rewrites on URL change', () => {
+    it('leaves the plugin untouched when only the port changes', () => {
       const provider = makeFactory().create('opencode');
       provider.installHooks('http://127.0.0.1:43110');
       const past = new Date(Date.now() - 60_000);
       fs.utimesSync(pluginPath(), past, past);
       const before = fs.statSync(pluginPath()).mtimeMs;
 
-      provider.installHooks('http://127.0.0.1:43110');
-      expect(fs.statSync(pluginPath()).mtimeMs).toBe(before);
-
       provider.installHooks('http://127.0.0.1:55555');
-      expect(fs.statSync(pluginPath()).mtimeMs).toBeGreaterThan(before);
-      expect(fs.readFileSync(pluginPath(), 'utf8')).toContain('http://127.0.0.1:55555/hook');
+
+      expect(fs.statSync(pluginPath()).mtimeMs).toBe(before);
+      expect(fs.readFileSync(path.join(storageDir, 'hook-url'), 'utf8')).toBe('http://127.0.0.1:55555');
+    });
+
+    it('buildCommand carries the URL and claims the route once hooks are installed', () => {
+      const provider = makeFactory().create('opencode');
+      provider.installHooks('http://127.0.0.1:43110');
+      expect(provider.buildCommand('wt-1')).toBe(
+        'FOREMAN_HOOK_URL="http://127.0.0.1:43110" FOREMAN_WORKSPACE_ID="wt-1" opencode',
+      );
+      expect(new HookRoutes(storageDir).lookup('wt-1')).toBe('http://127.0.0.1:43110');
+    });
+
+    describe('the generated plugin, running', () => {
+      const posts: { server: string; headers: http.IncomingHttpHeaders; body: string }[] = [];
+      const servers: http.Server[] = [];
+      const startServer = async (name: string, status: number): Promise<string> => {
+        const s = http.createServer((req, res) => {
+          let body = '';
+          req.on('data', (c) => { body += c; });
+          req.on('end', () => { posts.push({ server: name, headers: req.headers, body }); res.writeHead(status).end(); });
+        });
+        await new Promise<void>((resolve) => s.listen(0, '127.0.0.1', resolve));
+        servers.push(s);
+        return `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
+      };
+      const saved = { ...process.env };
+
+      afterEach(async () => {
+        posts.length = 0;
+        for (const s of servers.splice(0)) await new Promise<void>((resolve) => s.close(() => resolve()));
+        for (const k of ['FOREMAN_WORKSPACE_ID', 'FOREMAN_WINDOW_INDEX', 'FOREMAN_HOOK_URL', 'TMUX_PANE']) {
+          if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+        }
+      });
+
+      const waitFor = async (n: number) => {
+        const deadline = Date.now() + 2000;
+        while (posts.length < n && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+      };
+
+      it("reaches a reloaded window through the route, though its env holds the old port", async () => {
+        // opencode loads the plugin once and keeps running across a window
+        // reload; only a lookup at send time can follow the window's new port.
+        const reloaded = await startServer('reloaded', 200);
+        makeFactory().create('opencode').installHooks('http://127.0.0.1:1');
+        new HookRoutes(storageDir).claim(['wt-1'], reloaded);
+        process.env.FOREMAN_WORKSPACE_ID = 'wt-1';
+        process.env.FOREMAN_WINDOW_INDEX = '2';
+        process.env.FOREMAN_HOOK_URL = 'http://127.0.0.1:1';
+
+        const mod = await import(/* @vite-ignore */ pluginPath());
+        const hooks = await mod.ForemanNotify();
+        await hooks.event({ event: { type: 'session.idle', properties: { sessionID: 'ses_1' } } });
+        await waitFor(1);
+
+        expect(posts).toHaveLength(1);
+        expect(posts[0]?.server).toBe('reloaded');
+        expect(posts[0]?.headers['x-foreman-hook']).toBe('2');
+        expect(posts[0]?.headers['x-foreman-event']).toBe('Stop');
+        expect(posts[0]?.headers['x-foreman-agent']).toBe('opencode');
+        expect(posts[0]?.headers['x-foreman-workspace']).toBe('wt-1');
+        expect(posts[0]?.headers['x-foreman-window']).toBe('2');
+        expect(JSON.parse(posts[0]?.body ?? '{}')).toMatchObject({ hook_event_name: 'Stop', session_id: 'ses_1' });
+      });
+
+      it('moves on from a window that answers 404 to the launch env', async () => {
+        const other = await startServer('other', 404);
+        const mine = await startServer('mine', 200);
+        makeFactory().create('opencode').installHooks(other);
+        new HookRoutes(storageDir).claim(['wt-1'], other);
+        process.env.FOREMAN_WORKSPACE_ID = 'wt-1';
+        process.env.FOREMAN_HOOK_URL = mine;
+
+        const mod = await import(/* @vite-ignore */ pluginPath());
+        const hooks = await mod.ForemanNotify();
+        await hooks['tool.execute.before']({ tool: 'bash', sessionID: 'ses_2' });
+        await waitFor(2);
+
+        expect(posts.map((p) => p.server)).toEqual(['other', 'mine']);
+        expect(JSON.parse(posts[1]?.body ?? '{}')).toMatchObject({ tool_name: 'bash', session_id: 'ses_2' });
+      });
     });
 
     it('uninstallHooks deletes the plugin; no-op when it does not exist', () => {
@@ -144,7 +242,7 @@ describe('ProviderFactory', () => {
 
     it('defaults the plugin path to ~/.config/opencode/plugin when not injected', async () => {
       const { OpenCodeHookInstaller } = await import('../../src/providers/opencode/OpenCodeHookInstaller');
-      const installer = new OpenCodeHookInstaller();
+      const installer = new OpenCodeHookInstaller(storageDir);
       const resolved = (installer as unknown as { pluginPath: string }).pluginPath;
       expect(resolved).toBe(path.join(os.homedir(), '.config/opencode/plugin/foreman-notify.js'));
     });
@@ -243,7 +341,7 @@ describe('CodexProvider', () => {
     const commands = readHooks().hooks.Stop.flatMap((g: { hooks: { command: string }[] }) => g.hooks.map((h) => h.command));
     expect(commands).toContain('/other/notify.sh');
     // Ours is the quoted script path plus the event name.
-    expect(commands.some((c: string) => c.includes(storageDir) && c.endsWith(' Stop'))).toBe(true);
+    expect(commands.some((c: string) => c.includes(storageDir) && c.endsWith(' Stop codex'))).toBe(true);
   });
 
   it('uninstall removes only our entries, leaving the other tool alone', () => {
@@ -274,22 +372,28 @@ describe('CodexProvider', () => {
       .toBe(path.join(os.homedir(), '.codex/hooks.json'));
   });
 
-  it('uninstall gives up quietly when the config cannot be written', () => {
+  it('leaves a read-only config alone, saying why', () => {
     const provider = make();
     provider.installHooks('http://127.0.0.1:43110');
-    // Read-only config: dispose must not throw on the way out of the window.
+    const before = fs.readFileSync(hooksPath(), 'utf8');
+    // The atomic write renames over the file, which only needs the directory
+    // to be writable — it must still honour a file made read-only on purpose.
     fs.chmodSync(hooksPath(), 0o444);
     try {
-      expect(() => provider.uninstallHooks()).not.toThrow();
+      expect(() => provider.uninstallHooks()).toThrow(ConfigFileError);
+      expect(fs.readFileSync(hooksPath(), 'utf8')).toBe(before);
+      expect(fs.statSync(hooksPath()).mode & 0o777).toBe(0o444);
     } finally {
       fs.chmodSync(hooksPath(), 0o644);
     }
   });
 
-  it('survives a hand-corrupted hooks.json instead of throwing', () => {
+  it('refuses to overwrite a hand-corrupted hooks.json', () => {
+    // Codex users commonly keep another harness's hooks in this file; "starting
+    // fresh" on a syntax error used to delete them along with everything else.
     fs.mkdirSync(path.dirname(hooksPath()), { recursive: true });
     fs.writeFileSync(hooksPath(), '{ not json');
-    expect(() => make().installHooks('http://127.0.0.1:43110')).not.toThrow();
-    expect(Object.keys(readHooks().hooks)).toContain('Stop');
+    expect(() => make().installHooks('http://127.0.0.1:43110')).toThrow(/hooks\.json has a syntax error/);
+    expect(fs.readFileSync(hooksPath(), 'utf8')).toBe('{ not json');
   });
 });

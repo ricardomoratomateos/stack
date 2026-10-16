@@ -2,6 +2,7 @@ import { IWorktreeRepository } from '../ports/IWorktreeRepository';
 import { portBlockFor } from '../docker/dockerCompose';
 import { isPortFree as probePort } from './portProbe';
 import type { ForemanConfig } from '../types';
+import type { SharedPortReservations } from './portReservations';
 
 /** The only slice of the repository the allocator needs. */
 type PortRegistryReader = Pick<IWorktreeRepository, 'getPortRegistry'>;
@@ -17,11 +18,16 @@ export interface PortAllocatorOptions {
   config?: () => ForemanConfig;
   /** OS-level availability probe. Injected in tests to keep them off real sockets. */
   isPortFree?: (port: number) => Promise<boolean>;
+  /**
+   * Reservations every window can see. Without it, reservations are this
+   * window's alone and two windows creating at once can get the same slot.
+   */
+  shared?: SharedPortReservations;
 }
 
 export class PortAllocator {
   private store: PortRegistryReader;
-  private basePort: number;
+  private basePort: () => number;
   private options: PortAllocatorOptions;
   /**
    * Slots handed out but not yet written to the store. Held here because the
@@ -30,9 +36,15 @@ export class PortAllocator {
    */
   private reserved = new Set<number>();
 
-  constructor(store: PortRegistryReader, basePort: number, options: PortAllocatorOptions = {}) {
+  /**
+   * `basePort` may be a getter so `foreman.debugBasePort` is read per
+   * allocation. It used to be captured once at activation while the docker
+   * block derivation (dockerPortsFor) read the setting live, so changing it
+   * mid-session made the two disagree about which block a slot owns.
+   */
+  constructor(store: PortRegistryReader, basePort: number | (() => number), options: PortAllocatorOptions = {}) {
     this.store = store;
-    this.basePort = basePort;
+    this.basePort = typeof basePort === 'function' ? basePort : () => basePort;
     this.options = options;
   }
 
@@ -47,10 +59,14 @@ export class PortAllocator {
    */
   async allocate(): Promise<number> {
     const registry = new Set(Object.values(this.store.getPortRegistry()));
-    // Anything that reached the store no longer needs holding.
+    // Anything that reached the store no longer needs holding here. The shared
+    // claim is deliberately left to expire on its own: other windows see this
+    // store write only once globalState has synced to them, and until then the
+    // claim is all that tells them the slot is taken.
     for (const p of this.reserved) if (registry.has(p)) this.reserved.delete(p);
 
-    let port = this.basePort + 1;
+    const basePort = this.basePort();
+    let port = basePort + 1;
     for (let tried = 0; tried < MAX_SLOTS; tried++, port++) {
       if (registry.has(port) || this.reserved.has(port)) continue;
       // Claim the candidate BEFORE probing it. The probe is async and the
@@ -59,11 +75,18 @@ export class PortAllocator {
       // be handed the same slot — two worktrees with one block of docker ports,
       // failing minutes later inside `compose up`.
       this.reserved.add(port);
+      // Then across windows: the registry is globalState, which a creation in
+      // another window reaches only after its own allocate() returned.
+      if (this.options.shared && !(await this.options.shared.tryReserve(port))) {
+        this.reserved.delete(port);
+        continue;
+      }
       if ((await this.firstBusyPort(port)) === undefined) return port;
       this.reserved.delete(port);
+      await this.options.shared?.release(port);
     }
     throw new Error(
-      `No free port slot found in ${this.basePort + 1}..${this.basePort + MAX_SLOTS} — ` +
+      `No free port slot found in ${basePort + 1}..${basePort + MAX_SLOTS} — ` +
         'every candidate is already in use on this machine.',
     );
   }
@@ -79,10 +102,14 @@ export class PortAllocator {
    * the whole block is free. Used both to pick a slot and to re-check one long
    * after it was picked — a setup script can run for minutes before docker
    * finally reaches for the port.
+   *
+   * `ignore` lists ports known to be held by the worktree itself (its own
+   * running containers, its debug listener): busy, but not a collision.
    */
-  async firstBusyPort(debugPort: number): Promise<number | undefined> {
+  async firstBusyPort(debugPort: number, ignore: ReadonlySet<number> = new Set()): Promise<number | undefined> {
     const probe = this.options.isPortFree ?? probePort;
     for (const port of this.blockFor(debugPort)) {
+      if (ignore.has(port)) continue;
       if (!(await probe(port))) return port;
     }
     return undefined;
@@ -95,5 +122,6 @@ export class PortAllocator {
    */
   release(port: number): void {
     this.reserved.delete(port);
+    void this.options.shared?.release(port);
   }
 }

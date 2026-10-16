@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { WorktreeManager } from '../../src/worktree/WorktreeManager';
 import { parseWorktreeList } from '../../src/adapters/GitCliAdapter';
@@ -74,6 +76,7 @@ function makeFsStub() {
 
 function makeGitStub(entries: GitWorktreeEntry[] = []): IGitPort & {
   listWorktrees: ReturnType<typeof vi.fn>;
+  listWorktreePaths: ReturnType<typeof vi.fn>;
   createWorktree: ReturnType<typeof vi.fn>;
   deleteWorktree: ReturnType<typeof vi.fn>;
   deleteBranch: ReturnType<typeof vi.fn>;
@@ -83,6 +86,9 @@ function makeGitStub(entries: GitWorktreeEntry[] = []): IGitPort & {
 } {
   return {
     listWorktrees: vi.fn(() => entries),
+    // As if git could not answer: nothing is ever reported missing unless a
+    // test says what git lists.
+    listWorktreePaths: vi.fn(async () => undefined),
     createWorktree: vi.fn(),
     deleteWorktree: vi.fn(),
     deleteBranch: vi.fn(),
@@ -454,8 +460,8 @@ describe('reconcile', () => {
     const store = makeStoreStub();
     const git = makeGitStub([MAIN, LINKED]);
     const mgr = new WorktreeManager(store, makePortAllocatorStub(9899), makeConfigStub(), undefined, git, makeFsStub());
-    const { adopted, removed, current } = await mgr.reconcile(REPO);
-    expect(removed).toEqual([]);
+    const { adopted, missing, current } = await mgr.reconcile(REPO);
+    expect(missing).toEqual([]);
     expect(adopted).toHaveLength(2);
     expect(current).toHaveLength(2);
     const main = current.find((w) => w.path === '/repo')!;
@@ -476,7 +482,7 @@ describe('reconcile', () => {
     const git = makeGitStub([]);
     const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
     const result = await mgr.reconcile(REPO);
-    expect(result).toEqual({ adopted: [], removed: [], current: [existing] });
+    expect(result).toEqual({ adopted: [], missing: [], current: [existing] });
     expect(store.calls).toEqual([]); // no add/patch/remove
   });
 
@@ -582,6 +588,158 @@ describe('reconcile', () => {
     expect(current).toHaveLength(2);
     expect(current.map((w) => w.path).sort()).toEqual(['/repo', '/repo/zer/feat-x']);
   });
+
+  it('does not adopt a worktree git itself reports as prunable (directory gone)', async () => {
+    // Adopting it wrote launch.json into it — mkdir -p bringing back an empty
+    // ghost of a directory the user had deleted.
+    const fsStub = makeFsStub();
+    const store = makeStoreStub();
+    const git = makeGitStub([MAIN, { ...LINKED, prunable: true }]);
+    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, fsStub);
+
+    const { adopted } = await mgr.reconcile(REPO);
+
+    expect(adopted.map((w) => w.path)).toEqual(['/repo']);
+    expect(fsStub.dirs.has(path.join(LINKED.path, '.vscode'))).toBe(false);
+  });
+});
+
+// ---------- missing worktrees (real filesystem) ----------
+
+describe('missing worktrees', () => {
+  // Real directories: the whole point is how paths compare on a real disk —
+  // symlinks, macOS's /var → /private/var, directories that are really gone.
+  let tmp: string;
+  let repo: string;
+  let alive: string;
+  let gone: string;
+
+  beforeEach(() => {
+    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-missing-')));
+    repo = path.join(tmp, 'repo');
+    alive = path.join(repo, 'zer', 'alive');
+    gone = path.join(repo, 'zer', 'gone');
+    fs.mkdirSync(alive, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  function setup(gitPaths: Array<{ path: string; prunable?: boolean }> | undefined, extra: Worktree[] = []) {
+    const store = makeStoreStub([
+      makeWorktree({ id: 'main', branch: 'main', path: repo, repoRoot: repo, isMain: true }),
+      makeWorktree({ id: 'alive', branch: 'alive', path: alive, repoRoot: repo }),
+      makeWorktree({ id: 'gone', branch: 'gone', path: gone, repoRoot: repo }),
+      ...extra,
+    ]);
+    const git = makeGitStub([{ path: repo, head: 'a', branch: 'main' }]);
+    git.listWorktreePaths.mockImplementation(async () =>
+      gitPaths?.map((g) => ({ path: g.path, prunable: g.prunable ?? false })));
+    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+    return { store, git, mgr };
+  }
+
+  it('flags a worktree git has let go of and whose directory is gone — and removes nothing', async () => {
+    const { store, mgr } = setup([{ path: repo }, { path: alive }]);
+    const { missing } = await mgr.reconcile(repo);
+    expect(missing.map((w) => w.id)).toEqual(['gone']);
+    expect(store.calls.filter((c) => c.startsWith('remove:'))).toEqual([]);
+    expect(store.getAll()).toHaveLength(3);
+  });
+
+  it('flags nothing when git could not answer', async () => {
+    const { mgr } = setup(undefined);
+    expect((await mgr.reconcile(repo)).missing).toEqual([]);
+  });
+
+  it('flags nothing when git\'s answer does not include this repository\'s main worktree', async () => {
+    // Run against the wrong repository, or a truncated answer: either way it
+    // says nothing about which of OUR worktrees are gone.
+    const { mgr } = setup([{ path: alive }]);
+    expect((await mgr.reconcile(repo)).missing).toEqual([]);
+  });
+
+  it('flags nothing git still lists, even with the directory gone', async () => {
+    // A locked worktree on an unmounted volume, say: git still has it.
+    const { mgr } = setup([{ path: repo }, { path: alive }, { path: gone }]);
+    expect((await mgr.reconcile(repo)).missing).toEqual([]);
+  });
+
+  it('takes git\'s own "prunable" as gone, when the directory really is', async () => {
+    const { mgr } = setup([{ path: repo }, { path: alive }, { path: gone, prunable: true }]);
+    expect((await mgr.reconcile(repo)).missing.map((w) => w.id)).toEqual(['gone']);
+  });
+
+  it('never flags a directory that exists, whatever git says', async () => {
+    const { mgr } = setup([{ path: repo }]); // git lists neither linked worktree
+    expect((await mgr.reconcile(repo)).missing.map((w) => w.id)).toEqual(['gone']);
+  });
+
+  it('compares through symlinks: a worktree stored under a link is the one git lists by its real path', async () => {
+    // The store recorded the worktree through a symlinked folder; git prints
+    // the resolved path. A string comparison calls them different — and with
+    // the directory momentarily gone, that was enough to lose a live worktree.
+    const link = path.join(tmp, 'link');
+    fs.symlinkSync(repo, link);
+    const viaLink = path.join(link, 'zer', 'unmounted');
+    const { mgr } = setup(
+      [{ path: repo }, { path: alive }, { path: gone }, { path: path.join(repo, 'zer', 'unmounted') }],
+      [makeWorktree({ id: 'linked', branch: 'l', path: viaLink, repoRoot: repo })],
+    );
+    expect((await mgr.reconcile(repo)).missing).toEqual([]);
+  });
+
+  it('compares through symlinks on the repository root too', async () => {
+    const link = path.join(tmp, 'link');
+    fs.symlinkSync(repo, link);
+    const { mgr } = setup([{ path: link }, { path: path.join(link, 'zer', 'alive') }]);
+    expect((await mgr.reconcile(repo)).missing.map((w) => w.id)).toEqual(['gone']);
+  });
+
+  it('never flags another repository\'s worktree, nor the main checkout', async () => {
+    const elsewhere = makeWorktree({ id: 'other', branch: 'o', path: path.join(tmp, 'other', 'gone'), repoRoot: path.join(tmp, 'other') });
+    fs.rmSync(repo, { recursive: true, force: true }); // even with main itself gone
+    const { mgr } = setup([{ path: repo }], [elsewhere]);
+    expect((await mgr.reconcile(repo)).missing.map((w) => w.id).sort()).toEqual(['alive', 'gone']);
+  });
+
+  it('unflags a worktree whose directory has come back', async () => {
+    const { mgr } = setup([{ path: repo }, { path: alive }]);
+    expect((await mgr.reconcile(repo)).missing.map((w) => w.id)).toEqual(['gone']);
+    fs.mkdirSync(gone, { recursive: true });
+    expect((await mgr.reconcile(repo)).missing).toEqual([]);
+  });
+
+  describe('forget', () => {
+    it('removes the store entry of a worktree that is still missing, and nothing else', async () => {
+      const { store, git, mgr } = setup([{ path: repo }, { path: alive }]);
+      expect(await mgr.forget('gone')).toBe(true);
+      expect(store.calls).toEqual(['remove:gone']);
+      expect(git.deleteWorktree).not.toHaveBeenCalled();
+      expect(git.deleteBranch).not.toHaveBeenCalled();
+    });
+
+    it('refuses once the directory is back', async () => {
+      const { store, mgr } = setup([{ path: repo }, { path: alive }]);
+      fs.mkdirSync(gone, { recursive: true });
+      expect(await mgr.forget('gone')).toBe(false);
+      expect(store.calls).toEqual([]);
+    });
+
+    it('refuses a live worktree and an unknown id', async () => {
+      const { store, mgr } = setup([{ path: repo }, { path: alive }]);
+      expect(await mgr.forget('alive')).toBe(false);
+      expect(await mgr.forget('nope')).toBe(false);
+      expect(store.calls).toEqual([]);
+    });
+
+    it('refuses when git cannot answer', async () => {
+      const { store, mgr } = setup(undefined);
+      expect(await mgr.forget('gone')).toBe(false);
+      expect(store.calls).toEqual([]);
+    });
+  });
 });
 
 // ---------- listFromGit ----------
@@ -686,6 +844,18 @@ describe('ensureFreePorts', () => {
 
     expect(result.movedFrom).toBe(8083);
     expect(result.worktree.debugPort).toBe(9903);
+  });
+
+  it('passes the worktree\'s own ports to the probe, so its running stack does not count as a squatter', async () => {
+    const wt = makeWorktree({ debugPort: 9901 });
+    const { stub, firstBusyPort, allocate } = makeReallocatingAllocatorStub({});
+    const mgr = new WorktreeManager(makeStoreStub([wt]), stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
+    const own = new Set([9901, 8083]);
+
+    await mgr.ensureFreePorts(wt, own);
+
+    expect(firstBusyPort).toHaveBeenCalledWith(9901, own);
+    expect(allocate).not.toHaveBeenCalled();
   });
 
   it('persists the new port so the move survives a reload', async () => {

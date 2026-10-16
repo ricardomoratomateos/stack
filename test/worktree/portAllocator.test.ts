@@ -140,6 +140,21 @@ describe('PortAllocator', () => {
     });
   });
 
+  describe('a live base port', () => {
+    it('reads debugBasePort per allocation, so changing the setting needs no reload', async () => {
+      let base = 9898;
+      const allocator = new PortAllocator(stubStore({}), () => base, FREE);
+      await expect(allocator.allocate()).resolves.toBe(9899);
+      base = 12000;
+      await expect(allocator.allocate()).resolves.toBe(12001);
+    });
+
+    it('names the live range when nothing is free', async () => {
+      const allocator = new PortAllocator(stubStore({}), () => 30000, { isPortFree: async () => false });
+      await expect(allocator.allocate()).rejects.toThrow('30001..30500');
+    });
+  });
+
   describe('blockFor', () => {
     it('returns the debug port plus its derived docker ports, deduplicated', () => {
       const allocator = new PortAllocator(stubStore({}), 9898, { config: stubConfig() });
@@ -175,6 +190,15 @@ describe('PortAllocator', () => {
       const allocator = new PortAllocator(stubStore({}), 9898, { config: stubConfig(), isPortFree: probe });
       await allocator.firstBusyPort(9901);
       expect(probe).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips ports the worktree itself is known to hold', async () => {
+      // Its own running containers and its debug listener make those ports
+      // busy without making them a collision.
+      const probe = stubProbe(9901, 8083);
+      const allocator = new PortAllocator(stubStore({}), 9898, { config: stubConfig(), isPortFree: probe });
+      await expect(allocator.firstBusyPort(9901, new Set([9901, 8083]))).resolves.toBeUndefined();
+      expect(probe).not.toHaveBeenCalled();
     });
 
     it('defaults to the real socket probe when none is injected', async () => {

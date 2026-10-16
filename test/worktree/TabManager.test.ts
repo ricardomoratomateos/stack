@@ -502,3 +502,56 @@ describe('constructor', () => {
     expect(window.onDidChangeActiveTextEditor).toHaveBeenCalledTimes(1);
   });
 });
+
+// ── prune ────────────────────────────────────────────────────────────────────
+
+describe('prune', () => {
+  it('drops saved tabs of worktrees no longer in the store, and persists', async () => {
+    const memento = new FakeMemento();
+    await memento.update(STORE_KEY, {
+      a: { uris: ['/wt/a/x.ts'] },
+      gone: { uris: ['/wt/gone/y.ts'] },
+    });
+    const { manager } = build(memento, () => [wtA]);
+
+    manager.prune(new Set(['a', 'b']));
+
+    expect(Object.keys(savedState(memento))).toEqual(['a']);
+    expect(manager.getState('gone')).toBeUndefined();
+    expect(manager.getState('a')).toEqual({ uris: ['/wt/a/x.ts'] });
+  });
+
+  it('writes nothing when every entry is still alive', async () => {
+    const memento = new FakeMemento();
+    await memento.update(STORE_KEY, { a: { uris: [] } });
+    const update = vi.spyOn(memento, 'update');
+    const { manager } = build(memento, () => [wtA]);
+
+    manager.prune(new Set(['a']));
+
+    expect(update).not.toHaveBeenCalled();
+  });
+});
+
+// ── Two windows, one globalState ─────────────────────────────────────────────
+
+describe('two windows sharing globalState', () => {
+  it("each window's writes keep the other window's saved tabs", () => {
+    // Both windows read the store once at activation; writing the whole
+    // in-memory map back made the last writer erase what the other had saved.
+    const memento = new FakeMemento();
+    new TabManager(memento as never, () => [wtA]);
+    const windowA = window.tabGroups.onDidChangeTabs.mock.calls[0][0] as () => void;
+    new TabManager(memento as never, () => [wtB]);
+    const windowB = window.tabGroups.onDidChangeTabs.mock.calls[1][0] as () => void;
+
+    setOpenTabs('/wt/a/1.ts');
+    windowA();
+    setOpenTabs('/wt/b/2.ts');
+    windowB();
+
+    const saved = savedState(memento);
+    expect(saved['a']?.uris).toEqual(['/wt/a/1.ts']);
+    expect(saved['b']?.uris).toEqual(['/wt/b/2.ts']);
+  });
+});

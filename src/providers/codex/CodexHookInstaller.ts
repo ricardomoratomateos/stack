@@ -24,6 +24,7 @@ export class CodexHookInstaller extends JsonHookInstaller {
       extensionStoragePath,
       codexHooksPath ?? path.join(os.homedir(), CODEX_HOOKS_PATH),
       HOOK_EVENTS,
+      'codex',
     );
   }
 }

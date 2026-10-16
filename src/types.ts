@@ -4,11 +4,27 @@ export type AgentSessionState = 'active' | 'waiting' | 'permission' | 'idle' | '
 
 export type PrStatus = { number: number; state: 'OPEN' | 'CLOSED' | 'MERGED'; url: string } | null;
 
-export type DockerContainerState = 'running' | 'stopped' | 'missing';
+/**
+ * Docker's own container state, lowercased: running, exited, created, paused,
+ * restarting, dead, removing. Kept as docker reports it rather than folded into
+ * running/stopped — "created" (never started, usually a port clash) and
+ * "exited" (crashed) are different problems with different fixes.
+ */
+export type DockerContainerState = string;
 
 export interface DockerContainer {
   name: string;
   state: DockerContainerState;
+  /** Compose service the container runs. */
+  service?: string;
+  /** Exit code of an exited container; non-zero is why the stack is down. */
+  exitCode?: number;
+  /** Docker's status line, e.g. "Exited (1) 2 minutes ago". */
+  status?: string;
+  /** Host ports it publishes — so its own stack's ports are not mistaken for a stranger's. */
+  ports?: number[];
+  /** Compose's project-directory label; tells two stacks sharing a legacy name apart. */
+  workingDir?: string;
 }
 
 export interface GitStatus {

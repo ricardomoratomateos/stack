@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { AgentSessionState, Worktree } from '../types';
 import { TmuxManager } from './TmuxManager';
-import type { ISessionManager } from '../ports/ISessionManager';
+import type { ISessionManager, TmuxWindow } from '../ports/ISessionManager';
 import type { ProviderId } from '../ports/IAgentProvider';
 import { isAgentWindowName, providerForWindowName } from '../ports/IAgentProvider';
 import type { ProviderFactory } from '../providers/ProviderFactory';
@@ -46,13 +46,14 @@ export class AgentSessionManager {
   private titleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /**
-   * Single timer that keeps shell rows current.
+   * Single timer that keeps shell rows current, and agent rows honest.
    *
    * syncWindows is otherwise only reached from a hook event, which is an
    * AGENT's heartbeat — so a shell in a worktree with no agent running would
    * have been labelled once and then frozen, which is most of the time you have
-   * a shell open. One interval for all worktrees rather than one each, and it
-   * only exists while some worktree actually has a shell.
+   * a shell open; and an agent that died without a last hook would have been
+   * "working" forever. One interval for all worktrees rather than one each,
+   * and it only exists while some worktree needs it (see needsPolling).
    */
   private shellTimer?: ReturnType<typeof setInterval>;
 
@@ -84,6 +85,9 @@ export class AgentSessionManager {
   // worktreeId → (tmux window index → user-chosen name)
   private aliases = new Map<string, Map<number, string>>();
 
+  /** Kept to be disposed: the listener otherwise outlives the manager and pins it in memory. */
+  private closeTerminalSubscription: vscode.Disposable;
+
   constructor(
     private providers: ProviderFactory,
     private globalState: vscode.Memento,
@@ -92,7 +96,7 @@ export class AgentSessionManager {
     private hostname: string = os.hostname(),
     private sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
   ) {
-    vscode.window.onDidCloseTerminal(terminal => {
+    this.closeTerminalSubscription = vscode.window.onDidCloseTerminal(terminal => {
       for (const [id, viewer] of this.viewers.entries()) {
         if (viewer === terminal) { this.viewers.delete(id); break; }
       }
@@ -210,26 +214,49 @@ export class AgentSessionManager {
    * identifies a provider. Adopting every unknown window would surface the
    * session's own initial shell (window 0, an artefact of `new-session`) as a
    * session row nobody asked for.
+   *
+   * With `liveness`, also notices agents that are gone (see agentLiveness).
+   * State otherwise only moves on hook events, and some exits send none — a
+   * SIGKILL, a crash, Codex (which has no SessionEnd) — so such a session sat
+   * on "working" or "permission" forever. The poller asks for it; hook-driven
+   * calls do not, an agent that just sent a hook being alive by definition.
    */
-  async syncWindows(worktreeId: string): Promise<void> {
+  async syncWindows(worktreeId: string, opts?: { liveness?: boolean }): Promise<void> {
     const map = this.windows.get(worktreeId);
     if (!map) return;
+    // What the map held when we asked tmux. Anything launched, killed or
+    // repainted while the answer was on its way is newer than the answer, and
+    // must not be pruned or condemned on its strength: a launch that lands
+    // between list-windows and here is not in the list yet, and is not gone.
+    const before = new Map(map);
     const tmuxWindows = await this.tmux.listWindows(TmuxManager.sessionName(worktreeId));
     // An empty list means tmux failed or the session is gone — both return []
     // from listWindows. Pruning on that would wipe every session on a transient
     // error, so treat it as "no information" rather than "nothing is there".
     if (tmuxWindows.length === 0) return;
+    if (this.windows.get(worktreeId) !== map) return; // the session was killed meanwhile
 
     let changed = false;
+    let stateChanged = false;
     const live = new Set(tmuxWindows.map((w) => w.index));
+    const unchanged = (index: number) => map.has(index) && map.get(index) === before.get(index);
 
     for (const index of [...map.keys()]) {
-      if (!live.has(index)) {
+      if (!live.has(index) && unchanged(index)) {
         map.delete(index);
         // The name goes with the window. tmux reuses indexes, so leaving it
         // behind would hang "redis" on whatever opens next in that slot.
         this.forgetAlias(worktreeId, index);
         changed = true;
+      }
+    }
+
+    if (opts?.liveness) {
+      for (const w of tmuxWindows) {
+        const meta = map.get(w.index);
+        if (meta?.kind !== 'agent' || meta.state === 'terminated' || !unchanged(w.index)) continue;
+        if ((await this.agentLiveness(w)) !== 'dead' || !unchanged(w.index)) continue;
+        stateChanged = this.markTerminated(worktreeId, w.index) || stateChanged;
       }
     }
 
@@ -251,10 +278,13 @@ export class AgentSessionManager {
       }
     }
 
-    if (changed) {
+    if (stateChanged) {
+      this.stateChangeEmitter.fire({ worktreeId, state: this.aggregateState(worktreeId) });
+    }
+    if (changed || stateChanged) {
       this.persistState(worktreeId);
       this.syncShellPolling();
-    this.terminalsChangeEmitter.fire();
+      this.terminalsChangeEmitter.fire();
     }
   }
 
@@ -279,31 +309,40 @@ export class AgentSessionManager {
   }
 
   /**
-   * Starts or stops the shell poller to match whether any shell is open.
+   * Starts or stops the poller to match whether anything needs it.
    *
    * Called wherever the window map changes. Idempotent, and a no-op in the
    * common case — an extra `tmux list-windows` every two seconds is worth it
-   * for a label that moves, and worth nothing at all when there is no shell to
-   * label, which is why it is not simply always on.
+   * for a label that moves or an agent that may have died, and worth nothing
+   * at all when there is neither, which is why it is not simply always on.
    */
   private syncShellPolling(): void {
-    const wanted = [...this.windows.entries()]
-      .filter(([, map]) => [...map.values()].some((w) => w.kind === 'shell'))
-      .map(([id]) => id);
+    const wanted = [...this.windows.values()].some((map) => this.needsPolling(map));
 
-    if (wanted.length === 0) {
+    if (!wanted) {
       if (this.shellTimer) { clearInterval(this.shellTimer); this.shellTimer = undefined; }
       return;
     }
     if (this.shellTimer) return;
     this.shellTimer = setInterval(() => {
       for (const [worktreeId, map] of this.windows.entries()) {
-        if (![...map.values()].some((w) => w.kind === 'shell')) continue;
+        if (!this.needsPolling(map)) continue;
         // Failures are ignored on purpose: a tmux hiccup should leave the last
         // known label on screen rather than blanking the row.
-        this.syncWindows(worktreeId).catch(() => {});
+        this.syncWindows(worktreeId, { liveness: true }).catch(() => {});
       }
     }, AgentSessionManager.SHELL_POLL_MS);
+  }
+
+  /**
+   * A shell, for its label — or an agent not yet known to be gone, for its
+   * liveness: hooks say when an agent changes state, but not always when it
+   * dies, and an exit nobody reports would otherwise leave it "working"
+   * forever. Once every agent is terminated and no shell is open, nothing on
+   * the card can change without Foreman doing it, and the poller stops.
+   */
+  private needsPolling(map: Map<number, WindowMeta>): boolean {
+    return [...map.values()].some((w) => w.kind === 'shell' || w.state !== 'terminated');
   }
 
   /**
@@ -322,6 +361,34 @@ export class AgentSessionManager {
   private static readonly AGENT_READY_TIMEOUT_MS = 6_000;
   /** Launches waiting on a window's first hook event, keyed `worktreeId:windowIndex`. */
   private readyWaiters = new Map<string, () => void>();
+
+  /**
+   * SessionStart is sent from the agent's startup, not from its input box:
+   * Claude Code fires it while the TUI is still coming up. A beat after it,
+   * the box is there to paste into.
+   */
+  private static readonly INPUT_READY_SETTLE_MS = 500;
+  /**
+   * Between pasting and pressing Enter. The agent takes a bracketed paste in
+   * asynchronously — Claude Code folds a large one into "[Pasted text #1 +N
+   * lines]" — and an Enter that lands meanwhile is absorbed into the paste
+   * instead of submitting it. A constant, not something measured: the retry
+   * below is what covers a paste that takes longer.
+   */
+  private static readonly PASTE_SETTLE_MS = 250;
+  /** How long to wait for the agent to confirm a submit before pressing Enter again. */
+  private static readonly SUBMIT_ACK_TIMEOUT_MS = 2_000;
+  /** Enters pressed after the first one, at most, when no confirmation comes. */
+  private static readonly SUBMIT_RETRIES = 2;
+  /**
+   * Providers whose hook fires on submit: UserPromptSubmit, which HookServer
+   * maps to 'active' (see ClaudeHookInstaller / CodexHookInstaller). opencode's
+   * plugin has no submit event — only a reply to a permission — so it cannot
+   * acknowledge one.
+   */
+  private static readonly SUBMIT_ACK_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>(['claude', 'codex']);
+  /** Prompt submissions waiting on their window's next hook event, keyed `worktreeId:windowIndex`. */
+  private submitWaiters = new Map<string, Set<(state: AgentSessionState) => void>>();
 
   private aggregateState(worktreeId: string): AgentSessionState {
     const states = [...(this.windows.get(worktreeId) ?? new Map()).values()]
@@ -419,6 +486,17 @@ export class AgentSessionManager {
     const viewer = await this.getOrCreateViewer(worktree);
     viewer.show();
 
+    // The session row goes up with the terminal, not after the prompt: getting
+    // a prompt in can take the agent's whole boot plus a few seconds of
+    // waiting for it to confirm the submit, and the card should not lag that.
+    this.persistState(worktree.id);
+    // The worktree's aggregate, not the new window's 'waiting': with another
+    // agent of the worktree asking for permission, a bare 'waiting' read as
+    // that request being answered and cleared its badge.
+    this.stateChangeEmitter.fire({ worktreeId: worktree.id, state: this.aggregateState(worktree.id) });
+    this.syncShellPolling();
+    this.terminalsChangeEmitter.fire();
+
     // The prompt is pasted, never passed as an argument. See buildCommand: the
     // launch line goes through `sh -c`, which eats `${...}` and backticks — and
     // the review panel wraps every quoted code line in backticks, so sending
@@ -434,15 +512,12 @@ export class AgentSessionManager {
       // paste come on a beat later, and until then a paste sits in the tty's
       // line buffer — a multi-line prompt would submit line by line. The
       // agent's own first hook (SessionStart, which every provider emits) is
-      // the "listening now" signal.
-      if (started) await this.waitForHook(worktree.id, windowIndex);
-      await this.tmux.paste(`${sessionName}:${windowIndex}`, opts.prompt, started);
+      // the "listening now" signal — nearly: see INPUT_READY_SETTLE_MS.
+      if (started && (await this.waitForHook(worktree.id, windowIndex))) {
+        await this.sleep(AgentSessionManager.INPUT_READY_SETTLE_MS);
+      }
+      await this.submitPrompt(worktree.id, windowIndex, opts.prompt, started);
     }
-
-    this.persistState(worktree.id);
-    this.stateChangeEmitter.fire({ worktreeId: worktree.id, state: 'waiting' });
-    this.syncShellPolling();
-    this.terminalsChangeEmitter.fire();
     return viewer;
   }
 
@@ -479,11 +554,17 @@ export class AgentSessionManager {
   /**
    * Resolves once the window's agent has sent its first hook event, or after
    * AGENT_READY_TIMEOUT_MS: hooks the user has not trusted never fire, and a
-   * launch must not hang on them. The window's meta was written by launch()
-   * moments ago, hence the assertion.
+   * launch must not hang on them.
+   *
+   * launch() wrote the window's meta moments ago, but the process wait in
+   * between is up to ten seconds long, and the window can be killed or the
+   * worktree deleted during it. This used to assert the meta was there — a
+   * TypeError for a launch the user had already abandoned — and to look it
+   * up through windowMap(), which re-created the deleted worktree's entry.
    */
   private waitForHook(worktreeId: string, windowIndex: number): Promise<boolean> {
-    const meta = this.windowMap(worktreeId).get(windowIndex)!;
+    const meta = this.windows.get(worktreeId)?.get(windowIndex);
+    if (!meta) return Promise.resolve(false);
     if (meta.hookSeen) return Promise.resolve(true);
     const key = `${worktreeId}:${windowIndex}`;
     const seen = new Promise<boolean>((resolve) => this.readyWaiters.set(key, () => resolve(true)));
@@ -492,26 +573,164 @@ export class AgentSessionManager {
   }
 
   /**
+   * Paste a prompt into an agent window and, when `submit`, make sure it is
+   * actually sent — the one path every prompt takes, from a launch or from
+   * the review panel.
+   *
+   * Pressing Enter the instant the paste returned often lost the submit:
+   * the agent was still taking the paste in and swallowed the
+   * keypress. So: paste, let it settle, press Enter, and then — where the
+   * agent can say so — wait for it to confirm. Claude Code and Codex fire
+   * UserPromptSubmit on a submit, which arrives here as 'active' for this
+   * window; no confirmation within SUBMIT_ACK_TIMEOUT_MS means the Enter went
+   * nowhere, and it is pressed again, at most SUBMIT_RETRIES times.
+   *
+   * Retrying is only safe when silence means "not submitted", so it needs
+   * evidence that this window's hooks reach us (one has already arrived), a
+   * provider that has a submit hook, and an agent sitting at its prompt. An
+   * Enter is not harmless in general: into a permission dialog it is a "yes".
+   * Without all three the Enter is pressed once, after the same settle delay —
+   * which is the part of the fix that does not depend on hooks at all.
+   */
+  private async submitPrompt(worktreeId: string, windowIndex: number, text: string, submit: boolean): Promise<void> {
+    // Closed — or its worktree deleted — while a launch waited for the agent:
+    // the paste would fail, or land in whatever has taken the index since.
+    if (!this.windows.get(worktreeId)?.has(windowIndex)) return;
+    const target = `${TmuxManager.sessionName(worktreeId)}:${windowIndex}`;
+    await this.tmux.paste(target, text);
+    if (!submit) return;
+    await this.sleep(AgentSessionManager.PASTE_SETTLE_MS);
+
+    if (!this.canConfirmSubmit(worktreeId, windowIndex)) {
+      await this.tmux.pressEnter(target);
+      return;
+    }
+    for (let attempt = 0; attempt <= AgentSessionManager.SUBMIT_RETRIES; attempt++) {
+      // Armed before the keypress, so an acknowledgement cannot slip in between.
+      const confirmed = this.waitForSubmit(worktreeId, windowIndex);
+      await this.tmux.pressEnter(target);
+      if (await confirmed) return;
+      // Killed while we waited: there is nothing left to press Enter in.
+      if (!this.windows.get(worktreeId)?.has(windowIndex)) return;
+    }
+    console.warn(`[foreman] no submit confirmation from ${target} after ${AgentSessionManager.SUBMIT_RETRIES + 1} Enters`);
+  }
+
+  private canConfirmSubmit(worktreeId: string, windowIndex: number): boolean {
+    const meta = this.windows.get(worktreeId)?.get(windowIndex);
+    return meta?.kind === 'agent'
+      && meta.hookSeen === true
+      && meta.provider !== undefined
+      && AgentSessionManager.SUBMIT_ACK_PROVIDERS.has(meta.provider)
+      && (meta.state === 'waiting' || meta.state === 'idle');
+  }
+
+  /**
+   * True once the window reports it took a prompt: 'active' (UserPromptSubmit,
+   * or a tool already running), 'permission' (it is working and asking), or
+   * 'terminated' (gone — stop pressing). False after SUBMIT_ACK_TIMEOUT_MS.
+   */
+  private waitForSubmit(worktreeId: string, windowIndex: number): Promise<boolean> {
+    const key = `${worktreeId}:${windowIndex}`;
+    const waiters = this.submitWaiters.get(key) ?? new Set();
+    this.submitWaiters.set(key, waiters);
+    let waiter!: (state: AgentSessionState) => void;
+    const seen = new Promise<boolean>((resolve) => {
+      waiter = (state) => {
+        if (state === 'active' || state === 'permission' || state === 'terminated') resolve(true);
+      };
+      waiters.add(waiter);
+    });
+    const capped = this.sleep(AgentSessionManager.SUBMIT_ACK_TIMEOUT_MS).then(() => false);
+    return Promise.race([seen, capped]).finally(() => {
+      waiters.delete(waiter);
+      if (waiters.size === 0) this.submitWaiters.delete(key);
+    });
+  }
+
+  /**
+   * Whether a window's agent is still running, from what tmux and ps say now.
+   *
+   * Launched agents run inside `<shell> -c "…agent…; exec $SHELL"`, and the
+   * pane's process IS that wrapper for exactly as long as the agent runs:
+   * when the agent exits — /exit, a crash, SIGKILL — the wrapper execs the
+   * interactive shell, and the same pid's command line becomes a bare shell.
+   * That is the signal used here rather than "the pane has a child", which a
+   * dead window satisfies too: an interactive zsh keeps helpers such as
+   * powerlevel10k's gitstatusd as children, and pasting into that shell is
+   * the very thing this exists to prevent.
+   *
+   * A non-shell foreground command is enough on its own — it is how an agent
+   * the user started by hand in a shell window looks. 'unknown' when tmux or
+   * ps cannot say; callers must not read it as either answer.
+   */
+  private async agentLiveness(window: TmuxWindow | undefined): Promise<'alive' | 'dead' | 'unknown'> {
+    if (!window) return 'unknown';
+    const command = (window.command ?? '').replace(/^-/, '');
+    if (command && !SHELL_COMMANDS.has(command)) return 'alive';
+    if (!command || window.pid === undefined) return 'unknown';
+    let args: string;
+    try {
+      args = await this.tmux.processCommandLine(window.pid);
+    } catch {
+      return 'unknown';
+    }
+    return /(^|\s)-c(\s|$)/.test(args) ? 'alive' : 'dead';
+  }
+
+  /** Record agents found dead; returns whether anything changed. Callers persist and fire. */
+  private markTerminated(worktreeId: string, windowIndex: number): boolean {
+    const meta = this.windows.get(worktreeId)?.get(windowIndex);
+    if (meta?.kind !== 'agent' || meta.state === 'terminated') return false;
+    this.windows.get(worktreeId)!.set(windowIndex, { ...meta, state: 'terminated' });
+    console.log(`[foreman] agent gone id=${worktreeId} window=${windowIndex}`);
+    return true;
+  }
+
+  /**
    * Paste a prompt into a worktree's live agent window and bring it to the front.
-   * Picks a window that is ready for input (waiting/idle/permission) when one
-   * exists, else the first agent window. Returns false if the worktree has no
-   * agent window at all — the caller then decides to launch a fresh agent.
+   *
+   * Picks, in order, an agent at its prompt, one asking for permission, then
+   * a busy one — but only one that is actually running. This used to fall
+   * back to the first agent window whatever it held, and a window whose agent
+   * has exited holds the shell the launch line execs afterwards: the prompt
+   * was pasted into zsh and submitted, and review prompts quote code in
+   * backticks, which zsh runs as command substitution.
+   *
+   * Returns false when no agent is running — the caller then launches a
+   * fresh one. Windows found dead on the way are marked terminated.
    */
   async sendPromptToAgent(worktree: Worktree, prompt: string): Promise<boolean> {
     const map = this.windows.get(worktree.id);
     if (!map) return false;
-    const agents = [...map.entries()].filter(([, m]) => m.kind === 'agent');
-    if (agents.length === 0) return false;
-
-    const ready = agents.find(([, m]) => m.state === 'waiting' || m.state === 'idle' || m.state === 'permission');
-    const [windowIndex] = ready ?? agents[0];
+    const rank = (s: AgentSessionState) => (s === 'waiting' || s === 'idle' ? 0 : s === 'permission' ? 1 : 2);
+    const candidates = [...map.entries()]
+      .filter(([, m]) => m.kind === 'agent' && m.state !== 'terminated')
+      .sort(([, a], [, b]) => rank(a.state) - rank(b.state));
+    if (candidates.length === 0) return false;
 
     const sessionName = TmuxManager.sessionName(worktree.id);
-    await this.tmux.selectWindow(sessionName, windowIndex);
-    await this.tmux.paste(`${sessionName}:${windowIndex}`, prompt);
+    const tmuxWindows = await this.tmux.listWindows(sessionName).catch((): TmuxWindow[] => []);
+    let windowIndex: number | undefined;
+    let died = false;
+    for (const [index] of candidates) {
+      const liveness = await this.agentLiveness(tmuxWindows.find((w) => w.index === index));
+      if (liveness === 'alive') { windowIndex = index; break; }
+      if (liveness === 'dead') died = this.markTerminated(worktree.id, index) || died;
+    }
+    if (died) {
+      this.persistState(worktree.id);
+      this.stateChangeEmitter.fire({ worktreeId: worktree.id, state: this.aggregateState(worktree.id) });
+      this.terminalsChangeEmitter.fire();
+    }
+    if (windowIndex === undefined) return false;
 
+    await this.tmux.selectWindow(sessionName, windowIndex);
+    // Shown before the submit, which may now wait seconds for the agent to
+    // confirm it: the user watches the prompt go in rather than wait for it.
     const viewer = await this.getOrCreateViewer(worktree).catch(() => undefined);
     viewer?.show();
+    await this.submitPrompt(worktree.id, windowIndex, prompt, true);
     return true;
   }
 
@@ -548,7 +767,7 @@ export class AgentSessionManager {
 
   /** Paste text (e.g. a screenshot path) into the worktree's active pane, unsent. */
   async pasteToActiveWindow(worktreeId: string, text: string): Promise<void> {
-    await this.tmux.paste(TmuxManager.sessionName(worktreeId), text, false);
+    await this.tmux.paste(TmuxManager.sessionName(worktreeId), text);
   }
 
   getState(worktreeId: string): AgentSessionState {
@@ -571,6 +790,7 @@ export class AgentSessionManager {
       // renders with a neutral mark rather than guessing.
       map.set(windowIndex, meta.kind === 'agent' ? { ...meta, state, hookSeen: true } : { ...meta, kind: 'agent', state, hookSeen: true });
       this.readyWaiters.get(`${workspaceId}:${windowIndex}`)?.();
+      for (const waiter of this.submitWaiters.get(`${workspaceId}:${windowIndex}`) ?? []) waiter(state);
     } else {
       // Agents launched before FOREMAN_WINDOW_INDEX existed: no way to know the
       // source window — apply to all agent windows (pre-per-session behavior).
@@ -579,6 +799,9 @@ export class AgentSessionManager {
       }
       for (const [key, release] of this.readyWaiters) {
         if (key.startsWith(`${workspaceId}:`)) release();
+      }
+      for (const [key, waiters] of this.submitWaiters) {
+        if (key.startsWith(`${workspaceId}:`)) for (const waiter of waiters) waiter(state);
       }
     }
     this.persistState(workspaceId);
@@ -653,9 +876,15 @@ export class AgentSessionManager {
     this.terminalsChangeEmitter.fire();
   }
 
+  /**
+   * Agents that are, as far as we know, still running. A terminated window
+   * stays on the card until it is closed, but it is not an agent anyone can
+   * talk to — the review panel offers "paste into the live session" on this
+   * count, and offering it for a dead window sent the prompt to its shell.
+   */
   getAgentCount(worktreeId: string): number {
-    return [...(this.windows.get(worktreeId) ?? new Map()).values()]
-      .filter(w => w.kind === 'agent').length;
+    return [...(this.windows.get(worktreeId) ?? new Map<number, WindowMeta>()).values()]
+      .filter(w => w.kind === 'agent' && w.state !== 'terminated').length;
   }
 
   getShellCount(worktreeId: string): number {
@@ -689,6 +918,9 @@ export class AgentSessionManager {
     const sessionName = TmuxManager.sessionName(worktreeId);
     await this.tmux.killWindow(sessionName, windowIndex);
     this.windows.get(worktreeId)?.delete(windowIndex);
+    // A launch still waiting for this window's agent stops waiting now (and
+    // then finds the window gone) instead of sitting out its timeout.
+    this.readyWaiters.get(`${worktreeId}:${windowIndex}`)?.();
     this.forgetAlias(worktreeId, windowIndex);
     const order = this.orders.get(worktreeId);
     if (order?.includes(windowIndex)) {
@@ -727,6 +959,9 @@ export class AgentSessionManager {
     const sessionName = TmuxManager.sessionName(worktreeId);
     await this.tmux.killSession(sessionName);
     this.windows.delete(worktreeId);
+    for (const [key, release] of this.readyWaiters) {
+      if (key.startsWith(`${worktreeId}:`)) release();
+    }
     this.aliases.delete(worktreeId);
     this.persistAliases();
     this.viewers.get(worktreeId)?.dispose();
@@ -744,6 +979,27 @@ export class AgentSessionManager {
   /** Kept for extension.ts compat (setup/teardown scripts). No-op with tmux. */
   register(_worktreeId: string, _terminal: vscode.Terminal): void {}
 
+  /**
+   * The state an agent window comes back with after a reload.
+   *
+   * The persisted state is from before the reload, and the agent did not
+   * stop in between: its hooks went to the previous window's HookServer,
+   * which is gone, so whatever happened meanwhile — it finished, it died — was
+   * never heard. So the process is asked first: gone is "terminated", which
+   * it really is. Running, the persisted state is kept only where it cannot
+   * have gone stale on its own: "permission" waits for the user, who was not
+   * there to answer. "active" may well have finished since, and restoring it
+   * left the session "working" until the next hook, which an agent sitting at
+   * its prompt never sends; "waiting" is the recoverable guess, and any hook
+   * corrects it. A persisted "terminated" on a running agent is likewise
+   * stale (or left by a past liveness-detection bug), and gets "waiting".
+   */
+  private async restoredState(worktreeId: string, window: TmuxWindow): Promise<AgentSessionState> {
+    if ((await this.agentLiveness(window)) === 'dead') return 'terminated';
+    const persisted = this.persistedState(worktreeId, window.index);
+    return persisted === 'permission' || persisted === 'idle' ? persisted : 'waiting';
+  }
+
   /** On extension reload, scan tmux sessions to restore tracked windows. */
   async reconnect(worktrees: Worktree[]): Promise<void> {
     for (const wt of worktrees) {
@@ -752,30 +1008,28 @@ export class AgentSessionManager {
 
       const tmuxWindows = await this.tmux.listWindows(sessionName);
       const wm = this.windowMap(wt.id);
+      let restoredAgents = false;
+      // The session's own first window, which new-session creates and nobody
+      // asked for. It sits at tmux's base-index — 0 by default, but 1 under
+      // the common `set -g base-index 1`, where a hard-coded 0 used to let it
+      // through as a stray "shell" row on every reload.
+      const anchor = Math.min(...tmuxWindows.map((w) => w.index));
       for (const w of tmuxWindows) {
-        // Skip the default session window (index 0, named after the shell)
-        if (w.index === 0 && w.name !== 'shell' && !isAgentWindowName(w.name)) continue;
+        // Skip the default session window (the first one, named after the shell)
+        if (w.index === anchor && w.name !== 'shell' && !isAgentWindowName(w.name)) continue;
         const provider = providerForWindowName(w.name);
         const kind: 'agent' | 'shell' = provider ? 'agent' : 'shell';
         const title = kind === 'agent' ? this.cleanTitle(w.title, w.name) : this.commandTitle(w.command);
-        // Restore each window's own pre-reload state (e.g. "permission"),
-        // falling back to "waiting" when nothing was persisted for it.
-        //
-        // "terminated" is deliberately NOT restored. The window is still listed
-        // in tmux, so something is there; whether its agent process is alive is
-        // not knowable here, and "waiting" is the recoverable guess — any hook
-        // event corrects it, whereas a stale "terminated" is a dead end that
-        // paints a live agent as dead until you kill the window. (It also
-        // unpoisons state wrongly persisted by a past liveness-detection bug.)
-        const persisted = kind === 'agent' ? this.persistedState(wt.id, w.index) : undefined;
-        const restoredState = kind === 'agent'
-          ? (persisted && persisted !== 'terminated' ? persisted : 'waiting')
-          : 'idle';
+        const restoredState = kind === 'agent' ? await this.restoredState(wt.id, w) : 'idle';
         wm.set(w.index, { kind, provider, state: restoredState, name: w.name, title });
-        if (kind === 'agent') {
-          this.stateChangeEmitter.fire({ worktreeId: wt.id, state: restoredState });
-        }
+        if (kind === 'agent') restoredAgents = true;
       }
+      // One event per worktree, carrying the aggregate — what every other
+      // emitter sends. One per window, each with its own state, had the
+      // notifier read "permission" then "waiting" from the same worktree as a
+      // transition: it cleared a real permission badge, or announced an agent
+      // "finished" that had only been reloaded.
+      if (restoredAgents) this.stateChangeEmitter.fire({ worktreeId: wt.id, state: this.aggregateState(wt.id) });
     }
 
     // Claim any viewer terminals VSCode auto-restored after reload.
@@ -800,6 +1054,7 @@ export class AgentSessionManager {
     for (const timer of this.titleTimers.values()) clearTimeout(timer);
     this.titleTimers.clear();
     if (this.shellTimer) { clearInterval(this.shellTimer); this.shellTimer = undefined; }
+    this.closeTerminalSubscription.dispose();
     this.stateChangeEmitter.dispose();
     this.terminalsChangeEmitter.dispose();
   }
