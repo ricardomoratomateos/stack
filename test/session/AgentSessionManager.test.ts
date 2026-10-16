@@ -342,6 +342,10 @@ describe('attention message', () => {
     expect(sessionsOf(mgr)).toEqual(['plain']);
     mgr.noteHookEvent({ event: 'PermissionRequest', workspaceId: 'wt-1', windowIndex: 1, payload: { tool_name: 'Bash', tool_input: { command: '  ' } } });
     expect(sessionsOf(mgr)).toEqual(['plain']);
+    // A tool_input that is not an object (or no tool name) names nothing either.
+    mgr.noteHookEvent({ event: 'PermissionRequest', workspaceId: 'wt-1', windowIndex: 1, payload: { tool_name: 'Bash', tool_input: 'rm -rf /' } });
+    mgr.noteHookEvent({ event: 'PermissionRequest', workspaceId: 'wt-1', windowIndex: 1, payload: { tool_input: { command: 'ls' } } });
+    expect(sessionsOf(mgr)).toEqual(['plain']);
   });
 
   it('does not let a notification\'s prose replace the command a request named', () => {
