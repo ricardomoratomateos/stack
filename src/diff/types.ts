@@ -10,6 +10,8 @@ export type SendDestination = 'live' | 'new' | 'clipboard';
 export interface DiffComment {
   /** File path as it appears in the diff (new path, or old path for deletions). */
   file: string;
+  /** Where the file was before, when this diff renames it (old-side line numbers refer to that path). */
+  renamedFrom?: string;
   /** Which side of a side-by-side row the comment is anchored to. */
   side: 'old' | 'new';
   /** 1-based line number on that side, when known. */

@@ -60,7 +60,7 @@ export function DiffApp() {
   const nonce = useRef(1);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const cursor = useRef<Cursor | null>(null);
-  const hunkAt = useRef<{ pos: number; block: number } | null>(null);
+  const painted = useRef(false);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const filtered = useMemo(() => filterReview(review, query), [review, query]);
@@ -177,10 +177,7 @@ export function DiffApp() {
         const mid = (lo + hi + 1) >> 1;
         if ((els[mid] as HTMLElement).offsetTop <= y) lo = mid; else hi = mid - 1;
       }
-      setActivePos((cur) => {
-        if (cur !== lo && hunkAt.current && hunkAt.current.pos !== lo) hunkAt.current = null;
-        return cur === lo ? cur : lo;
-      });
+      setActivePos(lo);
     };
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(measure); };
     sc.addEventListener('scroll', onScroll, { passive: true });
@@ -200,12 +197,15 @@ export function DiffApp() {
     if (!el || !scroller.current) return;
     scroller.current.scrollTo({ top: el.offsetTop - 1 });
     setActivePos(p);
-    hunkAt.current = null;
   }, []);
 
   const paintCursor = useCallback((c: Cursor | null, visible: boolean) => {
-    scroller.current?.querySelectorAll('.rv-cursor').forEach((n) => n.classList.remove('rv-cursor'));
+    if (painted.current) {
+      scroller.current?.querySelectorAll('.rv-cursor').forEach((n) => n.classList.remove('rv-cursor'));
+      painted.current = false;
+    }
     if (!c || !visible) return;
+    painted.current = true;
     const a = anchorOf(c.line, c.side);
     if (!a) return;
     document.getElementById(`rv-f-${c.file.index}`)
@@ -224,7 +224,7 @@ export function DiffApp() {
       if (existing) {
         return base.map((c) => (c === existing && !c.editing ? { ...c, editing: true, prev: c.body } : c));
       }
-      return [...base, { id: nextId.current++, file: file.path, side: a.side, line: a.line, code: line.text, body: '', editing: true }];
+      return [...base, { id: nextId.current++, file: file.path, ...(file.status === 'R' && file.oldPath !== file.path ? { renamedFrom: file.oldPath } : {}), side: a.side, line: a.line, code: line.text, body: '', editing: true }];
     });
   }, []);
 
@@ -265,11 +265,32 @@ export function DiffApp() {
     landed: (file, line, side) => { cursor.current = { file, line, side }; paintCursor(cursor.current, true); },
   }), [actions, startComment, paintCursor]);
 
+  /** The hunk the viewport is "in": the last header at or above the top of the file in view, or -1 above the first. */
+  const currentHunk = useCallback((pos: number): { block: number; atTop: boolean } => {
+    const sc = scroller.current;
+    const el = stream.current?.children[pos];
+    if (!sc || !el) return { block: -1, atTop: false };
+    // Headers land 44px under the scroller's top (below the sticky file header) when n/p scroll to them.
+    const line = sc.getBoundingClientRect().top + 44;
+    let block = -1;
+    let atTop = false;
+    const seen = new Set<string>();
+    el.querySelectorAll<HTMLElement>('[data-h]').forEach((h) => {
+      const id = h.dataset.h ?? '';
+      if (seen.has(id)) return; // split view has one per pane
+      seen.add(id);
+      const top = h.getBoundingClientRect().top;
+      if (top <= line + 8) { block = Number(id); atTop = Math.abs(top - line) <= 8; }
+    });
+    return { block, atTop };
+  }, []);
+
   const moveHunk = useCallback((dir: 1 | -1) => {
     const { shown: list, isOpen: open, activePos: pos } = latest.current;
-    const from = hunkAt.current ?? { pos, block: dir === 1 ? -1 : list[pos]?.blocks.length ?? 0 };
-    let p = from.pos;
-    let b = from.block + dir;
+    const cur = currentHunk(pos);
+    // Going back from the middle of a hunk goes to its start; from its start, to the one before.
+    let b = dir === 1 ? cur.block + 1 : cur.atTop ? cur.block - 1 : Math.max(cur.block, 0) - (cur.block < 0 ? 1 : 0);
+    let p = pos;
     for (;;) {
       const f = list[p];
       if (!f) return;
@@ -279,10 +300,9 @@ export function DiffApp() {
       if (!nf) return;
       b = dir === 1 ? 0 : nf.blocks.length - 1;
     }
-    hunkAt.current = { pos: p, block: b };
     setActivePos(p);
     setFocus({ fileIndex: list[p].index, block: b, nonce: nonce.current++ });
-  }, []);
+  }, [currentHunk]);
 
   const toggleDir = useCallback((id: string) => {
     setCollapsedDirs((s) => {
@@ -295,7 +315,7 @@ export function DiffApp() {
   const doSend = useCallback((destination: SendDestination) => {
     const payload: DiffComment[] = latest.current.comments
       .filter((c) => c.body.trim().length > 0)
-      .map(({ file, side, line, code, body }) => ({ file, side, line, code, body }));
+      .map(({ file, renamedFrom, side, line, code, body }) => ({ file, renamedFrom, side, line, code, body }));
     send({ type: 'send', destination, comments: payload });
   }, []);
 

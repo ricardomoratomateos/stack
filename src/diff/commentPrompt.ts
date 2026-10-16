@@ -11,11 +11,13 @@ const SIDE_OLD = 'line in the old file, before the change; it was removed or edi
 export function buildCommentPrompt(comments: DiffComment[]): string {
   if (comments.length === 0) return '';
 
+  const renamed = new Map<string, string>();
   const byFile = new Map<string, DiffComment[]>();
   for (const c of comments) {
     const list = byFile.get(c.file) ?? [];
     list.push(c);
     byFile.set(c.file, list);
+    if (c.renamedFrom) renamed.set(c.file, c.renamedFrom);
   }
 
   const sections: string[] = [];
@@ -28,7 +30,8 @@ export function buildCommentPrompt(comments: DiffComment[]): string {
       const codeLine = c.code ? `\n\`${c.code.trim()}\`` : '';
       return `- **${loc}**${codeLine}\n  → ${c.body.trim()}`;
     });
-    sections.push(`### ${file}\n${blocks.join('\n')}`);
+    const from = renamed.get(file);
+    sections.push(`### ${file}${from ? ` (renamed from ${from})` : ''}\n${blocks.join('\n')}`);
   }
 
   return [

@@ -27,6 +27,17 @@ describe('buildCommentPrompt', () => {
     expect(out).toContain('**a.ts:7 (line in the new file, after the change)**');
   });
 
+  it('says when a file was renamed, once per file', () => {
+    const out = buildCommentPrompt([
+      { file: 'new.ts', renamedFrom: 'old.ts', side: 'new', line: 1, body: 'a' },
+      { file: 'new.ts', renamedFrom: 'old.ts', side: 'old', line: 2, body: 'b' },
+      { file: 'plain.ts', side: 'new', line: 1, body: 'c' },
+    ]);
+    expect(out).toContain('### new.ts (renamed from old.ts)');
+    expect(out.match(/renamed from/g)).toHaveLength(1);
+    expect(out).toContain('### plain.ts\n');
+  });
+
   it('groups by file and orders comments by line', () => {
     const comments: DiffComment[] = [
       { file: 'a.ts', side: 'new', line: 20, body: 'second' },
