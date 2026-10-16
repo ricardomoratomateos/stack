@@ -42,6 +42,9 @@ body.vscode-light .fm { --fm-needs-text: color-mix(in srgb, var(--fm-needs) 70%,
 .fm-btn:hover:not(:disabled) { background: var(--fm-hover); }
 .fm-btn:disabled { opacity: .45; }
 .fm-btn-icon { width: 28px; padding: 0; }
+.fm-btn-danger:hover:not(:disabled) { color: var(--vscode-errorForeground, #f14c4c); }
+/* Fills what the row leaves; ActionBar measures it to decide what overflows. */
+.fm-actionbar { display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0; }
 .fm-btn-primary { background: var(--fm-primary-bg); color: var(--fm-primary-ink); border-color: transparent; font-weight: 600; }
 .fm-btn-primary:hover:not(:disabled) { background: var(--fm-primary-bg); filter: brightness(1.1); }
 .fm-btn-needs { background: var(--fm-needs); color: var(--fm-needs-ink, #1a1a1a); border-color: transparent; font-weight: 600; }

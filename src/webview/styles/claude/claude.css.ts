@@ -98,7 +98,7 @@ body.vscode-high-contrast .fm-claude, body.vscode-high-contrast-light .fm-claude
 .cl-indent { margin: 0 10px 8px var(--fm-indent); }
 
 .cl-expand { margin: 0 10px 10px var(--fm-indent); display: flex; flex-direction: column; gap: 8px; }
-.cl-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.cl-actions { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px; }
 .cl-actions .fm-split-main { padding: 0 10px; }
 
 .cl-foot {

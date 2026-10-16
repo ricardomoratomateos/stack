@@ -3,7 +3,7 @@ import { send } from '../../vscode';
 import { GROUP_LABEL, GROUP_ORDER, formatAge, type Described, type WorktreeGroup } from '../../derive';
 import { Details, DiffStat } from '../../components/Details';
 import { LaunchSplit } from '../../components/LaunchSplit';
-import { MoreMenu } from '../../components/MoreMenu';
+import { ActionBar } from '../../components/ActionBar';
 import { ProviderMark, visualFor } from '../../components/providers';
 import { AskBox, ForgetActions, ReviewActions } from '../../components/RowParts';
 import { SessionList } from '../../components/SessionList';
@@ -154,13 +154,7 @@ function Row({ d, selected, now, state, select, drag }: {
               installedProviders={state.installedProviders}
               tone="solid"
             />
-            <button type="button" className="fm-btn fm-btn-icon" aria-label="Open terminal" title="Open terminal" onClick={() => send({ type: 'openTerminal', worktreeId: wt.id })}>
-              <i className="codicon codicon-terminal" aria-hidden="true" />
-            </button>
-            <button type="button" className="fm-btn fm-btn-icon" aria-label="Review diff" title="Review diff & comment" onClick={() => send({ type: 'openDiff', worktreeId: wt.id })}>
-              <i className="codicon codicon-git-compare" aria-hidden="true" />
-            </button>
-            <MoreMenu wt={wt} dockerEnabled={state.dockerEnabled} />
+            <ActionBar wt={wt} dockerEnabled={state.dockerEnabled} />
           </div>
         </div>
       )}

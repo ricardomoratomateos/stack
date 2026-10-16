@@ -150,7 +150,7 @@ body.vscode-high-contrast .fm-aside, body.vscode-high-contrast-light .fm-aside {
 .as-expand { margin: 0 10px 10px var(--fm-indent); display: flex; flex-direction: column; gap: 10px; }
 .as-expand .fm-det { border-top: 1px solid var(--fm-border); padding-top: 8px; }
 .as-expand .fm-sessions { padding-top: 4px; }
-.as-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.as-actions { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px; }
 .as-actions .fm-split-main { padding: 0 10px; }
 /* Aside's session markers are small squares too. */
 .fm-aside .fm-sess-dot { border-radius: 2px; }

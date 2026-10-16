@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { send } from '../vscode';
 import type { Described } from '../derive';
 import type { DockerContainer } from '../types';
-import { stackRunning } from './MoreMenu';
+import { stackRunning } from './ActionBar';
 
 /** The gist of a container for one line: its service (or a trimmed name) and what it is doing. */
 function containerLine(c: DockerContainer): { name: string; status: string; tone: 'ok' | 'bad' | 'muted' } {
