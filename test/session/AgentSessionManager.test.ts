@@ -1013,6 +1013,16 @@ describe('sendPromptToAgent', () => {
     expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:4`, 'x');
   });
 
+  it('shows the viewer before submitting, which can take a few seconds of confirmation', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    live(stub, 3);
+    await mgr.sendPromptToAgent(wt, 'x');
+    const shown = window.createTerminal.mock.invocationCallOrder[0];
+    const pasted = (stub.paste as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    expect(shown).toBeLessThan(pasted);
+  });
+
   it('prefers an agent at its prompt over one asking for permission', async () => {
     const { mgr, stub } = create();
     seed(mgr, 'wt-1', [

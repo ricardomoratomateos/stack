@@ -726,10 +726,11 @@ export class AgentSessionManager {
     if (windowIndex === undefined) return false;
 
     await this.tmux.selectWindow(sessionName, windowIndex);
-    await this.submitPrompt(worktree.id, windowIndex, prompt, true);
-
+    // Shown before the submit, which may now wait seconds for the agent to
+    // confirm it: the user watches the prompt go in rather than wait for it.
     const viewer = await this.getOrCreateViewer(worktree).catch(() => undefined);
     viewer?.show();
+    await this.submitPrompt(worktree.id, windowIndex, prompt, true);
     return true;
   }
 
