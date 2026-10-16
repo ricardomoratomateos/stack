@@ -846,6 +846,18 @@ describe('ensureFreePorts', () => {
     expect(result.worktree.debugPort).toBe(9903);
   });
 
+  it('passes the worktree\'s own ports to the probe, so its running stack does not count as a squatter', async () => {
+    const wt = makeWorktree({ debugPort: 9901 });
+    const { stub, firstBusyPort, allocate } = makeReallocatingAllocatorStub({});
+    const mgr = new WorktreeManager(makeStoreStub([wt]), stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
+    const own = new Set([9901, 8083]);
+
+    await mgr.ensureFreePorts(wt, own);
+
+    expect(firstBusyPort).toHaveBeenCalledWith(9901, own);
+    expect(allocate).not.toHaveBeenCalled();
+  });
+
   it('persists the new port so the move survives a reload', async () => {
     const wt = makeWorktree({ debugPort: 9901 });
     const store = makeStoreStub([wt]);

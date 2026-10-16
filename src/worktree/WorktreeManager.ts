@@ -240,10 +240,15 @@ export class WorktreeManager {
    * Regenerates launch.json so the debug listener follows the new port.
    * Returns the worktree unchanged when its block is still free.
    */
-  async ensureFreePorts(worktree: Worktree): Promise<{ worktree: Worktree; movedFrom?: number }> {
+  async ensureFreePorts(
+    worktree: Worktree,
+    ownPorts: ReadonlySet<number> = new Set(),
+  ): Promise<{ worktree: Worktree; movedFrom?: number }> {
     if (worktree.isMain || worktree.debugPort <= 0) return { worktree };
 
-    const busyPort = await this.portAllocator.firstBusyPort(worktree.debugPort);
+    // Ports the worktree's own stack already holds are busy by definition;
+    // counting them moved a running stack to a fresh slot on every ▶.
+    const busyPort = await this.portAllocator.firstBusyPort(worktree.debugPort, ownPorts);
     if (busyPort === undefined) return { worktree };
 
     // allocate() skips ports in the registry, and this worktree is still in it,

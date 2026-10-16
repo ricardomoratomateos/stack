@@ -1,17 +1,63 @@
+import { createHash } from 'node:crypto';
 import * as path from 'node:path';
 import type { ForemanConfig, Worktree } from '../types';
-import { isEnvName, shellQuote } from '../shell/shellQuote';
+import { isEnvName } from '../shell/shellQuote';
 
 /**
- * The docker compose project name for a worktree = its directory basename,
- * matching what `docker compose` uses by default when run in that directory
- * (and what the main repo's own stack already runs under). Passed explicitly as
- * `-p` to every command so the compose template living in `.foreman/` doesn't
- * make every worktree collide under the "foreman" project, and so `docker
- * compose ps` finds the same containers Foreman started.
+ * Compose's own project-name normalisation (compose-go `NormalizeProjectName`):
+ * lowercase, drop every character outside [a-z0-9_-], then strip leading `_`
+ * and `-` — a name may not start with either. Mirrored exactly so the name
+ * Foreman computes for the main checkout is the one a plain `docker compose up`
+ * in it really runs under.
+ */
+export function normalizeProjectName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9_-]/g, '').replace(/^[_-]+/, '');
+}
+
+/** Six hex chars of the repo root: stable across reloads, short enough to read. */
+function repoTag(repoRoot: string): string {
+  return createHash('sha1').update(path.resolve(repoRoot)).digest('hex').slice(0, 6);
+}
+
+/**
+ * The docker compose project name for a worktree: its directory basename plus
+ * a short hash of the repository it belongs to, e.g. `feat-login-3fa2c1`.
+ *
+ * The basename alone was not unique: two repositories with a worktree for the
+ * same branch shared one project, so `down` in one silently removed the other's
+ * containers. Passed explicitly as `-p` to every command (and exported as
+ * COMPOSE_PROJECT_NAME to scripts) so the compose template living in
+ * `.foreman/` doesn't make every worktree collide under the "foreman" project.
+ *
+ * The main checkout keeps compose's default — its directory name — because
+ * Foreman runs its stack plain, exactly as the user would by hand.
  */
 export function composeProject(worktree: Worktree): string {
-  return path.basename(worktree.path).toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  const base = normalizeProjectName(path.basename(worktree.path));
+  if (worktree.isMain) return base;
+  return `${base || 'worktree'}-${repoTag(worktree.repoRoot)}`;
+}
+
+/**
+ * Names this worktree's stack may still be running under from before the
+ * project name carried the repo hash: Foreman's old sanitisation (invalid
+ * characters became `-`) and compose's own default for a plain `docker compose
+ * up` in the worktree. Looked up so a stack started by an older version is
+ * still shown, still stopped, and never orphaned holding its ports.
+ */
+export function legacyComposeProjects(worktree: Worktree): string[] {
+  if (worktree.isMain) return [];
+  const basename = path.basename(worktree.path);
+  const names = [
+    basename.toLowerCase().replace(/[^a-z0-9_-]/g, '-'),
+    normalizeProjectName(basename),
+  ];
+  return [...new Set(names)].filter((n) => n && n !== composeProject(worktree));
+}
+
+/** Docker orchestration is on when at least one port is configured — the same gate as the card's button. */
+export function dockerConfigured(config: ForemanConfig): boolean {
+  return config.docker.ports.length > 0;
 }
 
 /**
@@ -57,36 +103,35 @@ export function portBlockFor(debugPort: number, config: ForemanConfig): number[]
   return [...block];
 }
 
-/**
- * `docker compose` args for a worktree, given resolved absolute compose paths.
- * Worktrees run `composePath` (a self-contained per-worktree stack) plus the
- * optional `overridePath`. The main repo always uses its plain stack.
- * Absolute paths let the compose template live in the main repo's `.foreman/`
- * (shared across worktrees) while the command runs from the worktree dir.
- */
-export function buildComposeArgs(
-  worktree: Worktree,
-  composePath: string,
-  overridePath: string | undefined,
-  subcommand: string,
-): string {
-  if (worktree.isMain) return subcommand;
-  const files = overridePath ? `-f ${quotePath(composePath)} -f ${quotePath(overridePath)}` : `-f ${quotePath(composePath)}`;
-  return `-p "${composeProject(worktree)}" ${files} ${subcommand}`;
+/** Compose files resolved for one worktree; `override` absent when not configured or not found. */
+export interface ComposeFiles {
+  base: string;
+  override?: string;
 }
 
 /**
- * A compose path for a command line that goes through a shell (`exec`, or a
- * terminal's sendText).
+ * `docker compose` argv for a worktree, given resolved absolute compose paths.
+ * Worktrees run the base file plus the optional override under their own
+ * project; the main repo always uses its plain stack.
  *
- * The path sits under the worktree, whose directory is named after the branch,
- * and a branch may legally contain `$(…)` — which double quotes do not stop.
- * Double quotes are kept when they are safe (nothing in the path that is
- * special inside them), so the command the user watches in the terminal reads
- * as it always has; anything else is single-quoted.
+ * `--project-directory` is the worktree, always. Without it compose takes the
+ * directory of the FIRST file as the project dir — and when the compose file
+ * only exists in the main checkout that is main, so `build: .`, `./` volumes
+ * and env_file in a worktree's stack all quietly resolved against main's code.
+ *
+ * `files` is left out only for `down` when the compose file is gone: compose
+ * can still remove a stack by project name alone. `project` overrides the name
+ * only to address a stack still running under a legacy one.
  */
-function quotePath(p: string): string {
-  return /[$`"\\!]/.test(p) ? shellQuote(p) : `"${p}"`;
+export function composeArgv(
+  worktree: Worktree,
+  files: ComposeFiles | undefined,
+  subcommand: string[],
+  project = composeProject(worktree),
+): string[] {
+  if (worktree.isMain) return ['compose', ...subcommand];
+  const fileArgs = files ? ['-f', files.base, ...(files.override ? ['-f', files.override] : [])] : [];
+  return ['compose', '-p', project, '--project-directory', worktree.path, ...fileArgs, ...subcommand];
 }
 
 /** Env vars (string values) to inject when running compose for a worktree. */
@@ -102,4 +147,27 @@ export function dockerEnv(worktree: Worktree, config: ForemanConfig): Record<str
     out[name] = String(port);
   }
   return out;
+}
+
+/**
+ * What a setup/teardown script needs to run compose by hand and land on the
+ * SAME stack Foreman monitors and stops.
+ *
+ * Without COMPOSE_PROJECT_NAME a plain `docker compose up` in the script ran
+ * under compose's default name: Foreman never saw it, `down` never removed it,
+ * and its containers kept holding the ports. COMPOSE_FILE uses the platform's
+ * path separator, which is what compose splits it on by default.
+ */
+export function composeScriptEnv(
+  worktree: Worktree,
+  config: ForemanConfig,
+  files: ComposeFiles,
+  project = composeProject(worktree),
+): Record<string, string> {
+  if (worktree.isMain || !dockerConfigured(config)) return {};
+  return {
+    COMPOSE_PROJECT_NAME: project,
+    COMPOSE_FILE: [files.base, ...(files.override ? [files.override] : [])].join(path.delimiter),
+    ...dockerEnv(worktree, config),
+  };
 }

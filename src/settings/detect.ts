@@ -12,6 +12,14 @@ const COMPOSE_FILE = /^(docker-)?compose(\..+)?\.ya?ml$/i;
 // `${HTTP_PORT}`, `${HTTP_PORT:-8080}`, `${HTTP_PORT-8080}` and bare `$HTTP_PORT`.
 const ENV_VAR = /\$\{?([A-Z][A-Z0-9_]*)(?:[:-][^}\s]*)?\}?/g;
 
+/**
+ * Folders compose files commonly live in instead of the root. Only these are
+ * descended into — never the whole tree, which in a node repo means
+ * node_modules — and only two levels deep (`deploy/local/compose.yml`).
+ */
+const COMPOSE_DIRS = new Set(['docker', '.docker', 'deploy', 'deployment', 'infra', 'ops', 'compose', '.devcontainer', '.foreman']);
+const MAX_DEPTH = 2;
+
 const SETUP_CANDIDATES = ['.foreman/setup.sh', 'scripts/setup.sh', 'setup.sh'];
 const TEARDOWN_CANDIDATES = ['.foreman/teardown.sh', 'scripts/teardown.sh', 'teardown.sh'];
 
@@ -21,14 +29,17 @@ const TEARDOWN_CANDIDATES = ['.foreman/teardown.sh', 'scripts/teardown.sh', 'tea
  * of a blank form and a README. Pure: every lookup goes through `io`.
  */
 export function detect(repoRoot: string, io: DetectIo): Detection {
-  let entries: string[] = [];
-  try { entries = io.readdir(repoRoot); } catch { entries = []; }
-
-  // Base files first: `docker-compose.yml` is the compose file, and
-  // `docker-compose.worktree.yml` the override the settings expect on top.
-  const composeFiles = entries
-    .filter((f) => COMPOSE_FILE.test(f))
-    .sort((a, b) => Number(hasQualifier(a)) - Number(hasQualifier(b)) || a.localeCompare(b));
+  // Shallowest first, then base files before overrides: `docker-compose.yml`
+  // is the compose file, and `docker-compose.worktree.yml` the override the
+  // settings expect on top.
+  const composeFiles = findComposeFiles(repoRoot, io)
+    .sort((a, b) => depth(a) - depth(b) || Number(hasQualifier(a)) - Number(hasQualifier(b)) || a.localeCompare(b));
+  const composeBase = composeFiles.find((f) => !hasQualifier(f)) ?? composeFiles[0];
+  // Only a file that says what it is for is offered as the override: taking
+  // "the second compose file" picked compose.prod.yaml as often as not.
+  const composeOverride = composeFiles.find(
+    (f) => !!composeBase && f !== composeBase && path.dirname(f) === path.dirname(composeBase) && /worktree|override/i.test(path.basename(f)),
+  );
 
   const portVars = new Set<string>();
   for (const file of composeFiles) {
@@ -54,6 +65,8 @@ export function detect(repoRoot: string, io: DetectIo): Detection {
 
   return {
     composeFiles,
+    composeBase,
+    composeOverride,
     portVars: [...portVars],
     stack,
     setupScript: SETUP_CANDIDATES.find(has),
@@ -63,5 +76,26 @@ export function detect(repoRoot: string, io: DetectIo): Detection {
 
 /** `docker-compose.worktree.yml` has one; `docker-compose.yml` does not. */
 function hasQualifier(file: string): boolean {
-  return /^(docker-)?compose\..+\.ya?ml$/i.test(file);
+  return /^(docker-)?compose\..+\.ya?ml$/i.test(path.basename(file));
+}
+
+function depth(rel: string): number {
+  return rel.split('/').length;
+}
+
+/** Compose files at the root and in the usual folders, as repo-relative paths. */
+function findComposeFiles(repoRoot: string, io: DetectIo): string[] {
+  const found: string[] = [];
+  const walk = (rel: string, level: number) => {
+    let entries: string[];
+    try { entries = io.readdir(rel ? path.join(repoRoot, rel) : repoRoot); } catch { return; }
+    for (const entry of entries) {
+      const child = rel ? `${rel}/${entry}` : entry;
+      if (COMPOSE_FILE.test(entry)) found.push(child);
+      // A file "descended into" just fails readdir and is skipped.
+      else if (level < MAX_DEPTH && (level > 0 || COMPOSE_DIRS.has(entry))) walk(child, level + 1);
+    }
+  };
+  walk('', 0);
+  return found;
 }
