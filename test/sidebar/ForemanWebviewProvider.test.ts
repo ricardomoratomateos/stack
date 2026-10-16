@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ForemanWebviewProvider } from '../../src/sidebar/ForemanWebviewProvider';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { ForemanWebviewProvider, PUSH_COALESCE_MS } from '../../src/sidebar/ForemanWebviewProvider';
 import { Uri, window, resetVscodeMock } from '../__mocks__/vscode';
 import type { WorktreeApplicationService } from '../../src/application/WorktreeApplicationService';
 import type { AgentSessionManager } from '../../src/session/AgentSessionManager';
@@ -8,13 +8,18 @@ import type { ForemanState, WebMessage } from '../../src/webview/types';
 
 // ── harness ──────────────────────────────────────────────────────────────────
 
+/** A subscription whose dispose is observable. */
+function disposable() {
+  return { dispose: vi.fn() };
+}
+
 function makeWebviewView(visible = true) {
   const webview = {
     options: undefined as unknown,
     html: '',
     cspSource: 'csp-src',
-    onDidReceiveMessage: vi.fn(),
-    postMessage: vi.fn(),
+    onDidReceiveMessage: vi.fn(() => disposable()),
+    postMessage: vi.fn(async (_msg: unknown) => true),
     asWebviewUri: vi.fn((u: Uri) => u),
   };
   return {
@@ -23,7 +28,8 @@ function makeWebviewView(visible = true) {
     badge: undefined as { value: number; tooltip: string } | undefined,
     description: undefined as string | undefined,
     show: vi.fn(),
-    onDidChangeVisibility: vi.fn(),
+    onDidChangeVisibility: vi.fn(() => disposable()),
+    onDidDispose: vi.fn(() => disposable()),
   };
 }
 
@@ -45,10 +51,10 @@ function makeHarness() {
   const gitListeners: Array<() => void> = [];
 
   const agentManager = {
-    onStateChange: vi.fn((cb: () => void) => { stateListeners.push(cb); return { dispose: vi.fn() }; }),
-    onTerminalsChange: vi.fn((cb: () => void) => { terminalsListeners.push(cb); return { dispose: vi.fn() }; }),
+    onStateChange: vi.fn((cb: () => void) => { stateListeners.push(cb); return disposable(); }),
+    onTerminalsChange: vi.fn((cb: () => void) => { terminalsListeners.push(cb); return disposable(); }),
   };
-  const gitWatcher = { onChange: vi.fn((cb: () => void) => { gitListeners.push(cb); }) };
+  const gitWatcher = { onChange: vi.fn((cb: () => void) => { gitListeners.push(cb); return disposable(); }) };
   const service = {
     handleMessage: vi.fn(async () => {}),
     buildState: vi.fn((): ForemanState => emptyState),
@@ -68,17 +74,28 @@ function makeHarness() {
 function resolve(h: ReturnType<typeof makeHarness>, visible = true) {
   const view = makeWebviewView(visible);
   h.provider.resolveWebviewView(view as never);
-  const onMessage = view.webview.onDidReceiveMessage.mock.calls[0][0] as (msg: WebMessage) => void;
-  const onVisibility = view.onDidChangeVisibility.mock.calls[0][0] as () => void;
-  return { view, onMessage, onVisibility };
+  const onMessage = (view.webview.onDidReceiveMessage.mock.calls[0] as unknown[])[0] as (msg: WebMessage) => void;
+  const onVisibility = (view.onDidChangeVisibility.mock.calls[0] as unknown[])[0] as () => void;
+  const onDispose = (view.onDidDispose.mock.calls[0] as unknown[])[0] as () => void;
+  return { view, onMessage, onVisibility, onDispose };
 }
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
+/** Lets the coalescing window close, so whatever was pushed goes out. */
+async function settle(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(PUSH_COALESCE_MS);
+}
+
 beforeEach(() => {
   resetVscodeMock();
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -108,36 +125,54 @@ describe('resolveWebviewView', () => {
     expect(html).toContain(`<script nonce="${nonce}"`);
   });
 
-  it('pushes the initial state when the view is visible', () => {
+  it('pushes the initial state when the view is visible', async () => {
     const h = makeHarness();
     const { view } = resolve(h);
+    await settle();
     expect(h.service.buildState).toHaveBeenCalled();
     expect(view.webview.postMessage).toHaveBeenCalledWith({ type: 'state', payload: emptyState });
   });
 
-  it('pushes again when the view becomes visible', () => {
+  it('pushes what changed while hidden when the view becomes visible', async () => {
     const h = makeHarness();
     const { view, onVisibility } = resolve(h);
+    await settle();
     view.webview.postMessage.mockClear();
+    h.service.buildState.mockReturnValue({ worktrees: [item('a', 'active')] });
     onVisibility();
+    await settle();
     expect(view.webview.postMessage).toHaveBeenCalledTimes(1);
   });
 
-  it('does not push when the view is hidden', () => {
+  it('does not push when the view is hidden', async () => {
     const h = makeHarness();
     const { view, onVisibility } = resolve(h, false);
+    await settle();
     expect(view.webview.postMessage).not.toHaveBeenCalled();
     onVisibility();
+    await settle();
     expect(view.webview.postMessage).not.toHaveBeenCalled();
   });
 
-  it('subscribes to claude state/terminal changes and git changes, pushing on each', () => {
+  it('drops a push that was pending when the view got hidden', async () => {
     const h = makeHarness();
     const { view } = resolve(h);
+    view.visible = false;
+    await settle();
+    expect(view.webview.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('subscribes to agent state/terminal changes and git changes, pushing on each', async () => {
+    const h = makeHarness();
+    const { view } = resolve(h);
+    await settle();
+    let n = 0;
+    h.service.buildState.mockImplementation(() => ({ worktrees: [], activeWorktreeId: String(n++) }));
     view.webview.postMessage.mockClear();
-    h.stateListeners[0]();
-    h.terminalsListeners[0]();
-    h.gitListeners[0]();
+    for (const fire of [h.stateListeners[0], h.terminalsListeners[0], h.gitListeners[0]]) {
+      fire();
+      await settle();
+    }
     expect(view.webview.postMessage).toHaveBeenCalledTimes(3);
   });
 
@@ -176,10 +211,169 @@ describe('setBadge', () => {
 });
 
 describe('push', () => {
-  it('is a no-op before the view is resolved', () => {
+  it('is a no-op before the view is resolved', async () => {
     const h = makeHarness();
     expect(() => h.provider.push()).not.toThrow();
+    await settle();
     expect(h.service.buildState).not.toHaveBeenCalled();
+  });
+
+  it('coalesces a burst of pushes into one state, built once', async () => {
+    const h = makeHarness();
+    const { view } = resolve(h);
+    for (let i = 0; i < 10; i++) h.stateListeners[0]();
+    await settle();
+    expect(h.service.buildState).toHaveBeenCalledOnce();
+    expect(view.webview.postMessage).toHaveBeenCalledOnce();
+  });
+
+  it('builds the state when the window closes, so it carries the latest change', async () => {
+    const h = makeHarness();
+    const { view } = resolve(h);
+    h.service.buildState.mockReturnValue({ worktrees: [item('late', 'active')] });
+    h.gitListeners[0]();
+    await settle();
+    expect(view.webview.postMessage).toHaveBeenCalledWith({
+      type: 'state', payload: { worktrees: [item('late', 'active')] },
+    });
+  });
+
+  it('does not re-send a state the webview already has', async () => {
+    const h = makeHarness();
+    const { view } = resolve(h);
+    await settle();
+    h.stateListeners[0]();
+    await settle();
+    h.gitListeners[0]();
+    await settle();
+    expect(h.service.buildState).toHaveBeenCalledTimes(3);
+    expect(view.webview.postMessage).toHaveBeenCalledOnce();
+  });
+
+  it('re-sends after the page says it is ready, even when nothing changed', async () => {
+    // The ready handshake exists because the first state can be lost while
+    // the bundle loads; deduplication must not swallow the answer to it.
+    const h = makeHarness();
+    h.service.handleMessage.mockImplementation(async () => { h.provider.push(); });
+    const { view, onMessage } = resolve(h);
+    await settle();
+    onMessage({ type: 'ready' });
+    await flush();
+    await settle();
+    expect(view.webview.postMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('re-sends a state the webview did not take', async () => {
+    const h = makeHarness();
+    const { view } = resolve(h);
+    view.webview.postMessage.mockResolvedValueOnce(false);
+    await settle();
+    h.stateListeners[0]();
+    await settle();
+    expect(view.webview.postMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('re-sends a state whose delivery failed', async () => {
+    const h = makeHarness();
+    const { view } = resolve(h);
+    view.webview.postMessage.mockRejectedValueOnce(new Error('disposed'));
+    await settle();
+    h.stateListeners[0]();
+    await settle();
+    expect(view.webview.postMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the dedup of a newer state when an older delivery reports late', async () => {
+    const h = makeHarness();
+    const { view } = resolve(h);
+    let answer!: (ok: boolean) => void;
+    view.webview.postMessage.mockImplementationOnce(() => new Promise<boolean>((r) => { answer = r; }));
+    await settle(); // first state in flight
+    h.service.buildState.mockReturnValue({ worktrees: [item('b', 'idle')] });
+    h.stateListeners[0]();
+    await settle(); // second state sent and delivered
+    answer(false); // the first one turns out to have been dropped
+    await flush();
+    h.stateListeners[0]();
+    await settle();
+    // The page holds the second state, which is what is current: nothing to send.
+    expect(view.webview.postMessage).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('subscriptions', () => {
+  function allSubscriptions(h: ReturnType<typeof makeHarness>, view: ReturnType<typeof makeWebviewView>) {
+    return [
+      ...view.webview.onDidReceiveMessage.mock.results,
+      ...view.onDidChangeVisibility.mock.results,
+      ...view.onDidDispose.mock.results,
+      ...h.agentManager.onStateChange.mock.results,
+      ...h.agentManager.onTerminalsChange.mock.results,
+      ...h.gitWatcher.onChange.mock.results,
+      ...window.onDidChangeActiveTerminal.mock.results,
+    ].map((r) => r.value as { dispose: ReturnType<typeof vi.fn> });
+  }
+
+  it('re-resolving disposes the previous view\'s subscriptions instead of stacking more', async () => {
+    const h = makeHarness();
+    const first = resolve(h);
+    const firstSubs = allSubscriptions(h, first.view);
+    expect(firstSubs).toHaveLength(7);
+
+    const second = resolve(h);
+    for (const s of firstSubs) expect(s.dispose).toHaveBeenCalledOnce();
+
+    // One event, one state — not one per resolve the window has seen.
+    await settle();
+    second.view.webview.postMessage.mockClear();
+    h.service.buildState.mockClear();
+    h.stateListeners.at(-1)!();
+    await settle();
+    expect(h.service.buildState).toHaveBeenCalledOnce();
+    expect(first.view.webview.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('disposing the view releases everything and forgets it', async () => {
+    const h = makeHarness();
+    const { view, onDispose } = resolve(h);
+    const subs = allSubscriptions(h, view);
+
+    onDispose();
+
+    for (const s of subs) expect(s.dispose).toHaveBeenCalledOnce();
+    await settle(); // the initial push was pending: it must not go out
+    expect(view.webview.postMessage).not.toHaveBeenCalled();
+    h.provider.push();
+    h.provider.setBadge(1);
+    await settle();
+    expect(h.service.buildState).not.toHaveBeenCalled();
+    expect(view.badge).toBeUndefined();
+  });
+
+  it('a stale view\'s dispose does not tear down its replacement', async () => {
+    const h = makeHarness();
+    const first = resolve(h);
+    const second = resolve(h);
+    const secondSubs = allSubscriptions(h, second.view).filter((s) => !allSubscriptions(h, first.view).includes(s));
+
+    first.onDispose();
+
+    for (const s of secondSubs) expect(s.dispose).not.toHaveBeenCalled();
+    await settle();
+    expect(second.view.webview.postMessage).toHaveBeenCalledOnce();
+  });
+
+  it('a failing message handler is logged, not left as an unhandled rejection', async () => {
+    const h = makeHarness();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    h.service.handleMessage.mockRejectedValueOnce(new Error('boom'));
+    const { onMessage } = resolve(h);
+
+    onMessage({ type: 'listBranches' });
+    await flush();
+
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('"listBranches" failed'), expect.any(Error));
+    error.mockRestore();
   });
 });
 
@@ -226,13 +420,14 @@ describe('message dispatch', () => {
 });
 
 describe('header description', () => {
-  it('summarises the live counts on every push', () => {
+  it('summarises the live counts on every push', async () => {
     const h = makeHarness();
     h.service.buildState.mockReturnValue({
       worktrees: [item('a', 'active'), item('b', 'active'), item('c', 'permission')],
       activeWorktreeId: 'a',
     });
     const { view } = resolve(h);
+    await settle();
     expect(view.description).toBe('2 thinking · 1 needs you');
   });
 
