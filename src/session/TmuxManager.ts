@@ -2,6 +2,7 @@ import { exec } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import type { ISessionManager, TmuxWindow } from '../ports/ISessionManager';
 
 /**
@@ -26,6 +27,9 @@ export class TmuxManager implements ISessionManager {
   }
 
   private static readonly UTF8_LOCALE = utf8LocaleFor(process.platform);
+
+  /** Per-process paste counter; with the pid and a random suffix, a buffer name nobody else holds. */
+  private static pasteSeq = 0;
 
   private run(cmd: string): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -90,17 +94,35 @@ export class TmuxManager implements ISessionManager {
     // shell-escaping a large multi-line payload, and paste-buffer -p wraps it in
     // bracketed-paste markers so the receiving app (e.g. Claude Code) treats the
     // whole block as one input instead of submitting on every newline.
-    const bufferName = `foreman-paste-${process.pid}`;
-    const tmpFile = path.join(os.tmpdir(), `${bufferName}.txt`);
-    await fs.promises.writeFile(tmpFile, text, 'utf8');
+    //
+    // Both names are unique PER CALL. They used to be `foreman-paste-<pid>`,
+    // shared by every paste this extension host made — so two in flight at
+    // once (two image drops, a launch's prompt and a review send) loaded into
+    // the same buffer and the same file: one agent received the other's text,
+    // and whichever finished first unlinked the file the other was still
+    // loading. tmux buffers are server-wide, so the name also has to be unique
+    // across windows; the pid keeps two VS Code windows apart.
+    const bufferName = `foreman-paste-${process.pid}-${++TmuxManager.pasteSeq}-${randomBytes(4).toString('hex')}`;
+    // A private directory rather than a guessable name in the shared tmpdir:
+    // mkdtemp makes it 0700 and unique, and the prompt never sits world-readable.
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'foreman-paste-'));
+    const tmpFile = path.join(dir, 'paste.txt');
     try {
+      await fs.promises.writeFile(tmpFile, text, 'utf8');
       await this.run(`tmux load-buffer -b "${bufferName}" "${tmpFile}"`);
-      await this.run(`tmux paste-buffer -d -p -b "${bufferName}" -t "${target}"`);
+      try {
+        await this.run(`tmux paste-buffer -d -p -b "${bufferName}" -t "${target}"`);
+      } catch (e) {
+        // -d only deletes on success; a failed paste would leave the prompt
+        // sitting in a server-wide buffer for the life of the tmux server.
+        await this.run(`tmux delete-buffer -b "${bufferName}"`).catch(() => {});
+        throw e;
+      }
       // Submit once, after the paste has landed — unless the caller wants to
       // leave the text unsent (e.g. an image path the user still adds a prompt to).
       if (submit) await this.run(`tmux send-keys -t "${target}" Enter`);
     } finally {
-      await fs.promises.unlink(tmpFile).catch(() => {});
+      await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
     }
   }
 

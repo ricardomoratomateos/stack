@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, afterEach, afterAll } from 'vitest';
 import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
 
 // ── exec interception ─────────────────────────────────────────────────────────
 // The mock delegates to the REAL exec unless a test installs an override, so
@@ -164,9 +166,46 @@ describe('command construction', () => {
     const calls = captureExec(() => ({}));
     await tmux.paste('s1:2', 'line one\nline two');
     expect(calls).toHaveLength(3);
-    expect(calls[0]).toMatch(/^tmux load-buffer -b "foreman-paste-\d+" ".*foreman-paste-\d+\.txt"$/);
-    expect(calls[1]).toMatch(/^tmux paste-buffer -d -p -b "foreman-paste-\d+" -t "s1:2"$/);
+    expect(calls[0]).toMatch(/^tmux load-buffer -b "foreman-paste-\d+-\d+-[0-9a-f]+" ".*foreman-paste-[^/]+\/paste\.txt"$/);
+    expect(calls[1]).toMatch(/^tmux paste-buffer -d -p -b "foreman-paste-\d+-\d+-[0-9a-f]+" -t "s1:2"$/);
     expect(calls[2]).toBe('tmux send-keys -t "s1:2" Enter');
+  });
+
+  it('gives every paste its own buffer and file, so concurrent pastes cannot swap or delete each other\'s text', async () => {
+    // Both used to be `foreman-paste-<pid>`: a launch's prompt and a review send
+    // in flight together loaded into one buffer, and the agent of one received
+    // the other's text.
+    const loaded = new Map<string, string>(); // buffer name → file contents at load time
+    const pasted: Array<{ buffer: string; target: string }> = [];
+    captureExec((cmd) => {
+      const load = cmd.match(/^tmux load-buffer -b "([^"]+)" "([^"]+)"$/);
+      if (load) loaded.set(load[1], fs.readFileSync(load[2], 'utf8'));
+      const paste = cmd.match(/^tmux paste-buffer -d -p -b "([^"]+)" -t "([^"]+)"$/);
+      if (paste) pasted.push({ buffer: paste[1], target: paste[2] });
+      return {};
+    });
+    await Promise.all([tmux.paste('s1:1', 'for agent one', false), tmux.paste('s2:1', 'for agent two', false)]);
+
+    expect(loaded.size).toBe(2);
+    expect(pasted).toHaveLength(2);
+    for (const { buffer, target } of pasted) {
+      expect(loaded.get(buffer)).toBe(target === 's1:1' ? 'for agent one' : 'for agent two');
+    }
+  });
+
+  it('removes its temp file, and drops the buffer when the paste itself fails', async () => {
+    let file = '';
+    const calls = captureExec((cmd) => {
+      const load = cmd.match(/^tmux load-buffer -b "[^"]+" "([^"]+)"$/);
+      if (load) file = load[1];
+      return cmd.startsWith('tmux paste-buffer') ? { err: new Error("can't find pane") } : {};
+    });
+    await expect(tmux.paste('s1:9', 'x')).rejects.toThrow("can't find pane");
+    expect(calls[2]).toMatch(/^tmux delete-buffer -b "foreman-paste-/);
+    expect(calls).not.toContain('tmux send-keys -t "s1:9" Enter');
+    expect(file).not.toBe('');
+    expect(fs.existsSync(file)).toBe(false);
+    expect(fs.existsSync(path.dirname(file))).toBe(false);
   });
 
   it('killSession swallows errors (session may not exist)', async () => {
