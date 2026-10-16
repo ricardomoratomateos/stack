@@ -120,9 +120,9 @@ body.vscode-high-contrast .fm-mission, body.vscode-high-contrast-light .fm-missi
 .ms-v[data-tone='muted'] { color: var(--fm-text-dim); }
 .ms-pad { margin: 0 12px 8px; }
 .ms-expand { padding: 0 12px 10px; display: flex; flex-direction: column; gap: 10px; }
-.ms-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 0 12px 10px; }
+.ms-actions { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px; padding: 0 12px 10px; }
 .ms-expand .ms-actions { padding: 0; }
-.ms-spacer { flex: 1; }
+.ms-actionbar { justify-content: flex-end; }
 .ms-mono { font-family: var(--fm-mono); font-size: 11px; }
 /* The state markers in session rows are dots here. */
 .fm-mission .fm-sess-main { grid-template-columns: 8px minmax(0, 1fr) auto; }

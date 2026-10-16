@@ -112,7 +112,10 @@ describe.each(['aside', 'claude', 'mission'])('%s layout', (name) => {
     expect(html).toMatch(/Launch|New claude session|not on your PATH/);
     expect(html).toMatch(/Terminal|Shell|Open terminal/);
     expect(html).toMatch(/Diff|Review diff/);
-    expect(html).toContain('More actions');
+    // Unmeasured (no layout in SSR) everything fits, so every action is an
+    // inline icon and there is no "⋯" — it only appears for what overflows.
+    expect(html).toContain('Delete worktree');
+    expect(html).not.toContain('More actions');
   });
 
   it('draws the loading and empty states', () => {

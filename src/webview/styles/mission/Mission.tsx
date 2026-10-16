@@ -3,7 +3,7 @@ import { send } from '../../vscode';
 import { GROUP_SHORT, attentionQueue, countByGroup, formatAge, type Described, type WorktreeGroup } from '../../derive';
 import { DiffStat, PrBadge, Details } from '../../components/Details';
 import { LaunchSplit } from '../../components/LaunchSplit';
-import { MoreMenu, stackRunning } from '../../components/MoreMenu';
+import { ActionBar } from '../../components/ActionBar';
 import { visualFor } from '../../components/providers';
 import { openAsking } from '../../components/RowParts';
 import { SessionList } from '../../components/SessionList';
@@ -125,7 +125,6 @@ function Card({ d, selected, now, state, select, drag }: {
   const wt = d.wt;
   const pick = () => select(wt.id);
   const showMeta = d.group !== 'missing' && d.group !== 'idle';
-  const running = stackRunning(wt);
 
   return (
     <article
@@ -173,30 +172,11 @@ function Card({ d, selected, now, state, select, drag }: {
           <Details d={d} dockerEnabled={state.dockerEnabled} />
           <div className="ms-actions">
             <Primary d={d} state={state} select={pick} />
-            <span className="ms-spacer" />
             {/* The contextual button above may already be the launcher. */}
             {d.group !== 'working' && d.group !== 'idle' && (
               <LaunchSplit wt={wt} defaultProvider={state.defaultProvider} installedProviders={state.installedProviders} />
             )}
-            <button type="button" className="fm-btn fm-btn-icon" aria-label="Open terminal" title="Open terminal" onClick={() => send({ type: 'openTerminal', worktreeId: wt.id })}>
-              <i className="codicon codicon-terminal" aria-hidden="true" />
-            </button>
-            <button type="button" className="fm-btn fm-btn-icon" aria-label="Review diff" title="Review diff & comment" onClick={() => send({ type: 'openDiff', worktreeId: wt.id })}>
-              <i className="codicon codicon-git-compare" aria-hidden="true" />
-            </button>
-            {state.dockerEnabled && (
-              <button
-                type="button"
-                className="fm-btn fm-btn-icon"
-                aria-label={running ? 'Stop containers' : 'Start containers'}
-                title={wt.dockerBusy ? `Docker is ${wt.dockerBusy === 'starting' ? 'starting' : 'stopping'} the stack` : running ? 'Stop containers' : 'Start containers'}
-                disabled={!!wt.dockerBusy}
-                onClick={() => send({ type: running ? 'dockerDown' : 'dockerUp', worktreeId: wt.id })}
-              >
-                <i className={`codicon codicon-${wt.dockerBusy ? 'loading codicon-modifier-spin' : running ? 'debug-stop' : 'play'}`} aria-hidden="true" />
-              </button>
-            )}
-            <MoreMenu wt={wt} dockerEnabled={state.dockerEnabled} />
+            <ActionBar wt={wt} dockerEnabled={state.dockerEnabled} className="ms-actionbar" />
           </div>
         </div>
       )}
