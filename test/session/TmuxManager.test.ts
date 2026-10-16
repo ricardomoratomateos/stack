@@ -4,11 +4,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 // ── exec interception ─────────────────────────────────────────────────────────
-// The mock delegates to the REAL exec unless a test installs an override, so
-// unit tests (command construction) and integration tests (real tmux) coexist.
+// The mock delegates to the REAL exec/execFile unless a test installs an
+// override, so unit tests (command construction) and integration tests (real
+// tmux) coexist. Both report an argv: exec's is its one shell string.
 type ExecCb = (err: Error | null, stdout: string, stderr: string) => void;
 type ExecOpts = { env?: Record<string, string | undefined> } | undefined;
-let execOverride: ((cmd: string, cb: ExecCb, opts: ExecOpts) => void) | null = null;
+let execOverride: ((argv: string[], cb: ExecCb, opts: ExecOpts) => void) | null = null;
 
 vi.mock('node:child_process', async (importOriginal) => {
   const real = await importOriginal<typeof import('node:child_process')>();
@@ -18,8 +19,12 @@ vi.mock('node:child_process', async (importOriginal) => {
     exec: (cmd: string, optsOrCb: ExecOpts | ExecCb, maybeCb?: ExecCb) => {
       const cb = (typeof optsOrCb === 'function' ? optsOrCb : maybeCb) as ExecCb;
       const opts = typeof optsOrCb === 'function' ? undefined : optsOrCb;
-      if (execOverride) { execOverride(cmd, cb, opts); return undefined; }
+      if (execOverride) { execOverride([cmd], cb, opts); return undefined; }
       return (real.exec as unknown as (c: string, o: ExecOpts, cb: ExecCb) => unknown)(cmd, opts, cb);
+    },
+    execFile: (file: string, args: string[], opts: ExecOpts, cb: ExecCb) => {
+      if (execOverride) { execOverride([file, ...args], cb, opts); return undefined; }
+      return (real.execFile as unknown as (f: string, a: string[], o: ExecOpts, cb: ExecCb) => unknown)(file, args, opts, cb);
     },
   };
 });
@@ -35,14 +40,17 @@ afterEach(() => { execOverride = null; });
 /** Options seen by the exec override, in call order (reset by captureExec). */
 let execOptsSeen: ExecOpts[] = [];
 
-/** Installs an override that records commands and replies with canned results. */
+/**
+ * Installs an override that records each call's argv and replies with canned
+ * results. `reply` sees the argv joined with spaces, for easy matching.
+ */
 function captureExec(reply: (cmd: string) => { err?: Error; stdout?: string } = () => ({})) {
-  const calls: string[] = [];
+  const calls: string[][] = [];
   execOptsSeen = [];
-  execOverride = (cmd, cb, opts) => {
-    calls.push(cmd);
+  execOverride = (argv, cb, opts) => {
+    calls.push(argv);
     execOptsSeen.push(opts);
-    const r = reply(cmd);
+    const r = reply(argv.join(' '));
     cb(r.err ?? null, r.stdout ?? '', '');
   };
   return calls;
@@ -86,15 +94,15 @@ describe('command construction', () => {
   it('isAvailable runs `which tmux` and maps success/error to boolean', async () => {
     let calls = captureExec(() => ({}));
     await expect(TmuxManager.isAvailable()).resolves.toBe(true);
-    expect(calls).toEqual(['which tmux']);
+    expect(calls).toEqual([['which tmux']]);
     calls = captureExec(() => ({ err: new Error('not found') }));
     await expect(TmuxManager.isAvailable()).resolves.toBe(false);
   });
 
-  it('hasSession probes with stderr silenced and maps success/error to boolean', async () => {
+  it('hasSession probes the session and maps success/error to boolean', async () => {
     let calls = captureExec(() => ({}));
     await expect(tmux.hasSession('s1')).resolves.toBe(true);
-    expect(calls).toEqual(['tmux has-session -t "s1" 2>/dev/null']);
+    expect(calls).toEqual([['tmux', 'has-session', '-t', 's1']]);
     calls = captureExec(() => ({ err: new Error('no session') }));
     await expect(tmux.hasSession('s1')).resolves.toBe(false);
   });
@@ -102,15 +110,15 @@ describe('command construction', () => {
   it('ensureSession does nothing when the session exists', async () => {
     const calls = captureExec(() => ({}));
     await tmux.ensureSession('s1', '/some/cwd');
-    expect(calls).toEqual(['tmux has-session -t "s1" 2>/dev/null']);
+    expect(calls).toEqual([['tmux', 'has-session', '-t', 's1']]);
   });
 
   it('ensureSession creates a detached session with -c cwd when missing', async () => {
     const calls = captureExec(cmd => cmd.startsWith('tmux has-session') ? { err: new Error('nope') } : {});
     await tmux.ensureSession('s1', '/some/cwd');
     expect(calls).toEqual([
-      'tmux has-session -t "s1" 2>/dev/null',
-      'tmux new-session -d -s "s1" -c "/some/cwd"',
+      ['tmux', 'has-session', '-t', 's1'],
+      ['tmux', 'new-session', '-d', '-s', 's1', '-c', '/some/cwd'],
     ]);
   });
 
@@ -122,7 +130,7 @@ describe('command construction', () => {
     // reliably reach windows created afterwards.
     const calls = captureExec(cmd => (cmd.includes('new-window') ? { stdout: '4' } : {}));
     await tmux.newWindow('s1', 'claude', '/cwd');
-    expect(calls).toContain('tmux set-window-option -t "s1:4" automatic-rename off');
+    expect(calls).toContainEqual(['tmux', 'set-window-option', '-t', 's1:4', 'automatic-rename', 'off']);
   });
 
   it('still returns the window index when tmux rejects the option', async () => {
@@ -139,27 +147,37 @@ describe('command construction', () => {
     const calls = captureExec(() => ({ stdout: ' 3\n' }));
     await expect(tmux.newWindow('s1', 'claude', '/wt')).resolves.toBe(3);
     expect(calls).toEqual([
-      'tmux new-window -t "s1" -n "claude" -c "/wt" -P -F "#{window_index}"',
-      'tmux set-window-option -t "s1:3" automatic-rename off',
+      ['tmux', 'new-window', '-t', 's1', '-n', 'claude', '-c', '/wt', '-P', '-F', '#{window_index}'],
+      ['tmux', 'set-window-option', '-t', 's1:3', 'automatic-rename', 'off'],
     ]);
   });
 
-  it('sendKeys single-quotes the keys and escapes embedded single quotes', async () => {
-    const calls = captureExec(() => ({}));
-    await tmux.sendKeys('s1:2', "echo 'a'");
-    expect(calls).toEqual([`tmux send-keys -t "s1:2" 'echo '\\''a'\\''' Enter`]);
+  it('hands a path with $(...) in it to tmux as one inert argument — no shell sees it', async () => {
+    // The worktree path carries the branch name, and adopted branches are not
+    // validated: inside the old `-c "${cwd}"` this ran `touch x`.
+    const calls = captureExec(cmd => (cmd.includes('new-window') ? { stdout: '1' } : cmd.includes('has-session') ? { err: new Error('no') } : {}));
+    await tmux.ensureSession('s1', '/repo/$(touch x)`id`');
+    await tmux.newWindow('s1', 'claude', '/repo/$(touch x)`id`');
+    expect(calls).toContainEqual(['tmux', 'new-session', '-d', '-s', 's1', '-c', '/repo/$(touch x)`id`']);
+    expect(calls).toContainEqual(['tmux', 'new-window', '-t', 's1', '-n', 'claude', '-c', '/repo/$(touch x)`id`', '-P', '-F', '#{window_index}']);
   });
 
-  it('respawnWindow kills the pane and runs the command directly, escaping single quotes', async () => {
+  it('sendKeys passes the keys as one argument, quotes and all, then Enter', async () => {
+    const calls = captureExec(() => ({}));
+    await tmux.sendKeys('s1:2', "echo 'a'");
+    expect(calls).toEqual([['tmux', 'send-keys', '-t', 's1:2', "echo 'a'", 'Enter']]);
+  });
+
+  it('respawnWindow kills the pane and hands tmux the command as one argument', async () => {
     const calls = captureExec(() => ({}));
     await tmux.respawnWindow('s1', 3, "claude; exec 'sh'");
-    expect(calls).toEqual([`tmux respawn-window -k -t "s1:3" 'claude; exec '\\''sh'\\'''`]);
+    expect(calls).toEqual([['tmux', 'respawn-window', '-k', '-t', 's1:3', "claude; exec 'sh'"]]);
   });
 
   it('selectWindow targets session:index', async () => {
     const calls = captureExec(() => ({}));
     await tmux.selectWindow('s1', 4);
-    expect(calls).toEqual(['tmux select-window -t "s1:4"']);
+    expect(calls).toEqual([['tmux', 'select-window', '-t', 's1:4']]);
   });
 
   it('paste loads a temp-file buffer and bracketed-pastes it, leaving it unsent', async () => {
@@ -168,14 +186,17 @@ describe('command construction', () => {
     const calls = captureExec(() => ({}));
     await tmux.paste('s1:2', 'line one\nline two');
     expect(calls).toHaveLength(2);
-    expect(calls[0]).toMatch(/^tmux load-buffer -b "foreman-paste-\d+-\d+-[0-9a-f]+" ".*foreman-paste-[^/]+\/paste\.txt"$/);
-    expect(calls[1]).toMatch(/^tmux paste-buffer -d -p -b "foreman-paste-\d+-\d+-[0-9a-f]+" -t "s1:2"$/);
+    const [load, paste] = calls;
+    expect(load.slice(0, 3)).toEqual(['tmux', 'load-buffer', '-b']);
+    expect(load[3]).toMatch(/^foreman-paste-\d+-\d+-[0-9a-f]+$/);
+    expect(load[4]).toMatch(/foreman-paste-[^/]+\/paste\.txt$/);
+    expect(paste).toEqual(['tmux', 'paste-buffer', '-d', '-p', '-b', load[3], '-t', 's1:2']);
   });
 
   it('pressEnter sends a single Enter key to the target', async () => {
     const calls = captureExec(() => ({}));
     await tmux.pressEnter('s1:2');
-    expect(calls).toEqual(['tmux send-keys -t "s1:2" Enter']);
+    expect(calls).toEqual([['tmux', 'send-keys', '-t', 's1:2', 'Enter']]);
   });
 
   it('gives every paste its own buffer and file, so concurrent pastes cannot swap or delete each other\'s text', async () => {
@@ -185,9 +206,9 @@ describe('command construction', () => {
     const loaded = new Map<string, string>(); // buffer name → file contents at load time
     const pasted: Array<{ buffer: string; target: string }> = [];
     captureExec((cmd) => {
-      const load = cmd.match(/^tmux load-buffer -b "([^"]+)" "([^"]+)"$/);
+      const load = cmd.match(/^tmux load-buffer -b (\S+) (\S+)$/);
       if (load) loaded.set(load[1], fs.readFileSync(load[2], 'utf8'));
-      const paste = cmd.match(/^tmux paste-buffer -d -p -b "([^"]+)" -t "([^"]+)"$/);
+      const paste = cmd.match(/^tmux paste-buffer -d -p -b (\S+) -t (\S+)$/);
       if (paste) pasted.push({ buffer: paste[1], target: paste[2] });
       return {};
     });
@@ -203,12 +224,13 @@ describe('command construction', () => {
   it('removes its temp file, and drops the buffer when the paste itself fails', async () => {
     let file = '';
     const calls = captureExec((cmd) => {
-      const load = cmd.match(/^tmux load-buffer -b "[^"]+" "([^"]+)"$/);
+      const load = cmd.match(/^tmux load-buffer -b \S+ (\S+)$/);
       if (load) file = load[1];
       return cmd.startsWith('tmux paste-buffer') ? { err: new Error("can't find pane") } : {};
     });
     await expect(tmux.paste('s1:9', 'x')).rejects.toThrow("can't find pane");
-    expect(calls[2]).toMatch(/^tmux delete-buffer -b "foreman-paste-/);
+    expect(calls[2].slice(0, 3)).toEqual(['tmux', 'delete-buffer', '-b']);
+    expect(calls[2][3]).toBe(calls[0][3]);
     expect(file).not.toBe('');
     expect(fs.existsSync(file)).toBe(false);
     expect(fs.existsSync(path.dirname(file))).toBe(false);
@@ -217,13 +239,13 @@ describe('command construction', () => {
   it('killSession swallows errors (session may not exist)', async () => {
     const calls = captureExec(() => ({ err: new Error('gone') }));
     await expect(tmux.killSession('s1')).resolves.toBeUndefined();
-    expect(calls).toEqual(['tmux kill-session -t "s1"']);
+    expect(calls).toEqual([['tmux', 'kill-session', '-t', 's1']]);
   });
 
   it('detachClients detaches by session and swallows errors', async () => {
     let calls = captureExec(() => ({}));
     await tmux.detachClients('s1');
-    expect(calls).toEqual(['tmux detach-client -s "s1"']);
+    expect(calls).toEqual([['tmux', 'detach-client', '-s', 's1']]);
     calls = captureExec(() => ({ err: new Error('no clients') }));
     await expect(tmux.detachClients('s1')).resolves.toBeUndefined();
   });
@@ -231,7 +253,7 @@ describe('command construction', () => {
   it('killWindow targets session:index and swallows errors', async () => {
     const calls = captureExec(() => ({ err: new Error('gone') }));
     await expect(tmux.killWindow('s1', 2)).resolves.toBeUndefined();
-    expect(calls).toEqual(['tmux kill-window -t "s1:2"']);
+    expect(calls).toEqual([['tmux', 'kill-window', '-t', 's1:2']]);
   });
 
   it('listWindows parses separator-delimited index/name/title/command lines, keeping spaces in names and titles', async () => {
@@ -246,9 +268,10 @@ describe('command construction', () => {
       { index: 1, name: 'claude', title: '⠂ Fix login flow bug', command: 'node', pid: 200 },
       { index: 2, name: 'my window name', title: '', command: 'npm', pid: 300 },
     ]);
-    expect(calls).toEqual([
-      'tmux list-windows -t "s1" -F "#{window_index}|:foreman:|#{window_name}|:foreman:|#{pane_title}|:foreman:|#{pane_current_command}|:foreman:|#{pane_pid}"',
-    ]);
+    expect(calls).toEqual([[
+      'tmux', 'list-windows', '-t', 's1',
+      '-F', '#{window_index}|:foreman:|#{window_name}|:foreman:|#{pane_title}|:foreman:|#{pane_current_command}|:foreman:|#{pane_pid}',
+    ]]);
   });
 
   it('run() forces a UTF-8 locale — the extension host has no LANG, and C-locale tmux mangles non-ASCII titles to "_"', async () => {
@@ -271,7 +294,7 @@ describe('command construction', () => {
   it('hasChildProcess asks pgrep for the pid\'s children and reads its exit status', async () => {
     let calls = captureExec(() => ({ stdout: '4243\n' }));
     await expect(tmux.hasChildProcess(4242)).resolves.toBe(true);
-    expect(calls).toEqual(['pgrep -P 4242']);
+    expect(calls).toEqual([['pgrep', '-P', '4242']]);
     // pgrep exits 1 (an error to exec) when there is nothing to list.
     calls = captureExec(() => ({ err: new Error('exit 1') }));
     await expect(tmux.hasChildProcess(4242)).resolves.toBe(false);
@@ -282,7 +305,7 @@ describe('command construction', () => {
   it('processCommandLine reads the full, untruncated command line of a pid', async () => {
     const calls = captureExec(() => ({ stdout: 'zsh -c FOREMAN_WINDOW_INDEX="1" claude; exec zsh\n' }));
     await expect(tmux.processCommandLine(4242)).resolves.toBe('zsh -c FOREMAN_WINDOW_INDEX="1" claude; exec zsh');
-    expect(calls).toEqual(['ps -ww -o args= -p 4242']);
+    expect(calls).toEqual([['ps', '-ww', '-o', 'args=', '-p', '4242']]);
     captureExec(() => ({ err: new Error('exit 1') }));
     await expect(tmux.processCommandLine(4242)).rejects.toThrow();
   });
@@ -381,6 +404,25 @@ describe('TmuxManager (integration)', () => {
     expect(after).toMatch(/(^|\/)sh$/);
 
     await tmux.killWindow(SES, idx);
+  });
+
+  it.runIf(hasTmux)('opens a window in a directory named `$(touch …)` without running it', async () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-inject-'));
+    const marker = path.join(base, 'ran');
+    // No slash inside the substitution, so this is one directory name; the
+    // env var points the would-be command at a file we can look for.
+    const dir = path.join(base, '$(touch "$FOREMAN_INJECT_MARKER")');
+    fs.mkdirSync(dir);
+    process.env.FOREMAN_INJECT_MARKER = marker;
+    try {
+      const idx = await tmux.newWindow(SES, 'injwin', dir);
+      expect((await tmux.listWindows(SES)).some((w) => w.index === idx)).toBe(true);
+      expect(fs.existsSync(marker)).toBe(false);
+      await tmux.killWindow(SES, idx);
+    } finally {
+      delete process.env.FOREMAN_INJECT_MARKER;
+      fs.rmSync(base, { recursive: true, force: true });
+    }
   });
 
   it.runIf(hasTmux)('detachClients succeeds with no clients attached', async () => {

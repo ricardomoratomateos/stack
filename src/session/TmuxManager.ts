@@ -1,4 +1,4 @@
-import { exec } from 'node:child_process';
+import { exec, execFile } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -31,18 +31,33 @@ export class TmuxManager implements ISessionManager {
   /** Per-process paste counter; with the pid and a random suffix, a buffer name nobody else holds. */
   private static pasteSeq = 0;
 
-  private run(cmd: string): Promise<string> {
+  /**
+   * Run a program with an argument vector — no shell in between.
+   *
+   * Every call used to be one string handed to `exec`, i.e. to `/bin/sh -c`,
+   * with values spliced into double quotes — where `$(...)` and backticks
+   * still expand. The worktree path carries the branch name, and branches
+   * adopted from `git worktree list` are not validated, so a branch called
+   * `$(touch x)` ran `touch x` the moment Foreman opened a terminal in it.
+   * Arguments passed as a vector are never parsed, so there is nothing to
+   * escape and nothing to get wrong.
+   */
+  private runFile(file: string, args: string[]): Promise<string> {
     return new Promise((resolve, reject) => {
       // Force a UTF-8 locale: the VSCode extension host has no LANG/LC_ALL, and
       // under the C locale tmux replaces every non-printable/non-ASCII byte of
       // its output with '_' — destroying the \x01 field separator in
       // listWindows and any non-ASCII pane title.
       const locale = TmuxManager.UTF8_LOCALE;
-      exec(cmd, { env: { ...process.env, LC_ALL: locale, LANG: locale } }, (err, stdout) => {
+      execFile(file, args, { env: { ...process.env, LC_ALL: locale, LANG: locale } }, (err, stdout) => {
         if (err) reject(err);
         else resolve(stdout.trim());
       });
     });
+  }
+
+  private tmux(...args: string[]): Promise<string> {
+    return this.runFile('tmux', args);
   }
 
   static isAvailable(): Promise<boolean> {
@@ -53,22 +68,20 @@ export class TmuxManager implements ISessionManager {
 
   async hasSession(name: string): Promise<boolean> {
     try {
-      await this.run(`tmux has-session -t "${name}" 2>/dev/null`);
+      await this.tmux('has-session', '-t', name);
       return true;
     } catch { return false; }
   }
 
   async ensureSession(name: string, cwd: string): Promise<void> {
     if (!(await this.hasSession(name))) {
-      await this.run(`tmux new-session -d -s "${name}" -c "${cwd}"`);
+      await this.tmux('new-session', '-d', '-s', name, '-c', cwd);
     }
   }
 
   /** Creates a new window and returns its index. */
   async newWindow(session: string, name: string, cwd: string): Promise<number> {
-    const out = await this.run(
-      `tmux new-window -t "${session}" -n "${name}" -c "${cwd}" -P -F "#{window_index}"`,
-    );
+    const out = await this.tmux('new-window', '-t', session, '-n', name, '-c', cwd, '-P', '-F', '#{window_index}');
     const index = parseInt(out, 10);
     // Pin the name we just gave it. Window names are Foreman's identity for a
     // session — reconnect() decides a window holds an agent by matching its
@@ -79,14 +92,13 @@ export class TmuxManager implements ISessionManager {
     // windows created afterwards (it does not on the Linux runners).
     // Best-effort, because a naming quirk must never block a launch.
     try {
-      await this.run(`tmux set-window-option -t "${session}:${index}" automatic-rename off`);
+      await this.tmux('set-window-option', '-t', `${session}:${index}`, 'automatic-rename', 'off');
     } catch { /* worst case the name drifts, exactly as it did before */ }
     return index;
   }
 
   async sendKeys(target: string, keys: string): Promise<void> {
-    const escaped = keys.replace(/'/g, "'\\''");
-    await this.run(`tmux send-keys -t "${target}" '${escaped}' Enter`);
+    await this.tmux('send-keys', '-t', target, keys, 'Enter');
   }
 
   /**
@@ -99,10 +111,10 @@ export class TmuxManager implements ISessionManager {
    * acknowledgement; pressEnter is the primitive it uses.
    */
   async paste(target: string, text: string): Promise<void> {
-    // Route the text through a tmux buffer loaded from a temp file: this avoids
-    // shell-escaping a large multi-line payload, and paste-buffer -p wraps it in
-    // bracketed-paste markers so the receiving app (e.g. Claude Code) treats the
-    // whole block as one input instead of submitting on every newline.
+    // Route the text through a tmux buffer loaded from a temp file: this keeps
+    // a large multi-line payload off the command line, and paste-buffer -p wraps
+    // it in bracketed-paste markers so the receiving app (e.g. Claude Code)
+    // treats the whole block as one input instead of submitting on every newline.
     //
     // Both names are unique PER CALL. They used to be `foreman-paste-<pid>`,
     // shared by every paste this extension host made — so two in flight at
@@ -118,13 +130,13 @@ export class TmuxManager implements ISessionManager {
     const tmpFile = path.join(dir, 'paste.txt');
     try {
       await fs.promises.writeFile(tmpFile, text, 'utf8');
-      await this.run(`tmux load-buffer -b "${bufferName}" "${tmpFile}"`);
+      await this.tmux('load-buffer', '-b', bufferName, tmpFile);
       try {
-        await this.run(`tmux paste-buffer -d -p -b "${bufferName}" -t "${target}"`);
+        await this.tmux('paste-buffer', '-d', '-p', '-b', bufferName, '-t', target);
       } catch (e) {
         // -d only deletes on success; a failed paste would leave the prompt
         // sitting in a server-wide buffer for the life of the tmux server.
-        await this.run(`tmux delete-buffer -b "${bufferName}"`).catch(() => {});
+        await this.tmux('delete-buffer', '-b', bufferName).catch(() => {});
         throw e;
       }
     } finally {
@@ -133,29 +145,33 @@ export class TmuxManager implements ISessionManager {
   }
 
   async pressEnter(target: string): Promise<void> {
-    await this.run(`tmux send-keys -t "${target}" Enter`);
+    await this.tmux('send-keys', '-t', target, 'Enter');
   }
 
+  /**
+   * `command` is a shell command on purpose — tmux runs it through the
+   * default shell, which is what lets a launch line set env vars and chain
+   * `; exec $SHELL`. Only the tmux invocation itself is shell-free.
+   */
   async respawnWindow(session: string, windowIndex: number, command: string): Promise<void> {
-    const escaped = command.replace(/'/g, "'\\''");
-    await this.run(`tmux respawn-window -k -t "${session}:${windowIndex}" '${escaped}'`);
+    await this.tmux('respawn-window', '-k', '-t', `${session}:${windowIndex}`, command);
   }
 
   async selectWindow(session: string, windowIndex: number): Promise<void> {
-    await this.run(`tmux select-window -t "${session}:${windowIndex}"`);
+    await this.tmux('select-window', '-t', `${session}:${windowIndex}`);
   }
 
   async killSession(name: string): Promise<void> {
-    try { await this.run(`tmux kill-session -t "${name}"`); } catch { /* may not exist */ }
+    try { await this.tmux('kill-session', '-t', name); } catch { /* may not exist */ }
   }
 
   /** Detaches all VSCode viewer clients from the session (session keeps running). */
   async detachClients(sessionName: string): Promise<void> {
-    try { await this.run(`tmux detach-client -s "${sessionName}"`); } catch { /* no clients attached */ }
+    try { await this.tmux('detach-client', '-s', sessionName); } catch { /* no clients attached */ }
   }
 
   async killWindow(session: string, windowIndex: number): Promise<void> {
-    try { await this.run(`tmux kill-window -t "${session}:${windowIndex}"`); } catch { /* may not exist */ }
+    try { await this.tmux('kill-window', '-t', `${session}:${windowIndex}`); } catch { /* may not exist */ }
   }
 
   async listWindows(session: string): Promise<TmuxWindow[]> {
@@ -174,8 +190,9 @@ export class TmuxManager implements ISessionManager {
     // half-fail.
     const SEP = '|:foreman:|';
     try {
-      const out = await this.run(
-        `tmux list-windows -t "${session}" -F "#{window_index}${SEP}#{window_name}${SEP}#{pane_title}${SEP}#{pane_current_command}${SEP}#{pane_pid}"`,
+      const out = await this.tmux(
+        'list-windows', '-t', session,
+        '-F', `#{window_index}${SEP}#{window_name}${SEP}#{pane_title}${SEP}#{pane_current_command}${SEP}#{pane_pid}`,
       );
       return out.split('\n').filter(Boolean).map(line => {
         const [index, name, title, command, pid] = line.split(SEP);
@@ -195,16 +212,16 @@ export class TmuxManager implements ISessionManager {
    * child in the same group — so tmux reports `zsh` for as long as the agent
    * runs. The child list is the only thing that actually changes.
    */
-  /** `ps` with -ww so a long launch line is not cut at the terminal width. Rejects when the pid is gone. */
-  async processCommandLine(pid: number): Promise<string> {
-    return this.run(`ps -ww -o args= -p ${pid}`);
-  }
-
   async hasChildProcess(pid: number): Promise<boolean> {
     try {
-      return (await this.run(`pgrep -P ${pid}`)).trim().length > 0;
+      return (await this.runFile('pgrep', ['-P', String(pid)])).trim().length > 0;
     } catch {
       return false; // pgrep exits 1 when there is nothing to list
     }
+  }
+
+  /** `ps` with -ww so a long launch line is not cut at the terminal width. Rejects when the pid is gone. */
+  async processCommandLine(pid: number): Promise<string> {
+    return this.runFile('ps', ['-ww', '-o', 'args=', '-p', String(pid)]);
   }
 }
