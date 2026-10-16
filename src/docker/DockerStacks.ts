@@ -1,5 +1,5 @@
 import * as path from 'node:path';
-import type { DockerContainer, ForemanConfig, Worktree } from '../types';
+import type { DockerContainer, StackConfig, Worktree } from '../types';
 import type { INotifyPort } from '../ports/INotifyPort';
 import { isPortFree as probePort } from '../worktree/portProbe';
 import { displayLabel } from '../worktree/displayLabel';
@@ -24,7 +24,7 @@ const CONFIG_TIMEOUT_MS = 30_000;
 /** Long enough for containers to stop gracefully; short enough that deleting never hangs on a dead daemon. */
 export const DOWN_TIMEOUT_MS = 60_000;
 
-/** Where compose's output goes: a "Foreman: Docker" output channel in the extension. */
+/** Where compose's output goes: a "Stack: Docker" output channel in the extension. */
 export interface DockerOutput {
   append(text: string): void;
   /** Bring the log into view without taking focus. */
@@ -35,7 +35,7 @@ export interface DockerOutput {
 
 export interface DockerStacksDeps {
   monitor: DockerMonitor;
-  config: () => ForemanConfig;
+  config: () => StackConfig;
   /** Resolve a repo-relative file: the worktree's own copy first, then the main repo's. */
   locate: (wt: Worktree, file: string) => string | undefined;
   exists: (p: string) => boolean;
@@ -52,7 +52,7 @@ export type DownOutcome = 'ok' | 'failed' | 'timeout';
  * Starts, stops and describes each worktree's compose stack.
  *
  * Everything runs as an awaited child process. `up` used to be typed into a
- * terminal, which meant Foreman never learned whether it worked: a stack that
+ * terminal, which meant Stack never learned whether it worked: a stack that
  * died on "port is already allocated" left a card with no containers, a ▶ and
  * no reason, the error scrolled away in a terminal nobody was looking at.
  */
@@ -81,7 +81,7 @@ export class DockerStacks {
 
   /**
    * The projects this worktree's containers currently run under: its own name,
-   * plus any legacy name a stack from an older Foreman still uses. A legacy
+   * plus any legacy name a compose stack from an older version still uses. A legacy
    * name was shared between repositories, so its containers only count when
    * compose recorded a project directory inside this worktree or its repo.
    */
@@ -96,7 +96,7 @@ export class DockerStacks {
 
   /**
    * The project name to address this worktree's stack by: a legacy one while
-   * a stack from an older Foreman still runs under it, its own otherwise.
+   * a compose stack from an older version still runs under it, its own otherwise.
    */
   project(wt: Worktree): string {
     return this.projectsWithContainers(wt)[0] ?? composeProject(wt);
@@ -213,7 +213,7 @@ export class DockerStacks {
 
   /**
    * Bring the stack down — under every name it is running as, so a stack from
-   * an older Foreman is not orphaned. Bounded by `timeoutMs` so deleting a
+   * an older version is not orphaned. Bounded by `timeoutMs` so deleting a
    * worktree can never hang on a wedged daemon. With `report` off, failures are
    * left to the caller.
    */
@@ -279,7 +279,7 @@ export class DockerStacks {
   /**
    * Every published port of the RESOLVED model that something else holds —
    * hard-coded ones included, which the allocator never sees because they are
-   * not Foreman's to move.
+   * not Stack's to move.
    */
   private async portConflicts(wt: Worktree, published: Array<{ service: string; port: number }>): Promise<PortConflict[]> {
     const probe = this.deps.isPortFree ?? probePort;
@@ -292,8 +292,8 @@ export class DockerStacks {
     for (const p of published) {
       if (own.has(p.port) || (await probe(p.port))) continue;
       const conflict: PortConflict = { ...p };
-      const foremanVar = generated.get(p.port);
-      if (foremanVar) conflict.foremanVar = foremanVar;
+      const generatedVar = generated.get(p.port);
+      if (generatedVar) conflict.generatedVar = generatedVar;
       const heldBy = this.deps.monitor.projectPublishing(p.port);
       if (heldBy) conflict.heldBy = heldBy;
       conflicts.push(conflict);

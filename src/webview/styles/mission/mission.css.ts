@@ -97,7 +97,7 @@ body.vscode-high-contrast .fm-mission, body.vscode-high-contrast-light .fm-missi
 .ms-cards > .fm-empty { flex: 1; }
 .ms-card {
   flex: none; border-radius: 6px; background: var(--fm-card); border: 1px solid var(--fm-border);
-  transition: background .12s, border-color .12s; animation: foreman-fadein .15s ease;
+  transition: background .12s, border-color .12s; animation: stack-fadein .15s ease;
 }
 .ms-card[data-group='idle'], .ms-card[data-group='missing'] { opacity: .88; }
 .ms-card[data-group='missing'] { border-style: dashed; }

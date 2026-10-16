@@ -283,7 +283,7 @@ describe('DockerMonitor', () => {
 
       result = failed('', 125);
       await vi.advanceTimersByTimeAsync(20_000);
-      expect(error).toHaveBeenLastCalledWith('[foreman] docker ps failed: docker ps exited with 125');
+      expect(error).toHaveBeenLastCalledWith('[stack] docker ps failed: docker ps exited with 125');
 
       result = ok();
       onChange.mockClear();

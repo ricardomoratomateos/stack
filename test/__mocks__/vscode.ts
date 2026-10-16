@@ -193,7 +193,7 @@ export const workspace = {
   onDidChangeWorkspaceFolders: vi.fn(() => ({ dispose: vi.fn() })),
 };
 
-/** Mirrors vscode.ConfigurationTarget; only Global is used by Foreman. */
+/** Mirrors vscode.ConfigurationTarget; only Global is used by Stack. */
 export const ConfigurationTarget = { Global: 1, Workspace: 2, WorkspaceFolder: 3 } as const;
 
 // ── commands / env ───────────────────────────────────────────────────────────

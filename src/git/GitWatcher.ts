@@ -264,7 +264,7 @@ export class GitWatcher {
       // and the throw used to abort it: one unwatchable worktree left all the
       // ones after it unwatched and unpolled. Skip this one, say why.
       for (const w of fsWatchers) w.close();
-      console.error(`[foreman] cannot watch ${worktreePath}; its git status will not update:`, e);
+      console.error(`[stack] cannot watch ${worktreePath}; its git status will not update:`, e);
       return;
     }
 
@@ -279,7 +279,7 @@ export class GitWatcher {
    */
   private guard(worktreePath: string, watcher: fs.FSWatcher): fs.FSWatcher {
     watcher.on('error', (e) => {
-      console.error(`[foreman] watcher for ${worktreePath} failed; no longer watching it:`, e);
+      console.error(`[stack] watcher for ${worktreePath} failed; no longer watching it:`, e);
       const owned = this.watchers.get(worktreePath);
       if (!owned?.includes(watcher)) return;
       for (const w of owned) w.close();

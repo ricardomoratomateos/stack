@@ -19,7 +19,7 @@ export function utf8LocaleFor(platform: NodeJS.Platform): string {
 
 export class TmuxManager implements ISessionManager {
   static sessionName(worktreeId: string): string {
-    return 'foreman-' + worktreeId
+    return 'stack-' + worktreeId
       .replace(/[^a-zA-Z0-9-]/g, '-')
       .replace(/-{2,}/g, '-')
       .replace(/^-|-$/g, '')
@@ -52,7 +52,7 @@ export class TmuxManager implements ISessionManager {
 
   /** The base session and window a view session belongs to; undefined for any other session. */
   static parseViewSessionName(name: string): { base: string; windowIndex: number } | undefined {
-    const m = /^(foreman-[a-zA-Z0-9-]+)__w(\d+)$/.exec(name);
+    const m = /^(stack-[a-zA-Z0-9-]+)__w(\d+)$/.exec(name);
     return m ? { base: m[1], windowIndex: Number(m[2]) } : undefined;
   }
 
@@ -96,7 +96,7 @@ export class TmuxManager implements ISessionManager {
   static viewAttachArgs(base: string, windowIndex: number): string[] {
     const view = TmuxManager.viewSessionName(base, windowIndex);
     return [
-      'new-session', '-A', '-s', view, '-n', 'foreman-placeholder', 'sleep 5',
+      'new-session', '-A', '-s', view, '-n', 'stack-placeholder', 'sleep 5',
       ';', 'link-window', '-d', '-s', `=${base}:${windowIndex}`, '-t', `=${view}:`,
       ';', 'unlink-window', '-k', '-t', `=${view}:^`,
       ';', 'set-option', '-t', `=${view}:`, 'status', 'off',
@@ -105,7 +105,7 @@ export class TmuxManager implements ISessionManager {
   }
 
   /**
-   * Which session a Foreman terminal attaches to, read back from its launch
+   * Which session a Stack terminal attaches to, read back from its launch
    * argv — exact, where matching the terminal's NAME is a guess. Also reads
    * the `/bin/sh -c 'tmux attach -t "…"'` form viewers were launched with
    * before, so a reload into this version still recognises them.
@@ -134,7 +134,7 @@ export class TmuxManager implements ISessionManager {
    * with values spliced into double quotes — where `$(...)` and backticks
    * still expand. The worktree path carries the branch name, and branches
    * adopted from `git worktree list` are not validated, so a branch called
-   * `$(touch x)` ran `touch x` the moment Foreman opened a terminal in it.
+   * `$(touch x)` ran `touch x` the moment Stack opened a terminal in it.
    * Arguments passed as a vector are never parsed, so there is nothing to
    * escape and nothing to get wrong.
    */
@@ -186,8 +186,8 @@ export class TmuxManager implements ISessionManager {
         if (!(await this.hasSession(name))) throw e;
       }
     }
-    // Foreman keys everything on window indexes — its window map, the
-    // FOREMAN_WINDOW_INDEX baked into each agent's environment, the hook
+    // Stack keys everything on window indexes — its window map, the
+    // STACK_WINDOW_INDEX baked into each agent's environment, the hook
     // routing built on it — so a ~/.tmux.conf with `renumber-windows on`
     // would shift them under a running agent the first time a window closed,
     // and every later hook would land on the wrong session. Pinned per
@@ -203,7 +203,7 @@ export class TmuxManager implements ISessionManager {
   async newWindow(session: string, name: string, cwd: string): Promise<number> {
     const out = await this.tmux('new-window', '-t', session, '-n', name, '-c', cwd, '-P', '-F', '#{window_index}');
     const index = parseInt(out, 10);
-    // Pin the name we just gave it. Window names are Foreman's identity for a
+    // Pin the name we just gave it. Window names are Stack's identity for a
     // session — reconnect() decides a window holds an agent by matching its
     // name against the provider ids — and tmux otherwise renames a window after
     // whatever command is running in it, so every agent window would come back
@@ -236,17 +236,17 @@ export class TmuxManager implements ISessionManager {
     // it in bracketed-paste markers so the receiving app (e.g. Claude Code)
     // treats the whole block as one input instead of submitting on every newline.
     //
-    // Both names are unique PER CALL. They used to be `foreman-paste-<pid>`,
+    // Both names are unique PER CALL. They used to be `stack-paste-<pid>`,
     // shared by every paste this extension host made — so two in flight at
     // once (two image drops, a launch's prompt and a review send) loaded into
     // the same buffer and the same file: one agent received the other's text,
     // and whichever finished first unlinked the file the other was still
     // loading. tmux buffers are server-wide, so the name also has to be unique
     // across windows; the pid keeps two VS Code windows apart.
-    const bufferName = `foreman-paste-${process.pid}-${++TmuxManager.pasteSeq}-${randomBytes(4).toString('hex')}`;
+    const bufferName = `stack-paste-${process.pid}-${++TmuxManager.pasteSeq}-${randomBytes(4).toString('hex')}`;
     // A private directory rather than a guessable name in the shared tmpdir:
     // mkdtemp makes it 0700 and unique, and the prompt never sits world-readable.
-    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'foreman-paste-'));
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'stack-paste-'));
     const tmpFile = path.join(dir, 'paste.txt');
     try {
       await fs.promises.writeFile(tmpFile, text, 'utf8');
@@ -293,7 +293,7 @@ export class TmuxManager implements ISessionManager {
 
   /** Every session on the server, with how many clients each has; [] when there is no server. */
   async listSessions(): Promise<TmuxSession[]> {
-    const SEP = '|:foreman:|';
+    const SEP = '|:stack:|';
     try {
       const out = await this.tmux('list-sessions', '-F', `#{session_name}${SEP}#{session_attached}`);
       return out.split('\n').filter(Boolean).map((line) => {
@@ -305,7 +305,7 @@ export class TmuxManager implements ISessionManager {
 
   /** Every attached client: its process (a terminal's processId) and the session it shows. */
   async listClients(): Promise<TmuxClient[]> {
-    const SEP = '|:foreman:|';
+    const SEP = '|:stack:|';
     try {
       const out = await this.tmux('list-clients', '-F', `#{client_pid}${SEP}#{session_name}`);
       return out.split('\n').filter(Boolean).flatMap((line) => {
@@ -334,7 +334,7 @@ export class TmuxManager implements ISessionManager {
     // unrecognised shell, which is what reconnect() uses to find agents.
     // Printable ASCII survives any locale, so the parse no longer has a way to
     // half-fail.
-    const SEP = '|:foreman:|';
+    const SEP = '|:stack:|';
     try {
       const out = await this.tmux(
         'list-windows', '-t', `=${session}`,

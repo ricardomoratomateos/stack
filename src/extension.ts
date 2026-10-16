@@ -17,7 +17,7 @@ import { HookRoutes } from './providers/shared/HookRoutes';
 import { DockerMonitor } from './docker/DockerMonitor';
 import { GitWatcher } from './git/GitWatcher';
 import { HookServer } from './server/HookServer';
-import { ForemanWebviewProvider } from './sidebar/ForemanWebviewProvider';
+import { StackWebviewProvider } from './sidebar/StackWebviewProvider';
 import { PrMonitor } from './pr/PrMonitor';
 import { TmuxManager } from './session/TmuxManager';
 import { switchSidebarStyle } from './sidebar/switchSidebarStyle';
@@ -38,14 +38,14 @@ import { SettingsPanelManager } from './settings/SettingsPanelManager';
 import { detect, type DetectIo } from './settings/detect';
 import { SCRIPT_TEMPLATES } from './settings/scriptTemplates';
 import { installedProviders } from './providers/commandLookup';
-import { SIDEBAR_VIEW_ID } from './constants';
+import { EXTENSION_ID, SIDEBAR_VIEW_ID } from './constants';
 import { PACKAGE_MANAGERS, tmuxInstallCommand } from './onboarding/tmuxGate';
 import { TmuxGateView } from './onboarding/TmuxGateView';
 import { findRepoRoot } from './worktree/findRepoRoot';
 import { worktreesInRepo } from './worktree/worktreesInRepo';
 
 /**
- * Surfaces a broken `.foreman/config.json` with a way to go fix it.
+ * Surfaces a broken `.stack/config.json` with a way to go fix it.
  *
  * A warning rather than an error, and never a modal: whatever is wrong, the
  * extension is already running on the user's own settings, so this is news the
@@ -56,7 +56,7 @@ async function reportRepoConfigProblems(config: ConfigManager, problems: string[
   const head = problems[0] ?? '';
   const rest = problems.length > 1 ? ` (+${problems.length - 1} more)` : '';
   const action = await vscode.window.showWarningMessage(
-    `Foreman: ${REPO_CONFIG_RELATIVE} — ${head}${rest}`,
+    `Stack: ${REPO_CONFIG_RELATIVE} — ${head}${rest}`,
     ...(file ? ['Open file'] : []),
   );
   if (action === 'Open file' && file) {
@@ -65,16 +65,16 @@ async function reportRepoConfigProblems(config: ConfigManager, problems: string[
 }
 
 /**
- * Writes `.foreman/config.json` from whatever is in effect right now.
+ * Writes `.stack/config.json` from whatever is in effect right now.
  *
- * The point of the command is the handover: the person who made Foreman work
+ * The point of the command is the handover: the person who made Stack work
  * here has the answers in their own settings.json, and everyone who clones the
  * repo afterwards has none of them. This lifts them into a file that travels
  * with the code.
  */
 async function createRepoConfig(config: ConfigManager, root: string | undefined): Promise<void> {
   if (!root) {
-    vscode.window.showWarningMessage('Foreman: open a git repository first.');
+    vscode.window.showWarningMessage('Stack: open a git repository first.');
     return;
   }
   const file = path.join(root, REPO_CONFIG_RELATIVE);
@@ -82,7 +82,7 @@ async function createRepoConfig(config: ConfigManager, root: string | undefined)
     // Never silently overwritten: this file is committed and shared, so the
     // copy on disk may well be a teammate's work rather than a stale draft.
     const overwrite = await vscode.window.showWarningMessage(
-      `Foreman: ${REPO_CONFIG_RELATIVE} already exists.`,
+      `Stack: ${REPO_CONFIG_RELATIVE} already exists.`,
       'Open it',
       'Overwrite',
     );
@@ -96,7 +96,7 @@ async function createRepoConfig(config: ConfigManager, root: string | undefined)
   fs.writeFileSync(file, renderRepoConfig(config.get()));
   await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file));
   vscode.window.showInformationMessage(
-    `Foreman: wrote ${REPO_CONFIG_RELATIVE}. Commit it and your team gets the same setup.`,
+    `Stack: wrote ${REPO_CONFIG_RELATIVE}. Commit it and your team gets the same setup.`,
   );
 }
 
@@ -216,7 +216,7 @@ class VsCodeWorkspaceHost implements IWorkspaceHost {
         editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
       }
     } catch {
-      vscode.window.showWarningMessage(`Foreman: could not open ${absPath}`);
+      vscode.window.showWarningMessage(`Stack: could not open ${absPath}`);
     }
   }
 }
@@ -233,15 +233,15 @@ export async function activate(ctx: vscode.ExtensionContext) {
     const install = tmuxInstallCommand(process.platform, (bin) => present.has(bin));
     // Hides the settings gear in the view header (its menu `when` clause): the
     // command behind it is only registered once the extension really runs.
-    void vscode.commands.executeCommand('setContext', 'foreman.tmuxMissing', true);
+    void vscode.commands.executeCommand('setContext', 'stack.tmuxMissing', true);
     ctx.subscriptions.push(
       vscode.window.registerWebviewViewProvider(SIDEBAR_VIEW_ID, new TmuxGateView(install)),
     );
     return;
   }
-  void vscode.commands.executeCommand('setContext', 'foreman.tmuxMissing', false);
+  void vscode.commands.executeCommand('setContext', 'stack.tmuxMissing', false);
   // Ticks the walkthrough's first step; the gate above never sets it.
-  void vscode.commands.executeCommand('setContext', 'foreman.tmuxReady', true);
+  void vscode.commands.executeCommand('setContext', 'stack.tmuxReady', true);
 
   // Resolved per read, not captured: the user can add or remove the folder that
   // holds the repository at any point in a window's life.
@@ -265,7 +265,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     shared: new PortReservationFile(ctx.globalStorageUri.fsPath),
   });
   const providerFactory = new ProviderFactory(config, ctx.globalStorageUri.fsPath);
-  // The tab layout is read live, so flipping foreman.sessionTabs applies to
+  // The tab layout is read live, so flipping stack.sessionTabs applies to
   // the next terminal opened; the rest are the manager's own defaults.
   const agentManager = new AgentSessionManager(
     providerFactory, ctx.globalState, undefined, undefined, undefined, undefined,
@@ -287,14 +287,14 @@ export async function activate(ctx: vscode.ExtensionContext) {
       // A broken agent config (say, a syntax error in ~/.claude/settings.json)
       // costs that one agent its sidebar state, never the activation — and the
       // file is left as the user wrote it. Say so instead of failing silently.
-      const message = e instanceof ConfigFileError ? e.message : `Foreman couldn't install the ${provider.label} hooks: ${String(e)}`;
+      const message = e instanceof ConfigFileError ? e.message : `Stack couldn't install the ${provider.label} hooks: ${String(e)}`;
       void vscode.window.showWarningMessage(message);
     }
   }
 
   const prMonitor = new PrMonitor();
 
-  // Clickable file paths in foreman terminals — resolves the relative paths
+  // Clickable file paths in stack terminals — resolves the relative paths
   // Claude prints (src/foo.ts:12) against the terminal's worktree.
   const fileLinkProvider = new TerminalFileLinkProvider({
     resolveBase: (terminal) => {
@@ -329,7 +329,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
 
   // Teardown scripts run headless so a delete can wait for them; this is where
   // their output goes instead of a terminal.
-  const scriptOutput = vscode.window.createOutputChannel('Foreman');
+  const scriptOutput = vscode.window.createOutputChannel('Stack');
   ctx.subscriptions.push(scriptOutput);
 
   // Point the hooks of this window's worktrees at this window's server. Done
@@ -350,13 +350,13 @@ export async function activate(ctx: vscode.ExtensionContext) {
 
   // Compose's own words for every start/stop, so a stack that did not come up
   // has a "Show output" behind its error toast rather than nothing at all.
-  const dockerChannel = vscode.window.createOutputChannel('Foreman: Docker');
+  const dockerChannel = vscode.window.createOutputChannel('Stack: Docker');
   ctx.subscriptions.push(dockerChannel);
   const dockerOutput = {
     append: (text: string) => dockerChannel.append(text),
     reveal: () => dockerChannel.show(true),
     showError: (message: string) => {
-      void vscode.window.showErrorMessage(`Foreman: ${message}`, 'Show output').then((pick) => {
+      void vscode.window.showErrorMessage(`Stack: ${message}`, 'Show output').then((pick) => {
         if (pick === 'Show output') dockerChannel.show();
       });
     },
@@ -388,14 +388,14 @@ export async function activate(ctx: vscode.ExtensionContext) {
   });
   ctx.subscriptions.push(newTaskPanel);
 
-  const webviewProvider = new ForemanWebviewProvider(ctx.extensionUri, agentManager, gitWatcher, service);
+  const webviewProvider = new StackWebviewProvider(ctx.extensionUri, agentManager, gitWatcher, service);
   ctx.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SIDEBAR_VIEW_ID, webviewProvider, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
   );
 
-  // Settings panel: the project half round-trips through `.foreman/config.json`
+  // Settings panel: the project half round-trips through `.stack/config.json`
   // (written here, read back through the same validator the extension uses, so
   // the panel reports exactly what the extension would), the personal half
   // through VS Code's own settings at global scope.
@@ -413,7 +413,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     snapshot: () => {
       const root = repoRootOf();
       const effective = config.get();
-      const cfg = vscode.workspace.getConfiguration('foreman');
+      const cfg = vscode.workspace.getConfiguration('stack');
       const repoFile = readRepoConfig(root);
       return {
         repoRoot: root,
@@ -461,7 +461,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     createScript: async (kind) => {
       const root = repoRootOf();
       if (!root) throw new Error('Open a git repository first.');
-      const rel = path.join('.foreman', `${kind}.sh`);
+      const rel = path.join('.stack', `${kind}.sh`);
       const abs = path.join(root, rel);
       if (!fs.existsSync(abs)) {
         fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -478,7 +478,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       if (!root) return ['Open a git repository first.'];
       const file = path.join(root, REPO_CONFIG_RELATIVE);
       fs.mkdirSync(path.dirname(file), { recursive: true });
-      // Written INTO the existing file, so keys from a newer Foreman and its
+      // Written INTO the existing file, so keys from a newer Stack and its
       // higher version survive a save from this one (see updateRepoConfig).
       const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined;
       fs.writeFileSync(file, updateRepoConfig(existing, values));
@@ -490,7 +490,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       webviewProvider.push();
     },
     clearPersonalOverrides: async () => {
-      const cfg = vscode.workspace.getConfiguration('foreman');
+      const cfg = vscode.workspace.getConfiguration('stack');
       for (const key of REPO_KEYS) {
         await cfg.update(key, undefined, vscode.ConfigurationTarget.Global);
         // Workspace scope only exists inside a workspace; elsewhere the update throws.
@@ -596,7 +596,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   );
 
   // Docker polling follows the setting without a reload — from settings.json,
-  // or from `.foreman/config.json` saved by the panel, edited by hand or
+  // or from `.stack/config.json` saved by the panel, edited by hand or
   // changed by a checkout (which no configuration event reports).
   const repoConfigWatcher = vscode.workspace.createFileSystemWatcher(`**/${REPO_CONFIG_RELATIVE}`);
   const resyncDocker = () => {
@@ -609,32 +609,32 @@ export async function activate(ctx: vscode.ExtensionContext) {
     repoConfigWatcher.onDidCreate(resyncDocker),
     repoConfigWatcher.onDidDelete(resyncDocker),
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('foreman')) resyncDocker();
+      if (e.affectsConfiguration('stack')) resyncDocker();
     }),
   );
 
   // Commands.
   ctx.subscriptions.push(
-    vscode.commands.registerCommand('foreman.createWorktree', (opts?: { branch?: string; description?: string }) =>
+    vscode.commands.registerCommand('stack.createWorktree', (opts?: { branch?: string; description?: string }) =>
       service.createWorktree(opts),
     ),
     // The "+" in the view header: opens the webview's rich new-task modal
     // (title, branch, base branch, description) rather than a bare input box.
-    vscode.commands.registerCommand('foreman.newTask', () => newTaskPanel.open()),
-    vscode.commands.registerCommand('foreman.openSettings', () => settingsPanel.open()),
-    vscode.commands.registerCommand('foreman.gettingStarted', () =>
-      vscode.commands.executeCommand('workbench.action.openWalkthrough', 'foreman.foreman#foreman.gettingStarted', false),
+    vscode.commands.registerCommand('stack.newTask', () => newTaskPanel.open()),
+    vscode.commands.registerCommand('stack.openSettings', () => settingsPanel.open()),
+    vscode.commands.registerCommand('stack.gettingStarted', () =>
+      vscode.commands.executeCommand('workbench.action.openWalkthrough', `${EXTENSION_ID}#stack.gettingStarted`, false),
     ),
-    vscode.commands.registerCommand('foreman.createRepoConfig', () => createRepoConfig(config, repoRootOf())),
-    vscode.commands.registerCommand('foreman.deleteWorktree', (item) => service.deleteWorktree(item?.worktree)),
-    vscode.commands.registerCommand('foreman.renameWorktree', (item) => service.renameWorktree(item?.worktree)),
-    vscode.commands.registerCommand('foreman.initWorktree', (item) => service.initWorktree(item?.worktree)),
-    vscode.commands.registerCommand('foreman.openTerminal', (item) => service.openTerminal(item?.worktree)),
-    vscode.commands.registerCommand('foreman.launchAgent', (item) => service.launchAgent(item?.worktree)),
-    vscode.commands.registerCommand('foreman.focusNextWorktree', () => service.focusNextWorktree()),
-    vscode.commands.registerCommand('foreman.focusPrevWorktree', () => service.focusPrevWorktree()),
-    vscode.commands.registerCommand('foreman.focusNextAttention', () => service.focusNextAttention()),
-    vscode.commands.registerCommand('foreman.switchSidebarStyle', () =>
+    vscode.commands.registerCommand('stack.createRepoConfig', () => createRepoConfig(config, repoRootOf())),
+    vscode.commands.registerCommand('stack.deleteWorktree', (item) => service.deleteWorktree(item?.worktree)),
+    vscode.commands.registerCommand('stack.renameWorktree', (item) => service.renameWorktree(item?.worktree)),
+    vscode.commands.registerCommand('stack.initWorktree', (item) => service.initWorktree(item?.worktree)),
+    vscode.commands.registerCommand('stack.openTerminal', (item) => service.openTerminal(item?.worktree)),
+    vscode.commands.registerCommand('stack.launchAgent', (item) => service.launchAgent(item?.worktree)),
+    vscode.commands.registerCommand('stack.focusNextWorktree', () => service.focusNextWorktree()),
+    vscode.commands.registerCommand('stack.focusPrevWorktree', () => service.focusPrevWorktree()),
+    vscode.commands.registerCommand('stack.focusNextAttention', () => service.focusNextAttention()),
+    vscode.commands.registerCommand('stack.switchSidebarStyle', () =>
       switchSidebarStyle({
         current: () => config.get().sidebarStyle,
         pick: (items, placeHolder) => Promise.resolve(vscode.window.showQuickPick(items, { placeHolder, matchOnDetail: true })),
@@ -643,22 +643,22 @@ export async function activate(ctx: vscode.ExtensionContext) {
         save: (style) => config.saveUserValues({ sidebarStyle: style }),
       }),
     ),
-    vscode.commands.registerCommand('foreman.focusSession', (terminal: vscode.Terminal | undefined) => terminal?.show()),
-    vscode.commands.registerCommand('foreman.openSessionToSide', (target?: { worktreeId: string; index?: number }) =>
+    vscode.commands.registerCommand('stack.focusSession', (terminal: vscode.Terminal | undefined) => terminal?.show()),
+    vscode.commands.registerCommand('stack.openSessionToSide', (target?: { worktreeId: string; index?: number }) =>
       service.openSessionToSide(target),
     ),
-    vscode.commands.registerCommand('foreman.attachLatestScreenshot', async () => {
+    vscode.commands.registerCommand('stack.attachLatestScreenshot', async () => {
       const term = vscode.window.activeTerminal;
       // The session of the focused tab, not just its worktree: with a tab per
       // session, the worktree's other agent may be the one in front of tmux.
       const target = term ? agentManager.getTargetForTerminal(term) : undefined;
       if (!target) {
-        vscode.window.showWarningMessage('Foreman: focus an agent terminal first, then attach the screenshot.');
+        vscode.window.showWarningMessage('Stack: focus an agent terminal first, then attach the screenshot.');
         return;
       }
       const shot = await findLatestScreenshot();
       if (!shot) {
-        vscode.window.showWarningMessage('Foreman: no screenshot found in your screenshot folder.');
+        vscode.window.showWarningMessage('Stack: no screenshot found in your screenshot folder.');
         return;
       }
       // Paste the path single-quoted (as a terminal file-drop does), unsent, so
@@ -681,7 +681,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       // global — one entry in ~/.claude/settings.json serves every window — and
       // uninstalling them here, as this used to, pulled them out from under
       // every other window still open, and from the new window of a reload.
-      // With no Foreman listening the hook finds no endpoint and exits 0.
+      // With no Stack listening the hook finds no endpoint and exits 0.
       try { hookRoutes.release(hookUrl); } catch { /* best effort */ }
     },
   });
@@ -690,7 +690,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // so activation never blocks — the webview renders immediately and folder
   // mutations (which may reload the window) happen after activate() resolves.
   void service.start().then(claimHookRoutes, (e) => {
-    vscode.window.showErrorMessage(`Foreman failed to load worktrees: ${String(e)}`);
+    vscode.window.showErrorMessage(`Stack failed to load worktrees: ${String(e)}`);
   });
 
   // Greet an empty editor with the New agent panel — the same spirit as the
@@ -705,11 +705,11 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // First look at a repository that could use the heavier setup — a compose
   // file, or a PHP stack that wants Xdebug — offer the settings panel once.
   // Then never again for this repo: it lives behind the gear from here on, and
-  // a repo that already has `.foreman/config.json` was set up by someone.
+  // a repo that already has `.stack/config.json` was set up by someone.
   void (async () => {
     const root = repoRootOf();
     if (!root) return;
-    const key = `foreman.setupNudged:${root}`;
+    const key = `stack.setupNudged:${root}`;
     if (ctx.globalState.get<boolean>(key)) return;
     if (readRepoConfig(root).present) { await ctx.globalState.update(key, true); return; }
     const found = detect(root, detectIo);
@@ -717,7 +717,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     await ctx.globalState.update(key, true);
     const what = found.composeFiles.length > 0 ? `\`${found.composeFiles[0]}\`` : 'a PHP stack';
     const pick = await vscode.window.showInformationMessage(
-      `Foreman: this repo has ${what}. Set up a Docker stack and debugger per worktree?`,
+      `Stack: this repo has ${what}. Set up a Docker stack and debugger per worktree?`,
       'Open settings',
       'Not now',
     );

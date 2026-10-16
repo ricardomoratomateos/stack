@@ -17,11 +17,11 @@ const ENV_VAR = /\$\{?([A-Z][A-Z0-9_]*)(?:[:-][^}\s]*)?\}?/g;
  * descended into — never the whole tree, which in a node repo means
  * node_modules — and only two levels deep (`deploy/local/compose.yml`).
  */
-const COMPOSE_DIRS = new Set(['docker', '.docker', 'deploy', 'deployment', 'infra', 'ops', 'compose', '.devcontainer', '.foreman']);
+const COMPOSE_DIRS = new Set(['docker', '.docker', 'deploy', 'deployment', 'infra', 'ops', 'compose', '.devcontainer', '.stack']);
 const MAX_DEPTH = 2;
 
-const SETUP_CANDIDATES = ['.foreman/setup.sh', 'scripts/setup.sh', 'setup.sh'];
-const TEARDOWN_CANDIDATES = ['.foreman/teardown.sh', 'scripts/teardown.sh', 'teardown.sh'];
+const SETUP_CANDIDATES = ['.stack/setup.sh', 'scripts/setup.sh', 'setup.sh'];
+const TEARDOWN_CANDIDATES = ['.stack/teardown.sh', 'scripts/teardown.sh', 'teardown.sh'];
 
 /**
  * What the repository already tells us, so the settings panel can lead with

@@ -8,14 +8,14 @@ import { IWorktreeRepository } from '../../src/ports/IWorktreeRepository';
 import { Worktree } from '../../src/types';
 import { InMemoryWorktreeRepository } from '../helpers/InMemoryWorktreeRepository';
 
-const STORE_KEY = 'foreman.store';
+const STORE_KEY = 'stack.store';
 
 function makeWorktree(overrides: Partial<Worktree> = {}): Worktree {
   return {
     id: 'wt-1',
     branch: 'feature/foo',
-    path: '/tmp/foreman-test/feature-foo',
-    repoRoot: '/tmp/foreman-test/repo',
+    path: '/tmp/stack-test/feature-foo',
+    repoRoot: '/tmp/stack-test/repo',
     debugPort: 9004,
     dockerProjectName: 'feature-foo',
     createdAt: 1700000000000,
@@ -43,7 +43,7 @@ describe('WorktreeStore (implements IWorktreeRepository)', () => {
     expect(store.getPortRegistry()).toEqual({});
   });
 
-  it('reads/writes the exact key "foreman.store" as { worktrees, portRegistry }', async () => {
+  it('reads/writes the exact key "stack.store" as { worktrees, portRegistry }', async () => {
     // Write path: add() persists under the exact key with the exact shape.
     const wt = makeWorktree();
     await store.add(wt);
@@ -140,7 +140,7 @@ describe('WorktreeStore (implements IWorktreeRepository)', () => {
     let aliveDir: string;
 
     beforeEach(() => {
-      aliveDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-store-test-'));
+      aliveDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-store-test-'));
     });
 
     afterEach(() => {
@@ -151,7 +151,7 @@ describe('WorktreeStore (implements IWorktreeRepository)', () => {
       const alive = makeWorktree({ id: 'alive', path: aliveDir, debugPort: 9001 });
       const gone = makeWorktree({
         id: 'gone',
-        path: path.join(os.tmpdir(), 'foreman-definitely-missing-xyz'),
+        path: path.join(os.tmpdir(), 'stack-definitely-missing-xyz'),
         debugPort: 9002,
       });
       await store.add(alive);

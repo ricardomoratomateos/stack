@@ -69,27 +69,27 @@ input, textarea { font-family: inherit; font-size: inherit; }
 ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--vscode-foreground) 20%, transparent); border-radius: 3px; }
 ::selection { background: color-mix(in srgb, var(--vscode-button-background) 35%, transparent); }
 
-@keyframes foreman-bounce {
+@keyframes stack-bounce {
   0%,80%,100% { transform: translateY(0); }
   40%         { transform: translateY(-4px); }
 }
-@keyframes foreman-pulse {
+@keyframes stack-pulse {
   0%,100% { opacity: 1; }
   50%     { opacity: 0.3; }
 }
-@keyframes foreman-blink {
+@keyframes stack-blink {
   0%,100% { opacity: 1; }
   50%     { opacity: 0.15; }
 }
-@keyframes foreman-fadein {
+@keyframes stack-fadein {
   from { opacity: 0; transform: translateY(3px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-.u-dot-active  { animation: foreman-pulse 1.6s ease-in-out infinite; }
-.u-dot-perm    { animation: foreman-blink 1.0s ease-in-out infinite; }
-.u-dot-1 { animation: foreman-bounce 1.2s ease-in-out infinite; }
-.u-dot-2 { animation: foreman-bounce 1.2s ease-in-out 0.15s infinite; }
-.u-dot-3 { animation: foreman-bounce 1.2s ease-in-out 0.30s infinite; }
-.u-fadein { animation: foreman-fadein .2s ease; }
+.u-dot-active  { animation: stack-pulse 1.6s ease-in-out infinite; }
+.u-dot-perm    { animation: stack-blink 1.0s ease-in-out infinite; }
+.u-dot-1 { animation: stack-bounce 1.2s ease-in-out infinite; }
+.u-dot-2 { animation: stack-bounce 1.2s ease-in-out 0.15s infinite; }
+.u-dot-3 { animation: stack-bounce 1.2s ease-in-out 0.30s infinite; }
+.u-fadein { animation: stack-fadein .2s ease; }
 `;

@@ -47,13 +47,13 @@ describe('conflictMessage', () => {
   });
 
   it('names the variable for a busy generated port', () => {
-    expect(conflictMessage([{ service: 'web', port: 20000, foremanVar: 'HTTP_PORT' }], 'c.yml'))
+    expect(conflictMessage([{ service: 'web', port: 20000, generatedVar: 'HTTP_PORT' }], 'c.yml'))
       .toBe('Port 20000 (web) from HTTP_PORT is already in use by something else.');
   });
 
   it('reports both kinds together', () => {
     const msg = conflictMessage(
-      [{ service: 'db', port: 5432 }, { service: 'web', port: 20000, foremanVar: 'HTTP_PORT' }],
+      [{ service: 'db', port: 5432 }, { service: 'web', port: 20000, generatedVar: 'HTTP_PORT' }],
       'c.yml',
     );
     expect(msg).toMatch(/5432.*hard-coded.*20000.*HTTP_PORT/s);

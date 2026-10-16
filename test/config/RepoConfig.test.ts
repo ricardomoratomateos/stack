@@ -7,7 +7,7 @@ import {
   REPO_CONFIG_RELATIVE,
   REPO_CONFIG_VERSION,
 } from '../../src/config/RepoConfig';
-import { ForemanConfig } from '../../src/types';
+import { StackConfig } from '../../src/types';
 
 /** In-memory stand-in for the two fs calls readRepoConfig makes. */
 const fsWith = (files: Record<string, string>) => ({
@@ -16,14 +16,14 @@ const fsWith = (files: Record<string, string>) => ({
 });
 
 const ROOT = path.join('/repo');
-const FILE = path.join(ROOT, '.foreman', 'config.json');
+const FILE = path.join(ROOT, '.stack', 'config.json');
 
 const read = (body: unknown) =>
   readRepoConfig(ROOT, fsWith({ [FILE]: typeof body === 'string' ? body : JSON.stringify(body) }));
 
 describe('readRepoConfig', () => {
-  it('looks in .foreman/config.json under the repo root', () => {
-    expect(REPO_CONFIG_RELATIVE).toBe(path.join('.foreman', 'config.json'));
+  it('looks in .stack/config.json under the repo root', () => {
+    expect(REPO_CONFIG_RELATIVE).toBe(path.join('.stack', 'config.json'));
   });
 
   it('returns nothing when there is no root', () => {
@@ -43,8 +43,8 @@ describe('readRepoConfig', () => {
       version: 1,
       worktreesDirectory: '../wt',
       defaultBaseBranch: 'trunk',
-      setupScript: '.foreman/setup.sh',
-      teardownScript: '.foreman/teardown.sh',
+      setupScript: '.stack/setup.sh',
+      teardownScript: '.stack/teardown.sh',
       docker: {
         composeFile: 'compose.yaml',
         overrideFile: 'compose.wt.yaml',
@@ -61,8 +61,8 @@ describe('readRepoConfig', () => {
     expect(result.values).toEqual({
       worktreesDirectory: '../wt',
       defaultBaseBranch: 'trunk',
-      setupScript: '.foreman/setup.sh',
-      teardownScript: '.foreman/teardown.sh',
+      setupScript: '.stack/setup.sh',
+      teardownScript: '.stack/teardown.sh',
       docker: {
         composeFile: 'compose.yaml',
         overrideFile: 'compose.wt.yaml',
@@ -201,7 +201,7 @@ describe('readRepoConfig', () => {
     });
 
     it('reads a newer file anyway, saying what it did', () => {
-      // A teammate on a newer Foreman bumping this must not stop the repo working
+      // A teammate on a newer Stack bumping this must not stop the repo working
       // for everyone still on this build.
       const result = read({ version: REPO_CONFIG_VERSION + 1, defaultBaseBranch: 'trunk' });
       expect(result.values.defaultBaseBranch).toBe('trunk');
@@ -218,11 +218,11 @@ describe('readRepoConfig', () => {
 });
 
 describe('renderRepoConfig', () => {
-  const effective: ForemanConfig = {
+  const effective: StackConfig = {
     worktreesDirectory: '../wt',
     defaultBaseBranch: 'trunk',
-    setupScript: '.foreman/setup.sh',
-    teardownScript: '.foreman/teardown.sh',
+    setupScript: '.stack/setup.sh',
+    teardownScript: '.stack/teardown.sh',
     defaultProvider: 'codex',
     claudeCommand: 'claude',
     codexCommand: 'codex',
@@ -247,8 +247,8 @@ describe('renderRepoConfig', () => {
       version: REPO_CONFIG_VERSION,
       worktreesDirectory: '../wt',
       defaultBaseBranch: 'trunk',
-      setupScript: '.foreman/setup.sh',
-      teardownScript: '.foreman/teardown.sh',
+      setupScript: '.stack/setup.sh',
+      teardownScript: '.stack/teardown.sh',
       docker: effective.docker,
       debugBasePort: 9001,
       debugTemplate: effective.debugTemplate,
@@ -288,7 +288,7 @@ describe('updateRepoConfig', () => {
   };
 
   it('keeps keys this build does not know, where they were', () => {
-    // A teammate on a newer Foreman added `agentsDirectory`; saving from this
+    // A teammate on a newer Stack added `agentsDirectory`; saving from this
     // one used to re-render the file from the keys it knows and drop it.
     const existing = JSON.stringify({
       version: 1,
@@ -321,7 +321,7 @@ describe('updateRepoConfig', () => {
     expect(JSON.parse(updateRepoConfig('{}', values)).version).toBe(REPO_CONFIG_VERSION);
   });
 
-  it('merges docker key by key, so a newer Foreman\'s docker keys survive too', () => {
+  it('merges docker key by key, so a newer Stack\'s docker keys survive too', () => {
     const existing = JSON.stringify({ docker: { composeFile: 'old.yml', networkName: 'shared' } });
     const parsed = JSON.parse(updateRepoConfig(existing, values));
     expect(parsed.docker).toEqual({ ...values.docker, networkName: 'shared' });

@@ -51,7 +51,7 @@ describe('configFile', () => {
 
   describe('files', () => {
     let dir: string;
-    beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-configfile-')); });
+    beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-configfile-')); });
     afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
 
     it('reports a syntax error with no location when the parser gives none', () => {

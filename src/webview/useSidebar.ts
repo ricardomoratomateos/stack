@@ -2,18 +2,18 @@ import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 import { getState, send, setState } from './vscode';
 import { normalizeSidebarStyle } from '../sidebarStyle';
 import { describeAll, type Described } from './derive';
-import type { ExtMessage, ForemanState, WorktreeItem } from './types';
+import type { ExtMessage, StackState, WorktreeItem } from './types';
 
 /**
  * The style the sidebar wore last time, so a reload paints it from the first
  * frame instead of flashing the default until the extension's first push.
  */
-function initialState(): ForemanState {
+function initialState(): StackState {
   const saved = (getState() as { sidebarStyle?: unknown } | null | undefined)?.sidebarStyle;
   return { worktrees: [], sidebarStyle: saved === undefined ? undefined : normalizeSidebarStyle(saved) };
 }
 
-function reducer(current: ForemanState, msg: ExtMessage): ForemanState {
+function reducer(current: StackState, msg: ExtMessage): StackState {
   return msg.type === 'state' ? msg.payload : current;
 }
 
@@ -80,7 +80,7 @@ export function useWorktreeDrag(worktrees: WorktreeItem[]): (wt: WorktreeItem) =
 }
 
 export interface Sidebar {
-  state: ForemanState;
+  state: StackState;
   loaded: boolean;
   items: Described[];
   selectedId: string | null;

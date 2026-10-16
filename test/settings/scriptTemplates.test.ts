@@ -12,7 +12,7 @@ import { SCRIPT_TEMPLATES } from '../../src/settings/scriptTemplates';
 const EXPORTED = new Set(
   [...fs
     .readFileSync(path.join(__dirname, '../../src/application/WorktreeApplicationService.ts'), 'utf8')
-    .matchAll(/^\s+(FOREMAN_[A-Z_]+):/gm)].map((m) => m[1]),
+    .matchAll(/^\s+(STACK_[A-Z_]+):/gm)].map((m) => m[1]),
 );
 
 describe('SCRIPT_TEMPLATES', () => {
@@ -28,7 +28,7 @@ describe('SCRIPT_TEMPLATES', () => {
       });
 
       it('starts from the worktree it was run for', () => {
-        expect(body).toContain('cd "$FOREMAN_WORKTREE_PATH"');
+        expect(body).toContain('cd "$STACK_WORKTREE_PATH"');
       });
 
       it('leaves every command commented out', () => {
@@ -36,11 +36,11 @@ describe('SCRIPT_TEMPLATES', () => {
           .split('\n')
           .slice(1) // the shebang
           .filter((l) => l.trim() && !l.trimStart().startsWith('#'));
-        expect(live).toEqual(['set -euo pipefail', 'cd "$FOREMAN_WORKTREE_PATH"']);
+        expect(live).toEqual(['set -euo pipefail', 'cd "$STACK_WORKTREE_PATH"']);
       });
 
       it('names only variables the service really exports', () => {
-        for (const name of new Set([...body.matchAll(/FOREMAN_[A-Z_]+/g)].map((m) => m[0]))) {
+        for (const name of new Set([...body.matchAll(/STACK_[A-Z_]+/g)].map((m) => m[0]))) {
           expect(EXPORTED).toContain(name);
         }
       });

@@ -7,7 +7,7 @@ describe('OsaNotifyAdapter', () => {
     new OsaNotifyAdapter('darwin', run).notify('feature-x: agent finished');
     expect(run).toHaveBeenCalledWith('osascript', [
       '-e',
-      'display notification "feature-x: agent finished" with title "Foreman"',
+      'display notification "feature-x: agent finished" with title "Stack"',
     ]);
   });
 

@@ -18,7 +18,7 @@ export interface ListedContainer extends DockerContainer {
  * - `docker compose ps -a --format json` — a JSON array on Compose ≥ 2.21 and
  *   NDJSON before it, with Project/Service/ExitCode/Publishers as real fields.
  *
- * Containers without a compose project are dropped: nothing Foreman shows
+ * Containers without a compose project are dropped: nothing Stack shows
  * comes from outside compose.
  */
 export function parseContainerList(output: string): ListedContainer[] {

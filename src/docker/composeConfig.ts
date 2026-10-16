@@ -38,9 +38,9 @@ export function publishedPorts(configJson: string): PublishedPort[] {
 }
 
 export interface PortConflict extends PublishedPort {
-  /** The env var Foreman generated it from; absent for a port hard-coded in a compose file. */
-  foremanVar?: string;
-  /** The compose project already publishing it, when it is another Foreman-visible stack. */
+  /** The env var Stack generated it from; absent for a port hard-coded in a compose file. */
+  generatedVar?: string;
+  /** The compose project already publishing it, when it is another compose stack the extension can see. */
   heldBy?: string;
 }
 
@@ -52,8 +52,8 @@ export interface PortConflict extends PublishedPort {
 export function conflictMessage(conflicts: PortConflict[], composeFile: string): string {
   const describe = (c: PortConflict) =>
     `${c.port} (${c.service}${c.heldBy ? `, held by "${c.heldBy}"` : ''})`;
-  const fixed = conflicts.filter((c) => !c.foremanVar);
-  const generated = conflicts.filter((c) => c.foremanVar);
+  const fixed = conflicts.filter((c) => !c.generatedVar);
+  const generated = conflicts.filter((c) => c.generatedVar);
   const parts: string[] = [];
   if (fixed.length > 0) {
     parts.push(
@@ -66,7 +66,7 @@ export function conflictMessage(conflicts: PortConflict[], composeFile: string):
   }
   if (generated.length > 0) {
     parts.push(
-      `Port ${generated.map((c) => `${describe(c)} from ${c.foremanVar}`).join(', ')} is already in use by something else.`,
+      `Port ${generated.map((c) => `${describe(c)} from ${c.generatedVar}`).join(', ')} is already in use by something else.`,
     );
   }
   return parts.join(' ');

@@ -29,7 +29,7 @@ export async function switchSidebarStyle(deps: SwitchSidebarStyleDeps): Promise<
       detail: SIDEBAR_STYLE_INFO[style].description,
       style,
     }));
-  const picked = await deps.pick(items, 'Choose how the Foreman sidebar looks');
+  const picked = await deps.pick(items, 'Choose how the Stack sidebar looks');
   if (!picked || picked.style === current) return undefined;
   await deps.save(picked.style);
   return picked.style;

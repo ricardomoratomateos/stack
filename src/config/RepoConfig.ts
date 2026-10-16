@@ -1,16 +1,16 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { ForemanConfig, DockerConfig, DebugTemplate } from '../types';
+import { StackConfig, DockerConfig, DebugTemplate } from '../types';
 
-/** Where a repository declares how Foreman should treat it. */
-export const REPO_CONFIG_RELATIVE = path.join('.foreman', 'config.json');
+/** Where a repository declares how Stack should treat it. */
+export const REPO_CONFIG_RELATIVE = path.join('.stack', 'config.json');
 
 /**
  * The schema version this build writes and understands.
  *
  * A file from the future is read anyway, on the assumption that new keys are
  * additive and the ones we recognise still mean what they meant. It reports the
- * mismatch rather than refusing: a teammate on a newer Foreman bumping the
+ * mismatch rather than refusing: a teammate on a newer Stack bumping the
  * version must not stop the repo working for everyone still on this one.
  */
 export const REPO_CONFIG_VERSION = 1;
@@ -40,7 +40,7 @@ export type RepoScopedKey =
   | 'debugBasePort'
   | 'debugTemplate';
 
-export type RepoConfigValues = Partial<Pick<ForemanConfig, RepoScopedKey>>;
+export type RepoConfigValues = Partial<Pick<StackConfig, RepoScopedKey>>;
 
 export type RepoConfigResult = {
   /** Recognised, correctly typed values. Empty when there is no file. */
@@ -138,7 +138,7 @@ const validators: Record<RepoScopedKey, Validator> = {
   debugTemplate: asDebugTemplate,
 };
 
-/** Keys that exist in ForemanConfig but are the user's, not the repository's. */
+/** Keys that exist in StackConfig but are the user's, not the repository's. */
 const USER_SCOPED = new Set([
   'defaultProvider',
   'claudeCommand',
@@ -160,7 +160,7 @@ function describe(v: unknown): string {
   return typeof v;
 }
 
-/** Reads and validates `<repoRoot>/.foreman/config.json`. Never throws. */
+/** Reads and validates `<repoRoot>/.stack/config.json`. Never throws. */
 export function readRepoConfig(
   repoRoot: string | undefined,
   io: Pick<typeof fs, 'existsSync' | 'readFileSync'> = fs,
@@ -188,8 +188,8 @@ export function readRepoConfig(
     if (typeof version !== 'number') problems.push(`"version" must be a number, got ${describe(version)}`);
     else if (version > REPO_CONFIG_VERSION) {
       problems.push(
-        `${REPO_CONFIG_RELATIVE} declares version ${version}; this Foreman understands ${REPO_CONFIG_VERSION}. ` +
-        'Reading the keys it recognises — update Foreman if something looks wrong.',
+        `${REPO_CONFIG_RELATIVE} declares version ${version}; this Stack understands ${REPO_CONFIG_VERSION}. ` +
+        'Reading the keys it recognises — update Stack if something looks wrong.',
       );
     }
   }
@@ -221,7 +221,7 @@ export function readRepoConfig(
  * has a working setup in their own settings.json, and the useful thing is to
  * lift it into the repository verbatim so everyone else inherits it.
  */
-export function renderRepoConfig(effective: ForemanConfig): string {
+export function renderRepoConfig(effective: StackConfig): string {
   return updateRepoConfig(undefined, {
     worktreesDirectory: effective.worktreesDirectory,
     defaultBaseBranch: effective.defaultBaseBranch,
@@ -237,10 +237,10 @@ export function renderRepoConfig(effective: ForemanConfig): string {
  * The file's new text after writing `values` into what is already there.
  *
  * An update, not a re-render. The file is shared and outlives any one build
- * of Foreman, and re-rendering it from the keys this build knows did two
+ * of Stack, and re-rendering it from the keys this build knows did two
  * quiet kinds of damage on every save from the settings panel: a key added by
- * a newer Foreman (or one this build reports as unknown) vanished, and
- * `version` went back to 1 — telling every newer Foreman the file is older
+ * a newer Stack (or one this build reports as unknown) vanished, and
+ * `version` went back to 1 — telling every newer Stack the file is older
  * than it is. So: every existing key survives, in its place; docker is merged
  * key by key for the same reason; the version only ever goes up.
  *

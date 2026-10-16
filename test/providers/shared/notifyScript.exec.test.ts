@@ -14,7 +14,7 @@ import { HookEntry } from '../../../src/types';
  *
  * Every other test of this script asserts on its *source text* — that it
  * contains a curl, that it reads the right files. None of them executes a line
- * of it, and this is the one part of Foreman that runs on the user's machine
+ * of it, and this is the one part of Stack that runs on the user's machine
  * outside our control. A quoting mistake, an unset variable, a `cat` that
  * blocks, a fallback that never falls back: all of it would ship unverified.
  *
@@ -88,13 +88,13 @@ describe('notify.sh (executed)', () => {
     }
   });
 
-  const TMUX_SESSION = `foreman-notifyexec-${process.pid}`;
+  const TMUX_SESSION = `stack-notifyexec-${process.pid}`;
 
   beforeEach(() => {
     received = [];
     for (const k of Object.keys(behaviour)) delete behaviour[k];
     for (const k of Object.keys(replies)) delete replies[k];
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-notifyexec-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-notifyexec-'));
     // A directory with a space in it, because the real one is
     // "~/Library/Application Support/Code/User/globalStorage/..." on macOS and
     // an unquoted path there is the classic way this breaks for one platform.
@@ -132,7 +132,7 @@ describe('notify.sh (executed)', () => {
       const started = Date.now();
       const child = spawn('bash', argv, {
         // Deliberately NOT process.env: this suite runs inside a terminal that
-        // may well be a tmux pane with FOREMAN_* exported, which would mask
+        // may well be a tmux pane with STACK_* exported, which would mask
         // exactly the fallbacks under test.
         env: { PATH: process.env['PATH'] ?? '', HOME: os.tmpdir(), ...env },
       });
@@ -158,8 +158,8 @@ describe('notify.sh (executed)', () => {
       session_id: 's-1', transcript_path: '/tmp/t.jsonl', hook_event_name: 'Stop', message: 'say "hi" & $HOME',
     });
     const r = await run(['Stop', 'claude'], {
-      FOREMAN_WORKSPACE_ID: 'wt-abc',
-      FOREMAN_WINDOW_INDEX: '3',
+      STACK_WORKSPACE_ID: 'wt-abc',
+      STACK_WINDOW_INDEX: '3',
     }, payload);
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1);
@@ -169,18 +169,18 @@ describe('notify.sh (executed)', () => {
     expect(post?.url).toBe('/hook');
     // Byte for byte: no shell expansion, no re-quoting.
     expect(post?.body).toBe(payload);
-    expect(post?.headers['x-foreman-hook']).toBe('2');
-    expect(post?.headers['x-foreman-event']).toBe('Stop');
-    expect(post?.headers['x-foreman-agent']).toBe('claude');
-    expect(post?.headers['x-foreman-workspace']).toBe('wt-abc');
-    expect(post?.headers['x-foreman-window']).toBe('3');
+    expect(post?.headers['x-stack-hook']).toBe('2');
+    expect(post?.headers['x-stack-event']).toBe('Stop');
+    expect(post?.headers['x-stack-agent']).toBe('claude');
+    expect(post?.headers['x-stack-workspace']).toBe('wt-abc');
+    expect(post?.headers['x-stack-window']).toBe('3');
   });
 
   it.runIf(canRun)("prefers the worktree's route over the launch env and the shared file", async () => {
     // Two windows open: hook-url says "fallback" (whichever started last),
     // but this worktree belongs to "window".
     route('wt-abc', urls['window']!);
-    const r = await run(['Stop'], { FOREMAN_WORKSPACE_ID: 'wt-abc', FOREMAN_HOOK_URL: urls['other']! }, '{}');
+    const r = await run(['Stop'], { STACK_WORKSPACE_ID: 'wt-abc', STACK_HOOK_URL: urls['other']! }, '{}');
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1);
     await waitForPosts(2, 200);
@@ -188,10 +188,10 @@ describe('notify.sh (executed)', () => {
   });
 
   it.runIf(canRun)('reaches a reloaded window through its route, though the env still holds the old port', async () => {
-    // The agent was launched before the reload: its FOREMAN_HOOK_URL is dead.
+    // The agent was launched before the reload: its STACK_HOOK_URL is dead.
     // The reloaded window claimed the route with its new port.
     route('wt-abc', urls['window']!);
-    const r = await run(['Stop'], { FOREMAN_WORKSPACE_ID: 'wt-abc', FOREMAN_HOOK_URL: await deadUrl() }, '{}');
+    const r = await run(['Stop'], { STACK_WORKSPACE_ID: 'wt-abc', STACK_HOOK_URL: await deadUrl() }, '{}');
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1);
     expect(received.map((p) => p.server)).toEqual(['window']);
@@ -200,7 +200,7 @@ describe('notify.sh (executed)', () => {
   it.runIf(canRun)('falls through a dead route to the launch env', async () => {
     // The route's window crashed without withdrawing it.
     route('wt-abc', await deadUrl());
-    const r = await run(['Stop'], { FOREMAN_WORKSPACE_ID: 'wt-abc', FOREMAN_HOOK_URL: urls['window']! }, '{}');
+    const r = await run(['Stop'], { STACK_WORKSPACE_ID: 'wt-abc', STACK_HOOK_URL: urls['window']! }, '{}');
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1);
     expect(received.map((p) => p.server)).toEqual(['window']);
@@ -209,7 +209,7 @@ describe('notify.sh (executed)', () => {
   it.runIf(canRun)('moves on when a window answers 404 (not its worktree)', async () => {
     behaviour['other'] = 404;
     route('wt-abc', urls['other']!);
-    const r = await run(['Stop'], { FOREMAN_WORKSPACE_ID: 'wt-abc', FOREMAN_HOOK_URL: urls['window']! }, '{}');
+    const r = await run(['Stop'], { STACK_WORKSPACE_ID: 'wt-abc', STACK_HOOK_URL: urls['window']! }, '{}');
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(2);
     expect(received.map((p) => p.server)).toEqual(['other', 'window']);
@@ -218,7 +218,7 @@ describe('notify.sh (executed)', () => {
   it.runIf(canRun)('posts each endpoint at most once', async () => {
     behaviour['window'] = 404;
     route('wt-abc', urls['window']!);
-    const r = await run(['Stop'], { FOREMAN_WORKSPACE_ID: 'wt-abc', FOREMAN_HOOK_URL: urls['window']! }, '{}');
+    const r = await run(['Stop'], { STACK_WORKSPACE_ID: 'wt-abc', STACK_HOOK_URL: urls['window']! }, '{}');
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(3, 500);
     expect(received.map((p) => p.server)).toEqual(['window', 'fallback']);
@@ -230,15 +230,15 @@ describe('notify.sh (executed)', () => {
     // not be paid again per fallback.
     behaviour['other'] = 'hang';
     route('wt-abc', urls['other']!);
-    const r = await run(['Stop'], { FOREMAN_WORKSPACE_ID: 'wt-abc', FOREMAN_HOOK_URL: urls['window']! }, '{}');
+    const r = await run(['Stop'], { STACK_WORKSPACE_ID: 'wt-abc', STACK_HOOK_URL: urls['window']! }, '{}');
     expect(r.status, r.stderr).toBe(0);
     expect(r.ms).toBeLessThan(4000);
     expect(received.map((p) => p.server)).toEqual(['other']);
   }, 10_000);
 
   it.runIf(canRun)('relays a reply that says it is one to the agent, on stdout', async () => {
-    replies['fallback'] = 'foreman-reply:{"continue":true}';
-    const r = await spawnBash([scriptPath, 'Stop'], { FOREMAN_WORKSPACE_ID: 'w' }, '{}');
+    replies['fallback'] = 'stack-reply:{"continue":true}';
+    const r = await spawnBash([scriptPath, 'Stop'], { STACK_WORKSPACE_ID: 'w' }, '{}');
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toBe('{"continue":true}\n');
   });
@@ -247,7 +247,7 @@ describe('notify.sh (executed)', () => {
     // The agent takes a hook's stdout as context or as a decision; an
     // unrelated process on a reused port must not get to write either.
     replies['fallback'] = '<html>hello</html>';
-    const r = await spawnBash([scriptPath, 'Stop'], { FOREMAN_WORKSPACE_ID: 'w' }, '{}');
+    const r = await spawnBash([scriptPath, 'Stop'], { STACK_WORKSPACE_ID: 'w' }, '{}');
     expect(r.status, r.stderr).toBe(0);
     expect(r.stdout).toBe('');
   });
@@ -255,7 +255,7 @@ describe('notify.sh (executed)', () => {
   it.runIf(canRun)('ignores a worktree id that is not a plain token instead of using it as a path', async () => {
     fs.mkdirSync(path.join(storageDir, 'evil'), { recursive: true });
     fs.writeFileSync(path.join(storageDir, 'evil', 'x'), urls['other']!);
-    const r = await run(['Stop'], { FOREMAN_WORKSPACE_ID: '../evil/x' }, '{}');
+    const r = await run(['Stop'], { STACK_WORKSPACE_ID: '../evil/x' }, '{}');
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1);
     expect(received.map((p) => p.server)).toEqual(['fallback']);
@@ -264,10 +264,10 @@ describe('notify.sh (executed)', () => {
   it.runIf(canRun)('falls back to HOOK_EVENT_NAME when invoked without an argument', async () => {
     // Claude Code exports it; we pass $1 ourselves, but a user who registered
     // the hook by hand — or an older install — gets here.
-    const r = await run([], { HOOK_EVENT_NAME: 'PreToolUse', FOREMAN_WORKSPACE_ID: 'w' });
+    const r = await run([], { HOOK_EVENT_NAME: 'PreToolUse', STACK_WORKSPACE_ID: 'w' });
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1);
-    expect(received[0]?.headers['x-foreman-event']).toBe('PreToolUse');
+    expect(received[0]?.headers['x-stack-event']).toBe('PreToolUse');
   });
 
   it.runIf(canRun)('drains and forwards a payload far larger than a pipe buffer', async () => {
@@ -275,7 +275,7 @@ describe('notify.sh (executed)', () => {
     // before the writer blocks, so a script that does not read it hangs the
     // agent — not the hook, the AGENT — until it is killed.
     const big = JSON.stringify({ tool_input: { content: 'x'.repeat(512 * 1024) } });
-    const r = await run(['Stop'], { FOREMAN_WORKSPACE_ID: 'w' }, big);
+    const r = await run(['Stop'], { STACK_WORKSPACE_ID: 'w' }, big);
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1);
     // Every byte accepted — no EPIPE — which is what "drained" means and what
@@ -284,12 +284,12 @@ describe('notify.sh (executed)', () => {
     expect(received[0]?.body).toBe(big);
   });
 
-  it.runIf(canRun)('stays silent and quick when no Foreman is listening anywhere', async () => {
+  it.runIf(canRun)('stays silent and quick when no Stack is listening anywhere', async () => {
     // After the last window closes the hook stays registered in the agent's
     // config and keeps being invoked. It has to be a no-op rather than an
     // error the user sees on every prompt — and must not slow the agent down.
     fs.rmSync(path.join(storageDir, 'hook-url'));
-    const r = await run(['Stop'], { FOREMAN_WORKSPACE_ID: 'w' });
+    const r = await run(['Stop'], { STACK_WORKSPACE_ID: 'w' });
     expect(r.status, r.stderr).toBe(0);
     expect(r.stderr).toBe('');
     await waitForPosts(1, 300);
@@ -298,7 +298,7 @@ describe('notify.sh (executed)', () => {
 
   it.runIf(canRun)('stays silent when the url file is empty', async () => {
     fs.writeFileSync(path.join(storageDir, 'hook-url'), '');
-    const r = await run(['Stop'], { FOREMAN_WORKSPACE_ID: 'w' });
+    const r = await run(['Stop'], { STACK_WORKSPACE_ID: 'w' });
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1, 300);
     expect(received).toHaveLength(0);
@@ -308,7 +308,7 @@ describe('notify.sh (executed)', () => {
     const dead = await deadUrl();
     fs.writeFileSync(path.join(storageDir, 'hook-url'), dead);
     route('w', dead);
-    const r = await run(['Stop'], { FOREMAN_WORKSPACE_ID: 'w', FOREMAN_HOOK_URL: dead });
+    const r = await run(['Stop'], { STACK_WORKSPACE_ID: 'w', STACK_HOOK_URL: dead });
     expect(r.status, r.stderr).toBe(0);
     expect(r.ms).toBeLessThan(2000);
   });
@@ -323,16 +323,16 @@ describe('notify.sh (executed)', () => {
     const command = settings.hooks['Stop']?.at(-1)?.hooks[0]?.command ?? '';
     expect(command).toContain('Application Support');
 
-    const r = await spawnBash(['-c', command], { FOREMAN_WORKSPACE_ID: 'w' }, '{}');
+    const r = await spawnBash(['-c', command], { STACK_WORKSPACE_ID: 'w' }, '{}');
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1);
-    expect(received[0]?.headers['x-foreman-event']).toBe('Stop');
-    expect(received[0]?.headers['x-foreman-agent']).toBe('claude');
+    expect(received[0]?.headers['x-stack-event']).toBe('Stop');
+    expect(received[0]?.headers['x-stack-agent']).toBe('claude');
   });
 
   it.runIf(canRun && hasTmux)('asks tmux for the ids when the launcher did not set them', async () => {
-    // The case that made hand-started agents invisible: an agent Foreman did not
-    // launch has no FOREMAN_* in its environment, so every event it sent carried
+    // The case that made hand-started agents invisible: an agent Stack did not
+    // launch has no STACK_* in its environment, so every event it sent carried
     // an empty workspace id and was dropped on arrival. tmux knows, because the
     // hook runs inside the pane — and the id it yields picks the route.
     execSync(`tmux new-session -d -s "${TMUX_SESSION}" -c "${os.tmpdir()}"`);
@@ -344,21 +344,21 @@ describe('notify.sh (executed)', () => {
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1);
 
-    // "foreman-" stripped back off, which is the round-trip sessionName() relies on.
+    // "stack-" stripped back off, which is the round-trip sessionName() relies on.
     expect(received[0]?.server).toBe('window');
-    expect(received[0]?.headers['x-foreman-workspace']).toBe(`notifyexec-${process.pid}`);
-    expect(received[0]?.headers['x-foreman-window']).toMatch(/^\d+$/);
-    expect(received[0]?.headers['x-foreman-pane']).toBe(pane);
+    expect(received[0]?.headers['x-stack-workspace']).toBe(`notifyexec-${process.pid}`);
+    expect(received[0]?.headers['x-stack-window']).toMatch(/^\d+$/);
+    expect(received[0]?.headers['x-stack-pane']).toBe(pane);
   });
 
   it.runIf(canRun)('does not invent ids when there is no tmux to ask', async () => {
-    // No TMUX_PANE and no FOREMAN_*: the event still goes out, unattributed,
+    // No TMUX_PANE and no STACK_*: the event still goes out, unattributed,
     // to the shared endpoint. The server decides what to do with it (nothing).
     const r = await run(['Stop']);
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1);
     expect(received[0]?.server).toBe('fallback');
-    expect(received[0]?.headers['x-foreman-workspace']).toBeUndefined();
-    expect(received[0]?.headers['x-foreman-window']).toBeUndefined();
+    expect(received[0]?.headers['x-stack-workspace']).toBeUndefined();
+    expect(received[0]?.headers['x-stack-window']).toBeUndefined();
   });
 });

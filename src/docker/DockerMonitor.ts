@@ -21,7 +21,7 @@ const DAEMON_RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
  *
  * One `docker ps` grouped by the project label replaces one `docker compose ps`
  * per worktree: the cost no longer grows with the number of worktrees, and
- * stacks under names Foreman no longer uses (see legacyComposeProjects) come
+ * stacks under names Stack no longer uses (see legacyComposeProjects) come
  * along for free. `-a` because a stack whose containers exited is exactly the
  * one the user needs to see — without it a crashed stack looked like "no
  * containers" with nothing to say why.
@@ -213,7 +213,7 @@ export class DockerMonitor {
       // "No containers" and "docker could not be reached" used to be the same
       // silent empty list. Logged once per distinct message, so a permanent
       // failure does not spam every poll.
-      if (message !== this.failure) console.error(`[foreman] docker ps failed: ${message}`);
+      if (message !== this.failure) console.error(`[stack] docker ps failed: ${message}`);
       this.failure = message;
       // A timeout is a slow daemon, and what was running probably still is; a
       // daemon that refused outright has no containers to show.
@@ -249,8 +249,8 @@ export class DockerMonitor {
       if (signature !== watch.signature) {
         const count = this.getContainers(project).length;
         // Without this, "the badge is empty" gives no way to tell a stack that
-        // really is down from one Foreman looks up under the wrong name.
-        console.log(`[foreman] docker "${project}": ${count} container(s)`);
+        // really is down from one Stack looks up under the wrong name.
+        console.log(`[stack] docker "${project}": ${count} container(s)`);
       }
       watch.signature = signature;
       watch.onChange();

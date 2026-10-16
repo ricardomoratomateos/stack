@@ -117,7 +117,7 @@ export interface DockerConfig {
   portStride: number;
 }
 
-export interface ForemanConfig {
+export interface StackConfig {
   worktreesDirectory: string;
   /**
    * Branch new worktrees start from. Without this, the base was whatever the

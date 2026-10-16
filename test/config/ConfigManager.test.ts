@@ -26,23 +26,23 @@ describe('ConfigManager', () => {
   let tmpDir: string;
 
   const writeRepoConfig = (body: unknown): void => {
-    const file = path.join(tmpDir, '.foreman', 'config.json');
+    const file = path.join(tmpDir, '.stack', 'config.json');
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, typeof body === 'string' ? body : JSON.stringify(body, null, 2));
   };
 
   beforeEach(() => {
     resetVscodeMock();
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-cfg-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-cfg-'));
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('reads the "foreman" configuration section', () => {
+  it('reads the "stack" configuration section', () => {
     new ConfigManager().get();
-    expect(workspace.getConfiguration).toHaveBeenCalledWith('foreman');
+    expect(workspace.getConfiguration).toHaveBeenCalledWith('stack');
   });
 
   it('returns defaults: .worktrees, empty scripts, claude, 9898, node debugTemplate with {{PORT}}', () => {
@@ -73,7 +73,7 @@ describe('ConfigManager', () => {
       debugTemplate: {
         type: 'node',
         request: 'attach',
-        name: 'Foreman: Debug',
+        name: 'Stack: Debug',
         port: '{{PORT}}',
       },
     });
@@ -153,7 +153,7 @@ describe('ConfigManager', () => {
 
   // ── repo config ────────────────────────────────────────────────────────────
 
-  describe('.foreman/config.json', () => {
+  describe('.stack/config.json', () => {
     const managerFor = (root: string | undefined, onProblems?: (p: string[]) => void) =>
       new ConfigManager({ repoRoot: () => root, onProblems });
 
@@ -263,7 +263,7 @@ describe('ConfigManager', () => {
     });
 
     it('exposes the file path whether or not it exists', () => {
-      const expected = path.join(tmpDir, '.foreman', 'config.json');
+      const expected = path.join(tmpDir, '.stack', 'config.json');
       expect(managerFor(tmpDir).repoConfigPath()).toBe(expected);
       expect(managerFor(undefined).repoConfigPath()).toBeUndefined();
     });
@@ -313,7 +313,7 @@ describe('ConfigManager', () => {
           portStride: 100,
         },
         debugBasePort: 9898,
-        debugTemplate: { type: 'node', request: 'attach', name: 'Foreman: Debug', port: '{{PORT}}' },
+        debugTemplate: { type: 'node', request: 'attach', name: 'Stack: Debug', port: '{{PORT}}' },
       });
     });
 
@@ -381,7 +381,7 @@ describe('ConfigManager', () => {
   });
 
   describe('setDefaultProvider', () => {
-    it('writes foreman.defaultProvider globally', async () => {
+    it('writes stack.defaultProvider globally', async () => {
       const update = vi.fn().mockResolvedValue(undefined);
       workspace.getConfiguration.mockReturnValue({ get: vi.fn(), update } as never);
 

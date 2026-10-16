@@ -8,14 +8,14 @@ export const ROUTES_DIR = 'routes';
  * `<globalStorage>/hook-url` → URL of the most recently activated window.
  *
  * The last resort, for events no route claims (an agent run outside any
- * Foreman session). It used to be the ONLY endpoint, shared by every window,
+ * Stack session). It used to be the ONLY endpoint, shared by every window,
  * so the last window to open received every window's events.
  */
 export const DEFAULT_URL_FILE = 'hook-url';
 
 /**
  * Worktree ids are UUIDs; the hook script applies this same check before
- * using one as a file name, so a hand-named "foreman-../x" tmux session cannot
+ * using one as a file name, so a hand-named "stack-../x" tmux session cannot
  * point it anywhere else.
  */
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
@@ -33,7 +33,7 @@ const SAFE_ID = /^[A-Za-z0-9_-]+$/;
  *    reloaded window claims again with its new port, which is what lets agents
  *    that were already running reach it: their environment still holds the old
  *    port, but they read this file on every event.
- * 2. `$FOREMAN_HOOK_URL`, set in the agent's environment at launch. Covers the
+ * 2. `$STACK_HOOK_URL`, set in the agent's environment at launch. Covers the
  *    moment before any route exists, and agents run where no worktree id can
  *    be worked out.
  * 3. `hook-url`, the last activated window.
@@ -107,10 +107,10 @@ export class HookRoutes {
    * in place before the agent starts, not after.
    */
   launchEnv(worktreeId: string, url: string | undefined): string {
-    const env = [`FOREMAN_WORKSPACE_ID="${worktreeId}"`];
+    const env = [`STACK_WORKSPACE_ID="${worktreeId}"`];
     if (url) {
-      env.unshift(`FOREMAN_HOOK_URL="${url}"`);
-      // Never fail a launch over a routing file; $FOREMAN_HOOK_URL still works.
+      env.unshift(`STACK_HOOK_URL="${url}"`);
+      // Never fail a launch over a routing file; $STACK_HOOK_URL still works.
       try { this.claim([worktreeId], url); } catch { /* best effort */ }
     }
     return env.join(' ');

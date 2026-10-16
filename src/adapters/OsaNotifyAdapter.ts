@@ -15,7 +15,7 @@ export class OsaNotifyAdapter {
     },
   ) {}
 
-  notify(message: string, title = 'Foreman'): void {
+  notify(message: string, title = 'Stack'): void {
     if (this.platform !== 'darwin') return;
     const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     this.run('osascript', ['-e', `display notification "${esc(message)}" with title "${esc(title)}"`]);

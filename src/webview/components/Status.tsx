@@ -1,7 +1,7 @@
 import React from 'react';
 import { send } from '../vscode';
 import type { Described } from '../derive';
-import type { ForemanState } from '../types';
+import type { StackState } from '../types';
 
 export function LoadingState() {
   return (
@@ -39,7 +39,7 @@ export function NothingHere({ text, onClear }: { text: string; onClear: () => vo
  * a tmux session, and whether docker answers. A red docker says why in its
  * tooltip, so an empty stack is not mistaken for a stopped one.
  */
-export function HealthStrip({ items, state }: { items: Described[]; state: ForemanState }) {
+export function HealthStrip({ items, state }: { items: Described[]; state: StackState }) {
   const agents = items.reduce((n, d) => n + d.wt.sessions.filter((s) => s.kind === 'agent' && s.state !== 'terminated').length, 0);
   const asking = items.filter((d) => d.group === 'needs').length;
   const tmux = items.filter((d) => d.wt.sessions.length > 0).length;

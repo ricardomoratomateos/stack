@@ -1,7 +1,7 @@
 import { IWorktreeRepository } from '../ports/IWorktreeRepository';
 import { portBlockFor } from '../docker/dockerCompose';
 import { isPortFree as probePort } from './portProbe';
-import type { ForemanConfig } from '../types';
+import type { StackConfig } from '../types';
 import type { SharedPortReservations } from './portReservations';
 
 /** The only slice of the repository the allocator needs. */
@@ -15,7 +15,7 @@ export interface PortAllocatorOptions {
    * Current config, re-read on every allocation so the derived docker block is
    * validated too. Omit and only the debug port itself is checked.
    */
-  config?: () => ForemanConfig;
+  config?: () => StackConfig;
   /** OS-level availability probe. Injected in tests to keep them off real sockets. */
   isPortFree?: (port: number) => Promise<boolean>;
   /**
@@ -37,7 +37,7 @@ export class PortAllocator {
   private reserved = new Set<number>();
 
   /**
-   * `basePort` may be a getter so `foreman.debugBasePort` is read per
+   * `basePort` may be a getter so `stack.debugBasePort` is read per
    * allocation. It used to be captured once at activation while the docker
    * block derivation (dockerPortsFor) read the setting live, so changing it
    * mid-session made the two disagree about which block a slot owns.
@@ -51,7 +51,7 @@ export class PortAllocator {
   /**
    * The lowest slot that is free both in the registry *and* on the machine.
    *
-   * The registry alone is not enough: it only knows worktrees Foreman created,
+   * The registry alone is not enough: it only knows worktrees Stack created,
    * so it cannot see another project's containers, a leftover stack from a
    * deleted worktree, or any other local listener. Every port the slot will
    * bind is probed, not just the debug one — a slot is only usable if its

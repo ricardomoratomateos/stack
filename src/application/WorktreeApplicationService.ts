@@ -1,6 +1,6 @@
 import * as path from 'node:path';
-import type { ForemanConfig, Worktree } from '../types';
-import type { ForemanState, WorktreeItem, WebMessage, PortMapping } from '../webview/types';
+import type { StackConfig, Worktree } from '../types';
+import type { StackState, WorktreeItem, WebMessage, PortMapping } from '../webview/types';
 import type { WorktreeManager } from '../worktree/WorktreeManager';
 import type { AgentSessionManager } from '../session/AgentSessionManager';
 import type { TabManager } from '../worktree/TabManager';
@@ -32,8 +32,8 @@ import { envPrefix, shellQuote } from '../shell/shellQuote';
  * another's selection — an id none of its worktrees has, which scoped search
  * and dimmed the explorer as if the user had selected nothing at all.
  */
-export const ACTIVE_WORKTREE_KEY = 'foreman.activeWorktreeId';
-export const WORKTREE_ORDER_KEY = 'foreman.worktreeOrder';
+export const ACTIVE_WORKTREE_KEY = 'stack.activeWorktreeId';
+export const WORKTREE_ORDER_KEY = 'stack.worktreeOrder';
 /**
  * How long a teardown script may hold up a delete. Generous — a `compose down`
  * with volumes can take minutes — but finite: a script stuck on a prompt nobody
@@ -130,9 +130,9 @@ export interface WorktreeAppDeps {
    * Which agents are runnable on this machine. Injected so tests do not depend
    * on whatever the developer happens to have on their PATH.
    */
-  installedProviders?: (config: ForemanConfig) => ProviderId[];
+  installedProviders?: (config: StackConfig) => ProviderId[];
   /**
-   * Where compose output goes (the "Foreman: Docker" output channel). Without
+   * Where compose output goes (the "Stack: Docker" output channel). Without
    * one, output goes to the console and failures to a plain error toast.
    */
   dockerOutput?: DockerOutput;
@@ -164,7 +164,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
   /**
    * Worktrees whose directory is gone, as of the last reconcile. Shown with a
    * flag and an explicit "Forget"; never watched, polled or added to the
-   * workspace, and never dropped from the store on Foreman's own initiative.
+   * workspace, and never dropped from the store on Stack's own initiative.
    */
   private missing = new Set<string>();
   /**
@@ -195,7 +195,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       exists: (p) => deps.host.exists(p),
       notify: deps.notify,
       output: deps.dockerOutput ?? {
-        append: (text) => console.log(`[foreman] docker: ${text.trim()}`),
+        append: (text) => console.log(`[stack] docker: ${text.trim()}`),
         reveal: () => {},
         showError: (message) => deps.notify.showError(message),
       },
@@ -265,7 +265,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
    *
    * The store is global to the extension, so every window used to list every
    * worktree of every repo it had ever seen. Invisible while only one project
-   * was ever open; the moment the extension was installed and Foreman's own
+   * was ever open; the moment the extension was installed and Stack's own
    * checkout was opened beside aside, that checkout arrived at the top of
    * aside's sidebar as "main".
    *
@@ -298,10 +298,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
   /**
    * Run a setup/teardown script in a visible host terminal registered to the
    * worktree. The script path is resolved against the repo (worktree-first,
-   * then main), and the script gets FOREMAN_* env plus the worktree's docker
+   * then main), and the script gets STACK_* env plus the worktree's docker
    * ports so it can prepare deps and bring the stack up without guessing —
    * and COMPOSE_PROJECT_NAME / COMPOSE_FILE, so a plain `docker compose up` in
-   * it lands on the stack Foreman monitors and stops.
+   * it lands on the compose stack the extension monitors and stops.
    */
   private runScriptTerminal(wt: Worktree, script: string, labelPrefix: string, doneMessage?: string): void {
     const { resolved, env } = this.scriptInvocation(wt, script);
@@ -319,24 +319,24 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   /**
    * Where a setup/teardown script lives (worktree-first, then main) and the
-   * FOREMAN_* env plus docker ports it is handed — shared by the terminal run
+   * STACK_* env plus docker ports it is handed — shared by the terminal run
    * and the awaited teardown so the two can never disagree.
    */
   private scriptInvocation(wt: Worktree, script: string): { resolved: string; env: Record<string, string> } {
     const resolved =
       this.locateRepoFile(wt, script) ?? (path.isAbsolute(script) ? script : path.join(wt.repoRoot, script));
-    const foreman: Record<string, string> = {
-      FOREMAN_REPO_ROOT: wt.repoRoot,
-      FOREMAN_WORKTREE_PATH: wt.path,
-      FOREMAN_BRANCH: wt.branch,
-      FOREMAN_COMPOSE_PROJECT: this.stacks.project(wt),
+    const stack: Record<string, string> = {
+      STACK_REPO_ROOT: wt.repoRoot,
+      STACK_WORKTREE_PATH: wt.path,
+      STACK_BRANCH: wt.branch,
+      STACK_COMPOSE_PROJECT: this.stacks.project(wt),
     };
     const env: Record<string, string> = {
-      ...foreman,
+      ...stack,
       // DEPRECATED: the names from when the project was called unmess. Scripts
       // written then still read them, and under `set -u` an unset one aborts
       // the script on its first line. Drop once nobody has such a script.
-      ...Object.fromEntries(Object.entries(foreman).map(([k, v]) => [k.replace(/^FOREMAN_/, 'UNMESS_'), v])),
+      ...Object.fromEntries(Object.entries(stack).map(([k, v]) => [k.replace(/^STACK_/, 'UNMESS_'), v])),
       ...this.stacks.scriptEnv(wt),
     };
     return { resolved, env };
@@ -386,15 +386,15 @@ export class WorktreeApplicationService implements DiffPanelHost {
     });
     if (code !== 0) {
       this.deps.notify.showWarning(
-        `Teardown script for "${displayLabel(wt)}" ${code === null ? 'did not finish' : `exited with code ${code}`} — see the Foreman output. Deleting anyway.`,
+        `Teardown script for "${displayLabel(wt)}" ${code === null ? 'did not finish' : `exited with code ${code}`} — see the Stack output. Deleting anyway.`,
       );
     }
   }
 
   /**
    * Resolve a repo-relative file, preferring the worktree's own copy (when its
-   * branch carries `.foreman/`) and falling back to the main repo — where
-   * `.foreman/` lives when the branch predates it. Returns undefined if neither
+   * branch carries `.stack/`) and falling back to the main repo — where
+   * `.stack/` lives when the branch predates it. Returns undefined if neither
    * has it.
    */
   private locateRepoFile(wt: Worktree, file: string): string | undefined {
@@ -428,7 +428,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     } catch (e) {
       // No free slot at all, or the store rejected the patch. Carry on with the
       // ports we have and let docker report the collision itself.
-      console.error('[foreman] port re-check failed; keeping the current ports:', e);
+      console.error('[stack] port re-check failed; keeping the current ports:', e);
       return wt;
     }
     if (moved.movedFrom !== undefined) {
@@ -588,12 +588,12 @@ export class WorktreeApplicationService implements DiffPanelHost {
       ? this.findWorktree(targetId)
       : this.findWorktree(this.currentWorktreeId ?? '') ?? (worktrees.length === 1 ? worktrees[0] : undefined);
     if (!wt) {
-      this.deps.notify.showWarning('Foreman: select a worktree first, then drop the image again.');
+      this.deps.notify.showWarning('Stack: select a worktree first, then drop the image again.');
       return;
     }
     if (!this.deps.agentManager.hasTerminals(wt.id)) {
       this.deps.notify.showWarning(
-        `Foreman: no agent session in ${wt.alias ?? wt.branch} — launch one, then drop the image again.`,
+        `Stack: no agent session in ${wt.alias ?? wt.branch} — launch one, then drop the image again.`,
       );
       return;
     }
@@ -611,7 +611,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
   }
 
   /**
-   * "Foreman: Open Session to the Side": the session given, else the one whose
+   * "Stack: Open Session to the Side": the session given, else the one whose
    * terminal is focused, else the active worktree's session in front — opened
    * (or moved) beside the active editor group, so two sessions sit side by side.
    */
@@ -624,7 +624,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       ? target.index ?? this.deps.agentManager.focusedSession(target.worktreeId)
       : fromTerminal?.windowIndex ?? (wt ? this.deps.agentManager.focusedSession(wt.id) : undefined);
     if (!wt || index === undefined) {
-      this.deps.notify.showWarning('Foreman: open a session first, then move it to the side.');
+      this.deps.notify.showWarning('Stack: open a session first, then move it to the side.');
       return;
     }
     await this.deps.agentManager.focusWindow(wt, index, { beside: true });
@@ -642,7 +642,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const target = worktrees.find((w) => w.id === worktreeId);
     if (!target) return;
 
-    console.log(`[foreman] switch to id=${worktreeId} path=${target.path} exists=${this.deps.host.exists(target.path)}`);
+    console.log(`[stack] switch to id=${worktreeId} path=${target.path} exists=${this.deps.host.exists(target.path)}`);
     this.setActiveWorktreeId(worktreeId);
     // Push eagerly — the terminal-change event that normally syncs the webview
     // never fires for a worktree with no sessions to show.
@@ -677,7 +677,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     viewer?.show();
   }
 
-  /** Clean-slate switch (foreman.focusMode): only the active worktree on screen. */
+  /** Clean-slate switch (stack.focusMode): only the active worktree on screen. */
   private async switchWithFocusMode(target: Worktree, worktrees: Worktree[]): Promise<void> {
     const viewerOpenIds = new Set(
       worktrees.filter((wt) => this.deps.agentManager.getViewer(wt.id) !== undefined).map((wt) => wt.id),
@@ -784,7 +784,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
   /**
    * Refreshes the remote ref the drift is measured against, on request.
    *
-   * The only place Foreman touches the network for this. It is a click rather
+   * The only place Stack touches the network for this. It is a click rather
    * than a timer because the numbers are read off a filesystem watch that fires
    * on every save, and because a repo's remote may be slow or want credentials —
    * neither is something to inflict on someone who just typed.
@@ -848,9 +848,9 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * container is published on. A worktree moved to a free slot takes its card
    * with it.
    *
-   * Only the ports the user named in `foreman.docker.ports` — the debug port is
+   * Only the ports the user named in `stack.docker.ports` — the debug port is
    * in there when they asked for it (DEBUG_PORT) and left out otherwise, since
-   * a debug port nobody configured is Foreman's bookkeeping rather than something
+   * a debug port nobody configured is Stack's bookkeeping rather than something
    * the user needs to know.
    */
   private portsFor(wt: Worktree): PortMapping[] {
@@ -864,7 +864,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     }));
   }
 
-  buildState(): ForemanState {
+  buildState(): StackState {
     const config = this.deps.config.get();
     const dockerOn = dockerConfigured(config);
     const worktrees = this.orderWorktrees(this.worktreesInWindow());
@@ -928,7 +928,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const items = this.buildState().worktrees.map((wt) => ({ wt, group: groupOf(wt) }));
     const next = nextInQueue(attentionQueue(items), this.currentWorktreeId);
     if (!next) {
-      this.deps.notify.showInfo('Foreman: nothing is waiting on you.');
+      this.deps.notify.showInfo('Stack: nothing is waiting on you.');
       return;
     }
     await this.handleMessage({ type: 'focusTerminal', worktreeId: next.wt.id });
@@ -1067,7 +1067,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const mine = worktreesInRepo(current, repoRoot).filter((w) => !this.missing.has(w.id));
 
     const keep = new Set([repoRoot, ...mine.map((w) => w.path)].map(canonicalPath));
-    // Folders Foreman itself added for some OTHER repository, which are ours to
+    // Folders Stack itself added for some OTHER repository, which are ours to
     // take back. Deliberately excludes another repo's MAIN checkout: that is a
     // project the user opened, not noise we introduced.
     //
@@ -1087,7 +1087,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const indicesToRemove = this.deps.host
       .workspaceFolderPaths()
       .map((p, i) => ({ p: canonicalPath(p), i }))
-      // Only folders Foreman is responsible for: another repo's worktree, or a
+      // Only folders Stack is responsible for: another repo's worktree, or a
       // stale one inside this repository. A folder it does not recognise is the
       // user's own and is left where they put it.
       .filter(({ p }) => !keep.has(p) && (foreign.has(p) || p.startsWith(normalizedRoot + path.sep)))
@@ -1107,11 +1107,11 @@ export class WorktreeApplicationService implements DiffPanelHost {
     }
 
     // The compose project is derived from the worktree's directory name, so a
-    // stack brought up outside Foreman (or under the branch name instead) is
+    // stack brought up outside Stack (or under the branch name instead) is
     // invisible to it. Printing the keys makes that mismatch obvious instead of
     // looking like a broken docker integration.
     const dockerOn = dockerConfigured(this.deps.config.get());
-    if (dockerOn) console.log(`[foreman] docker projects: ${mine.map((wt) => composeProject(wt)).join(', ')}`);
+    if (dockerOn) console.log(`[stack] docker projects: ${mine.map((wt) => composeProject(wt)).join(', ')}`);
     // A diff, not just a start: whatever an earlier load watched and polled
     // that is no longer in this set — another repository after the window
     // switched, a worktree gone missing, one forgotten elsewhere — is stopped
@@ -1256,7 +1256,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
   // ── Create ─────────────────────────────────────────────────────────────────
 
   /**
-   * The branch a new worktree should start from: `foreman.defaultBaseBranch`
+   * The branch a new worktree should start from: `stack.defaultBaseBranch`
    * when the repo actually has it, otherwise whatever the main checkout is on.
    *
    * The fallback is what makes the setting safe to ship with a `develop`
@@ -1319,7 +1319,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
           this.deps.host.addWorkspaceFolders({ path: wt.path, name: displayLabel(wt) });
           this.startMonitoring(wt);
         } catch (e) {
-          console.error('[foreman] post-create wiring failed (worktree and setup are unaffected):', e);
+          console.error('[stack] post-create wiring failed (worktree and setup are unaffected):', e);
         }
         this.ui.pushWebview();
 
@@ -1418,11 +1418,11 @@ export class WorktreeApplicationService implements DiffPanelHost {
         const outcome = await this.stacks.down(wt, { report: false });
         if (outcome !== 'ok') {
           this.deps.notify.showWarning(
-            `"${displayLabel(wt)}": docker compose down ${outcome === 'timeout' ? 'timed out' : 'failed'} (${this.stacks.status(wt).error ?? 'see the Foreman: Docker output'}). Deleting anyway — its containers may still be running; check \`docker compose ls\`.`,
+            `"${displayLabel(wt)}": docker compose down ${outcome === 'timeout' ? 'timed out' : 'failed'} (${this.stacks.status(wt).error ?? 'see the Stack: Docker output'}). Deleting anyway — its containers may still be running; check \`docker compose ls\`.`,
           );
         } else {
           // Containers left standing mean the stack came up under a compose
-          // project name Foreman does not know — say so, instead of reporting
+          // project name Stack does not know — say so, instead of reporting
           // a clean teardown that removed nothing.
           const left = this.stacks.containers(wt);
           if (left.length > 0) {
@@ -1488,7 +1488,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     if (!wt) return;
     const setupScript = this.deps.config.get().setupScript;
     if (!setupScript) {
-      this.deps.notify.showError('No setup script configured. Set "foreman.setupScript" in settings.');
+      this.deps.notify.showError('No setup script configured. Set "stack.setupScript" in settings.');
       return;
     }
     // A re-init can happen long after the slot was allocated — re-check before

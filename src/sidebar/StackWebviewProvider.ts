@@ -3,7 +3,7 @@ import * as crypto from 'node:crypto';
 import { AgentSessionManager } from '../session/AgentSessionManager';
 import { GitWatcher } from '../git/GitWatcher';
 import { WorktreeApplicationService } from '../application/WorktreeApplicationService';
-import type { ExtMessage, WebMessage, ForemanState } from '../webview/types';
+import type { ExtMessage, WebMessage, StackState } from '../webview/types';
 
 /**
  * Thin webview adapter: renders the React sidebar, pushes state, and forwards
@@ -17,7 +17,7 @@ import type { ExtMessage, WebMessage, ForemanState } from '../webview/types';
  */
 export const PUSH_COALESCE_MS = 50;
 
-export class ForemanWebviewProvider implements vscode.WebviewViewProvider {
+export class StackWebviewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private badgeCount = 0;
   /**
@@ -59,7 +59,7 @@ export class ForemanWebviewProvider implements vscode.WebviewViewProvider {
         // unhandled rejection with nothing on screen.
         Promise.resolve()
           .then(() => this.service.handleMessage(msg))
-          .catch((e) => console.error(`[foreman] webview message "${msg.type}" failed:`, e));
+          .catch((e) => console.error(`[stack] webview message "${msg.type}" failed:`, e));
       }),
       webviewView.onDidChangeVisibility(() => {
         if (webviewView.visible) this.push();
@@ -127,7 +127,7 @@ export class ForemanWebviewProvider implements vscode.WebviewViewProvider {
     const serialized = JSON.stringify(state);
     if (serialized === this.lastSent) return;
     this.lastSent = serialized;
-    view.description = ForemanWebviewProvider.describe(state);
+    view.description = StackWebviewProvider.describe(state);
     const msg: ExtMessage = { type: 'state', payload: state };
     void Promise.resolve(view.webview.postMessage(msg)).then(
       (delivered) => {
@@ -145,7 +145,7 @@ export class ForemanWebviewProvider implements vscode.WebviewViewProvider {
    * the section header already says "Worktrees", so repeating it inside the
    * webview just wasted a row.
    */
-  static describe(state: ForemanState): string | undefined {
+  static describe(state: StackState): string | undefined {
     const parts: string[] = [];
     const active = state.worktrees.filter((w) => w.agent === 'active').length;
     const perm = state.worktrees.filter((w) => w.agent === 'permission').length;
@@ -165,7 +165,7 @@ export class ForemanWebviewProvider implements vscode.WebviewViewProvider {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline' ${webview.cspSource}; font-src ${webview.cspSource};">
-  <title>Foreman</title>
+  <title>Stack</title>
   <link rel="stylesheet" href="${codiconUri}">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }

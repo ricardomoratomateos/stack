@@ -1,6 +1,6 @@
 import type { RepoScopedKey } from '../config/RepoConfig';
 import type { ProviderId } from '../ports/IAgentProvider';
-import type { ForemanConfig } from '../types';
+import type { StackConfig } from '../types';
 
 export type Stack = 'node' | 'php' | 'python' | 'go';
 
@@ -22,12 +22,12 @@ export interface Detection {
   teardownScript?: string;
 }
 
-/** The repository's own settings — what `.foreman/config.json` carries. */
-export type ProjectValues = Pick<ForemanConfig, RepoScopedKey>;
+/** The repository's own settings — what `.stack/config.json` carries. */
+export type ProjectValues = Pick<StackConfig, RepoScopedKey>;
 
 /** The settings that belong to the person, not the repository. */
 export type UserValues = Pick<
-  ForemanConfig,
+  StackConfig,
   | 'defaultProvider'
   | 'claudeCommand'
   | 'codexCommand'

@@ -7,7 +7,7 @@ import { parseWorktreeList } from '../../src/adapters/GitCliAdapter';
 import { IGitPort, GitWorktreeEntry } from '../../src/ports/IGitPort';
 import { IFileSystem } from '../../src/ports/IFileSystem';
 import { IWorktreeRepository } from '../../src/ports/IWorktreeRepository';
-import { Worktree, DebugTemplate, ForemanConfig } from '../../src/types';
+import { Worktree, DebugTemplate, StackConfig } from '../../src/types';
 import { WORKTREE_SETTINGS_EXCLUSIONS } from '../../src/constants';
 import type { PortAllocator } from '../../src/worktree/portAllocator';
 import type { ConfigManager } from '../../src/config/ConfigManager';
@@ -100,9 +100,9 @@ function makeGitStub(entries: GitWorktreeEntry[] = []): IGitPort & {
   };
 }
 
-function makeConfigStub(overrides: Partial<ForemanConfig> = {}): ConfigManager {
+function makeConfigStub(overrides: Partial<StackConfig> = {}): ConfigManager {
   return {
-    get: (): ForemanConfig => ({
+    get: (): StackConfig => ({
       worktreesDirectory: './zer',
       setupScript: '',
       teardownScript: '',
@@ -111,7 +111,7 @@ function makeConfigStub(overrides: Partial<ForemanConfig> = {}): ConfigManager {
       debugTemplate: {
         type: 'php',
         request: 'launch',
-        name: 'Foreman: Debug',
+        name: 'Stack: Debug',
         port: '{{PORT}}',
         pathMappings: { '/var/www/html': '{{WORKTREE_PATH}}' },
       } as DebugTemplate,
@@ -615,7 +615,7 @@ describe('missing worktrees', () => {
   let gone: string;
 
   beforeEach(() => {
-    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-missing-')));
+    tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'stack-missing-')));
     repo = path.join(tmp, 'repo');
     alive = path.join(repo, 'zer', 'alive');
     gone = path.join(repo, 'zer', 'gone');
@@ -785,7 +785,7 @@ describe('generateLaunchJson', () => {
     expect(cfg.name).toBe('My Debug');
   });
 
-  it('defaults template name to "Foreman: Debug (<branch>)"', async () => {
+  it('defaults template name to "Stack: Debug (<branch>)"', async () => {
     const config = makeConfigStub({
       debugTemplate: {
         type: 'php',
@@ -802,7 +802,7 @@ describe('generateLaunchJson', () => {
     );
     const wt = await mgr.create('feat/x', REPO);
     const written = JSON.parse(fsStub.files.get(path.join(wt.path, '.vscode/launch.json'))!);
-    expect(written.configurations[0].name).toBe('Foreman: Debug (feat/x)');
+    expect(written.configurations[0].name).toBe('Stack: Debug (feat/x)');
   });
 });
 

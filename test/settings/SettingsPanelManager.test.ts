@@ -28,9 +28,9 @@ const snapshot: SettingsSnapshot = {
   project: {
     worktreesDirectory: '.worktrees', defaultBaseBranch: 'main', setupScript: '', teardownScript: '',
     docker: { composeFile: 'docker-compose.yml', overrideFile: 'docker-compose.worktree.yml', ports: [], basePort: 20000, portStride: 100 },
-    debugBasePort: 9898, debugTemplate: { type: 'node', request: 'attach', name: 'Foreman: Debug', port: '{{PORT}}' },
+    debugBasePort: 9898, debugTemplate: { type: 'node', request: 'attach', name: 'Stack: Debug', port: '{{PORT}}' },
   },
-  projectFile: { path: '/repo/.foreman/config.json', present: false, problems: [] },
+  projectFile: { path: '/repo/.stack/config.json', present: false, problems: [] },
   personalOverrides: [],
   user: {
     defaultProvider: 'claude', claudeCommand: 'claude', codexCommand: 'codex', opencodeCommand: 'opencode',
@@ -45,7 +45,7 @@ function makeHost(over: Partial<SettingsPanelHost> = {}): SettingsPanelHost {
   return {
     snapshot: vi.fn(() => snapshot),
     pickFile: vi.fn(async () => 'docker/compose.yml'),
-    createScript: vi.fn(async (kind) => `.foreman/${kind}.sh`),
+    createScript: vi.fn(async (kind) => `.stack/${kind}.sh`),
     saveProject: vi.fn(async () => []),
     saveUser: vi.fn(async () => {}),
     clearPersonalOverrides: vi.fn(async () => {}),
@@ -67,7 +67,7 @@ describe('SettingsPanelManager', () => {
     m.open();
     m.open();
     expect(window.createWebviewPanel).toHaveBeenCalledTimes(1);
-    expect(window.createWebviewPanel.mock.calls[0][1]).toBe('Foreman settings');
+    expect(window.createWebviewPanel.mock.calls[0][1]).toBe('Stack settings');
     expect(panel.webview.html).toContain('settingsPanel.js');
     expect(panel.reveal).toHaveBeenCalledTimes(1);
   });
@@ -97,7 +97,7 @@ describe('SettingsPanelManager', () => {
     new SettingsPanelManager(extUri, makeHost()).open();
     await panel.fire({ type: 'createScript', kind: 'teardown' });
     await flush();
-    expect(panel.posted).toEqual([{ type: 'picked', field: 'teardownScript', path: '.foreman/teardown.sh' }]);
+    expect(panel.posted).toEqual([{ type: 'picked', field: 'teardownScript', path: '.stack/teardown.sh' }]);
   });
 
   it('saves the project, reports the problems the file reads back with, then pushes a fresh snapshot', async () => {
@@ -139,13 +139,13 @@ describe('SettingsPanelManager', () => {
     // that decides which field the panel fills in.
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
-    const host = makeHost({ createScript: vi.fn(async () => '.foreman/setup.sh') });
+    const host = makeHost({ createScript: vi.fn(async () => '.stack/setup.sh') });
     new SettingsPanelManager(extUri, host).open();
 
     await panel.fire({ type: 'createScript', kind: 'setup' });
     await flush();
     expect(panel.posted).toContainEqual({
-      type: 'picked', field: 'setupScript', path: '.foreman/setup.sh',
+      type: 'picked', field: 'setupScript', path: '.stack/setup.sh',
     });
   });
 

@@ -8,7 +8,7 @@ import { HookEntry } from '../../../src/types';
 import { ConfigFileError } from '../../../src/providers/shared/configFile';
 
 /** First 16 hex chars of sha256(notify.sh). See the "is pinned" test. */
-const NOTIFY_SH_HASH = '66fc598fbbca4ff7';
+const NOTIFY_SH_HASH = '9a81b74cbb86a37e';
 
 const HOOK_EVENTS = [
   'SessionStart',
@@ -39,7 +39,7 @@ describe('ClaudeHookInstaller', () => {
   };
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-notifyhook-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-notifyhook-'));
     storageDir = path.join(tmpDir, 'storage');
     settingsPath = path.join(tmpDir, 'claude', 'settings.json');
     scriptPath = path.join(storageDir, 'notify.sh');
@@ -65,7 +65,7 @@ describe('ClaudeHookInstaller', () => {
       expect(content).toContain('ANSWER=$(printf \'%s\' "$PAYLOAD" | curl -sf --connect-timeout 1 --max-time 2');
       expect(content).toContain('--data-binary @-');
       for (const h of ['Hook: 2', 'Event: $EVENT_NAME', 'Agent: $AGENT', 'Workspace: $WORKSPACE_ID', 'Window: $WINDOW_INDEX']) {
-        expect(content).toContain(`-H "X-Foreman-${h}"`);
+        expect(content).toContain(`-H "X-Stack-${h}"`);
       }
     });
 
@@ -73,7 +73,7 @@ describe('ClaudeHookInstaller', () => {
       makeHook().install(hookUrl);
       const content = fs.readFileSync(scriptPath, 'utf8');
       expect(content).toContain('ROUTE=$(cat "$DIR/routes/$WORKSPACE_ID" 2>/dev/null)');
-      expect(content).toContain('for URL in "$ROUTE" "${FOREMAN_HOOK_URL:-}" "$FALLBACK"; do');
+      expect(content).toContain('for URL in "$ROUTE" "${STACK_HOOK_URL:-}" "$FALLBACK"; do');
       // A worktree id that is not a plain token never becomes a path.
       expect(content).toContain('""|*[!A-Za-z0-9_-]*) ;;');
     });
@@ -99,12 +99,12 @@ describe('ClaudeHookInstaller', () => {
       // it sent used to be discarded for carrying an empty workspace id.
       makeHook().install(hookUrl);
       const content = fs.readFileSync(scriptPath, 'utf8');
-      expect(content).toContain('WORKSPACE_ID="${FOREMAN_WORKSPACE_ID:-}"');
-      expect(content).toContain('WINDOW_INDEX="${FOREMAN_WINDOW_INDEX:-}"');
+      expect(content).toContain('WORKSPACE_ID="${STACK_WORKSPACE_ID:-}"');
+      expect(content).toContain('WINDOW_INDEX="${STACK_WINDOW_INDEX:-}"');
       expect(content).toContain("tmux display-message -p -t \"$TMUX_PANE\" '#{window_index}'");
       expect(content).toContain("tmux display-message -p -t \"$TMUX_PANE\" '#{session_name}'");
-      // Session names are "foreman-<worktree id>"; the prefix strip recovers it.
-      expect(content).toContain('foreman-*) WORKSPACE_ID="${SESSION#foreman-}"');
+      // Session names are "stack-<worktree id>"; the prefix strip recovers it.
+      expect(content).toContain('stack-*) WORKSPACE_ID="${SESSION#stack-}"');
     });
 
     it('does nothing outside tmux, where there is no pane to ask about', () => {
@@ -238,7 +238,7 @@ describe('ClaudeHookInstaller', () => {
 
     it('refuses to touch settings with a syntax error, and says where it is', () => {
       // This used to "start fresh": the user's permissions, env and model were
-      // overwritten by a file holding only Foreman's hooks.
+      // overwritten by a file holding only Stack's hooks.
       fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
       const broken = '{\n  "model": "opus",\n  "permissions": { "allow": ["Bash"], }\n}';
       fs.writeFileSync(settingsPath, broken);
@@ -247,7 +247,7 @@ describe('ClaudeHookInstaller', () => {
       expect(() => makeHook().install(hookUrl)).toThrow(/couldn't install its hooks: .*settings\.json has a syntax error at line 3, column \d+/);
 
       expect(fs.readFileSync(settingsPath, 'utf8')).toBe(broken);
-      expect(fs.existsSync(`${settingsPath}.foreman-backup`)).toBe(false);
+      expect(fs.existsSync(`${settingsPath}.stack-backup`)).toBe(false);
     });
 
     it('refuses JSON that is not an object rather than replacing it', () => {
@@ -290,17 +290,17 @@ describe('ClaudeHookInstaller', () => {
       expect(Object.keys(readSettings()['hooks'] as object)).toHaveLength(7);
     });
 
-    it('keeps a one-time backup of the settings as they were before Foreman', () => {
+    it('keeps a one-time backup of the settings as they were before Stack', () => {
       writeSettings({ model: 'opus' });
       const original = fs.readFileSync(settingsPath, 'utf8');
 
       makeHook().install(hookUrl);
-      expect(fs.readFileSync(`${settingsPath}.foreman-backup`, 'utf8')).toBe(original);
+      expect(fs.readFileSync(`${settingsPath}.stack-backup`, 'utf8')).toBe(original);
 
       // A later change must not replace the user's own version with ours.
       writeSettings({ model: 'sonnet', hooks: {} });
       makeHook().install(hookUrl);
-      expect(fs.readFileSync(`${settingsPath}.foreman-backup`, 'utf8')).toBe(original);
+      expect(fs.readFileSync(`${settingsPath}.stack-backup`, 'utf8')).toBe(original);
     });
 
     it('does not rewrite settings that already hold exactly our hooks', () => {
@@ -371,7 +371,7 @@ describe('ClaudeHookInstaller', () => {
       expect(hooks['SessionStart']).toEqual([]);
     });
 
-    it('preserves hooks for events foreman does not manage', () => {
+    it('preserves hooks for events stack does not manage', () => {
       writeSettings({
         hooks: {
           Notification: [{ matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Notification` }] }],

@@ -18,7 +18,7 @@ const wt: Worktree = {
   debugPort: 9898, dockerProjectName: 'feat-login', createdAt: 0,
 };
 const wt2: Worktree = { ...wt, id: 'wt-2', branch: 'feat/login-v2', path: '/nonexistent/wt-2' };
-const SESSION = 'foreman-wt-1';
+const SESSION = 'stack-wt-1';
 const view = (index: number, base = SESSION) => TmuxManager.viewSessionName(base, index);
 
 type Fn = ReturnType<typeof vi.fn>;
@@ -55,7 +55,7 @@ function makeStub(): ISessionManager & Record<string, Fn> {
 
 function makeFactory(): ProviderFactory {
   const config = { get: () => ({ claudeCommand: 'claude', opencodeCommand: 'opencode', defaultProvider: 'claude' }) } as unknown as ConfigSource;
-  return new ProviderFactory(config, '/tmp/foreman-test-storage');
+  return new ProviderFactory(config, '/tmp/stack-test-storage');
 }
 
 function create(mode: SessionTabsMode = 'perSession') {
@@ -156,7 +156,7 @@ describe('perSession: a terminal tab per session', () => {
     expect(again.creationOptions.shellArgs).toEqual(TmuxManager.viewAttachArgs(SESSION, 1));
   });
 
-  it('focusWindow on a window Foreman does not track brings the worktree forward instead', async () => {
+  it('focusWindow on a window Stack does not track brings the worktree forward instead', async () => {
     const { mgr, stub } = create();
     const tab = await open(mgr, stub, 1);
     window.createTerminal.mockClear();
@@ -426,7 +426,7 @@ describe('perSession: sessions ending', () => {
       { name: SESSION, attached: 0 },
       { name: view(1), attached: 1 },
       { name: view(4), attached: 0 },
-      { name: view(1, 'foreman-wt-2'), attached: 1 },
+      { name: view(1, 'stack-wt-2'), attached: 1 },
       { name: 'work', attached: 1 },
     ]);
     await mgr.killWorktreeSession('wt-1');
@@ -526,8 +526,8 @@ describe('reconnect: claiming restored terminals exactly', () => {
 
   it('leaves alone a terminal attached to a session of a worktree it does not know, or already tracked', async () => {
     const { mgr } = reloaded([{ index: 1, name: 'claude' }]);
-    const other = makeTerminal({ name: 'x', shellArgs: TmuxManager.attachArgs('foreman-elsewhere') });
-    const otherTab = makeTerminal({ name: 'y', shellArgs: TmuxManager.viewAttachArgs('foreman-elsewhere', 1) });
+    const other = makeTerminal({ name: 'x', shellArgs: TmuxManager.attachArgs('stack-elsewhere') });
+    const otherTab = makeTerminal({ name: 'y', shellArgs: TmuxManager.viewAttachArgs('stack-elsewhere', 1) });
     const twinViewer = [makeTerminal({ name: 'a', shellArgs: TmuxManager.attachArgs(SESSION) }), makeTerminal({ name: 'b', shellArgs: TmuxManager.attachArgs(SESSION) })];
     const twinTab = [makeTerminal({ name: 'c', shellArgs: TmuxManager.viewAttachArgs(SESSION, 1) }), makeTerminal({ name: 'd', shellArgs: TmuxManager.viewAttachArgs(SESSION, 1) })];
     window.terminals = [other, otherTab, ...twinViewer, ...twinTab];
@@ -556,12 +556,12 @@ describe('reconnect: claiming restored terminals exactly', () => {
       { name: SESSION, attached: 0 },
       { name: view(1), attached: 1 },
       { name: view(2), attached: 0 },
-      { name: view(1, 'foreman-gone'), attached: 1 },
-      { name: 'foreman-other', attached: 0 },
+      { name: view(1, 'stack-gone'), attached: 1 },
+      { name: 'stack-other', attached: 0 },
       { name: 'work', attached: 0 },
     ]);
     await mgr.reconnect([wt]);
-    expect(stub.killSession.mock.calls.map((c) => c[0])).toEqual([view(2), view(1, 'foreman-gone')]);
+    expect(stub.killSession.mock.calls.map((c) => c[0])).toEqual([view(2), view(1, 'stack-gone')]);
   });
 
   it('tolerates tmux failing to list clients or sessions', async () => {

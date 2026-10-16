@@ -1,10 +1,10 @@
 import type { IAgentProvider } from '../../ports/IAgentProvider';
-import type { ForemanConfig } from '../../types';
+import type { StackConfig } from '../../types';
 import type { ClaudeHookInstaller } from './ClaudeHookInstaller';
 
 /** Anything exposing the extension configuration (structural ConfigManager). */
 export interface ConfigSource {
-  get(): ForemanConfig;
+  get(): StackConfig;
 }
 
 export class ClaudeProvider implements IAgentProvider {

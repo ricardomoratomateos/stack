@@ -23,7 +23,7 @@ export function pickTerminalLabel(labels: readonly string[], lastActive: string 
 /**
  * Whether an image that just opened plausibly arrived by drop rather than by a
  * deliberate double-click in the Explorer: fresh off the disk, or from the
- * folder macOS drops screenshots into. Keeps Foreman from hijacking every
+ * folder macOS drops screenshots into. Keeps Stack from hijacking every
  * image the user opens on purpose.
  */
 export function looksLikeScreenshot(opts: {

@@ -43,7 +43,7 @@ export interface DockerContainer {
 
 /** One of the worktree's own auto-generated ports. */
 export interface PortMapping {
-  /** Env var name from `foreman.docker.ports`, e.g. HTTP_PORT. */
+  /** Env var name from `stack.docker.ports`, e.g. HTTP_PORT. */
   name: string;
   port: number;
   /**
@@ -103,33 +103,33 @@ export interface WorktreeItem {
   git: GitStatus;
   /** Every container of the stack, stopped ones included (`ps -a`). */
   docker: DockerContainer[];
-  /** Foreman is starting or stopping the stack right now; the button should not offer ▶/■. */
+  /** Stack is starting or stopping the stack right now; the button should not offer ▶/■. */
   dockerBusy?: 'starting' | 'stopping';
   /**
-   * Why the last start/stop failed — compose's error, or Foreman's own (port
+   * Why the last start/stop failed — compose's error, or Stack's own (port
    * conflict, daemon down). Cleared by the next one that succeeds.
    */
   dockerError?: string;
-  /** Ports this worktree owns — empty unless `foreman.docker.ports` is set. */
+  /** Ports this worktree owns — empty unless `stack.docker.ports` is set. */
   ports: PortMapping[];
   pr?: PrStatus | null;
 }
 
-export interface ForemanState {
+export interface StackState {
   worktrees: WorktreeItem[];
   activeWorktreeId?: string;
-  /** Provider launched by the main agent button (foreman.defaultProvider). */
+  /** Provider launched by the main agent button (stack.defaultProvider). */
   defaultProvider?: ProviderId;
   /** Agents whose command resolves on PATH; the rest are shown dimmed. */
   installedProviders?: ProviderId[];
-  /** Show the docker start/stop button (foreman.docker.ports configured). */
+  /** Show the docker start/stop button (stack.docker.ports configured). */
   dockerEnabled?: boolean;
   /**
    * Docker itself could not be listed on the last poll (daemon down or hung,
    * CLI missing). While set, an empty stack means "unknown", not "down".
    */
   dockerUnavailable?: string;
-  /** Which layout the sidebar renders (foreman.sidebarStyle). */
+  /** Which layout the sidebar renders (stack.sidebarStyle). */
   sidebarStyle?: SidebarStyle;
   /** Local branches offered as the base for a new worktree (filled on demand). */
   branches?: string[];
@@ -139,7 +139,7 @@ export interface ForemanState {
 
 // Extension → WebView
 export type ExtMessage =
-  | { type: 'state'; payload: ForemanState };
+  | { type: 'state'; payload: StackState };
 
 // WebView → Extension
 export type WebMessage =

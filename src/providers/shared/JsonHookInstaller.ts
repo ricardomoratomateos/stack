@@ -16,9 +16,9 @@ import { HookRoutes } from './HookRoutes';
  *   the script finds the right one at send time (see HookRoutes).
  * - No interpretation. The agent's payload is forwarded verbatim as the body —
  *   session_id, transcript_path, tool_name, message, whatever later agent
- *   versions add — and Foreman's own ids ride in X-Foreman-* headers. What the
+ *   versions add — and Stack's own ids ride in X-Stack-* headers. What the
  *   extension reads out of an event can grow without the script changing.
- * - A reply channel. A response body starting with `foreman-reply:` is printed
+ * - A reply channel. A response body starting with `stack-reply:` is printed
  *   to stdout, which is how Claude Code and Codex take a hook's answer (extra
  *   context, a permission decision). Nothing uses it yet; it is here so that
  *   using it later does not mean changing this file.
@@ -32,22 +32,22 @@ import { HookRoutes } from './HookRoutes';
  * explicit arguments sidestep the differences.
  */
 const SCRIPT = `#!/bin/bash
-# Foreman notify hook — generated, do not edit manually.
+# Stack notify hook — generated, do not edit manually.
 #
 # Forwards the agent's hook payload (stdin, untouched) to the VS Code window
 # that owns this session. Never fails, and never holds the agent for long:
-# whether Foreman is running must not be something the agent notices.
+# whether Stack is running must not be something the agent notices.
 DIR="$(dirname "$0")"
 EVENT_NAME="\${1:-\${HOOK_EVENT_NAME:-}}"
 AGENT="\${2:-}"
 # Drain stdin first: the agent blocks writing the payload until it is all read.
 PAYLOAD=$(cat)
 
-WORKSPACE_ID="\${FOREMAN_WORKSPACE_ID:-}"
-WINDOW_INDEX="\${FOREMAN_WINDOW_INDEX:-}"
+WORKSPACE_ID="\${STACK_WORKSPACE_ID:-}"
+WINDOW_INDEX="\${STACK_WINDOW_INDEX:-}"
 
 # Ask tmux where we are whenever the launcher did not say. Those variables are
-# baked in when Foreman starts an agent, so an agent the user starts BY HAND —
+# baked in when Stack starts an agent, so an agent the user starts BY HAND —
 # in a shell window, or after the first one exited — has neither, and every
 # event it sent was dropped for having an empty workspace id. tmux always knows,
 # because the hook runs inside the pane.
@@ -56,12 +56,12 @@ if [ -n "\${TMUX_PANE:-}" ] && command -v tmux >/dev/null 2>&1; then
     WINDOW_INDEX=$(tmux display-message -p -t "$TMUX_PANE" '#{window_index}' 2>/dev/null) || WINDOW_INDEX=""
   fi
   if [ -z "$WORKSPACE_ID" ]; then
-    # Session names are "foreman-<worktree id>". Worktree ids are UUIDs, so they
+    # Session names are "stack-<worktree id>". Worktree ids are UUIDs, so they
     # survive sessionName()'s sanitising and 50-char cap unchanged and the
     # prefix strip round-trips exactly.
     SESSION=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null) || SESSION=""
     case "$SESSION" in
-      foreman-*) WORKSPACE_ID="\${SESSION#foreman-}" ;;
+      stack-*) WORKSPACE_ID="\${SESSION#stack-}" ;;
     esac
   fi
 fi
@@ -81,19 +81,19 @@ esac
 FALLBACK=$(cat "$DIR/hook-url" 2>/dev/null) || FALLBACK=""
 
 TRIED=" "
-for URL in "$ROUTE" "\${FOREMAN_HOOK_URL:-}" "$FALLBACK"; do
+for URL in "$ROUTE" "\${STACK_HOOK_URL:-}" "$FALLBACK"; do
   [ -n "$URL" ] || continue
   case "$TRIED" in *" $URL "*) continue ;; esac
   TRIED="$TRIED$URL "
   ANSWER=$(printf '%s' "$PAYLOAD" | curl -sf --connect-timeout 1 --max-time 2 \\
     -X POST "$URL/hook" \\
     -H "Content-Type: application/json" \\
-    -H "X-Foreman-Hook: 2" \\
-    -H "X-Foreman-Event: $EVENT_NAME" \\
-    -H "X-Foreman-Agent: $AGENT" \\
-    -H "X-Foreman-Workspace: $WORKSPACE_ID" \\
-    -H "X-Foreman-Window: $WINDOW_INDEX" \\
-    -H "X-Foreman-Pane: \${TMUX_PANE:-}" \\
+    -H "X-Stack-Hook: 2" \\
+    -H "X-Stack-Event: $EVENT_NAME" \\
+    -H "X-Stack-Agent: $AGENT" \\
+    -H "X-Stack-Workspace: $WORKSPACE_ID" \\
+    -H "X-Stack-Window: $WINDOW_INDEX" \\
+    -H "X-Stack-Pane: \${TMUX_PANE:-}" \\
     --data-binary @- 2>/dev/null)
   case $? in
     7|22) continue ;;
@@ -101,7 +101,7 @@ for URL in "$ROUTE" "\${FOREMAN_HOOK_URL:-}" "$FALLBACK"; do
   # The agent reads a hook's stdout (as context, or as a decision), so only a
   # reply that says it is one is relayed — never whatever else answered.
   case "$ANSWER" in
-    foreman-reply:*) printf '%s\\n' "\${ANSWER#foreman-reply:}" ;;
+    stack-reply:*) printf '%s\\n' "\${ANSWER#stack-reply:}" ;;
   esac
   break
 done
@@ -109,7 +109,7 @@ exit 0
 `;
 
 /**
- * Registers Foreman's notify hook in an agent whose hook config is JSON shaped
+ * Registers Stack's notify hook in an agent whose hook config is JSON shaped
  * like `{ "hooks": { "<Event>": [{ "hooks": [{ type, command }] }] } }`.
  *
  * Claude Code and Codex both landed on that same shape, so they share one
@@ -129,7 +129,7 @@ export class JsonHookInstaller {
     storagePath: string,
     /** Absolute path to the agent's JSON hook config. */
     private settingsPath: string,
-    /** Events this agent emits, out of the ones Foreman understands. */
+    /** Events this agent emits, out of the ones Stack understands. */
     private events: readonly string[],
     /** Provider id, passed to the script as $2 so the server knows whose payload it is. */
     private agent: string,
@@ -200,7 +200,7 @@ export class JsonHookInstaller {
     const hooks = settings['hooks'] ?? {};
     const bad = (where: string) =>
       new ConfigFileError(
-        `Foreman couldn't ${action}: "${where}" in ${displayPath(this.settingsPath)} is not the documented hooks shape. ` +
+        `Stack couldn't ${action}: "${where}" in ${displayPath(this.settingsPath)} is not the documented hooks shape. ` +
         'The file was left untouched.',
       );
     if (typeof hooks !== 'object' || hooks === null || Array.isArray(hooks)) throw bad('hooks');

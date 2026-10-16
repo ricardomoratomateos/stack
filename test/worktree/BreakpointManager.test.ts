@@ -118,7 +118,7 @@ describe('BreakpointManager.activate', () => {
 
 describe('BreakpointManager.prune', () => {
   it('drops the stash of a worktree no longer in the store, and persists', async () => {
-    await memento.update('foreman.breakpoints', {
+    await memento.update('stack.breakpoints', {
       a: [{ uri: '/repo/zer/feat-a/x.php', line: 1, character: 0, enabled: true }],
       gone: [{ uri: '/repo/zer/gone/y.php', line: 1, character: 0, enabled: true }],
     });
@@ -128,11 +128,11 @@ describe('BreakpointManager.prune', () => {
 
     expect(mgr.getStashed('gone')).toEqual([]);
     expect(mgr.getStashed('a')).toHaveLength(1);
-    expect(Object.keys(memento.get<Record<string, unknown>>('foreman.breakpoints', {}))).toEqual(['a']);
+    expect(Object.keys(memento.get<Record<string, unknown>>('stack.breakpoints', {}))).toEqual(['a']);
   });
 
   it('writes nothing when every stash is still alive', async () => {
-    await memento.update('foreman.breakpoints', { a: [] });
+    await memento.update('stack.breakpoints', { a: [] });
     const mgr = new BreakpointManager(memento as never, () => WORKTREES);
     const update = vi.spyOn(memento, 'update');
 
@@ -144,7 +144,7 @@ describe('BreakpointManager.prune', () => {
 
 describe('two windows sharing globalState', () => {
   const OTHER = [{ id: 'x', path: '/other' }, { id: 'y', path: '/other/zer/y' }];
-  const stored = () => memento.get<Record<string, unknown[]>>('foreman.breakpoints', {});
+  const stored = () => memento.get<Record<string, unknown[]>>('stack.breakpoints', {});
 
   it("a stash in one window survives the other window's switch", () => {
     // Each window wrote its whole in-memory map, read at activation, so the
@@ -165,7 +165,7 @@ describe('two windows sharing globalState', () => {
     debug.breakpoints = [bp('/repo/zer/feat-a/x.php')];
     windowA.activate('b', WORKTREES);
     // Another window stashed something meanwhile.
-    await memento.update('foreman.breakpoints', {
+    await memento.update('stack.breakpoints', {
       ...stored(),
       y: [{ uri: '/other/zer/y/q.py', line: 1, character: 0, enabled: true }],
     });

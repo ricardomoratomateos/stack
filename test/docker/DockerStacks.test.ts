@@ -3,7 +3,7 @@ import { DockerMonitor } from '../../src/docker/DockerMonitor';
 import { DockerStacks, type DockerStacksDeps } from '../../src/docker/DockerStacks';
 import { composeProject } from '../../src/docker/dockerCompose';
 import type { DockerRunOptions, DockerRunResult } from '../../src/docker/dockerCli';
-import type { ForemanConfig, Worktree } from '../../src/types';
+import type { StackConfig, Worktree } from '../../src/types';
 
 const ok = (stdout = ''): DockerRunResult => ({ code: 0, stdout, stderr: '', timedOut: false });
 const failed = (stderr: string, code = 1): DockerRunResult => ({ code, stdout: '', stderr, timedOut: false });
@@ -21,7 +21,7 @@ function makeWorktree(over: Partial<Worktree> = {}): Worktree {
   };
 }
 
-function makeConfig(over: Partial<ForemanConfig['docker']> = {}): ForemanConfig {
+function makeConfig(over: Partial<StackConfig['docker']> = {}): StackConfig {
   return {
     worktreesDirectory: '.worktrees',
     defaultBaseBranch: 'main',
@@ -66,7 +66,7 @@ interface FakeDocker {
  */
 function makeStacks(opts: {
   docker?: FakeDocker;
-  config?: ForemanConfig;
+  config?: StackConfig;
   files?: string[];
   busyPorts?: number[];
 } = {}) {
@@ -311,7 +311,7 @@ describe('DockerStacks.down', () => {
     expect(composeCalls()[0].options.timeoutMs).toBe(60_000);
   });
 
-  it('also stops a stack an older Foreman started under the legacy name — it is not orphaned', async () => {
+  it('also stops a stack an older version started under the legacy name — it is not orphaned', async () => {
     const { stacks, composeCalls } = makeStacks({
       docker: { containers: [ps(project, 'web'), ps('feat-b', 'old-web', { Labels: `com.docker.compose.project=feat-b,com.docker.compose.project.working_dir=${wt.path}` })] },
     });
@@ -402,8 +402,8 @@ describe('DockerStacks — which containers are this worktree\'s', () => {
     expect(stacks.project(wt)).toBe(project);
   });
 
-  it('falls back to a legacy stack from this worktree or its repo (compose file in main/.foreman)', async () => {
-    for (const dir of [wt.path, '/repo/.foreman', '/repo', undefined]) {
+  it('falls back to a legacy stack from this worktree or its repo (compose file in main/.stack)', async () => {
+    for (const dir of [wt.path, '/repo/.stack', '/repo', undefined]) {
       const { stacks, monitor } = makeStacks({ docker: { containers: [legacy(dir)] } });
       await monitor.refresh();
       expect(stacks.containers(wt).map((c) => c.name)).toEqual(['feat-b-web-1']);

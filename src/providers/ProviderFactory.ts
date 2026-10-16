@@ -28,7 +28,7 @@ export class ProviderFactory {
     return provider;
   }
 
-  /** The provider selected by `foreman.defaultProvider`. */
+  /** The provider selected by `stack.defaultProvider`. */
   defaultProvider(): IAgentProvider {
     return this.create(this.config.get().defaultProvider);
   }

@@ -41,8 +41,8 @@ export interface IAgentProvider {
    * substitute away the text they wrap — which is every code line the review
    * panel attaches. Prompts are pasted into the running agent instead.
    *
-   * Carries FOREMAN_WORKSPACE_ID and, once installHooks() has run,
-   * FOREMAN_HOOK_URL — and claims the worktree's hook route for this window
+   * Carries STACK_WORKSPACE_ID and, once installHooks() has run,
+   * STACK_HOOK_URL — and claims the worktree's hook route for this window
    * (see HookRoutes), because the launch waits on the agent's first hook.
    */
   buildCommand(worktreeId: string): string;

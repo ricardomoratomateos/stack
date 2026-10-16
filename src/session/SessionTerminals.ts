@@ -4,7 +4,7 @@ import type { ISessionManager, TmuxClient } from '../ports/ISessionManager';
 import type { Worktree } from '../types';
 
 /**
- * How a worktree's sessions reach the editor (`foreman.sessionTabs`).
+ * How a worktree's sessions reach the editor (`stack.sessionTabs`).
  *
  * - `perSession`: every session (agent or shell) is a terminal tab of its own,
  *   so two of them can sit side by side, be dragged between editor groups and
@@ -14,7 +14,7 @@ import type { Worktree } from '../types';
  */
 export type SessionTabsMode = 'perSession' | 'single';
 
-/** What a Foreman terminal shows: a worktree's whole session (the single viewer), or one window of it (a tab). */
+/** What a Stack terminal shows: a worktree's whole session (the single viewer), or one window of it (a tab). */
 export interface TerminalTarget {
   worktreeId: string;
   /** Set for a session tab; absent for the single-mode viewer. */
@@ -40,7 +40,7 @@ export interface ParkedTab {
 export const TAB_SEPARATOR = ' · ';
 
 /**
- * Every VS Code terminal Foreman shows, and the tmux sessions behind them.
+ * Every VS Code terminal Stack shows, and the tmux sessions behind them.
  *
  * Kept apart from AgentSessionManager, which tracks what runs in the tmux
  * windows: this tracks what is on screen. A worktree has either one viewer
@@ -140,7 +140,7 @@ export class SessionTerminals implements vscode.Disposable {
    * Same lookup by the terminal's NAME. Tab inputs for terminals are opaque
    * (TabInputTerminal exposes nothing), so a tab can only be matched to its
    * terminal through the label VS Code shows, which is the terminal's name —
-   * kept unique among Foreman's terminals for exactly this (see uniqueName).
+   * kept unique among Stack's terminals for exactly this (see uniqueName).
    */
   targetOfName(name: string): TerminalTarget | undefined {
     for (const [worktreeId, viewer] of this.viewers) {
@@ -163,8 +163,8 @@ export class SessionTerminals implements vscode.Disposable {
    */
   private cwdFor(worktree: Worktree, name: string): string | undefined {
     const exists = this.pathExists(worktree.path);
-    console.log(`[foreman] open viewer id=${worktree.id} name="${name}" path=${worktree.path} exists=${exists}`);
-    if (!exists) console.warn(`[foreman] worktree directory missing, attaching viewer without cwd: ${worktree.path}`);
+    console.log(`[stack] open viewer id=${worktree.id} name="${name}" path=${worktree.path} exists=${exists}`);
+    if (!exists) console.warn(`[stack] worktree directory missing, attaching viewer without cwd: ${worktree.path}`);
     return exists ? worktree.path : undefined;
   }
 
@@ -248,7 +248,7 @@ export class SessionTerminals implements vscode.Disposable {
     return terminal;
   }
 
-  /** `name`, or `name 2`, `name 3`… — whichever no other Foreman terminal carries. */
+  /** `name`, or `name 2`, `name 3`… — whichever no other Stack terminal carries. */
   private uniqueName(name: string): string {
     const taken = new Set(
       [...this.viewers.values(), ...[...this.tabs.values()].flatMap((m) => [...m.values()])]
@@ -397,7 +397,7 @@ export class SessionTerminals implements vscode.Disposable {
     if (active?.windowIndex !== undefined) this.lastFocused.set(active.worktreeId, active.windowIndex);
   }
 
-  /** Claim one terminal by what it is attached to. True when it is (now) Foreman's. */
+  /** Claim one terminal by what it is attached to. True when it is (now) Stack's. */
   private async claimOne(terminal: vscode.Terminal, clients: () => Promise<TmuxClient[]>): Promise<boolean> {
     if (terminal.exitStatus !== undefined) return false;
     if (this.targetOf(terminal)) return true;
@@ -431,7 +431,7 @@ export class SessionTerminals implements vscode.Disposable {
    * Kill view sessions nobody is looking at, and those whose worktree session
    * is gone. destroy-unattached normally takes a view with its last client;
    * this catches the ones it could not (a client killed before the option was
-   * set, a base killed from outside Foreman) so they do not pile up — an
+   * set, a base killed from outside Stack) so they do not pile up — an
    * orphaned view would also keep the windows it shared with its base alive.
    */
   async pruneViews(): Promise<void> {

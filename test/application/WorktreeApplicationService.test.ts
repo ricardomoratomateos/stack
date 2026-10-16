@@ -11,7 +11,7 @@ import {
 } from '../../src/application/WorktreeApplicationService';
 import { VsCodeNotifyAdapter } from '../../src/adapters/VsCodeNotifyAdapter';
 import { window, ProgressLocation, resetVscodeMock } from '../__mocks__/vscode';
-import type { Worktree, ForemanConfig } from '../../src/types';
+import type { Worktree, StackConfig } from '../../src/types';
 import type { SessionItem } from '../../src/webview/types';
 import type { ProviderId } from '../../src/ports/IAgentProvider';
 import type { WorktreeManager } from '../../src/worktree/WorktreeManager';
@@ -48,7 +48,7 @@ interface HarnessOpts {
   worktrees?: Worktree[];
   persistedActiveId?: string | null;
   legacyGlobalActiveId?: string;
-  config?: Partial<ForemanConfig>;
+  config?: Partial<StackConfig>;
   /** worktree ids that currently have an open viewer terminal */
   viewerIds?: string[];
   /** worktree ids for which hasTerminals() returns true */
@@ -106,7 +106,7 @@ interface HarnessOpts {
 function makeHarness(o: HarnessOpts = {}) {
   const calls: string[] = [];
   const worktrees = o.worktrees ?? [];
-  const cfg: ForemanConfig = {
+  const cfg: StackConfig = {
     worktreesDirectory: './zer',
     setupScript: '',
     teardownScript: '',
@@ -122,7 +122,7 @@ function makeHarness(o: HarnessOpts = {}) {
       portStride: 100,
     },
     debugBasePort: 9898,
-    debugTemplate: { type: 'php', request: 'launch', name: 'Foreman: Debug', port: '{{PORT}}' },
+    debugTemplate: { type: 'php', request: 'launch', name: 'Stack: Debug', port: '{{PORT}}' },
     ...o.config,
   };
 
@@ -370,19 +370,19 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 /** Docker orchestration switched on: at least one generated port. */
-const DOCKER_ON: Partial<ForemanConfig> = {
+const DOCKER_ON: Partial<StackConfig> = {
   docker: { composeFile: 'docker-compose.yml', overrideFile: '', ports: ['HTTP_PORT'], basePort: 20000, portStride: 100 },
 };
 
 /**
- * The env prefix a lifecycle script is launched with: FOREMAN_* and their
+ * The env prefix a lifecycle script is launched with: STACK_* and their
  * deprecated UNMESS_* twins, then whatever docker adds.
  */
 function scriptEnv(path: string, branch: string, extra: Record<string, string> = {}): string {
   const project = composeProject(makeWorktree({ path }));
   const vars = { REPO_ROOT: '/repo', WORKTREE_PATH: path, BRANCH: branch, COMPOSE_PROJECT: project };
   const prefixed = (prefix: string) => Object.fromEntries(Object.entries(vars).map(([k, v]) => [`${prefix}_${k}`, v]));
-  return envPrefix({ ...prefixed('FOREMAN'), ...prefixed('UNMESS'), ...extra });
+  return envPrefix({ ...prefixed('STACK'), ...prefixed('UNMESS'), ...extra });
 }
 
 const COMPOSE_OK = { code: 0, stdout: '', stderr: '', timedOut: false };
@@ -541,7 +541,7 @@ describe('openSessionToSide', () => {
     expect(h.claude.focusWindow).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }), 5, { beside: true });
   });
 
-  it('with no Foreman terminal focused, uses the active worktree', async () => {
+  it('with no Stack terminal focused, uses the active worktree', async () => {
     const h = makeHarness({ worktrees: [a(), b()], persistedActiveId: 'b', focusedSessions: { b: 2 } });
     await h.service.loadWorktreesForRepo('/repo');
     h.setActiveTerminal({ name: 'some zsh' });
@@ -556,7 +556,7 @@ describe('openSessionToSide', () => {
     await h.service.openSessionToSide({ worktreeId: 'a' });
     expect(h.claude.focusWindow).not.toHaveBeenCalled();
     expect(h.notify.showWarning).toHaveBeenCalledTimes(3);
-    expect(h.notify.showWarning).toHaveBeenCalledWith('Foreman: open a session first, then move it to the side.');
+    expect(h.notify.showWarning).toHaveBeenCalledWith('Stack: open a session first, then move it to the side.');
   });
 });
 
@@ -661,7 +661,7 @@ describe('attachDroppedFiles', () => {
       worktrees: [makeWorktree({ id: 'a' }), makeWorktree({ id: 'b', branch: 'feat/b' })],
     });
     await h.service.attachDroppedFiles(['/shots/x.png']);
-    expect(h.notify.showWarning).toHaveBeenCalledWith('Foreman: select a worktree first, then drop the image again.');
+    expect(h.notify.showWarning).toHaveBeenCalledWith('Stack: select a worktree first, then drop the image again.');
     expect(h.claude.pasteToActiveWindow).not.toHaveBeenCalled();
   });
 
@@ -672,7 +672,7 @@ describe('attachDroppedFiles', () => {
     });
     await h.service.attachDroppedFiles(['/shots/x.png']);
     expect(h.notify.showWarning).toHaveBeenCalledWith(
-      'Foreman: no agent session in login fix — launch one, then drop the image again.',
+      'Stack: no agent session in login fix — launch one, then drop the image again.',
     );
     expect(h.claude.pasteToActiveWindow).not.toHaveBeenCalled();
   });
@@ -681,7 +681,7 @@ describe('attachDroppedFiles', () => {
     const h = makeHarness({ worktrees: [makeWorktree({ id: 'a', branch: 'feat/a' })], persistedActiveId: 'a' });
     await h.service.attachDroppedFiles(['/shots/x.png']);
     expect(h.notify.showWarning).toHaveBeenCalledWith(
-      'Foreman: no agent session in feat/a — launch one, then drop the image again.',
+      'Stack: no agent session in feat/a — launch one, then drop the image again.',
     );
   });
 
@@ -775,25 +775,25 @@ describe('handleMessage dockerUp / dockerDown', () => {
     const head = `compose -p ${project(b)} --project-directory /repo/zer/feat-b -f /repo/docker-compose.yml -f /repo/docker-compose.worktree.yml`;
     expect(h.calls).toContain(`docker.runCompose:${head} config --format json:/repo/zer/feat-b:{"HTTP_PORT":"20000","PWD":"/repo/zer/feat-b"}`);
     expect(h.calls).toContain(`docker.runCompose:${head} up -d:/repo/zer/feat-b:{"HTTP_PORT":"20000","PWD":"/repo/zer/feat-b"}`);
-    // No terminal any more: Foreman has to see the exit code.
+    // No terminal any more: Stack has to see the exit code.
     expect(h.host.createTerminal).not.toHaveBeenCalled();
     expect(h.dockerMonitor.checkDaemon).toHaveBeenCalled();
     expect(h.ui.pushWebview).toHaveBeenCalled();
   });
 
-  it('prefers the worktree\'s own compose file when its branch carries .foreman', async () => {
+  it('prefers the worktree\'s own compose file when its branch carries .stack', async () => {
     const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
     const h = makeHarness({
       worktrees: [b],
       config: {
-        docker: { composeFile: '.foreman/docker-compose.worktree.yml', overrideFile: '', ports: ['WORKTREE_PORT'], basePort: 8081, portStride: 1 },
+        docker: { composeFile: '.stack/docker-compose.worktree.yml', overrideFile: '', ports: ['WORKTREE_PORT'], basePort: 8081, portStride: 1 },
       },
-      existingPaths: ['/repo/zer/feat-b/.foreman/docker-compose.worktree.yml'],
+      existingPaths: ['/repo/zer/feat-b/.stack/docker-compose.worktree.yml'],
     });
     await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
     await flushDocker();
     expect(h.calls.some((c) => c.startsWith(
-      `docker.runCompose:compose -p ${project(b)} --project-directory /repo/zer/feat-b -f /repo/zer/feat-b/.foreman/docker-compose.worktree.yml up -d:`,
+      `docker.runCompose:compose -p ${project(b)} --project-directory /repo/zer/feat-b -f /repo/zer/feat-b/.stack/docker-compose.worktree.yml up -d:`,
     ))).toBe(true);
   });
 
@@ -854,7 +854,7 @@ describe('handleMessage dockerUp / dockerDown', () => {
     const h = makeHarness({ worktrees: [b], config: dockerCfg });
     await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
     await flushDocker();
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('[foreman] docker: $ docker compose'));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('[stack] docker: $ docker compose'));
     log.mockRestore();
   });
 
@@ -965,10 +965,10 @@ describe('switchToWorktree', () => {
     expect(h.globalState.update).not.toHaveBeenCalled();
   });
 
-  it('persists activeWorktreeId under foreman.activeWorktreeId before any UI work', async () => {
+  it('persists activeWorktreeId under stack.activeWorktreeId before any UI work', async () => {
     const { h } = switchHarness();
     await h.service.switchToWorktree('b');
-    expect(h.calls[0]).toBe('workspaceState.update:foreman.activeWorktreeId:b');
+    expect(h.calls[0]).toBe('workspaceState.update:stack.activeWorktreeId:b');
   });
 
   it('creates viewer only when target hasTerminals', async () => {
@@ -1001,7 +1001,7 @@ describe('switchToWorktree', () => {
       const { h } = switchHarness({ viewerIds: ['a'], terminalIds: ['b'] });
       await h.service.switchToWorktree('b');
       expect(h.calls).toEqual([
-        'workspaceState.update:foreman.activeWorktreeId:b',
+        'workspaceState.update:stack.activeWorktreeId:b',
         'ui.pushWebview',
         'claude.getOrCreateViewer:b',
         'viewer.show:b',
@@ -1033,7 +1033,7 @@ describe('switchToWorktree', () => {
     });
   });
 
-  // ── foreman.focusMode: the clean-slate teardown behaviour ─────────────────
+  // ── stack.focusMode: the clean-slate teardown behaviour ─────────────────
   describe('focusMode (clean slate)', () => {
     const focus = (over: HarnessOpts = {}) =>
       switchHarness({ ...over, config: { focusMode: true, ...(over.config ?? {}) } });
@@ -1077,7 +1077,7 @@ describe('switchToWorktree', () => {
       const { h } = focus({ viewerIds: ['a'], terminalIds: ['b'] });
       await h.service.switchToWorktree('b');
       expect(h.calls).toEqual([
-        'workspaceState.update:foreman.activeWorktreeId:b',
+        'workspaceState.update:stack.activeWorktreeId:b',
         'ui.pushWebview',
         'tab.updateViewerState:a,b,c:a',
         'host.saveAll:false',
@@ -1169,7 +1169,7 @@ describe('activeTerminal sync', () => {
     expect(h.ui.pushWebview).not.toHaveBeenCalled();
   });
 
-  it('ignores terminals that are not foreman viewers', () => {
+  it('ignores terminals that are not stack viewers', () => {
     const a = makeWorktree({ id: 'a' });
     const h = makeHarness({ worktrees: [a], persistedActiveId: undefined, viewerIds: ['a'] });
     h.service.handleActiveTerminalChange({ name: 'random terminal' });
@@ -1455,7 +1455,7 @@ describe('buildState', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('selection restore after reload', () => {
-  it('constructor hydrates currentWorktreeId from foreman.activeWorktreeId', () => {
+  it('constructor hydrates currentWorktreeId from stack.activeWorktreeId', () => {
     const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], persistedActiveId: 'a' });
     expect(h.workspaceState.get).toHaveBeenCalledWith(ACTIVE_WORKTREE_KEY);
     expect(h.service.buildState().activeWorktreeId).toBe('a');
@@ -1583,7 +1583,7 @@ describe('loadWorktreesForRepo', () => {
       worktrees: [a, b],
       workspaceFolders: ['/repo', '/repo/zer/stale-1', '/elsewhere/mine', '/repo/zer/stale-2'],
     });
-    // '/elsewhere/mine' stays. Foreman removes folders it is responsible for — a
+    // '/elsewhere/mine' stays. Stack removes folders it is responsible for — a
     // stale worktree of this repo, or one it added for another repo — and leaves
     // anything it does not recognise where the user put it.
     h.service.setUi(h.ui);
@@ -1614,7 +1614,7 @@ describe('loadWorktreesForRepo', () => {
       'docker.startPolling:repo',
       `docker.startPolling:${composeProject(b)}`,
     ]);
-    // The legacy name rides along, so a stack started by an older Foreman shows.
+    // The legacy name rides along, so a stack started by an older version shows.
     expect(h.dockerMonitor.startPolling).toHaveBeenCalledWith(composeProject(b), expect.any(Function), ['feat-b']);
   });
 
@@ -2208,7 +2208,7 @@ describe('deleteWorktree', () => {
 
     await h.service.deleteWorktree(a);
 
-    expect(h.notify.showWarning).toHaveBeenCalledWith(expect.stringContaining('docker compose down failed (see the Foreman: Docker output)'));
+    expect(h.notify.showWarning).toHaveBeenCalledWith(expect.stringContaining('docker compose down failed (see the Stack: Docker output)'));
     expect(h.manager.delete).toHaveBeenCalled();
     release();
     await flushDocker();
@@ -2414,7 +2414,7 @@ describe('initWorktree', () => {
     const a = makeWorktree({ id: 'a' });
     const h = makeHarness({ worktrees: [a] });
     await h.service.initWorktree(a);
-    expect(h.notify.showError).toHaveBeenCalledWith('No setup script configured. Set "foreman.setupScript" in settings.');
+    expect(h.notify.showError).toHaveBeenCalledWith('No setup script configured. Set "stack.setupScript" in settings.');
     expect(h.host.createTerminal).not.toHaveBeenCalled();
   });
 
@@ -2435,14 +2435,14 @@ describe('initWorktree', () => {
     const h = makeHarness({
       worktrees: [a],
       config: {
-        setupScript: '.foreman/setup.sh',
-        docker: { composeFile: '.foreman/docker-compose.worktree.yml', overrideFile: '', ports: ['WORKTREE_PORT'], basePort: 8081, portStride: 1 },
+        setupScript: '.stack/setup.sh',
+        docker: { composeFile: '.stack/docker-compose.worktree.yml', overrideFile: '', ports: ['WORKTREE_PORT'], basePort: 8081, portStride: 1 },
       },
-      existingPaths: ['/repo/zer/feat-b/.foreman/setup.sh'],
+      existingPaths: ['/repo/zer/feat-b/.stack/setup.sh'],
     });
     await h.service.initWorktree(a);
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      `${scriptEnv('/repo/zer/feat-b', 'feat/b', { COMPOSE_PROJECT_NAME: composeProject(a), COMPOSE_FILE: '/repo/.foreman/docker-compose.worktree.yml', WORKTREE_PORT: '8081' })} bash /repo/zer/feat-b/.foreman/setup.sh`,
+      `${scriptEnv('/repo/zer/feat-b', 'feat/b', { COMPOSE_PROJECT_NAME: composeProject(a), COMPOSE_FILE: '/repo/.stack/docker-compose.worktree.yml', WORKTREE_PORT: '8081' })} bash /repo/zer/feat-b/.stack/setup.sh`,
     );
   });
 
@@ -2476,8 +2476,8 @@ describe('initWorktree', () => {
     const h = makeHarness({ worktrees: [a], config: { setupScript: '/s.sh' } });
     await h.service.initWorktree(a);
     const typed = h.terminalsCreated[0].sendText.mock.calls[0][0] as string;
-    expect(typed).toContain("FOREMAN_BRANCH='feat/$(touch /tmp/pwned)'");
-    expect(typed).toContain(`FOREMAN_WORKTREE_PATH='/repo/zer/it'\\''s-\`id\`'`);
+    expect(typed).toContain("STACK_BRANCH='feat/$(touch /tmp/pwned)'");
+    expect(typed).toContain(`STACK_WORKTREE_PATH='/repo/zer/it'\\''s-\`id\`'`);
     expect(typed).not.toMatch(/"[^"]*\$\(/);
   });
 
@@ -2790,7 +2790,7 @@ describe('diff review panel', () => {
 describe('port re-check before setup / compose up', () => {
   const dockerCfg = {
     docker: {
-      composeFile: '.foreman/docker-compose.worktree.yml',
+      composeFile: '.stack/docker-compose.worktree.yml',
       overrideFile: '',
       ports: ['WORKTREE_PORT', 'DEBUG_PORT'],
       basePort: 8081,
@@ -2877,7 +2877,7 @@ describe('port re-check before setup / compose up', () => {
     await h.service.initWorktree(b);
 
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      `${scriptEnv('/repo/zer/feat-b', 'feat/b', { COMPOSE_PROJECT_NAME: composeProject(b), COMPOSE_FILE: '/repo/.foreman/docker-compose.worktree.yml', WORKTREE_PORT: '8085', DEBUG_PORT: '9903' })} bash /s.sh`,
+      `${scriptEnv('/repo/zer/feat-b', 'feat/b', { COMPOSE_PROJECT_NAME: composeProject(b), COMPOSE_FILE: '/repo/.stack/docker-compose.worktree.yml', WORKTREE_PORT: '8085', DEBUG_PORT: '9903' })} bash /s.sh`,
     );
   });
 
@@ -2910,7 +2910,7 @@ describe('port re-check before setup / compose up', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// foreman.defaultBaseBranch — where new worktrees branch from
+// stack.defaultBaseBranch — where new worktrees branch from
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('defaultBaseBranch', () => {
@@ -3456,7 +3456,7 @@ describe('worktrees are scoped to the window\'s repository', () => {
 
   it('lists only the worktrees of the repo open in this window', () => {
     // The bug this exists for: with the extension installed in every window,
-    // Foreman's own checkout turned up at the top of aside's sidebar.
+    // Stack's own checkout turned up at the top of aside's sidebar.
     const mine = inRepo('/repo', { id: 'a', path: '/repo/zer/feat-a', branch: 'feat/a' });
     const other = inRepo('/other', { id: 'z', path: '/other', branch: 'main', isMain: true });
     const h = windowOn('/repo', [mine, other]);
@@ -3472,7 +3472,7 @@ describe('worktrees are scoped to the window\'s repository', () => {
     h.service.focusNextWorktree();
 
     // Only one worktree here, so cycling lands back on it rather than on /other.
-    expect(h.calls.filter((c) => c.startsWith('workspaceState.update:foreman.activeWorktreeId'))
+    expect(h.calls.filter((c) => c.startsWith('workspaceState.update:stack.activeWorktreeId'))
       .every((c) => !c.includes('z'))).toBe(true);
   });
 
@@ -3577,7 +3577,7 @@ describe('loadWorktreesForRepo keeps to its own repository', () => {
   });
 
   it('leaves another repository\'s main checkout alone', async () => {
-    // That is a project the user opened, not noise Foreman introduced. Ripping it
+    // That is a project the user opened, not noise Stack introduced. Ripping it
     // out of their window would be worse than the folders it is cleaning up.
     const mine = makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/feat-a' });
     const h = makeHarness({
@@ -3641,7 +3641,7 @@ describe('syncMainFolderLabel bails out', () => {
   });
 
   it('does nothing when the repo root is not one of this window\'s worktrees', () => {
-    // A repository Foreman has never been asked to manage: there is no main
+    // A repository Stack has never been asked to manage: there is no main
     // worktree to take a label from, so there is nothing to rename it to.
     const h = makeHarness({
       worktrees: [makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' })],
@@ -3872,7 +3872,7 @@ describe('script terminals are reused, not piled up', () => {
 });
 
 describe('teardown is awaited before the worktree is removed', () => {
-  const teardown = { teardownScript: '.foreman/teardown.sh' };
+  const teardown = { teardownScript: '.stack/teardown.sh' };
 
   it('does not run git worktree remove until the script has finished', async () => {
     const a = makeWorktree({ id: 'a' });
@@ -3889,9 +3889,9 @@ describe('teardown is awaited before the worktree is removed', () => {
     expect(h.manager.delete).toHaveBeenCalledWith('a', false);
   });
 
-  it('hands the script the resolved path, the worktree cwd and the FOREMAN_* env, with a time limit', async () => {
+  it('hands the script the resolved path, the worktree cwd and the STACK_* env, with a time limit', async () => {
     const a = makeWorktree({ id: 'a' });
-    const script = nodePath.join(a.path, '.foreman/teardown.sh');
+    const script = nodePath.join(a.path, '.stack/teardown.sh');
     const h = makeHarness({ worktrees: [a], confirmResult: 'Delete', config: teardown, existingPaths: [a.path, script] });
 
     await h.service.deleteWorktree(a);
@@ -3901,10 +3901,10 @@ describe('teardown is awaited before the worktree is removed', () => {
       script,
       cwd: a.path,
       env: expect.objectContaining({
-        FOREMAN_REPO_ROOT: '/repo',
-        FOREMAN_WORKTREE_PATH: a.path,
-        FOREMAN_BRANCH: 'feat/a',
-        FOREMAN_COMPOSE_PROJECT: composeProject(a),
+        STACK_REPO_ROOT: '/repo',
+        STACK_WORKTREE_PATH: a.path,
+        STACK_BRANCH: 'feat/a',
+        STACK_COMPOSE_PROJECT: composeProject(a),
       }),
       timeoutMs: TEARDOWN_TIMEOUT_MS,
     });
@@ -4125,7 +4125,7 @@ describe('focusNextAttention', () => {
   it('says so when nothing is waiting', async () => {
     const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
     await h.service.focusNextAttention();
-    expect(h.notify.showInfo).toHaveBeenCalledWith('Foreman: nothing is waiting on you.');
+    expect(h.notify.showInfo).toHaveBeenCalledWith('Stack: nothing is waiting on you.');
     expect(h.claude.getOrCreateViewer).not.toHaveBeenCalled();
   });
 });

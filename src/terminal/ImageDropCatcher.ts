@@ -58,7 +58,7 @@ export class ImageDropCatcher implements vscode.Disposable {
     // Decide with the map as it was BEFORE this change: the image tab is
     // active now, but the terminal it displaced is what identifies the drop.
     for (const tab of e.opened) {
-      try { this.handle(tab); } catch (err) { console.warn('[foreman] image drop failed', err); }
+      try { this.handle(tab); } catch (err) { console.warn('[stack] image drop failed', err); }
     }
     this.snapshotActiveTerminals();
   }
@@ -100,10 +100,10 @@ export class ImageDropCatcher implements vscode.Disposable {
     void this.deps
       .attach(target, [uri.fsPath])
       .then(() => this.deps.notify(
-        `Foreman: attached ${path.basename(uri.fsPath)} to ${this.deps.labelFor(target.worktreeId) ?? 'the agent'}`,
+        `Stack: attached ${path.basename(uri.fsPath)} to ${this.deps.labelFor(target.worktreeId) ?? 'the agent'}`,
         () => this.reopen(uri),
       ))
-      .catch((err) => console.warn('[foreman] image drop failed', err));
+      .catch((err) => console.warn('[stack] image drop failed', err));
   }
 
   private reopen(uri: vscode.Uri): void {

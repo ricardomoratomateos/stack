@@ -10,14 +10,14 @@ import type { Stack } from './types';
 export const DEBUG_PRESETS: Record<Stack, { label: string; template: DebugTemplate }> = {
   node: {
     label: 'Node.js — attach',
-    template: { type: 'node', request: 'attach', name: 'Foreman: Debug', port: '{{PORT}}' },
+    template: { type: 'node', request: 'attach', name: 'Stack: Debug', port: '{{PORT}}' },
   },
   php: {
     label: 'PHP — Xdebug',
     template: {
       type: 'php',
       request: 'launch',
-      name: 'Foreman: Xdebug',
+      name: 'Stack: Xdebug',
       port: '{{PORT}}',
       pathMappings: { '/var/www': '{{WORKTREE_PATH}}' },
     },
@@ -27,14 +27,14 @@ export const DEBUG_PRESETS: Record<Stack, { label: string; template: DebugTempla
     template: {
       type: 'debugpy',
       request: 'attach',
-      name: 'Foreman: Debug',
+      name: 'Stack: Debug',
       port: '{{PORT}}',
       connect: { host: 'localhost', port: '{{PORT}}' },
     },
   },
   go: {
     label: 'Go — Delve remote',
-    template: { type: 'go', request: 'attach', mode: 'remote', name: 'Foreman: Debug', host: '127.0.0.1', port: '{{PORT}}' },
+    template: { type: 'go', request: 'attach', mode: 'remote', name: 'Stack: Debug', host: '127.0.0.1', port: '{{PORT}}' },
   },
 };
 

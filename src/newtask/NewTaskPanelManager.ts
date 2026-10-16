@@ -29,7 +29,7 @@ export class NewTaskPanelManager {
       return;
     }
     const panel = vscode.window.createWebviewPanel(
-      'foreman.newTask',
+      'stack.newTask',
       'New agent',
       vscode.ViewColumn.Active,
       {

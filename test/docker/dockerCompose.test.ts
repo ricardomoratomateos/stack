@@ -4,9 +4,9 @@ import {
   computeDockerPorts, dockerPortsFor, portBlockFor, composeArgv, composeProject, dockerEnv,
   legacyComposeProjects, normalizeProjectName, composeScriptEnv, dockerConfigured,
 } from '../../src/docker/dockerCompose';
-import type { ForemanConfig, Worktree } from '../../src/types';
+import type { StackConfig, Worktree } from '../../src/types';
 
-function makeConfig(over: Partial<ForemanConfig['docker']> = {}): ForemanConfig {
+function makeConfig(over: Partial<StackConfig['docker']> = {}): StackConfig {
   return {
     worktreesDirectory: './zer',
     setupScript: '',
@@ -109,13 +109,13 @@ describe('composeProject', () => {
     expect(composeProject(makeWorktree({ path: '/repo/zer/!!!' }))).toMatch(/^worktree-[0-9a-f]{6}$/);
   });
 
-  it('keeps compose\'s own default for the main checkout, which Foreman runs plain', () => {
+  it('keeps compose\'s own default for the main checkout, which Stack runs plain', () => {
     expect(composeProject(makeWorktree({ path: '/x/My Repo', isMain: true }))).toBe('myrepo');
   });
 });
 
 describe('legacyComposeProjects', () => {
-  it('lists the names an older Foreman (or a plain `compose up`) used for this worktree', () => {
+  it('lists the names an older version (or a plain `compose up`) used for this worktree', () => {
     expect(legacyComposeProjects(makeWorktree({ path: '/x/Feat Bar!' }))).toEqual(['feat-bar-', 'featbar']);
   });
 

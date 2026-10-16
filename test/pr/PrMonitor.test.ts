@@ -319,9 +319,9 @@ describe('defaultRunner', () => {
   });
 
   it('passes cwd, env and timeout through to child_process.execFile', async () => {
-    const out = await defaultRunner.execFile('sh', ['-c', 'echo "$FOREMAN_TEST_VAR:$(pwd)"'], {
+    const out = await defaultRunner.execFile('sh', ['-c', 'echo "$STACK_TEST_VAR:$(pwd)"'], {
       cwd: '/',
-      env: { ...process.env, FOREMAN_TEST_VAR: 'pr-runner' },
+      env: { ...process.env, STACK_TEST_VAR: 'pr-runner' },
       timeout: 10_000,
     });
     expect(out).toBe('pr-runner:/');

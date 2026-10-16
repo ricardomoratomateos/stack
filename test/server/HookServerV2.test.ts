@@ -2,9 +2,9 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as http from 'node:http';
 import { HookServer, parseHook, type HookEvent } from '../../src/server/HookServer';
 
-// ── v2 wire format: Foreman's ids in headers, the agent's payload as the body ──
+// ── v2 wire format: Stack's ids in headers, the agent's payload as the body ──
 
-describe('POST /hook (v2: X-Foreman-* headers)', () => {
+describe('POST /hook (v2: X-Stack-* headers)', () => {
   let server: HookServer | undefined;
   const updateState = vi.fn();
   const soundExec = vi.fn();
@@ -30,7 +30,7 @@ describe('POST /hook (v2: X-Foreman-* headers)', () => {
     return new Promise((resolve, reject) => {
       const req = http.request(`${baseUrl}${path}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Foreman-Hook': '2', ...headers },
+        headers: { 'Content-Type': 'application/json', 'X-Stack-Hook': '2', ...headers },
       }, (res) => { res.resume(); res.on('end', () => resolve(res.statusCode ?? 0)); });
       req.on('error', reject);
       req.end(body);
@@ -48,7 +48,7 @@ describe('POST /hook (v2: X-Foreman-* headers)', () => {
   it('reads the ids from headers and maps the event to a state', async () => {
     const url = await start();
     const status = await post(url, {
-      'X-Foreman-Event': 'Stop', 'X-Foreman-Workspace': 'ws1', 'X-Foreman-Window': '4',
+      'X-Stack-Event': 'Stop', 'X-Stack-Workspace': 'ws1', 'X-Stack-Window': '4',
     }, '{"session_id":"s"}');
     expect(status).toBe(200);
     expect(updateState).toHaveBeenCalledWith('ws1', 'waiting', 4);
@@ -59,8 +59,8 @@ describe('POST /hook (v2: X-Foreman-* headers)', () => {
     const seen: HookEvent[] = [];
     server!.onHookEvent((e) => seen.push(e));
     await post(url, {
-      'X-Foreman-Event': 'Notification', 'X-Foreman-Agent': 'claude',
-      'X-Foreman-Workspace': 'ws1', 'X-Foreman-Window': '2', 'X-Foreman-Pane': '%7',
+      'X-Stack-Event': 'Notification', 'X-Stack-Agent': 'claude',
+      'X-Stack-Workspace': 'ws1', 'X-Stack-Window': '2', 'X-Stack-Pane': '%7',
     }, claudePayload);
 
     expect(seen).toHaveLength(1);
@@ -82,21 +82,21 @@ describe('POST /hook (v2: X-Foreman-* headers)', () => {
     const url = await start();
     const listener = vi.fn();
     server!.onHookEvent(listener).dispose();
-    await post(url, { 'X-Foreman-Event': 'Stop', 'X-Foreman-Workspace': 'ws1' }, '{}');
+    await post(url, { 'X-Stack-Event': 'Stop', 'X-Stack-Workspace': 'ws1' }, '{}');
     expect(listener).not.toHaveBeenCalled();
   });
 
   it('a throwing listener does not cost the agent its answer', async () => {
     const url = await start();
     server!.onHookEvent(() => { throw new Error('boom'); });
-    const status = await post(url, { 'X-Foreman-Event': 'Stop', 'X-Foreman-Workspace': 'ws1' }, '{}');
+    const status = await post(url, { 'X-Stack-Event': 'Stop', 'X-Stack-Workspace': 'ws1' }, '{}');
     expect(status).toBe(200);
     expect(updateState).toHaveBeenCalledTimes(1);
   });
 
   it('takes the event from the payload when the header is missing', async () => {
     const url = await start();
-    await post(url, { 'X-Foreman-Workspace': 'ws1' }, '{"hook_event_name":"PreToolUse"}');
+    await post(url, { 'X-Stack-Workspace': 'ws1' }, '{"hook_event_name":"PreToolUse"}');
     expect(updateState).toHaveBeenCalledWith('ws1', 'active');
   });
 
@@ -108,7 +108,7 @@ describe('POST /hook (v2: X-Foreman-* headers)', () => {
 
   it('still counts an event whose payload is not JSON', async () => {
     const url = await start();
-    await post(url, { 'X-Foreman-Event': 'Stop', 'X-Foreman-Workspace': 'ws1' }, 'not json');
+    await post(url, { 'X-Stack-Event': 'Stop', 'X-Stack-Workspace': 'ws1' }, 'not json');
     expect(updateState).toHaveBeenCalledWith('ws1', 'waiting');
   });
 
@@ -117,7 +117,7 @@ describe('POST /hook (v2: X-Foreman-* headers)', () => {
     const seen: HookEvent[] = [];
     server!.onHookEvent((e) => seen.push(e));
     const huge = JSON.stringify({ session_id: 's', tool_input: { content: 'x'.repeat(2 * 1024 * 1024) } });
-    await post(url, { 'X-Foreman-Event': 'PreToolUse', 'X-Foreman-Workspace': 'ws1' }, huge);
+    await post(url, { 'X-Stack-Event': 'PreToolUse', 'X-Stack-Workspace': 'ws1' }, huge);
     expect(updateState).toHaveBeenCalledWith('ws1', 'active');
     expect(seen[0]?.payload).toEqual({});
   });
@@ -126,12 +126,12 @@ describe('POST /hook (v2: X-Foreman-* headers)', () => {
     // The hook takes 404 as "try your next endpoint": a stale route whose port
     // another window now holds must not swallow the event.
     const url = await start((id) => id === 'mine', 'darwin');
-    const status = await post(url, { 'X-Foreman-Event': 'Stop', 'X-Foreman-Workspace': 'theirs' }, '{}');
+    const status = await post(url, { 'X-Stack-Event': 'Stop', 'X-Stack-Workspace': 'theirs' }, '{}');
     expect(status).toBe(404);
     expect(updateState).not.toHaveBeenCalled();
     expect(soundExec).not.toHaveBeenCalled();
 
-    expect(await post(url, { 'X-Foreman-Event': 'Stop', 'X-Foreman-Workspace': 'mine' }, '{}')).toBe(200);
+    expect(await post(url, { 'X-Stack-Event': 'Stop', 'X-Stack-Workspace': 'mine' }, '{}')).toBe(200);
     expect(updateState).toHaveBeenCalledWith('mine', 'waiting');
     expect(soundExec).toHaveBeenCalledTimes(1);
   });
@@ -142,7 +142,7 @@ describe('POST /hook (v2: X-Foreman-* headers)', () => {
     const url = await start(() => true, 'darwin');
     const listener = vi.fn();
     server!.onHookEvent(listener);
-    expect(await post(url, { 'X-Foreman-Event': 'Stop' }, claudePayload)).toBe(200);
+    expect(await post(url, { 'X-Stack-Event': 'Stop' }, claudePayload)).toBe(200);
     expect(updateState).not.toHaveBeenCalled();
     expect(soundExec).not.toHaveBeenCalled();
     expect(listener).not.toHaveBeenCalled();
@@ -156,14 +156,14 @@ describe('parseHook', () => {
   });
 
   it('keeps an event that maps to no state, for listeners', () => {
-    const e = parseHook({ 'x-foreman-hook': '2', 'x-foreman-event': 'SubagentStop' }, new URLSearchParams(), '{}');
+    const e = parseHook({ 'x-stack-hook': '2', 'x-stack-event': 'SubagentStop' }, new URLSearchParams(), '{}');
     expect(e?.event).toBe('SubagentStop');
     expect(e?.state).toBeUndefined();
   });
 
   it('rejects a negative or fractional window index', () => {
     const h = (w: string) =>
-      parseHook({ 'x-foreman-hook': '2', 'x-foreman-event': 'Stop', 'x-foreman-window': w }, new URLSearchParams(), '');
+      parseHook({ 'x-stack-hook': '2', 'x-stack-event': 'Stop', 'x-stack-window': w }, new URLSearchParams(), '');
     expect(h('-1')?.windowIndex).toBeUndefined();
     expect(h('1.5')?.windowIndex).toBeUndefined();
     expect(h('0')?.windowIndex).toBe(0);
@@ -171,7 +171,7 @@ describe('parseHook', () => {
 
   it('takes the first of a header sent twice', () => {
     const e = parseHook(
-      { 'x-foreman-hook': '2', 'x-foreman-event': 'Stop', 'x-foreman-workspace': ['wt-1', 'wt-2'] },
+      { 'x-stack-hook': '2', 'x-stack-event': 'Stop', 'x-stack-workspace': ['wt-1', 'wt-2'] },
       new URLSearchParams(),
       '',
     );
@@ -179,7 +179,7 @@ describe('parseHook', () => {
   });
 
   it('is undefined without an event', () => {
-    expect(parseHook({ 'x-foreman-hook': '2' }, new URLSearchParams(), '{}')).toBeUndefined();
+    expect(parseHook({ 'x-stack-hook': '2' }, new URLSearchParams(), '{}')).toBeUndefined();
     expect(parseHook({}, new URLSearchParams(), undefined)).toBeUndefined();
   });
 });

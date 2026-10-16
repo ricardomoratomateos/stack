@@ -77,7 +77,7 @@ describe('POST /hook', () => {
     expect(updateState).toHaveBeenCalledWith('ws1', 'waiting', 4);
   });
 
-  it('omits windowIndex when empty or non-numeric (agents launched before FOREMAN_WINDOW_INDEX)', async () => {
+  it('omits windowIndex when empty or non-numeric (agents launched before STACK_WINDOW_INDEX)', async () => {
     const url = await startServer();
     await postHook(url, { event: 'Stop', workspaceId: 'ws1', windowIndex: '' });
     await postHook(url, { event: 'Stop', workspaceId: 'ws1', windowIndex: 'junk' });
@@ -184,10 +184,10 @@ describe('POST /hook', () => {
     expect(soundExec).toHaveBeenCalledWith('afplay /System/Library/Sounds/Glass.aiff');
   });
 
-  it('plays no sound for an unattributed event (an agent outside Foreman)', async () => {
+  it('plays no sound for an unattributed event (an agent outside Stack)', async () => {
     // The hook is global, so every Claude session on the machine reaches some
     // window — including ones the user started in a plain terminal. Their
-    // Stop is none of Foreman's business.
+    // Stop is none of Stack's business.
     const url = await startServer('darwin');
     await postHook(url, { event: 'Stop' });
     await postHook(url, { event: 'Stop', workspaceId: '' });

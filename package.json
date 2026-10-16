@@ -1,9 +1,9 @@
 {
-  "name": "foreman",
-  "displayName": "Foreman",
-  "description": "Run parallel AI coding agents (Claude Code, opencode) across git worktrees, each in its own tmux session.",
+  "name": "stack",
+  "displayName": "Stack",
+  "description": "Run parallel AI coding agents (Claude Code, Codex CLI, opencode) across git worktrees, each in its own tmux session, from one sidebar.",
   "version": "0.1.0",
-  "publisher": "foreman",
+  "publisher": "ricardomoratomateos",
   "license": "MIT",
   "icon": "assets/icon.png",
   "galleryBanner": {
@@ -46,16 +46,16 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "foreman-container",
-          "title": "Foreman",
+          "id": "stack-container",
+          "title": "Stack",
           "icon": "resources/icon.svg"
         }
       ]
     },
     "views": {
-      "foreman-container": [
+      "stack-container": [
         {
-          "id": "foreman-sidebar",
+          "id": "stack-sidebar",
           "name": "Worktrees",
           "type": "webview",
           "initialSize": 20
@@ -64,104 +64,104 @@
     },
     "commands": [
       {
-        "command": "foreman.newTask",
-        "title": "Foreman: New Task",
+        "command": "stack.newTask",
+        "title": "Stack: New Task",
         "icon": "$(add)"
       },
       {
-        "command": "foreman.openSettings",
-        "title": "Foreman: Settings",
+        "command": "stack.openSettings",
+        "title": "Stack: Settings",
         "icon": "$(gear)"
       },
       {
-        "command": "foreman.createWorktree",
-        "title": "Foreman: Create Worktree",
+        "command": "stack.createWorktree",
+        "title": "Stack: Create Worktree",
         "icon": "$(add)"
       },
       {
-        "command": "foreman.deleteWorktree",
-        "title": "Foreman: Delete Worktree",
+        "command": "stack.deleteWorktree",
+        "title": "Stack: Delete Worktree",
         "icon": "$(trash)"
       },
       {
-        "command": "foreman.launchAgent",
-        "title": "Foreman: Launch Agent",
+        "command": "stack.launchAgent",
+        "title": "Stack: Launch Agent",
         "icon": "$(hubot)"
       },
       {
-        "command": "foreman.openTerminal",
-        "title": "Foreman: Open Terminal",
+        "command": "stack.openTerminal",
+        "title": "Stack: Open Terminal",
         "icon": "$(terminal)"
       },
       {
-        "command": "foreman.initWorktree",
-        "title": "Foreman: Init Worktree",
+        "command": "stack.initWorktree",
+        "title": "Stack: Init Worktree",
         "icon": "$(zap)"
       },
       {
-        "command": "foreman.renameWorktree",
-        "title": "Foreman: Set Alias",
+        "command": "stack.renameWorktree",
+        "title": "Stack: Set Alias",
         "icon": "$(tag)"
       },
       {
-        "command": "foreman.focusNextAttention",
-        "title": "Foreman: Focus Next Worktree Needing Attention"
+        "command": "stack.focusNextAttention",
+        "title": "Stack: Focus Next Worktree Needing Attention"
       },
       {
-        "command": "foreman.switchSidebarStyle",
-        "title": "Foreman: Switch Sidebar Style",
+        "command": "stack.switchSidebarStyle",
+        "title": "Stack: Switch Sidebar Style",
         "icon": "$(layout)"
       },
       {
-        "command": "foreman.focusSession",
-        "title": "Foreman: Focus Session"
+        "command": "stack.focusSession",
+        "title": "Stack: Focus Session"
       },
       {
-        "command": "foreman.openSessionToSide",
-        "title": "Foreman: Open Session to the Side",
+        "command": "stack.openSessionToSide",
+        "title": "Stack: Open Session to the Side",
         "icon": "$(split-horizontal)"
       },
       {
-        "command": "foreman.focusNextWorktree",
-        "title": "Foreman: Focus Next Worktree"
+        "command": "stack.focusNextWorktree",
+        "title": "Stack: Focus Next Worktree"
       },
       {
-        "command": "foreman.focusPrevWorktree",
-        "title": "Foreman: Focus Previous Worktree"
+        "command": "stack.focusPrevWorktree",
+        "title": "Stack: Focus Previous Worktree"
       },
       {
-        "command": "foreman.attachLatestScreenshot",
-        "title": "Foreman: Attach Latest Screenshot to Agent",
+        "command": "stack.attachLatestScreenshot",
+        "title": "Stack: Attach Latest Screenshot to Agent",
         "icon": "$(file-media)"
       },
       {
-        "command": "foreman.createRepoConfig",
-        "title": "Foreman: Create Repo Config File",
+        "command": "stack.createRepoConfig",
+        "title": "Stack: Create Repo Config File",
         "icon": "$(file-code)"
       },
       {
-        "command": "foreman.gettingStarted",
-        "title": "Foreman: Getting Started"
+        "command": "stack.gettingStarted",
+        "title": "Stack: Getting Started"
       }
     ],
     "keybindings": [
       {
-        "command": "foreman.focusNextWorktree",
+        "command": "stack.focusNextWorktree",
         "key": "ctrl+shift+]",
         "mac": "cmd+shift+]"
       },
       {
-        "command": "foreman.focusPrevWorktree",
+        "command": "stack.focusPrevWorktree",
         "key": "ctrl+shift+[",
         "mac": "cmd+shift+["
       },
       {
-        "command": "foreman.focusNextAttention",
+        "command": "stack.focusNextAttention",
         "key": "ctrl+alt+j",
         "mac": "cmd+alt+j"
       },
       {
-        "command": "foreman.attachLatestScreenshot",
+        "command": "stack.attachLatestScreenshot",
         "key": "ctrl+alt+v",
         "mac": "cmd+alt+v",
         "when": "terminalFocus"
@@ -170,47 +170,47 @@
     "menus": {
       "view/title": [
         {
-          "command": "foreman.openSettings",
-          "when": "view == foreman-sidebar && !foreman.tmuxMissing",
+          "command": "stack.openSettings",
+          "when": "view == stack-sidebar && !stack.tmuxMissing",
           "group": "navigation@1"
         },
         {
-          "command": "foreman.newTask",
-          "when": "view == foreman-sidebar",
+          "command": "stack.newTask",
+          "when": "view == stack-sidebar",
           "group": "navigation@2"
         },
         {
-          "command": "foreman.switchSidebarStyle",
-          "when": "view == foreman-sidebar && !foreman.tmuxMissing",
+          "command": "stack.switchSidebarStyle",
+          "when": "view == stack-sidebar && !stack.tmuxMissing",
           "group": "1_appearance"
         }
       ],
       "view/item/context": []
     },
     "configuration": {
-      "title": "Foreman",
+      "title": "Stack",
       "properties": {
-        "foreman.worktreesDirectory": {
+        "stack.worktreesDirectory": {
           "type": "string",
           "default": ".worktrees",
-          "description": "Directory where worktrees are created (relative to the workspace root) Can be set for everyone who clones the repo in .foreman/config.json; a value set here wins."
+          "description": "Directory where worktrees are created (relative to the workspace root) Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
         },
-        "foreman.defaultBaseBranch": {
+        "stack.defaultBaseBranch": {
           "type": "string",
           "default": "develop",
-          "description": "Branch new worktrees start from, preselected in the New Task form. When this branch does not exist, Foreman uses the repository's own main line (the first of main/master/develop it finds, locally or on a remote), and only then the current branch. Can be set for everyone who clones the repo in .foreman/config.json; a value set here wins."
+          "description": "Branch new worktrees start from, preselected in the New Task form. When this branch does not exist, Stack uses the repository's own main line (the first of main/master/develop it finds, locally or on a remote), and only then the current branch. Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
         },
-        "foreman.setupScript": {
+        "stack.setupScript": {
           "type": "string",
           "default": "",
-          "description": "Script to run after creating a worktree Can be set for everyone who clones the repo in .foreman/config.json; a value set here wins."
+          "description": "Script to run after creating a worktree Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
         },
-        "foreman.teardownScript": {
+        "stack.teardownScript": {
           "type": "string",
           "default": "",
-          "description": "Script to run before deleting a worktree Can be set for everyone who clones the repo in .foreman/config.json; a value set here wins."
+          "description": "Script to run before deleting a worktree Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
         },
-        "foreman.defaultProvider": {
+        "stack.defaultProvider": {
           "type": "string",
           "enum": [
             "claude",
@@ -220,22 +220,22 @@
           "default": "claude",
           "description": "Primary agent: the one the big launch button on each worktree card starts. The chevron next to it opens the rest."
         },
-        "foreman.claudeCommand": {
+        "stack.claudeCommand": {
           "type": "string",
           "default": "claude",
           "description": "Command to launch Claude Code"
         },
-        "foreman.codexCommand": {
+        "stack.codexCommand": {
           "type": "string",
           "default": "codex",
           "description": "Command to launch Codex CLI"
         },
-        "foreman.opencodeCommand": {
+        "stack.opencodeCommand": {
           "type": "string",
           "default": "opencode",
           "description": "Command to launch opencode"
         },
-        "foreman.sidebarStyle": {
+        "stack.sidebarStyle": {
           "type": "string",
           "enum": [
             "aside",
@@ -248,19 +248,19 @@
             "Mission control: state counters that filter, an attention queue and cards with a metadata grid. Follows the VS Code theme."
           ],
           "default": "aside",
-          "description": "How the Foreman sidebar looks. Switches live, without a reload. The same worktrees and actions are in every style; only the layout and colours differ. Also under \"Foreman: Switch Sidebar Style\"."
+          "description": "How the Stack sidebar looks. Switches live, without a reload. The same worktrees and actions are in every style; only the layout and colours differ. Also under \"Stack: Switch Sidebar Style\"."
         },
-        "foreman.notifyOnAttention": {
+        "stack.notifyOnAttention": {
           "type": "boolean",
           "default": true,
           "description": "Show a native OS notification when an agent finishes or asks for permission while VS Code is in the background. The sidebar attention badge is always shown regardless."
         },
-        "foreman.focusMode": {
+        "stack.focusMode": {
           "type": "boolean",
           "default": false,
           "description": "Clean-slate switching: when you switch worktree, close the other worktrees' editor tabs and agent terminals so only the active one is on screen. Off (default) makes switching an instant reveal with no flicker."
         },
-        "foreman.sessionTabs": {
+        "stack.sessionTabs": {
           "type": "string",
           "enum": [
             "perSession",
@@ -273,12 +273,12 @@
           "default": "perSession",
           "description": "How a worktree's sessions open in the editor: a tab per session, or one terminal per worktree. Applies to terminals opened after the change."
         },
-        "foreman.scopeSearchToActiveWorktree": {
+        "stack.scopeSearchToActiveWorktree": {
           "type": "boolean",
           "default": true,
           "description": "Hide non-active worktree folders from text search and Quick Open (writes search.exclude to each worktree's .vscode/settings.json)"
         },
-        "foreman.docker": {
+        "stack.docker": {
           "type": "object",
           "default": {
             "composeFile": "docker-compose.yml",
@@ -312,62 +312,62 @@
               "description": "Size of the port block each worktree owns"
             }
           },
-          "description": "Per-worktree docker orchestration: compose files and auto-generated ports Can be set for everyone who clones the repo in .foreman/config.json; a value set here wins."
+          "description": "Per-worktree docker orchestration: compose files and auto-generated ports Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
         },
-        "foreman.debugBasePort": {
+        "stack.debugBasePort": {
           "type": "number",
           "default": 9898,
-          "description": "Base port for the debugger. Each worktree gets base+N Can be set for everyone who clones the repo in .foreman/config.json; a value set here wins."
+          "description": "Base port for the debugger. Each worktree gets base+N Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
         },
-        "foreman.debugTemplate": {
+        "stack.debugTemplate": {
           "type": "object",
           "default": {
             "type": "node",
             "request": "attach",
-            "name": "Foreman: Debug",
+            "name": "Stack: Debug",
             "port": "{{PORT}}"
           },
-          "description": "launch.json template for each worktree. Use {{PORT}} and {{WORKTREE_PATH}} as placeholders Can be set for everyone who clones the repo in .foreman/config.json; a value set here wins."
+          "description": "launch.json template for each worktree. Use {{PORT}} and {{WORKTREE_PATH}} as placeholders Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
         }
       }
     },
     "walkthroughs": [
       {
-        "id": "foreman.gettingStarted",
-        "title": "Get started with Foreman",
+        "id": "stack.gettingStarted",
+        "title": "Get started with Stack",
         "description": "Several AI agents in parallel, one git worktree each, and a sidebar that tells you who needs you.",
         "steps": [
           {
             "id": "tmux",
             "title": "Make sure tmux is there",
-            "description": "Agents run inside tmux so they survive window reloads. If it is missing, the Foreman view offers to install it.\n[Open Foreman](command:workbench.view.extension.foreman-container)",
+            "description": "Agents run inside tmux so they survive window reloads. If it is missing, the Stack view offers to install it.\n[Open Stack](command:workbench.view.extension.stack-container)",
             "media": {
               "markdown": "media/walkthrough/tmux.md"
             },
             "completionEvents": [
-              "onContext:foreman.tmuxReady"
+              "onContext:stack.tmuxReady"
             ]
           },
           {
             "id": "new-agent",
             "title": "Create a worktree and launch an agent",
-            "description": "One task, one branch, one worktree, one agent. Describe the task; Foreman cuts the branch, creates the worktree and starts the agent in it.\n[New agent](command:foreman.newTask)",
+            "description": "One task, one branch, one worktree, one agent. Describe the task; Stack cuts the branch, creates the worktree and starts the agent in it.\n[New agent](command:stack.newTask)",
             "media": {
               "markdown": "media/walkthrough/new-agent.md"
             },
             "completionEvents": [
-              "onCommand:foreman.newTask"
+              "onCommand:stack.newTask"
             ]
           },
           {
             "id": "switch",
             "title": "Switch between worktrees",
-            "description": "Cmd+Shift+] and Cmd+Shift+[ (Ctrl on Linux) jump between worktrees. Search, Quick Open and breakpoints follow you.\n[Next worktree](command:foreman.focusNextWorktree)",
+            "description": "Cmd+Shift+] and Cmd+Shift+[ (Ctrl on Linux) jump between worktrees. Search, Quick Open and breakpoints follow you.\n[Next worktree](command:stack.focusNextWorktree)",
             "media": {
               "markdown": "media/walkthrough/switch.md"
             },
             "completionEvents": [
-              "onCommand:foreman.focusNextWorktree"
+              "onCommand:stack.focusNextWorktree"
             ]
           },
           {
@@ -378,29 +378,29 @@
               "markdown": "media/walkthrough/review.md"
             },
             "completionEvents": [
-              "onCommand:foreman.attachLatestScreenshot"
+              "onCommand:stack.attachLatestScreenshot"
             ]
           },
           {
             "id": "configure",
             "title": "Set up Docker, debugging and scripts",
-            "description": "The gear in the Worktrees header opens settings: a Docker stack per worktree, a debugger port per worktree, setup and teardown scripts. Foreman prefills what it finds in the repo.\n[Open settings](command:foreman.openSettings)",
+            "description": "The gear in the Worktrees header opens settings: a Docker stack per worktree, a debugger port per worktree, setup and teardown scripts. Stack prefills what it finds in the repo.\n[Open settings](command:stack.openSettings)",
             "media": {
               "markdown": "media/walkthrough/configure.md"
             },
             "completionEvents": [
-              "onCommand:foreman.openSettings"
+              "onCommand:stack.openSettings"
             ]
           },
           {
             "id": "share",
             "title": "Share the setup with your team",
-            "description": "Project settings save to .foreman/config.json. Commit it and everyone who clones the repo gets the same worktrees, ports and scripts.\n[Open settings](command:foreman.openSettings)",
+            "description": "Project settings save to .stack/config.json. Commit it and everyone who clones the repo gets the same worktrees, ports and scripts.\n[Open settings](command:stack.openSettings)",
             "media": {
               "markdown": "media/walkthrough/share.md"
             },
             "completionEvents": [
-              "onCommand:foreman.openSettings"
+              "onCommand:stack.openSettings"
             ]
           }
         ]

@@ -27,7 +27,7 @@ describe('ProviderFactory', () => {
   const makeFactory = (config: ConfigSource = makeConfig()) => new ProviderFactory(config, storageDir, homeDir);
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-providers-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-providers-'));
     storageDir = path.join(tmpDir, 'storage');
     homeDir = path.join(tmpDir, 'home');
     fs.mkdirSync(homeDir, { recursive: true });
@@ -65,9 +65,9 @@ describe('ProviderFactory', () => {
   });
 
   describe('ClaudeProvider', () => {
-    it('buildCommand prefixes FOREMAN_WORKSPACE_ID and uses the configured command', () => {
+    it('buildCommand prefixes STACK_WORKSPACE_ID and uses the configured command', () => {
       const provider = makeFactory(makeConfig({ claudeCommand: 'my-claude' })).create('claude');
-      expect(provider.buildCommand('wt-1')).toBe('FOREMAN_WORKSPACE_ID="wt-1" my-claude');
+      expect(provider.buildCommand('wt-1')).toBe('STACK_WORKSPACE_ID="wt-1" my-claude');
     });
 
 
@@ -93,7 +93,7 @@ describe('ProviderFactory', () => {
       provider.installHooks('http://127.0.0.1:43110');
 
       expect(provider.buildCommand('wt-1')).toBe(
-        'FOREMAN_HOOK_URL="http://127.0.0.1:43110" FOREMAN_WORKSPACE_ID="wt-1" claude',
+        'STACK_HOOK_URL="http://127.0.0.1:43110" STACK_WORKSPACE_ID="wt-1" claude',
       );
       expect(new HookRoutes(storageDir).lookup('wt-1')).toBe('http://127.0.0.1:43110');
     });
@@ -112,7 +112,7 @@ describe('ProviderFactory', () => {
   });
 
   describe('OpenCodeProvider', () => {
-    const pluginPath = () => path.join(homeDir, '.config/opencode/plugin/foreman-notify.js');
+    const pluginPath = () => path.join(homeDir, '.config/opencode/plugin/stack-notify.js');
 
     it('is created for "opencode"', () => {
       const provider = makeFactory().create('opencode');
@@ -121,9 +121,9 @@ describe('ProviderFactory', () => {
       expect(provider.label).toBe('opencode');
     });
 
-    it('buildCommand prefixes FOREMAN_WORKSPACE_ID and uses the configured command', () => {
+    it('buildCommand prefixes STACK_WORKSPACE_ID and uses the configured command', () => {
       const provider = makeFactory(makeConfig({ opencodeCommand: '/opt/opencode' })).create('opencode');
-      expect(provider.buildCommand('wt-1')).toBe('FOREMAN_WORKSPACE_ID="wt-1" /opt/opencode');
+      expect(provider.buildCommand('wt-1')).toBe('STACK_WORKSPACE_ID="wt-1" /opt/opencode');
     });
 
 
@@ -133,7 +133,7 @@ describe('ProviderFactory', () => {
       // Looked up at send time — a literal URL is what froze opencode after a reload.
       expect(plugin).not.toContain('43110');
       expect(plugin).toContain(`const STORAGE = ${JSON.stringify(storageDir)};`);
-      expect(plugin).toContain('if (!workspaceId) return {};'); // inert outside foreman
+      expect(plugin).toContain('if (!workspaceId) return {};'); // inert outside stack
       expect(plugin).toContain('"session.idle": "Stop"');
       expect(plugin).toContain('"tool.execute.before"');
       expect(plugin).toContain('windowIndex');
@@ -156,7 +156,7 @@ describe('ProviderFactory', () => {
       const provider = makeFactory().create('opencode');
       provider.installHooks('http://127.0.0.1:43110');
       expect(provider.buildCommand('wt-1')).toBe(
-        'FOREMAN_HOOK_URL="http://127.0.0.1:43110" FOREMAN_WORKSPACE_ID="wt-1" opencode',
+        'STACK_HOOK_URL="http://127.0.0.1:43110" STACK_WORKSPACE_ID="wt-1" opencode',
       );
       expect(new HookRoutes(storageDir).lookup('wt-1')).toBe('http://127.0.0.1:43110');
     });
@@ -179,7 +179,7 @@ describe('ProviderFactory', () => {
       afterEach(async () => {
         posts.length = 0;
         for (const s of servers.splice(0)) await new Promise<void>((resolve) => s.close(() => resolve()));
-        for (const k of ['FOREMAN_WORKSPACE_ID', 'FOREMAN_WINDOW_INDEX', 'FOREMAN_HOOK_URL', 'TMUX_PANE']) {
+        for (const k of ['STACK_WORKSPACE_ID', 'STACK_WINDOW_INDEX', 'STACK_HOOK_URL', 'TMUX_PANE']) {
           if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
         }
       });
@@ -195,22 +195,22 @@ describe('ProviderFactory', () => {
         const reloaded = await startServer('reloaded', 200);
         makeFactory().create('opencode').installHooks('http://127.0.0.1:1');
         new HookRoutes(storageDir).claim(['wt-1'], reloaded);
-        process.env.FOREMAN_WORKSPACE_ID = 'wt-1';
-        process.env.FOREMAN_WINDOW_INDEX = '2';
-        process.env.FOREMAN_HOOK_URL = 'http://127.0.0.1:1';
+        process.env.STACK_WORKSPACE_ID = 'wt-1';
+        process.env.STACK_WINDOW_INDEX = '2';
+        process.env.STACK_HOOK_URL = 'http://127.0.0.1:1';
 
         const mod = await import(/* @vite-ignore */ pluginPath());
-        const hooks = await mod.ForemanNotify();
+        const hooks = await mod.StackNotify();
         await hooks.event({ event: { type: 'session.idle', properties: { sessionID: 'ses_1' } } });
         await waitFor(1);
 
         expect(posts).toHaveLength(1);
         expect(posts[0]?.server).toBe('reloaded');
-        expect(posts[0]?.headers['x-foreman-hook']).toBe('2');
-        expect(posts[0]?.headers['x-foreman-event']).toBe('Stop');
-        expect(posts[0]?.headers['x-foreman-agent']).toBe('opencode');
-        expect(posts[0]?.headers['x-foreman-workspace']).toBe('wt-1');
-        expect(posts[0]?.headers['x-foreman-window']).toBe('2');
+        expect(posts[0]?.headers['x-stack-hook']).toBe('2');
+        expect(posts[0]?.headers['x-stack-event']).toBe('Stop');
+        expect(posts[0]?.headers['x-stack-agent']).toBe('opencode');
+        expect(posts[0]?.headers['x-stack-workspace']).toBe('wt-1');
+        expect(posts[0]?.headers['x-stack-window']).toBe('2');
         expect(JSON.parse(posts[0]?.body ?? '{}')).toMatchObject({ hook_event_name: 'Stop', session_id: 'ses_1' });
       });
 
@@ -219,11 +219,11 @@ describe('ProviderFactory', () => {
         const mine = await startServer('mine', 200);
         makeFactory().create('opencode').installHooks(other);
         new HookRoutes(storageDir).claim(['wt-1'], other);
-        process.env.FOREMAN_WORKSPACE_ID = 'wt-1';
-        process.env.FOREMAN_HOOK_URL = mine;
+        process.env.STACK_WORKSPACE_ID = 'wt-1';
+        process.env.STACK_HOOK_URL = mine;
 
         const mod = await import(/* @vite-ignore */ pluginPath());
-        const hooks = await mod.ForemanNotify();
+        const hooks = await mod.StackNotify();
         await hooks['tool.execute.before']({ tool: 'bash', sessionID: 'ses_2' });
         await waitFor(2);
 
@@ -244,7 +244,7 @@ describe('ProviderFactory', () => {
       const { OpenCodeHookInstaller } = await import('../../src/providers/opencode/OpenCodeHookInstaller');
       const installer = new OpenCodeHookInstaller(storageDir);
       const resolved = (installer as unknown as { pluginPath: string }).pluginPath;
-      expect(resolved).toBe(path.join(os.homedir(), '.config/opencode/plugin/foreman-notify.js'));
+      expect(resolved).toBe(path.join(os.homedir(), '.config/opencode/plugin/stack-notify.js'));
     });
 
     it('uninstallHooks swallows fs errors (best effort)', () => {
@@ -258,10 +258,10 @@ describe('ProviderFactory', () => {
     it('the generated plugin is syntactically valid ESM', async () => {
       makeFactory().create('opencode').installHooks('http://127.0.0.1:43110');
       const mod = await import(/* @vite-ignore */ pluginPath());
-      expect(typeof mod.ForemanNotify).toBe('function');
-      // Without FOREMAN_WORKSPACE_ID the plugin must return no hooks at all.
-      delete process.env.FOREMAN_WORKSPACE_ID;
-      await expect(mod.ForemanNotify()).resolves.toEqual({});
+      expect(typeof mod.StackNotify).toBe('function');
+      // Without STACK_WORKSPACE_ID the plugin must return no hooks at all.
+      delete process.env.STACK_WORKSPACE_ID;
+      await expect(mod.StackNotify()).resolves.toEqual({});
     });
   });
 
@@ -294,7 +294,7 @@ describe('CodexProvider', () => {
   } as unknown as ConfigSource;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-codex-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-codex-'));
     storageDir = path.join(tmpDir, 'storage');
     homeDir = path.join(tmpDir, 'home');
     fs.mkdirSync(homeDir, { recursive: true });
@@ -311,8 +311,8 @@ describe('CodexProvider', () => {
     expect(provider.label).toBe('Codex');
   });
 
-  it('buildCommand prefixes FOREMAN_WORKSPACE_ID', () => {
-    expect(make().buildCommand('wt-1')).toBe('FOREMAN_WORKSPACE_ID="wt-1" codex');
+  it('buildCommand prefixes STACK_WORKSPACE_ID', () => {
+    expect(make().buildCommand('wt-1')).toBe('STACK_WORKSPACE_ID="wt-1" codex');
   });
 
 

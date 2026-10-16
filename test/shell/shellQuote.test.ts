@@ -27,7 +27,7 @@ describe('shellQuote', () => {
   // The point of the module: none of these may run anything, and each must
   // reach the command as exactly the bytes it started as.
   it.each([
-    'feat/$(touch /tmp/foreman-pwned)',
+    'feat/$(touch /tmp/stack-pwned)',
     'a`id`b',
     '${HOME}',
     'it\'s',
@@ -53,8 +53,8 @@ describe('isEnvName / envPrefix', () => {
   });
 
   it('quotes every value and drops names that are not identifiers', () => {
-    expect(envPrefix({ FOREMAN_BRANCH: 'x$(id)', PORT: '8081', 'BAD;rm -rf /': '1' }))
-      .toBe("FOREMAN_BRANCH='x$(id)' PORT=8081");
+    expect(envPrefix({ STACK_BRANCH: 'x$(id)', PORT: '8081', 'BAD;rm -rf /': '1' }))
+      .toBe("STACK_BRANCH='x$(id)' PORT=8081");
   });
 
   it('the prefix sets the variables without running what is in them', () => {

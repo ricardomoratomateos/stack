@@ -24,7 +24,7 @@ function output() {
 const base = { label: 'Teardown: feat/x', env: {}, timeoutMs: 10_000 };
 
 beforeAll(() => {
-  tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-script-')));
+  tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'stack-script-')));
 });
 
 afterAll(() => {
@@ -45,7 +45,7 @@ describe('runScript (real bash)', () => {
     const out = output();
     const quoted = `it's "quoted" $(nope)`;
     await runScript(
-      { ...base, script: script('env.sh', 'echo "cwd=$PWD"; echo "v=$FOREMAN_BRANCH"'), cwd: tmp, env: { FOREMAN_BRANCH: quoted } },
+      { ...base, script: script('env.sh', 'echo "cwd=$PWD"; echo "v=$STACK_BRANCH"'), cwd: tmp, env: { STACK_BRANCH: quoted } },
       out,
     );
     expect(out.text).toContain(`cwd=${tmp}`);

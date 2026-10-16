@@ -67,28 +67,28 @@ function captureExec(reply: (cmd: string) => { err?: Error; stdout?: string } = 
 describe('sessionName', () => {
   it('produces a valid tmux session name from a UUID', () => {
     expect(TmuxManager.sessionName('123e4567-e89b-12d3-a456-426614174000'))
-      .toBe('foreman-123e4567-e89b-12d3-a456-426614174000');
+      .toBe('stack-123e4567-e89b-12d3-a456-426614174000');
   });
 
   it('is deterministic', () => {
     expect(TmuxManager.sessionName('some-id')).toBe(TmuxManager.sessionName('some-id'));
-    expect(TmuxManager.sessionName('some-id')).toBe('foreman-some-id');
+    expect(TmuxManager.sessionName('some-id')).toBe('stack-some-id');
   });
 
   it('replaces invalid characters with dashes and collapses runs', () => {
-    expect(TmuxManager.sessionName('repo/path worktree_1')).toBe('foreman-repo-path-worktree-1');
-    expect(TmuxManager.sessionName('a//b..c')).toBe('foreman-a-b-c');
+    expect(TmuxManager.sessionName('repo/path worktree_1')).toBe('stack-repo-path-worktree-1');
+    expect(TmuxManager.sessionName('a//b..c')).toBe('stack-a-b-c');
   });
 
   it('trims leading/trailing dashes', () => {
-    expect(TmuxManager.sessionName('/x/')).toBe('foreman-x');
-    expect(TmuxManager.sessionName('--x--')).toBe('foreman-x');
+    expect(TmuxManager.sessionName('/x/')).toBe('stack-x');
+    expect(TmuxManager.sessionName('--x--')).toBe('stack-x');
   });
 
   it('caps the id portion at 50 characters', () => {
     const name = TmuxManager.sessionName('a'.repeat(60));
-    expect(name).toBe('foreman-' + 'a'.repeat(50));
-    expect(name.length).toBe(58);
+    expect(name).toBe('stack-' + 'a'.repeat(50));
+    expect(name.length).toBe(56);
   });
 });
 
@@ -96,37 +96,37 @@ describe('sessionName', () => {
 
 describe('view sessions', () => {
   it('names a view after its base and window, and parses it back', () => {
-    const view = TmuxManager.viewSessionName('foreman-abc-1', 3);
-    expect(view).toBe('foreman-abc-1__w3');
-    expect(TmuxManager.parseViewSessionName(view)).toEqual({ base: 'foreman-abc-1', windowIndex: 3 });
+    const view = TmuxManager.viewSessionName('stack-abc-1', 3);
+    expect(view).toBe('stack-abc-1__w3');
+    expect(TmuxManager.parseViewSessionName(view)).toEqual({ base: 'stack-abc-1', windowIndex: 3 });
   });
 
   it('parses nothing else: bases, other people\'s sessions, malformed suffixes', () => {
-    expect(TmuxManager.parseViewSessionName('foreman-abc')).toBeUndefined();
+    expect(TmuxManager.parseViewSessionName('stack-abc')).toBeUndefined();
     expect(TmuxManager.parseViewSessionName('work__w1')).toBeUndefined();
-    expect(TmuxManager.parseViewSessionName('foreman-abc__wx')).toBeUndefined();
+    expect(TmuxManager.parseViewSessionName('stack-abc__wx')).toBeUndefined();
   });
 
   it('attaches the single viewer to the base by EXACT name, no shell in between', () => {
-    expect(TmuxManager.attachArgs('foreman-a')).toEqual(['attach-session', '-t', '=foreman-a']);
+    expect(TmuxManager.attachArgs('stack-a')).toEqual(['attach-session', '-t', '=stack-a']);
   });
 
   it('builds one self-contained sequence: create-or-attach, link the window in, drop the placeholder, options', () => {
-    expect(TmuxManager.viewAttachArgs('foreman-a', 4)).toEqual([
-      'new-session', '-A', '-s', 'foreman-a__w4', '-n', 'foreman-placeholder', 'sleep 5',
-      ';', 'link-window', '-d', '-s', '=foreman-a:4', '-t', '=foreman-a__w4:',
-      ';', 'unlink-window', '-k', '-t', '=foreman-a__w4:^',
-      ';', 'set-option', '-t', '=foreman-a__w4:', 'status', 'off',
-      ';', 'set-option', '-t', '=foreman-a__w4:', 'destroy-unattached', 'on',
+    expect(TmuxManager.viewAttachArgs('stack-a', 4)).toEqual([
+      'new-session', '-A', '-s', 'stack-a__w4', '-n', 'stack-placeholder', 'sleep 5',
+      ';', 'link-window', '-d', '-s', '=stack-a:4', '-t', '=stack-a__w4:',
+      ';', 'unlink-window', '-k', '-t', '=stack-a__w4:^',
+      ';', 'set-option', '-t', '=stack-a__w4:', 'status', 'off',
+      ';', 'set-option', '-t', '=stack-a__w4:', 'destroy-unattached', 'on',
     ]);
   });
 
-  it('reads the attached session back from every launch argv Foreman has used', () => {
-    expect(TmuxManager.sessionOfAttachArgs(TmuxManager.attachArgs('foreman-a'))).toBe('foreman-a');
-    expect(TmuxManager.sessionOfAttachArgs(TmuxManager.viewAttachArgs('foreman-a', 2))).toBe('foreman-a__w2');
+  it('reads the attached session back from every launch argv Stack has used', () => {
+    expect(TmuxManager.sessionOfAttachArgs(TmuxManager.attachArgs('stack-a'))).toBe('stack-a');
+    expect(TmuxManager.sessionOfAttachArgs(TmuxManager.viewAttachArgs('stack-a', 2))).toBe('stack-a__w2');
     // The /bin/sh form viewers had before this version — restored after an upgrade.
-    expect(TmuxManager.sessionOfAttachArgs(['-c', 'tmux attach -t "foreman-a"'])).toBe('foreman-a');
-    expect(TmuxManager.sessionOfAttachArgs('tmux attach -t "foreman-b"')).toBe('foreman-b');
+    expect(TmuxManager.sessionOfAttachArgs(['-c', 'tmux attach -t "stack-a"'])).toBe('stack-a');
+    expect(TmuxManager.sessionOfAttachArgs('tmux attach -t "stack-b"')).toBe('stack-b');
   });
 
   it('reads nothing from argv that is not an attach', () => {
@@ -267,8 +267,8 @@ describe('command construction', () => {
     expect(calls).toHaveLength(2);
     const [load, paste] = calls;
     expect(load.slice(0, 3)).toEqual(['tmux', 'load-buffer', '-b']);
-    expect(load[3]).toMatch(/^foreman-paste-\d+-\d+-[0-9a-f]+$/);
-    expect(load[4]).toMatch(/foreman-paste-[^/]+\/paste\.txt$/);
+    expect(load[3]).toMatch(/^stack-paste-\d+-\d+-[0-9a-f]+$/);
+    expect(load[4]).toMatch(/stack-paste-[^/]+\/paste\.txt$/);
     expect(paste).toEqual(['tmux', 'paste-buffer', '-d', '-p', '-b', load[3], '-t', 's1:2']);
   });
 
@@ -279,7 +279,7 @@ describe('command construction', () => {
   });
 
   it('gives every paste its own buffer and file, so concurrent pastes cannot swap or delete each other\'s text', async () => {
-    // Both used to be `foreman-paste-<pid>`: a launch's prompt and a review send
+    // Both used to be `stack-paste-<pid>`: a launch's prompt and a review send
     // in flight together loaded into one buffer, and the agent of one received
     // the other's text.
     const loaded = new Map<string, string>(); // buffer name → file contents at load time
@@ -338,9 +338,9 @@ describe('command construction', () => {
   it('listWindows parses separator-delimited index/name/title/command lines, keeping spaces in names and titles', async () => {
     const calls = captureExec(() => ({
       stdout:
-        '0|:foreman:|zsh|:foreman:|my-host.local|:foreman:|zsh|:foreman:|100\n' +
-        '1|:foreman:|claude|:foreman:|⠂ Fix login flow bug|:foreman:|node|:foreman:|200\n' +
-        '2|:foreman:|my window name|:foreman:||:foreman:|npm|:foreman:|300\n',
+        '0|:stack:|zsh|:stack:|my-host.local|:stack:|zsh|:stack:|100\n' +
+        '1|:stack:|claude|:stack:|⠂ Fix login flow bug|:stack:|node|:stack:|200\n' +
+        '2|:stack:|my window name|:stack:||:stack:|npm|:stack:|300\n',
     }));
     await expect(tmux.listWindows('s1')).resolves.toEqual([
       { index: 0, name: 'zsh', title: 'my-host.local', command: 'zsh', pid: 100 },
@@ -349,7 +349,7 @@ describe('command construction', () => {
     ]);
     expect(calls).toEqual([[
       'tmux', 'list-windows', '-t', '=s1',
-      '-F', '#{window_index}|:foreman:|#{window_name}|:foreman:|#{pane_title}|:foreman:|#{pane_current_command}|:foreman:|#{pane_pid}',
+      '-F', '#{window_index}|:stack:|#{window_name}|:stack:|#{pane_title}|:stack:|#{pane_current_command}|:stack:|#{pane_pid}',
     ]]);
   });
 
@@ -366,22 +366,22 @@ describe('command construction', () => {
   });
 
   it('listSessions reads each session with its client count, [] without a server', async () => {
-    let calls = captureExec(() => ({ stdout: 'foreman-a|:foreman:|0\nfo o|:foreman:|2\nweird|:foreman:|\nbare\n' }));
+    let calls = captureExec(() => ({ stdout: 'stack-a|:stack:|0\nfo o|:stack:|2\nweird|:stack:|\nbare\n' }));
     await expect(tmux.listSessions()).resolves.toEqual([
-      { name: 'foreman-a', attached: 0 },
+      { name: 'stack-a', attached: 0 },
       { name: 'fo o', attached: 2 },
       { name: 'weird', attached: 0 },
       { name: 'bare', attached: 0 },
     ]);
-    expect(calls).toEqual([['tmux', 'list-sessions', '-F', '#{session_name}|:foreman:|#{session_attached}']]);
+    expect(calls).toEqual([['tmux', 'list-sessions', '-F', '#{session_name}|:stack:|#{session_attached}']]);
     calls = captureExec(() => ({ err: new Error('no server running') }));
     await expect(tmux.listSessions()).resolves.toEqual([]);
   });
 
   it('listClients reads each client\'s pid and session, skipping lines it cannot', async () => {
-    let calls = captureExec(() => ({ stdout: '123|:foreman:|foreman-a__w1\nxyz|:foreman:|s\n9|:foreman:|\n' }));
-    await expect(tmux.listClients()).resolves.toEqual([{ pid: 123, session: 'foreman-a__w1' }]);
-    expect(calls).toEqual([['tmux', 'list-clients', '-F', '#{client_pid}|:foreman:|#{session_name}']]);
+    let calls = captureExec(() => ({ stdout: '123|:stack:|stack-a__w1\nxyz|:stack:|s\n9|:stack:|\n' }));
+    await expect(tmux.listClients()).resolves.toEqual([{ pid: 123, session: 'stack-a__w1' }]);
+    expect(calls).toEqual([['tmux', 'list-clients', '-F', '#{client_pid}|:stack:|#{session_name}']]);
     calls = captureExec(() => ({ err: new Error('no server running') }));
     await expect(tmux.listClients()).resolves.toEqual([]);
   });
@@ -403,8 +403,8 @@ describe('command construction', () => {
   });
 
   it('processCommandLine reads the full, untruncated command line of a pid', async () => {
-    const calls = captureExec(() => ({ stdout: 'zsh -c FOREMAN_WINDOW_INDEX="1" claude; exec zsh\n' }));
-    await expect(tmux.processCommandLine(4242)).resolves.toBe('zsh -c FOREMAN_WINDOW_INDEX="1" claude; exec zsh');
+    const calls = captureExec(() => ({ stdout: 'zsh -c STACK_WINDOW_INDEX="1" claude; exec zsh\n' }));
+    await expect(tmux.processCommandLine(4242)).resolves.toBe('zsh -c STACK_WINDOW_INDEX="1" claude; exec zsh');
     expect(calls).toEqual([['ps', '-ww', '-o', 'args=', '-p', '4242']]);
     captureExec(() => ({ err: new Error('exit 1') }));
     await expect(tmux.processCommandLine(4242)).rejects.toThrow();
@@ -421,7 +421,7 @@ describe('command construction', () => {
 // ── integration (real tmux, guarded) ─────────────────────────────────────────
 
 describe('TmuxManager (integration)', () => {
-  const SES = `foreman-test-${process.pid}`;
+  const SES = `stack-test-${process.pid}`;
   const tmux = new TmuxManager();
 
   afterAll(() => {
@@ -508,26 +508,26 @@ describe('TmuxManager (integration)', () => {
   });
 
   it.runIf(hasTmux)('opens a window in a directory named `$(touch …)` without running it', async () => {
-    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-inject-'));
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-inject-'));
     const marker = path.join(base, 'ran');
     // No slash inside the substitution, so this is one directory name; the
     // env var points the would-be command at a file we can look for.
-    const dir = path.join(base, '$(touch "$FOREMAN_INJECT_MARKER")');
+    const dir = path.join(base, '$(touch "$STACK_INJECT_MARKER")');
     fs.mkdirSync(dir);
-    process.env.FOREMAN_INJECT_MARKER = marker;
+    process.env.STACK_INJECT_MARKER = marker;
     try {
       const idx = await tmux.newWindow(SES, 'injwin', dir);
       expect((await tmux.listWindows(SES)).some((w) => w.index === idx)).toBe(true);
       expect(fs.existsSync(marker)).toBe(false);
       await tmux.killWindow(SES, idx);
     } finally {
-      delete process.env.FOREMAN_INJECT_MARKER;
+      delete process.env.STACK_INJECT_MARKER;
       fs.rmSync(base, { recursive: true, force: true });
     }
   });
 
   it.runIf(hasTmux)('paste delivers the text verbatim and leaves it unsent until pressEnter', async () => {
-    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-paste-it-'));
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-paste-it-'));
     const out = path.join(base, 'line');
     try {
       const idx = await tmux.newWindow(SES, 'pastewin', base);
@@ -547,7 +547,7 @@ describe('TmuxManager (integration)', () => {
   });
 
   it.runIf(hasTmux)('two launches creating the same session at once both succeed', async () => {
-    const name = `foreman-race-${process.pid}`;
+    const name = `stack-race-${process.pid}`;
     try {
       await Promise.all([tmux.ensureSession(name, os.tmpdir()), tmux.ensureSession(name, os.tmpdir())]);
       expect(await tmux.hasSession(name)).toBe(true);
@@ -569,7 +569,7 @@ describe('TmuxManager (integration)', () => {
 });
 
 describe('session tabs: view sessions (integration)', () => {
-  const BASE = `foreman-itview-${process.pid}`;
+  const BASE = `stack-itview-${process.pid}`;
   const tmux = new TmuxManager();
   const clients: ChildProcess[] = [];
   /** Window indexes by name, set up by the first test. */

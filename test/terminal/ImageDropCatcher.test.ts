@@ -211,7 +211,7 @@ describe('ImageDropCatcher', () => {
     const g = group(2, [terminal('claude: feat/x'), image('/Users/me/Desktop/shot.png')]);
 
     await expect(h.open([g], [g.tabs[1]])).resolves.toBeUndefined();
-    expect(warn).toHaveBeenCalledWith('[foreman] image drop failed', expect.any(Error));
+    expect(warn).toHaveBeenCalledWith('[stack] image drop failed', expect.any(Error));
     warn.mockRestore();
   });
 

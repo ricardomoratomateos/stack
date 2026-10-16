@@ -18,7 +18,7 @@ describe('OsaNotifyAdapter default run', () => {
       (error: Error | null) => void,
     ];
     expect(cmd).toBe('osascript');
-    expect(args).toEqual(['-e', 'display notification "hello" with title "Foreman"']);
+    expect(args).toEqual(['-e', 'display notification "hello" with title "Stack"']);
     // The completion callback swallows errors (fire-and-forget).
     expect(() => callback(new Error('boom'))).not.toThrow();
   });

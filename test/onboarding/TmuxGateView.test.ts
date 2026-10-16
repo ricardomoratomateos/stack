@@ -33,7 +33,7 @@ beforeEach(() => {
 describe('TmuxGateView', () => {
   it('states the requirement and offers the detected manager', () => {
     const { view } = resolve(brew);
-    expect(view.webview.html).toContain('Foreman needs tmux');
+    expect(view.webview.html).toContain('Stack needs tmux');
     expect(view.webview.html).toContain('brew install tmux');
     expect(view.webview.html).toContain('Install with Homebrew');
   });

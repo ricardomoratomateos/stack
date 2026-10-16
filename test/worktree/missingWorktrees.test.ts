@@ -12,7 +12,7 @@ function wt(id: string, p: string, repoRoot: string): Worktree {
 let tmp: string;
 
 beforeEach(() => {
-  tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-missingwt-')));
+  tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'stack-missingwt-')));
 });
 
 afterEach(() => {
@@ -36,7 +36,7 @@ describe('resolveReal', () => {
   it('resolves macOS\'s tmpdir alias the same way on both sides', () => {
     // os.tmpdir() is under /var on macOS, which is a symlink to /private/var;
     // git prints the resolved form. Elsewhere both sides are simply equal.
-    const raw = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-alias-'));
+    const raw = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-alias-'));
     try {
       expect(resolveReal(path.join(raw, 'x'))).toBe(path.join(fs.realpathSync(raw), 'x'));
     } finally {

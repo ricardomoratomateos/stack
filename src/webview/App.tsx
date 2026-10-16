@@ -7,7 +7,7 @@ import { Mission } from './styles/mission/Mission';
 
 /**
  * The sidebar: one data layer (useSidebar) under three presentational layouts.
- * Which one renders is the `foreman.sidebarStyle` setting, carried in the state
+ * Which one renders is the `stack.sidebarStyle` setting, carried in the state
  * the extension pushes, so changing it takes effect on the next push, no reload.
  * (The native view header above carries the "Worktrees" title, the live counts
  * and the "+" and gear buttons, so none of the layouts draws its own.)

@@ -69,7 +69,7 @@ body.vscode-high-contrast .fm-claude, body.vscode-high-contrast-light .fm-claude
 .cl-row {
   margin-bottom: 2px; border-radius: 10px; border: 1px solid transparent;
   transition: background .12s, border-color .12s;
-  animation: foreman-fadein .15s ease;
+  animation: stack-fadein .15s ease;
 }
 .cl-row[data-selected] { background: color-mix(in srgb, var(--fm-accent) 8%, transparent); border-color: color-mix(in srgb, var(--fm-accent) 35%, transparent); }
 .cl-row-main {

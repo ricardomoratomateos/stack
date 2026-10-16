@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import * as path from 'node:path';
-import type { ForemanConfig, Worktree } from '../types';
+import type { StackConfig, Worktree } from '../types';
 import { isEnvName } from '../shell/shellQuote';
 
 /**
  * Compose's own project-name normalisation (compose-go `NormalizeProjectName`):
  * lowercase, drop every character outside [a-z0-9_-], then strip leading `_`
  * and `-` — a name may not start with either. Mirrored exactly so the name
- * Foreman computes for the main checkout is the one a plain `docker compose up`
+ * Stack computes for the main checkout is the one a plain `docker compose up`
  * in it really runs under.
  */
 export function normalizeProjectName(name: string): string {
@@ -27,10 +27,10 @@ function repoTag(repoRoot: string): string {
  * same branch shared one project, so `down` in one silently removed the other's
  * containers. Passed explicitly as `-p` to every command (and exported as
  * COMPOSE_PROJECT_NAME to scripts) so the compose template living in
- * `.foreman/` doesn't make every worktree collide under the "foreman" project.
+ * `.stack/` doesn't make every worktree collide under the "stack" project.
  *
  * The main checkout keeps compose's default — its directory name — because
- * Foreman runs its stack plain, exactly as the user would by hand.
+ * Stack runs its stack plain, exactly as the user would by hand.
  */
 export function composeProject(worktree: Worktree): string {
   const base = normalizeProjectName(path.basename(worktree.path));
@@ -40,7 +40,7 @@ export function composeProject(worktree: Worktree): string {
 
 /**
  * Names this worktree's stack may still be running under from before the
- * project name carried the repo hash: Foreman's old sanitisation (invalid
+ * project name carried the repo hash: Stack's old sanitisation (invalid
  * characters became `-`) and compose's own default for a plain `docker compose
  * up` in the worktree. Looked up so a stack started by an older version is
  * still shown, still stopped, and never orphaned holding its ports.
@@ -56,13 +56,13 @@ export function legacyComposeProjects(worktree: Worktree): string[] {
 }
 
 /** Docker orchestration is on when at least one port is configured — the same gate as the card's button. */
-export function dockerConfigured(config: ForemanConfig): boolean {
+export function dockerConfigured(config: StackConfig): boolean {
   return config.docker.ports.length > 0;
 }
 
 /**
  * Auto-generated docker ports for a worktree, keyed by the env var name from
- * `foreman.docker.ports`. Each worktree owns a contiguous block sized by
+ * `stack.docker.ports`. Each worktree owns a contiguous block sized by
  * `portStride`; the i-th configured name gets `basePort + slot*stride + i`.
  *
  * The slot is derived from the worktree's debug port (a stable, unique value
@@ -70,7 +70,7 @@ export function dockerConfigured(config: ForemanConfig): boolean {
  * DEBUG_PORT is special-cased to the worktree's own debug port so the value
  * matches the one already written to its launch.json.
  */
-export function computeDockerPorts(worktree: Worktree, config: ForemanConfig): Record<string, number> {
+export function computeDockerPorts(worktree: Worktree, config: StackConfig): Record<string, number> {
   return dockerPortsFor(worktree.debugPort, config);
 }
 
@@ -80,7 +80,7 @@ export function computeDockerPorts(worktree: Worktree, config: ForemanConfig): R
  * source of truth for the mapping — the allocator and the compose env must
  * never drift apart on which ports a slot actually owns.
  */
-export function dockerPortsFor(debugPort: number, config: ForemanConfig): Record<string, number> {
+export function dockerPortsFor(debugPort: number, config: StackConfig): Record<string, number> {
   const { ports, basePort, portStride } = config.docker;
   const slot = Math.max(0, debugPort - config.debugBasePort - 1);
   const result: Record<string, number> = {};
@@ -94,10 +94,10 @@ export function dockerPortsFor(debugPort: number, config: ForemanConfig): Record
 
 /**
  * Every distinct port a worktree on this slot will try to bind. Always includes
- * the debug port itself, even when `foreman.docker.ports` is empty — VSCode's
+ * the debug port itself, even when `stack.docker.ports` is empty — VSCode's
  * debug listener binds it too, and it collides just as happily.
  */
-export function portBlockFor(debugPort: number, config: ForemanConfig): number[] {
+export function portBlockFor(debugPort: number, config: StackConfig): number[] {
   const block = new Set<number>([debugPort]);
   for (const port of Object.values(dockerPortsFor(debugPort, config))) block.add(port);
   return [...block];
@@ -135,11 +135,11 @@ export function composeArgv(
 }
 
 /** Env vars (string values) to inject when running compose for a worktree. */
-export function dockerEnv(worktree: Worktree, config: ForemanConfig): Record<string, string> {
+export function dockerEnv(worktree: Worktree, config: StackConfig): Record<string, string> {
   if (worktree.isMain) return {};
   const out: Record<string, string> = {};
   for (const [name, port] of Object.entries(computeDockerPorts(worktree, config))) {
-    // Names come from `foreman.docker.ports` and are typed into a terminal as
+    // Names come from `stack.docker.ports` and are typed into a terminal as
     // `NAME=value` (dockerUp). One that is not an identifier is not an
     // assignment but a command — `A;curl x|sh` — so it is dropped here, where
     // every consumer gets the same answer. No shell could have exported it.
@@ -151,16 +151,16 @@ export function dockerEnv(worktree: Worktree, config: ForemanConfig): Record<str
 
 /**
  * What a setup/teardown script needs to run compose by hand and land on the
- * SAME stack Foreman monitors and stops.
+ * SAME compose stack the extension monitors and stops.
  *
  * Without COMPOSE_PROJECT_NAME a plain `docker compose up` in the script ran
- * under compose's default name: Foreman never saw it, `down` never removed it,
+ * under compose's default name: Stack never saw it, `down` never removed it,
  * and its containers kept holding the ports. COMPOSE_FILE uses the platform's
  * path separator, which is what compose splits it on by default.
  */
 export function composeScriptEnv(
   worktree: Worktree,
-  config: ForemanConfig,
+  config: StackConfig,
   files: ComposeFiles,
   project = composeProject(worktree),
 ): Record<string, string> {

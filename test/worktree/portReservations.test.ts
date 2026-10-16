@@ -19,7 +19,7 @@ describe('PortReservationFile', () => {
     new PortReservationFile(storage, { pid, isAlive: (p) => alive.has(p), now });
 
   beforeEach(() => {
-    storage = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-ports-'));
+    storage = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-ports-'));
     alive.clear();
     alive.add(1).add(2);
   });

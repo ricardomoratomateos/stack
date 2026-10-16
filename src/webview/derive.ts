@@ -7,7 +7,7 @@
  * it too, so the "jump to the next one that needs me" shortcut walks the same
  * queue the sidebar draws.
  */
-import type { ForemanState, ProviderId, SessionItem, WorktreeItem } from './types';
+import type { StackState, ProviderId, SessionItem, WorktreeItem } from './types';
 
 export type WorktreeGroup = 'needs' | 'review' | 'working' | 'idle' | 'missing';
 
@@ -213,7 +213,7 @@ export function describe(wt: WorktreeItem, dockerUnavailable?: string): Describe
   };
 }
 
-export function describeAll(state: ForemanState): Described[] {
+export function describeAll(state: StackState): Described[] {
   return state.worktrees.map((wt) => describe(wt, state.dockerUnavailable));
 }
 

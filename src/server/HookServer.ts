@@ -41,7 +41,7 @@ export interface HookEvent {
   event: string;
   /** Undefined for events that map to no state. */
   state?: AgentSessionState;
-  /** Worktree id; '' for an agent running outside any Foreman session. */
+  /** Worktree id; '' for an agent running outside any Stack session. */
   workspaceId: string;
   windowIndex?: number;
   /** Provider id the hook was registered for ('claude', 'codex', 'opencode'), when known. */
@@ -119,7 +119,7 @@ export class HookServer {
   private handle(e: HookEvent | undefined): number {
     // Malformed: nothing to act on, and nothing anyone else could do with it.
     if (!e) return 200;
-    // Unattributed — an agent running outside any Foreman session, still
+    // Unattributed — an agent running outside any Stack session, still
     // reaching the hook because it is global. Not ours to paint, sound or
     // notify about; answered 200 so the hook does not keep looking.
     if (!e.workspaceId) return 200;
@@ -162,8 +162,8 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' && v !== 
 /**
  * Reads either wire format.
  *
- * - v2 (notify.sh from 0.1.1 on, the opencode plugin): Foreman's ids in
- *   `X-Foreman-*` headers (or the query string), the body the agent's own
+ * - v2 (notify.sh from 0.1.1 on, the opencode plugin): Stack's ids in
+ *   `X-Stack-*` headers (or the query string), the body the agent's own
  *   payload, untouched.
  * - v1: a body of `{ event, terminalId, workspaceId, windowIndex }` and nothing
  *   else. Still accepted, because an agent started under the old script keeps
@@ -178,7 +178,7 @@ export function parseHook(
   body: string | undefined,
 ): HookEvent | undefined {
   const header = (name: string): string | undefined => {
-    const v = headers[`x-foreman-${name}`];
+    const v = headers[`x-stack-${name}`];
     return str(Array.isArray(v) ? v[0] : v) ?? str(query.get(name));
   };
 
@@ -197,7 +197,7 @@ export function parseHook(
   if (!event) return undefined;
 
   const workspaceId = (v2 ? header('workspace') : str(json['workspaceId']) ?? str(json['terminalId'])) ?? '';
-  // Empty = an agent launched before FOREMAN_WINDOW_INDEX existed, or one tmux
+  // Empty = an agent launched before STACK_WINDOW_INDEX existed, or one tmux
   // could not place: the event then applies to every agent window of the worktree.
   const rawIndex = v2 ? header('window') : str(json['windowIndex']);
   const index = rawIndex !== undefined ? Number(rawIndex) : NaN;

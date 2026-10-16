@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';
 
-const STORE_KEY = 'foreman.tabs';
+const STORE_KEY = 'stack.tabs';
 
 interface WorktreeRef { id: string; path: string }
 

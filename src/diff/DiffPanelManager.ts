@@ -34,7 +34,7 @@ export class DiffPanelManager {
 
     const ctx = this.host.getContext(worktreeId);
     const panel = vscode.window.createWebviewPanel(
-      'foreman.diffReview',
+      'stack.diffReview',
       ctx ? `Review: ${ctx.label}` : 'Review',
       vscode.ViewColumn.Active,
       {

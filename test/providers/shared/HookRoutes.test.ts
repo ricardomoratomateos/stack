@@ -12,7 +12,7 @@ describe('HookRoutes', () => {
   const A = 'http://127.0.0.1:1111';
   const B = 'http://127.0.0.1:2222';
 
-  beforeEach(() => { storage = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-routes-')); });
+  beforeEach(() => { storage = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-routes-')); });
   afterEach(() => { fs.rmSync(storage, { recursive: true, force: true }); });
 
   it('routes each worktree to the window that claimed it — two windows, two repos', () => {
@@ -102,20 +102,20 @@ describe('HookRoutes', () => {
 
   describe('launchEnv', () => {
     it('is just the worktree id before the server is up', () => {
-      expect(new HookRoutes(storage).launchEnv('wt-1', undefined)).toBe('FOREMAN_WORKSPACE_ID="wt-1"');
+      expect(new HookRoutes(storage).launchEnv('wt-1', undefined)).toBe('STACK_WORKSPACE_ID="wt-1"');
       expect(new HookRoutes(storage).lookup('wt-1')).toBeUndefined();
     });
 
     it('adds the URL and takes the route over from another window', () => {
       new HookRoutes(storage).claim(['wt-1'], B);
-      expect(new HookRoutes(storage).launchEnv('wt-1', A)).toBe(`FOREMAN_HOOK_URL="${A}" FOREMAN_WORKSPACE_ID="wt-1"`);
+      expect(new HookRoutes(storage).launchEnv('wt-1', A)).toBe(`STACK_HOOK_URL="${A}" STACK_WORKSPACE_ID="wt-1"`);
       expect(new HookRoutes(storage).lookup('wt-1')).toBe(A);
     });
 
     it('never fails a launch over the routing file', () => {
       // A FILE where the routes directory should be: every claim throws.
       fs.writeFileSync(path.join(storage, 'routes'), '');
-      expect(new HookRoutes(storage).launchEnv('wt-1', A)).toBe(`FOREMAN_HOOK_URL="${A}" FOREMAN_WORKSPACE_ID="wt-1"`);
+      expect(new HookRoutes(storage).launchEnv('wt-1', A)).toBe(`STACK_HOOK_URL="${A}" STACK_WORKSPACE_ID="wt-1"`);
     });
   });
 });

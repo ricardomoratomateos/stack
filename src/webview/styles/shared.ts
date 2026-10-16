@@ -125,8 +125,8 @@ body.vscode-high-contrast .fm .fm-split-solid .fm-split-chev, body.vscode-high-c
 .fm-sess[data-state='active'] .fm-sess-state { color: var(--fm-working-text, var(--fm-working)); }
 .fm-sess[data-state='waiting'] .fm-sess-state { color: var(--fm-ok); }
 .fm-sess-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fm-idle); }
-.fm-sess[data-state='permission'] .fm-sess-dot { background: var(--fm-needs); animation: foreman-blink 1s ease-in-out infinite; }
-.fm-sess[data-state='active'] .fm-sess-dot { background: var(--fm-working); animation: foreman-pulse 1.6s ease-in-out infinite; }
+.fm-sess[data-state='permission'] .fm-sess-dot { background: var(--fm-needs); animation: stack-blink 1s ease-in-out infinite; }
+.fm-sess[data-state='active'] .fm-sess-dot { background: var(--fm-working); animation: stack-pulse 1.6s ease-in-out infinite; }
 .fm-sess[data-state='waiting'] .fm-sess-dot { background: var(--fm-ok); }
 .fm-sess[data-state='terminated'] .fm-sess-dot { background: var(--fm-bad); }
 /* Rename and kill take the state label's place on hover or keyboard focus. */

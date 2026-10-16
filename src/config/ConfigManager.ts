@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { ForemanConfig, DebugTemplate, DockerConfig } from '../types';
+import { StackConfig, DebugTemplate, DockerConfig } from '../types';
 import type { ProviderId } from '../ports/IAgentProvider';
 import { normalizeSidebarStyle } from '../sidebarStyle';
 import {
@@ -32,7 +32,7 @@ const DOCKER_DEFAULTS: DockerConfig = {
 const DEBUG_TEMPLATE_DEFAULT: DebugTemplate = {
   type: 'node',
   request: 'attach',
-  name: 'Foreman: Debug',
+  name: 'Stack: Debug',
   port: '{{PORT}}',
 };
 
@@ -41,7 +41,7 @@ const DEBUG_TEMPLATE_DEFAULT: DebugTemplate = {
  * One table, read by get() and projectValues() alike, so the two can never
  * disagree about what "unset" means.
  */
-const PROJECT_DEFAULTS: Pick<ForemanConfig, RepoScopedKey> = {
+const PROJECT_DEFAULTS: Pick<StackConfig, RepoScopedKey> = {
   worktreesDirectory: '.worktrees',
   defaultBaseBranch: 'develop',
   setupScript: '',
@@ -54,7 +54,7 @@ const PROJECT_DEFAULTS: Pick<ForemanConfig, RepoScopedKey> = {
 const NO_REPO_CONFIG: RepoConfigResult = { values: {}, present: false, problems: [] };
 
 export type ConfigManagerOptions = {
-  /** Repository root to look for `.foreman/config.json` in, resolved per read. */
+  /** Repository root to look for `.stack/config.json` in, resolved per read. */
   repoRoot?: () => string | undefined;
   /** Called when the repo config's complaints change. Never on every read. */
   onProblems?: (problems: string[]) => void;
@@ -74,7 +74,7 @@ export class ConfigManager {
    */
   async setDefaultProvider(provider: ProviderId): Promise<void> {
     await vscode.workspace
-      .getConfiguration('foreman')
+      .getConfiguration('stack')
       .update('defaultProvider', provider, vscode.ConfigurationTarget.Global);
   }
 
@@ -95,7 +95,7 @@ export class ConfigManager {
    *   than written out as an explicit copy of the default.
    */
   async saveUserValues(values: Record<string, unknown>): Promise<void> {
-    const cfg = vscode.workspace.getConfiguration('foreman');
+    const cfg = vscode.workspace.getConfiguration('stack');
     for (const [key, value] of Object.entries(values)) {
       if (value === undefined || sameValue(cfg.get(key), value)) continue;
       const seen = cfg.inspect?.(key);
@@ -119,8 +119,8 @@ export class ConfigManager {
     return root ? path.join(root, REPO_CONFIG_RELATIVE) : undefined;
   }
 
-  get(): ForemanConfig {
-    const cfg = vscode.workspace.getConfiguration('foreman');
+  get(): StackConfig {
+    const cfg = vscode.workspace.getConfiguration('stack');
     const repo = this.repoConfig().values;
 
     return {
@@ -159,7 +159,7 @@ export class ConfigManager {
    * imposed on everyone who pulls. The overrides are listed separately
    * (personalOverrides) so the panel can say why what runs differs from this.
    */
-  projectValues(): Pick<ForemanConfig, RepoScopedKey> {
+  projectValues(): Pick<StackConfig, RepoScopedKey> {
     const repo = this.repoConfig().values;
     return {
       worktreesDirectory: repo.worktreesDirectory ?? PROJECT_DEFAULTS.worktreesDirectory,

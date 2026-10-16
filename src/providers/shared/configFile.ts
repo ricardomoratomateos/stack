@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 /**
- * An agent config file Foreman was about to edit but must not touch.
+ * An agent config file Stack was about to edit but must not touch.
  *
  * Thrown instead of "starting fresh": the file is the user's, holding their
  * permissions, env, model and other tools' hooks, and rewriting it with only
@@ -55,13 +55,13 @@ export function readJsonObject(file: string, action: string): Record<string, unk
   } catch (e) {
     const where = syntaxErrorLocation(text, e);
     throw new ConfigFileError(
-      `Foreman couldn't ${action}: ${displayPath(file)} has a syntax error${where ? ` at ${where}` : ''}. ` +
+      `Stack couldn't ${action}: ${displayPath(file)} has a syntax error${where ? ` at ${where}` : ''}. ` +
       'The file was left untouched — fix it and reload the window.',
     );
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new ConfigFileError(
-      `Foreman couldn't ${action}: ${displayPath(file)} is not a JSON object. The file was left untouched.`,
+      `Stack couldn't ${action}: ${displayPath(file)} is not a JSON object. The file was left untouched.`,
     );
   }
   return parsed as Record<string, unknown>;
@@ -78,9 +78,9 @@ export function readJsonObject(file: string, action: string): Record<string, unk
  *   silently turn it into a regular file and detach it from the repo.
  * - The existing file's mode is kept: settings can hold tokens, and a 0600
  *   file must not come back world-readable.
- * - The first time Foreman changes a file that already existed, the original is
- *   kept as `<file>.foreman-backup`. Never overwritten afterwards, so it stays
- *   the user's own version from before Foreman ever touched it.
+ * - The first time Stack changes a file that already existed, the original is
+ *   kept as `<file>.stack-backup`. Never overwritten afterwards, so it stays
+ *   the user's own version from before Stack ever touched it.
  */
 export function writeFileAtomic(file: string, content: string, opts: { backup?: boolean } = {}): void {
   let target = file;
@@ -96,14 +96,14 @@ export function writeFileAtomic(file: string, content: string, opts: { backup?: 
     try {
       fs.accessSync(target, fs.constants.W_OK);
     } catch {
-      throw new ConfigFileError(`Foreman couldn't update ${displayPath(file)}: the file is read-only. It was left untouched.`);
+      throw new ConfigFileError(`Stack couldn't update ${displayPath(file)}: the file is read-only. It was left untouched.`);
     }
     mode = fs.statSync(target).mode & 0o777;
-    const backup = `${target}.foreman-backup`;
+    const backup = `${target}.stack-backup`;
     if (opts.backup && !fs.existsSync(backup)) fs.copyFileSync(target, backup);
   }
 
-  const tmp = path.join(dir, `.${path.basename(target)}.foreman-${process.pid}-${Date.now()}.tmp`);
+  const tmp = path.join(dir, `.${path.basename(target)}.stack-${process.pid}-${Date.now()}.tmp`);
   try {
     fs.writeFileSync(tmp, content, mode !== undefined ? { mode } : undefined);
     // writeFileSync's mode is masked by the umask; chmod states it exactly.

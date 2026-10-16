@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import type { ForemanState, SessionItem, WorktreeItem } from '../../src/webview/types';
+import type { StackState, SessionItem, WorktreeItem } from '../../src/webview/types';
 import type { LayoutProps } from '../../src/webview/styles/types';
 import { describeAll } from '../../src/webview/derive';
 
@@ -25,7 +25,7 @@ function wt(over: Partial<WorktreeItem>): WorktreeItem {
   };
 }
 
-const state: ForemanState = {
+const state: StackState = {
   defaultProvider: 'claude',
   installedProviders: ['claude'],
   dockerEnabled: true,
@@ -130,7 +130,7 @@ describe.each(['aside', 'claude', 'mission'])('%s layout', (name) => {
 describe('docker on the health strip', () => {
   it('says docker is down, with the reason, instead of counting containers', async () => {
     const { Claude } = await import('../../src/webview/styles/claude/Claude');
-    const down: ForemanState = { ...state, dockerUnavailable: 'Cannot connect to the Docker daemon' };
+    const down: StackState = { ...state, dockerUnavailable: 'Cannot connect to the Docker daemon' };
     const html = renderToStaticMarkup(<Claude {...props({ state: down, items: describeAll(down) })} />);
     expect(html).toContain('docker down');
     expect(html).toContain('Cannot connect to the Docker daemon');
