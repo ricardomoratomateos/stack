@@ -27,7 +27,7 @@ const STR = {
   teardown: 'Before deleting a worktree',
   choose: 'Choose…',
   createForMe: 'Create one for me',
-  scriptEnv: 'Your script gets FOREMAN_REPO_ROOT, FOREMAN_WORKTREE_PATH, FOREMAN_BRANCH, FOREMAN_COMPOSE_PROJECT and one variable per port below.',
+  scriptEnv: 'Your script gets FOREMAN_REPO_ROOT, FOREMAN_WORKTREE_PATH, FOREMAN_BRANCH, FOREMAN_COMPOSE_PROJECT and one variable per port below — plus COMPOSE_PROJECT_NAME and COMPOSE_FILE, so a plain `docker compose up -d` in it starts the stack Foreman shows and stops.',
   docker: 'Docker',
   dockerHint: 'A dedicated compose stack per worktree, on ports that never collide.',
   dockerToggle: 'Docker stack per worktree',
@@ -35,7 +35,7 @@ const STR = {
   dockerUse: 'Set it up',
   composeFile: 'Compose file',
   overrideFile: 'Worktree override',
-  overrideHint: 'Merged on top; this is where ${HTTP_PORT}-style ports go.',
+  overrideHint: 'Layered on top of the compose file, in worktrees only. Compose adds its `ports` to the compose file’s rather than replacing them, so a port hard-coded there is still published by every worktree and collides: write it as ${HTTP_PORT} in the compose file, or start the override’s list with `ports: !override`.',
   ports: 'Ports to generate',
   portsHint: 'One env var per port. At least one is what enables the Docker button on each card. DEBUG_PORT reuses the debug port.',
   portsFound: 'Found in your compose files:',
@@ -230,10 +230,10 @@ export function SettingsApp() {
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                     <span style={{ flex: 1 }}>{STR.dockerFound(snap.detected.composeFiles.map((f) => `\`${f}\``).join(', '))}</span>
                     <button className="u-btn small primary" onClick={() => {
-                      const [base, override] = snap.detected.composeFiles;
+                      const { composeBase, composeOverride } = snap.detected;
                       patchDocker({
-                        composeFile: base ?? project.docker.composeFile,
-                        overrideFile: override ?? project.docker.overrideFile,
+                        composeFile: composeBase ?? project.docker.composeFile,
+                        overrideFile: composeOverride ?? project.docker.overrideFile,
                         ports: snap.detected.portVars.length > 0 ? snap.detected.portVars : project.docker.ports,
                       });
                       setDockerOn(true);
