@@ -221,8 +221,7 @@ export function readRepoConfig(
  * lift it into the repository verbatim so everyone else inherits it.
  */
 export function renderRepoConfig(effective: ForemanConfig): string {
-  const body: Record<string, unknown> = {
-    version: REPO_CONFIG_VERSION,
+  return updateRepoConfig(undefined, {
     worktreesDirectory: effective.worktreesDirectory,
     defaultBaseBranch: effective.defaultBaseBranch,
     setupScript: effective.setupScript,
@@ -230,6 +229,43 @@ export function renderRepoConfig(effective: ForemanConfig): string {
     docker: effective.docker,
     debugBasePort: effective.debugBasePort,
     debugTemplate: effective.debugTemplate,
-  };
+  });
+}
+
+/**
+ * The file's new text after writing `values` into what is already there.
+ *
+ * An update, not a re-render. The file is shared and outlives any one build
+ * of Foreman, and re-rendering it from the keys this build knows did two
+ * quiet kinds of damage on every save from the settings panel: a key added by
+ * a newer Foreman (or one this build reports as unknown) vanished, and
+ * `version` went back to 1 — telling every newer Foreman the file is older
+ * than it is. So: every existing key survives, in its place; docker is merged
+ * key by key for the same reason; the version only ever goes up.
+ *
+ * A file that is not a JSON object cannot be updated, only replaced — which
+ * is what the panel offers for it ("save from here to overwrite it").
+ */
+export function updateRepoConfig(existing: string | undefined, values: RepoConfigValues): string {
+  let current: Record<string, unknown> = {};
+  if (existing !== undefined) {
+    try {
+      const parsed: unknown = JSON.parse(existing);
+      if (isPlainObject(parsed)) current = parsed;
+    } catch { /* unreadable: replaced, as the panel says it will be */ }
+  }
+
+  const theirs = current['version'];
+  const version = typeof theirs === 'number' && theirs > REPO_CONFIG_VERSION ? theirs : REPO_CONFIG_VERSION;
+
+  // version first for a new file; an existing one keeps its own key order.
+  const body: Record<string, unknown> = { version, ...current };
+  body['version'] = version;
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined) continue;
+    body[key] = key === 'docker' && isPlainObject(current['docker'])
+      ? { ...current['docker'], ...(value as object) }
+      : value;
+  }
   return `${JSON.stringify(body, null, 2)}\n`;
 }

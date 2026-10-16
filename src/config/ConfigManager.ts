@@ -7,6 +7,7 @@ import {
   REPO_CONFIG_RELATIVE,
   RepoConfigResult,
   RepoConfigValues,
+  RepoScopedKey,
   readRepoConfig,
 } from './RepoConfig';
 
@@ -32,6 +33,21 @@ const DEBUG_TEMPLATE_DEFAULT: DebugTemplate = {
   request: 'attach',
   name: 'Foreman: Debug',
   port: '{{PORT}}',
+};
+
+/**
+ * What a repository gets when neither its file nor the user says otherwise.
+ * One table, read by get() and projectValues() alike, so the two can never
+ * disagree about what "unset" means.
+ */
+const PROJECT_DEFAULTS: Pick<ForemanConfig, RepoScopedKey> = {
+  worktreesDirectory: '.worktrees',
+  defaultBaseBranch: 'develop',
+  setupScript: '',
+  teardownScript: '',
+  docker: DOCKER_DEFAULTS,
+  debugBasePort: 9898,
+  debugTemplate: DEBUG_TEMPLATE_DEFAULT,
 };
 
 const NO_REPO_CONFIG: RepoConfigResult = { values: {}, present: false, problems: [] };
@@ -77,10 +93,10 @@ export class ConfigManager {
     const repo = this.repoConfig().values;
 
     return {
-      worktreesDirectory: this.pick(cfg, repo, 'worktreesDirectory', '.worktrees'),
-      defaultBaseBranch: this.pick(cfg, repo, 'defaultBaseBranch', 'develop'),
-      setupScript: this.pick(cfg, repo, 'setupScript', ''),
-      teardownScript: this.pick(cfg, repo, 'teardownScript', ''),
+      worktreesDirectory: this.pick(cfg, repo, 'worktreesDirectory', PROJECT_DEFAULTS.worktreesDirectory),
+      defaultBaseBranch: this.pick(cfg, repo, 'defaultBaseBranch', PROJECT_DEFAULTS.defaultBaseBranch),
+      setupScript: this.pick(cfg, repo, 'setupScript', PROJECT_DEFAULTS.setupScript),
+      teardownScript: this.pick(cfg, repo, 'teardownScript', PROJECT_DEFAULTS.teardownScript),
       defaultProvider: cfg.get<ProviderId>('defaultProvider', 'claude'),
       claudeCommand: cfg.get<string>('claudeCommand', 'claude'),
       codexCommand: cfg.get<string>('codexCommand', 'codex'),
@@ -92,8 +108,34 @@ export class ConfigManager {
       // file either, so all three layers are folded key by key. A repo naming
       // only its compose file must not reset basePort to the default.
       docker: this.pickDocker(cfg, repo),
-      debugBasePort: this.pick(cfg, repo, 'debugBasePort', 9898),
-      debugTemplate: this.pick(cfg, repo, 'debugTemplate', DEBUG_TEMPLATE_DEFAULT),
+      debugBasePort: this.pick(cfg, repo, 'debugBasePort', PROJECT_DEFAULTS.debugBasePort),
+      debugTemplate: this.pick(cfg, repo, 'debugTemplate', PROJECT_DEFAULTS.debugTemplate),
+    };
+  }
+
+  /**
+   * The repository's settings as the repository alone defines them: the file
+   * over the shipped defaults, with the user's own overrides left OUT.
+   *
+   * This is what the project form edits and therefore what it writes back. It
+   * used to be seeded from get(), which already has the user's settings.json
+   * folded in — so opening the panel and saving lifted one person's docker
+   * ports, worktree directory or debug port into the committed file, to be
+   * imposed on everyone who pulls. The overrides are listed separately
+   * (personalOverrides) so the panel can say why what runs differs from this.
+   */
+  projectValues(): Pick<ForemanConfig, RepoScopedKey> {
+    const repo = this.repoConfig().values;
+    return {
+      worktreesDirectory: repo.worktreesDirectory ?? PROJECT_DEFAULTS.worktreesDirectory,
+      defaultBaseBranch: repo.defaultBaseBranch ?? PROJECT_DEFAULTS.defaultBaseBranch,
+      setupScript: repo.setupScript ?? PROJECT_DEFAULTS.setupScript,
+      teardownScript: repo.teardownScript ?? PROJECT_DEFAULTS.teardownScript,
+      // Key by key, as in get(): a file naming only its compose file keeps the
+      // default ports and stride rather than losing them.
+      docker: { ...DOCKER_DEFAULTS, ...repo.docker },
+      debugBasePort: repo.debugBasePort ?? PROJECT_DEFAULTS.debugBasePort,
+      debugTemplate: repo.debugTemplate ?? PROJECT_DEFAULTS.debugTemplate,
     };
   }
 

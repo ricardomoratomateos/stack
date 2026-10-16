@@ -263,6 +263,51 @@ describe('ConfigManager', () => {
     });
   });
 
+  // ── projectValues: what the project form edits and saves ───────────────────
+
+  describe('projectValues', () => {
+    const managerFor = (root: string | undefined) => new ConfigManager({ repoRoot: () => root });
+
+    it('leaves the user\'s own overrides out, so saving cannot commit them', () => {
+      // The leak: the form was seeded from get(), which already holds the
+      // user's settings.json — one Save and their docker ports and worktree
+      // directory were in the committed file for the whole team.
+      writeRepoConfig({ defaultBaseBranch: 'trunk', docker: { composeFile: 'compose.yaml' } });
+      withSettings({
+        worktreesDirectory: '/Users/me/my-worktrees',
+        defaultBaseBranch: 'my-branch',
+        docker: { ports: ['MY_PORT'], basePort: 40000 },
+        debugBasePort: 7000,
+      });
+      const manager = managerFor(tmpDir);
+
+      // get() is still what runs here — the user's choices win…
+      expect(manager.get().worktreesDirectory).toBe('/Users/me/my-worktrees');
+      // …but none of them reach the project's view.
+      expect(manager.projectValues()).toEqual({
+        worktreesDirectory: '.worktrees',
+        defaultBaseBranch: 'trunk',
+        setupScript: '',
+        teardownScript: '',
+        docker: {
+          composeFile: 'compose.yaml',
+          overrideFile: 'docker-compose.worktree.yml',
+          ports: [],
+          basePort: 20000,
+          portStride: 100,
+        },
+        debugBasePort: 9898,
+        debugTemplate: { type: 'node', request: 'attach', name: 'Foreman: Debug', port: '{{PORT}}' },
+      });
+    });
+
+    it('is the shipped defaults when the repository has no file', () => {
+      withSettings({ setupScript: 'mine.sh' });
+      expect(managerFor(tmpDir).projectValues().setupScript).toBe('');
+      expect(managerFor(undefined).projectValues().worktreesDirectory).toBe('.worktrees');
+    });
+  });
+
   describe('setDefaultProvider', () => {
     it('writes foreman.defaultProvider globally', async () => {
       const update = vi.fn().mockResolvedValue(undefined);
