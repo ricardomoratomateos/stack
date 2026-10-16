@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { GitCliAdapter, parseWorktreePaths } from '../../src/adapters/GitCliAdapter';
+import { GitCliAdapter, parseWorktreePaths, reasonOf } from '../../src/adapters/GitCliAdapter';
 import { DiffError } from '../../src/ports/IGitPort';
 import { NodeFileSystem } from '../../src/adapters/NodeFileSystem';
 import { NodeProcessRunner } from '../../src/adapters/NodeProcessRunner';
@@ -116,6 +116,26 @@ describe('GitCliAdapter (integration, real temp git repo)', () => {
         { path: '/repo', prunable: false },
         { path: '/repo/wt', prunable: true },
       ]);
+    });
+  });
+
+  describe('reasonOf', () => {
+    it("is git's first stderr line, without its fatal:/error: prefix", () => {
+      expect(reasonOf({ stderr: Buffer.from('\nfatal: bad revision\nmore'), message: 'Command failed' })).toBe('bad revision');
+    });
+
+    it('falls back to the message when stderr says nothing', () => {
+      expect(reasonOf({ stderr: '  ', message: 'error: spawn git ENOENT' })).toBe('spawn git ENOENT');
+      expect(reasonOf(new Error('Command failed: git diff'))).toBe('Command failed: git diff');
+    });
+
+    it('describes whatever else was thrown', () => {
+      expect(reasonOf(undefined)).toBe('undefined');
+      expect(reasonOf('git exploded')).toBe('git exploded');
+    });
+
+    it('keeps a reason made only of blank lines as it is', () => {
+      expect(reasonOf({ message: ' \n ' })).toBe('');
     });
   });
 
@@ -392,6 +412,24 @@ describe('GitCliAdapter (integration, real temp git repo)', () => {
       expect(await adapter.diff(wtPath, { base: 'working' })).toBe('');
       git(`worktree remove --force "${wtPath}"`);
       git('branch -D diff-clean');
+    });
+
+    it.skipIf(process.getuid?.() === 0)('working: skips an untracked file git cannot read, and shows the rest', async () => {
+      const wtPath = path.join(tmp, 'wt-diff-unreadable');
+      git(`worktree add -b diff-unreadable "${wtPath}"`);
+      fs.writeFileSync(path.join(wtPath, 'kept.txt'), 'still here\n');
+      const locked = path.join(wtPath, 'locked.txt');
+      fs.writeFileSync(locked, 'secret\n');
+      fs.chmodSync(locked, 0o000);
+      try {
+        const out = await adapter.diff(wtPath, { base: 'working' });
+        expect(out).toContain('+still here');
+        expect(out).not.toContain('locked.txt');
+      } finally {
+        fs.chmodSync(locked, 0o644);
+        git(`worktree remove --force "${wtPath}"`);
+        git('branch -D diff-unreadable');
+      }
     });
 
     // The injection this file used to have: untracked names went into

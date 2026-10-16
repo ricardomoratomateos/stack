@@ -1,14 +1,11 @@
 # Foreman
 
-[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/foreman.foreman?label=marketplace&color=c8ff00)](https://marketplace.visualstudio.com/items?itemName=foreman.foreman)
-[![Installs](https://img.shields.io/visual-studio-marketplace/i/foreman.foreman?color=c8ff00)](https://marketplace.visualstudio.com/items?itemName=foreman.foreman)
-[![Rating](https://img.shields.io/visual-studio-marketplace/r/foreman.foreman)](https://marketplace.visualstudio.com/items?itemName=foreman.foreman&ssr=false#review-details)
 [![CI](https://github.com/ricardomoratomateos/foreman/actions/workflows/ci.yml/badge.svg)](https://github.com/ricardomoratomateos/foreman/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
 **Run multiple AI coding agents in parallel — each in its own git worktree, its own tmux session, its own environment — without the mess.**
 
-Foreman turns VS Code into a control panel for delegated work: spin up a git worktree per task, launch an AI coding agent (Claude Code, opencode, …) in it, and keep every session alive, isolated, and glanceable from one sidebar.
+Foreman turns VS Code into a control panel for delegated work: spin up a git worktree per task, launch an AI coding agent (Claude Code, Codex CLI, opencode) in it, and keep every session alive, isolated, and glanceable from one sidebar.
 
 ![Foreman: a worktree per task, an agent in each, and a sidebar that says who needs you](assets/demo.gif)
 
@@ -19,7 +16,7 @@ Working on several things at once with AI agents gets messy fast: branches colli
 ## Features
 
 - **Worktree manager in the sidebar** — create, rename, and delete git worktrees; each one is an isolated checkout you can work in independently.
-- **Agents per worktree** — launch Claude Code or opencode (pluggable providers) in any worktree. Multiple agent + shell sessions per worktree, each tracked separately.
+- **Agents per worktree** — launch Claude Code, Codex CLI or opencode (pluggable providers) in any worktree. Multiple agent + shell sessions per worktree, each tracked separately.
 - **Sessions survive reloads** — agents run in tmux, so they keep working across VS Code window reloads and reconnect automatically.
 - **State at a glance** — per-session status (working / waiting / needs permission / idle) with live task titles pulled from the agent, plus a sidebar badge and optional native notification when an agent needs you.
 - **Scoped to the active worktree** — text search, Quick Open, and breakpoints are automatically scoped to the worktree you're in, so parallel worktrees don't drown each other out. Editor tabs can be scoped too — see [Switching worktrees](#switching-worktrees).
@@ -33,16 +30,16 @@ Working on several things at once with AI agents gets messy fast: branches colli
 - **VS Code** 1.85 or newer
 - **[tmux](https://github.com/tmux/tmux)** — sessions are multiplexed and survive reloads through it (Foreman prompts to install it if missing)
 - **git** with worktree support
-- An **agent CLI** on your `PATH` — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`) and/or [opencode](https://opencode.ai) (`opencode`)
+- An **agent CLI** on your `PATH` — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`), [Codex CLI](https://github.com/openai/codex) (`codex`) and/or [opencode](https://opencode.ai) (`opencode`)
 
 > **Platform:** macOS and Linux. Native OS notifications are macOS-only; everything else works on both. Windows is supported only via WSL (tmux required).
 
 ## Getting started
 
-1. Install tmux and an agent CLI (`claude` or `opencode`).
+1. Install tmux and an agent CLI (`claude`, `codex` or `opencode`).
 2. Open a git repository in VS Code and open the **Foreman** view in the activity bar.
 3. Hit **+** to create a worktree for your task.
-4. Click the agent button on the worktree card to launch Claude Code / opencode in it.
+4. Click the agent button on the worktree card to launch your agent in it (the chevron beside it picks another).
 5. Watch status in the sidebar; switch worktrees to jump between tasks — switching is instant, and search and breakpoints follow you.
 
 The **Get started with Foreman** walkthrough (opens on install; later under *Help → Welcome → Walkthroughs*, or `Foreman: Getting Started`) walks through the same steps inside VS Code.
@@ -115,13 +112,17 @@ The base is recorded when the worktree is created, so a worktree cut from `relea
 
 For heavier setups (dedicated Docker stack, dependency prep, debug), point the `foreman.setupScript` / `foreman.teardownScript` and `foreman.docker` settings at your own script and compose files — **anywhere in the repo**, wherever you like to keep them.
 
-When it runs your setup script, Foreman exports `FOREMAN_REPO_ROOT`, `FOREMAN_WORKTREE_PATH`, `FOREMAN_BRANCH`, `FOREMAN_COMPOSE_PROJECT` and the worktree's auto-generated ports, and the matching debug port is wired into the generated `launch.json`. With Docker configured it also exports `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE`, so a plain `docker compose up -d` in the script starts the very stack the card shows and deleting the worktree stops (add `--project-directory "$FOREMAN_WORKTREE_PATH"` when the compose file lives in the main repo). Relative paths resolve against the worktree first, then the main repo.
+When it runs your setup script, Foreman exports `FOREMAN_REPO_ROOT`, `FOREMAN_WORKTREE_PATH`, `FOREMAN_BRANCH`, `FOREMAN_COMPOSE_PROJECT` and the worktree's auto-generated ports, and the matching debug port is wired into the generated `launch.json`. With Docker configured it also exports `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE`, so a plain `docker compose up -d` in the script starts the very stack the card shows and deleting the worktree stops it (add `--project-directory "$FOREMAN_WORKTREE_PATH"` when the compose file lives in the main repo). Relative paths resolve against the worktree first, then the main repo.
+
+The teardown script runs in the background and deleting the worktree waits for it — the directory is only removed once the script is done (or after 10 minutes). Its output goes to the **Foreman** output channel; a script that fails is reported, and the delete you asked for still happens.
 
 The ▶ on a card runs `docker compose up -d` itself and waits for it: compose's output goes to the **Foreman: Docker** output channel, and a stack that does not come up says why — on the card and in a toast with a *Show output* button. Before starting, Foreman asks compose for the merged configuration and checks every port it will publish. Compose *adds* the override's `ports` to the base file's instead of replacing them, so a port hard-coded in the base file (`"27017:27017"`) is published by every worktree and the second stack fails; write it as `"${DB_PORT:-27017}:27017"` and add `DB_PORT` to the generated ports, or replace the list in the override with `ports: !override`.
 
+If the Docker daemon is still starting (Docker Desktop, OrbStack, colima after a reboot), Foreman waits a few seconds for it before giving up with a clear message, and nothing it runs against Docker can hang: a stuck `docker compose down` is abandoned after a minute with a warning, so deleting a worktree never sits in "deleting" forever.
+
 Each worktree's ports are listed on its card, under Docker, and clicking one opens `http://localhost:<port>` — the numbers are derived from the same function that builds the compose environment, so the card cannot drift from what the container actually publishes. The debug port is shown when you name `DEBUG_PORT` but is not clickable; a debugger listener answers nothing a browser can render.
 
-Ports are checked against the machine, not just against Foreman's own bookkeeping: every port a worktree will bind is probed before the slot is handed out, and probed again right before a setup script or `compose up` runs. If something has taken one in the meantime — another project's container, a leftover stack from a deleted worktree, a local dev server — the worktree moves to a free slot, its `launch.json` follows, and you get a toast naming the port that was busy. Re-run your setup script afterwards if it bakes the port into a generated file such as `.env`.
+Ports are checked against the machine, not just against Foreman's own bookkeeping: every port a worktree will bind is probed before the slot is handed out, and probed again right before a setup script or `compose up` runs. If something has taken one in the meantime — another project's container, a leftover stack from a deleted worktree, a local dev server — the worktree moves to a free slot, its `launch.json` follows, and you get a toast naming the port that was busy. Ports held by the worktree's own running stack don't count as taken. Slots are also reserved across VS Code windows, so two windows creating worktrees at the same moment never get the same one. Re-run your setup script afterwards if it bakes the port into a generated file such as `.env`.
 
 > A `.foreman/` folder is a handy place to keep these together. Scripts and compose files can live anywhere; only `.foreman/config.json` below is a fixed path.
 

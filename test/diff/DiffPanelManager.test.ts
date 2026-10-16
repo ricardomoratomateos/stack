@@ -149,6 +149,16 @@ describe('DiffPanelManager', () => {
     expect(panel.posted.at(-1)).toMatchObject({ type: 'diff', base: 'working', unified: '', error: 'git boom' });
   });
 
+  it('reports a failure that is not even an Error as what was thrown', async () => {
+    const panel = makePanel();
+    window.createWebviewPanel.mockReturnValue(panel);
+    const host = makeHost({ getDiff: vi.fn(async () => { throw 'git vanished'; }) });
+    new DiffPanelManager(extUri, host).open('wt-1');
+
+    await panel.fire({ type: 'requestDiff', base: 'working' });
+    expect(panel.posted.at(-1)).toMatchObject({ type: 'diff', base: 'working', unified: '', error: 'git vanished' });
+  });
+
   it('carries no error field on success, so a clean tree still reads "no changes"', async () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);

@@ -257,6 +257,15 @@ describe('ClaudeHookInstaller', () => {
       expect(fs.readFileSync(settingsPath, 'utf8')).toBe(before);
     });
 
+    it('refuses a hooks value that is not an object at all', () => {
+      for (const hooks of ['run-me', 42, [{ command: 'x' }]]) {
+        writeSettings({ model: 'opus', hooks });
+        const before = fs.readFileSync(settingsPath, 'utf8');
+        expect(() => makeHook().install(hookUrl)).toThrow(/"hooks" in .* is not the documented hooks shape/);
+        expect(fs.readFileSync(settingsPath, 'utf8')).toBe(before);
+      }
+    });
+
     it('refuses a hooks block of an unexpected shape rather than clobbering it', () => {
       writeSettings({ model: 'opus', hooks: { Stop: 'say done' } });
       const before = fs.readFileSync(settingsPath, 'utf8');
