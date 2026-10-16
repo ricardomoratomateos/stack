@@ -254,7 +254,7 @@ function makeHarness(o: HarnessOpts = {}) {
     }),
   };
   const prMonitor = {
-    startPolling: vi.fn((branch: string, id: string, cb: () => void) => { calls.push(`pr.startPolling:${branch}:${id}`); prCallbacks.set(id, cb); }),
+    startPolling: vi.fn((branch: string, id: string, _cwd: string, cb: () => void) => { calls.push(`pr.startPolling:${branch}:${id}`); prCallbacks.set(id, cb); }),
     getStatus: vi.fn((): { number: number; state: string; url: string } | undefined => undefined),
     stopPolling: vi.fn((id: string) => { calls.push(`pr.stopPolling:${id}`); }),
   };
@@ -1528,6 +1528,15 @@ describe('createWorktree', () => {
     expect(h.calls).toEqual(['ui.pushWebview']);
   });
 
+  it('polls the PR from inside the new worktree, not the extension host\'s cwd', async () => {
+    // gh finds the GitHub repo from the git remote of the directory it runs in;
+    // the host's cwd is `/` when VS Code was launched from the Dock.
+    vi.useFakeTimers();
+    const { h } = createHarness();
+    await h.service.createWorktree({ branch: 'feat/x' });
+    expect(h.prMonitor.startPolling).toHaveBeenCalledWith('feat/x', 'new', '/repo/zer/feat-x', expect.any(Function));
+  });
+
   it('runs the setup script in a visible terminal when configured', async () => {
     vi.useFakeTimers();
     const { h } = createHarness({ config: { setupScript: '/scripts/setup.sh' } });
@@ -1537,7 +1546,7 @@ describe('createWorktree', () => {
     expect(h.calls).toContain('claude.register:new');
     expect(h.calls).toContain('terminal.show:Init: feat/x');
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      'FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-x" FOREMAN_BRANCH="feat/x" FOREMAN_COMPOSE_PROJECT="feat-x" bash "/scripts/setup.sh" && echo "✓ Setup complete"',
+      "FOREMAN_REPO_ROOT=/repo FOREMAN_WORKTREE_PATH=/repo/zer/feat-x FOREMAN_BRANCH=feat/x FOREMAN_COMPOSE_PROJECT=feat-x bash /scripts/setup.sh && echo '✓ Setup complete'",
     );
   });
 
@@ -2007,7 +2016,7 @@ describe('initWorktree', () => {
       'host.createTerminal:Init: My task:/repo/zer/feat-a',
       'claude.register:a',
       'terminal.show:Init: My task',
-      'terminal.sendText:FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-a" FOREMAN_BRANCH="feat/a" FOREMAN_COMPOSE_PROJECT="feat-a" bash "/scripts/setup.sh"',
+      'terminal.sendText:FOREMAN_REPO_ROOT=/repo FOREMAN_WORKTREE_PATH=/repo/zer/feat-a FOREMAN_BRANCH=feat/a FOREMAN_COMPOSE_PROJECT=feat-a bash /scripts/setup.sh',
     ]);
   });
 
@@ -2023,7 +2032,7 @@ describe('initWorktree', () => {
     });
     await h.service.initWorktree(a);
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      'FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-b" FOREMAN_BRANCH="feat/b" FOREMAN_COMPOSE_PROJECT="feat-b" WORKTREE_PORT="8081" bash "/repo/zer/feat-b/.foreman/setup.sh"',
+      'FOREMAN_REPO_ROOT=/repo FOREMAN_WORKTREE_PATH=/repo/zer/feat-b FOREMAN_BRANCH=feat/b FOREMAN_COMPOSE_PROJECT=feat-b WORKTREE_PORT=8081 bash /repo/zer/feat-b/.foreman/setup.sh',
     );
   });
 
@@ -2032,7 +2041,7 @@ describe('initWorktree', () => {
     const h = makeHarness({ worktrees: [a], config: { setupScript: '/abs/setup.sh' }, existingPaths: ['/abs/setup.sh'] });
     await h.service.initWorktree(a);
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      'FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-a" FOREMAN_BRANCH="feat/a" FOREMAN_COMPOSE_PROJECT="feat-a" bash "/abs/setup.sh"',
+      'FOREMAN_REPO_ROOT=/repo FOREMAN_WORKTREE_PATH=/repo/zer/feat-a FOREMAN_BRANCH=feat/a FOREMAN_COMPOSE_PROJECT=feat-a bash /abs/setup.sh',
     );
   });
 
@@ -2041,8 +2050,25 @@ describe('initWorktree', () => {
     const h = makeHarness({ worktrees: [a], config: { setupScript: 'scripts/setup.sh' } }); // present in neither
     await h.service.initWorktree(a);
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      'FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-a" FOREMAN_BRANCH="feat/a" FOREMAN_COMPOSE_PROJECT="feat-a" bash "/repo/scripts/setup.sh"',
+      'FOREMAN_REPO_ROOT=/repo FOREMAN_WORKTREE_PATH=/repo/zer/feat-a FOREMAN_BRANCH=feat/a FOREMAN_COMPOSE_PROJECT=feat-a bash /repo/scripts/setup.sh',
     );
+  });
+
+  // A branch may legally be named `x$(…)`, and the worktree directory carries
+  // the same name. This command is typed into the user's shell, where the
+  // double quotes it used to use still ran the substitution.
+  it('single-quotes every value typed into the terminal, so a hostile branch name stays text', async () => {
+    const a = makeWorktree({
+      id: 'a',
+      branch: 'feat/$(touch /tmp/pwned)',
+      path: "/repo/zer/it's-`id`",
+    });
+    const h = makeHarness({ worktrees: [a], config: { setupScript: '/s.sh' } });
+    await h.service.initWorktree(a);
+    const typed = h.terminalsCreated[0].sendText.mock.calls[0][0] as string;
+    expect(typed).toContain("FOREMAN_BRANCH='feat/$(touch /tmp/pwned)'");
+    expect(typed).toContain(`FOREMAN_WORKTREE_PATH='/repo/zer/it'\\''s-\`id\`'`);
+    expect(typed).not.toMatch(/"[^"]*\$\(/);
   });
 
   it('falls back to the first store entry', async () => {
@@ -2411,8 +2437,8 @@ describe('port re-check before setup / compose up', () => {
     await h.service.initWorktree(b);
 
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      'FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-b" FOREMAN_BRANCH="feat/b" ' +
-        'FOREMAN_COMPOSE_PROJECT="feat-b" WORKTREE_PORT="8085" DEBUG_PORT="9903" bash "/s.sh"',
+      'FOREMAN_REPO_ROOT=/repo FOREMAN_WORKTREE_PATH=/repo/zer/feat-b FOREMAN_BRANCH=feat/b ' +
+        'FOREMAN_COMPOSE_PROJECT=feat-b WORKTREE_PORT=8085 DEBUG_PORT=9903 bash /s.sh',
     );
   });
 

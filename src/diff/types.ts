@@ -28,6 +28,10 @@ export type DiffPanelMessage =
 
 // ── Extension → panel webview ────────────────────────────────────────────────
 export type DiffPanelExtMessage =
-  | { type: 'diff'; base: DiffBase; unified: string; hasLiveAgent: boolean; label: string }
+  | {
+      type: 'diff'; base: DiffBase; unified: string; hasLiveAgent: boolean; label: string;
+      /** Set when the diff could not be computed; `unified` is then '' and means nothing. */
+      error?: string;
+    }
   | { type: 'sent'; destination: SendDestination; ok: boolean }
   | { type: 'error'; message: string };

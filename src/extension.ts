@@ -7,7 +7,7 @@ import { WorktreeStore } from './worktree/WorktreeStore';
 import { WorktreeManager } from './worktree/WorktreeManager';
 import { PortAllocator } from './worktree/portAllocator';
 import { ConfigManager } from './config/ConfigManager';
-import { REPO_CONFIG_RELATIVE, readRepoConfig, renderRepoConfig, type RepoScopedKey } from './config/RepoConfig';
+import { REPO_CONFIG_RELATIVE, readRepoConfig, renderRepoConfig, updateRepoConfig, type RepoScopedKey } from './config/RepoConfig';
 import { AgentSessionManager } from './session/AgentSessionManager';
 import { AttentionNotifier } from './session/AttentionNotifier';
 import { ProviderFactory } from './providers/ProviderFactory';
@@ -354,15 +354,11 @@ export async function activate(ctx: vscode.ExtensionContext) {
       const repoFile = readRepoConfig(root);
       return {
         repoRoot: root,
-        project: {
-          worktreesDirectory: effective.worktreesDirectory,
-          defaultBaseBranch: effective.defaultBaseBranch,
-          setupScript: effective.setupScript,
-          teardownScript: effective.teardownScript,
-          docker: effective.docker,
-          debugBasePort: effective.debugBasePort,
-          debugTemplate: effective.debugTemplate,
-        },
+        // The file's own values, NOT `effective`: that one has this user's
+        // settings.json folded in, and whatever the form shows is what Save
+        // writes into the committed file. Personal overrides are listed below
+        // so the panel can say why what runs here differs.
+        project: config.projectValues(),
         projectFile: { path: config.repoConfigPath(), present: repoFile.present, problems: repoFile.problems },
         personalOverrides: REPO_KEYS.filter((key) => {
           const seen = cfg.inspect(key);
@@ -417,15 +413,15 @@ export async function activate(ctx: vscode.ExtensionContext) {
       if (!root) return ['Open a git repository first.'];
       const file = path.join(root, REPO_CONFIG_RELATIVE);
       fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, renderRepoConfig({ ...config.get(), ...values }));
+      // Written INTO the existing file, so keys from a newer Foreman and its
+      // higher version survive a save from this one (see updateRepoConfig).
+      const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined;
+      fs.writeFileSync(file, updateRepoConfig(existing, values));
       webviewProvider.push();
       return readRepoConfig(root).problems;
     },
     saveUser: async (values) => {
-      const cfg = vscode.workspace.getConfiguration('foreman');
-      for (const [key, value] of Object.entries(values)) {
-        await cfg.update(key, value, vscode.ConfigurationTarget.Global);
-      }
+      await config.saveUserValues(values);
       webviewProvider.push();
     },
     clearPersonalOverrides: async () => {

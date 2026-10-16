@@ -1,21 +1,26 @@
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { PrStatus } from '../types';
-import type { ExecOptions, IProcessRunner } from '../ports/IProcessRunner';
+import type { ExecOptions, IFileRunner } from '../ports/IProcessRunner';
 
 interface PollEntry {
   branch: string;
   worktreeId: string;
+  cwd: string;
   callback: () => void;
   timer: ReturnType<typeof setTimeout> | undefined;
 }
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
-export const defaultRunner: IProcessRunner = {
-  exec(cmd: string, options?: ExecOptions): Promise<string> {
+// No shell: the branch is an argv entry. It used to be pasted into a
+// `gh pr list --head "<branch>"` string, where a branch named `x$(…)` — a valid
+// git ref — ran its payload every five minutes.
+export const defaultRunner: IFileRunner = {
+  execFile(file: string, args: readonly string[], options?: ExecOptions): Promise<string> {
     return new Promise((resolve, reject) => {
-      exec(
-        cmd,
+      execFile(
+        file,
+        args,
         {
           cwd: options?.cwd,
           env: options?.env as NodeJS.ProcessEnv | undefined,
@@ -50,17 +55,24 @@ export class PrMonitor {
   private cache = new Map<string, PrStatus | undefined>();
   private polls = new Map<string, PollEntry>();
 
-  constructor(private readonly runner: IProcessRunner = defaultRunner) {}
+  constructor(private readonly runner: IFileRunner = defaultRunner) {}
 
-  startPolling(branch: string, worktreeId: string, callback: () => void): void {
+  /**
+   * `cwd` is the worktree (or repo) the branch lives in, and it is required:
+   * gh finds the GitHub repository to ask from the git remote of the directory
+   * it runs in. Without one it inherited the extension host's cwd — `/` when
+   * VS Code was launched from the Dock — and every lookup failed quietly into
+   * "no PR".
+   */
+  startPolling(branch: string, worktreeId: string, cwd: string, callback: () => void): void {
     // Stop any existing poll for this worktree
     this.stopPolling(worktreeId);
 
-    const entry: PollEntry = { branch, worktreeId, callback, timer: undefined };
+    const entry: PollEntry = { branch, worktreeId, cwd, callback, timer: undefined };
     this.polls.set(worktreeId, entry);
 
     const poll = () => {
-      this.fetchPrStatus(branch).then((status) => {
+      this.fetchPrStatus(branch, cwd).then((status) => {
         const previous = this.cache.get(worktreeId);
         this.cache.set(worktreeId, status);
         // Fire callback if status changed
@@ -98,10 +110,11 @@ export class PrMonitor {
     this.cache.clear();
   }
 
-  private fetchPrStatus(branch: string): Promise<PrStatus> {
-    return this.runner.exec(
-      `gh pr list --head "${branch}" --json number,state,url`,
-      { timeout: 15000 },
+  private fetchPrStatus(branch: string, cwd: string): Promise<PrStatus> {
+    return this.runner.execFile(
+      'gh',
+      ['pr', 'list', '--head', branch, '--json', 'number,state,url'],
+      { cwd, timeout: 15000 },
     ).then(
       (stdout) => parsePrListOutput(stdout),
       () => null,

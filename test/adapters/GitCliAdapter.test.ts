@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { GitCliAdapter } from '../../src/adapters/GitCliAdapter';
+import { DiffError } from '../../src/ports/IGitPort';
 import { NodeFileSystem } from '../../src/adapters/NodeFileSystem';
 import { NodeProcessRunner } from '../../src/adapters/NodeProcessRunner';
 
@@ -112,6 +113,56 @@ describe('GitCliAdapter (integration, real temp git repo)', () => {
     });
   });
 
+  describe('createWorktree: branch names', () => {
+    // The worktree directory is named after the branch, and from there the path
+    // reaches tmux, docker and terminal command lines. Git accepts `$(…)` in a
+    // ref; Foreman does not make a worktree for one.
+    it.each([
+      'feat/$(touch pwned)',
+      'feat/`id`',
+      'a;b',
+      'a|b',
+      'a&b',
+      "it's",
+      'say"hi"',
+    ])('refuses %j before git runs, with a reason', async (name) => {
+      const wtPath = path.join(tmp, 'wt-refused');
+      await expect(adapter.createWorktree(wtPath, name, repo, true)).rejects.toThrow(/shell/);
+      expect(fs.existsSync(wtPath)).toBe(false);
+      expect(adapter.branchExists(name, repo)).toBe(false);
+    });
+
+    it.each(['-x', 'a..b', 'a b', 'trailing.lock'])(
+      'refuses %j by git\'s own check-ref-format rule',
+      async (name) => {
+        await expect(adapter.createWorktree(path.join(tmp, 'wt-bad-ref'), name, repo, true))
+          .rejects.toThrow(/not a valid git branch name/);
+      },
+    );
+
+    it('still accepts the ordinary punctuation real branches use', async () => {
+      const wtPath = path.join(tmp, 'wt-hash');
+      await adapter.createWorktree(wtPath, 'fix/#123-a+b_c.d', repo, true);
+      expect(git('branch --show-current', wtPath).trim()).toBe('fix/#123-a+b_c.d');
+      await adapter.deleteWorktree(wtPath, repo);
+      adapter.deleteBranch('fix/#123-a+b_c.d', repo);
+      expect(adapter.branchExists('fix/#123-a+b_c.d', repo)).toBe(false);
+    });
+
+    it('takes a worktree path containing shell syntax as a plain path', async () => {
+      // Paths come from config (worktreesDirectory) and the branch; with no
+      // shell in the way, "$(…)" in one is just characters on disk.
+      const marker = path.join(tmp, 'pwned-by-path');
+      const wtPath = path.join(tmp, `dir $(touch ${marker})`);
+      await adapter.createWorktree(wtPath, 'odd-path', repo, true);
+      expect(fs.existsSync(path.join(wtPath, 'README.md'))).toBe(true);
+      expect(fs.existsSync(marker)).toBe(false);
+      await adapter.deleteWorktree(wtPath, repo);
+      expect(fs.existsSync(wtPath)).toBe(false);
+      adapter.deleteBranch('odd-path', repo);
+    });
+  });
+
   describe('listBranches', () => {
     it('lists local branches, most-recently-committed first', () => {
       // One future-dated commit is enough to prove --sort=-committerdate: it must
@@ -176,6 +227,10 @@ describe('GitCliAdapter (integration, real temp git repo)', () => {
 
     it('returns false for a missing branch', () => {
       expect(adapter.branchExists('definitely-not-a-branch', repo)).toBe(false);
+    });
+
+    it('reads a name starting with "-" as a name, not an option', () => {
+      expect(adapter.branchExists('--all', repo)).toBe(false);
     });
   });
 
@@ -264,10 +319,50 @@ describe('GitCliAdapter (integration, real temp git repo)', () => {
       git('branch -D diff-nomain');
     });
 
-    it('returns "" outside a git repo', async () => {
+    it('rejects with a DiffError carrying git\'s reason outside a git repo', async () => {
+      // This used to resolve '' — which the panel renders as "No changes to
+      // review", the one answer that sends a reviewer away for the wrong reason.
       const notARepo = path.join(tmp, 'not-a-repo-diff');
       fs.mkdirSync(notARepo, { recursive: true });
-      expect(await adapter.diff(notARepo, { base: 'working' })).toBe('');
+      const err = await adapter.diff(notARepo, { base: 'working' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(DiffError);
+      expect((err as DiffError).reason).toMatch(/not a git repository/i);
+      // git's "fatal: " prefix is noise in a sentence shown to a person.
+      expect((err as DiffError).reason).not.toMatch(/^fatal/);
+    });
+
+    it('rejects in branch mode too, rather than claiming a clean branch', async () => {
+      const gone = path.join(tmp, 'removed-under-the-panel');
+      fs.mkdirSync(gone, { recursive: true });
+      await expect(adapter.diff(gone, { base: 'branch' })).rejects.toBeInstanceOf(DiffError);
+    });
+
+    it('still resolves "" for a worktree with genuinely nothing to show', async () => {
+      const wtPath = path.join(tmp, 'wt-diff-clean');
+      git(`worktree add -b diff-clean "${wtPath}"`);
+      expect(await adapter.diff(wtPath, { base: 'working' })).toBe('');
+      git(`worktree remove --force "${wtPath}"`);
+      git('branch -D diff-clean');
+    });
+
+    // The injection this file used to have: untracked names went into
+    // `git diff --no-index -- /dev/null "<file>"` through a shell, and inside
+    // double quotes $(…) and backticks run. An agent controls those names.
+    it('working: an untracked file named like a command substitution is diffed, not run', async () => {
+      const wtPath = path.join(tmp, 'wt-diff-hostile');
+      git(`worktree add -b diff-hostile "${wtPath}"`);
+      const marker = 'pwned-by-diff';
+      fs.writeFileSync(path.join(wtPath, `$(touch ${marker}).txt`), 'payload one\n');
+      fs.writeFileSync(path.join(wtPath, `\`touch ${marker}\`.txt`), 'payload two\n');
+
+      const out = await adapter.diff(wtPath, { base: 'working' });
+      // The substitution would have run with the worktree as its cwd.
+      expect(fs.existsSync(path.join(wtPath, marker))).toBe(false);
+      expect(out).toContain('+payload one');
+      expect(out).toContain('+payload two');
+
+      git(`worktree remove --force "${wtPath}"`);
+      git('branch -D diff-hostile');
     });
   });
 });

@@ -22,6 +22,7 @@ import { displayLabel, truncateLabel } from '../worktree/displayLabel';
 import { findRepoRoot } from '../worktree/findRepoRoot';
 import { canonicalPath, worktreesInRepo } from '../worktree/worktreesInRepo';
 import { MAIN_BRANCH_CANDIDATES } from '../constants';
+import { envPrefix, shellQuote } from '../shell/shellQuote';
 
 export const ACTIVE_WORKTREE_KEY = 'foreman.activeWorktreeId';
 export const WORKTREE_ORDER_KEY = 'foreman.worktreeOrder';
@@ -187,12 +188,16 @@ export class WorktreeApplicationService implements DiffPanelHost {
       FOREMAN_COMPOSE_PROJECT: composeProject(wt),
       ...(config.docker.ports.length > 0 ? dockerEnv(wt, config) : {}),
     };
-    const prefix = Object.entries(env).map(([k, v]) => `${k}="${v}"`).join(' ');
+    // Typed into the user's shell, so every value is single-quoted (shellQuote).
+    // These used to sit in double quotes, where `$(…)` still runs — and the
+    // branch, which is also the worktree directory's name, may legally contain
+    // exactly that. A branch named `x$(curl …|sh)` ran on "Init worktree".
+    const prefix = envPrefix(env);
     const terminal = this.deps.host.createTerminal({ name: `${labelPrefix}: ${displayLabel(wt)}`, cwd: wt.path });
     this.deps.agentManager.register(wt.id, terminal as never);
     terminal.show();
-    const cmd = `${prefix} bash "${resolved}"`;
-    terminal.sendText(doneMessage ? `${cmd} && echo "✓ ${doneMessage}"` : cmd);
+    const cmd = `${prefix} bash ${shellQuote(resolved)}`;
+    terminal.sendText(doneMessage ? `${cmd} && echo ${shellQuote(`✓ ${doneMessage}`)}` : cmd);
   }
 
   /**
@@ -833,7 +838,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     for (const wt of mine) {
       this.deps.gitWatcher.watch(wt.path, this.driftBaseFor(wt));
       this.deps.dockerMonitor.startPolling(composeProject(wt), () => this.ui.pushWebview());
-      this.deps.prMonitor.startPolling(wt.branch, wt.id, () => this.ui.pushWebview());
+      this.deps.prMonitor.startPolling(wt.branch, wt.id, wt.path, () => this.ui.pushWebview());
     }
 
     // `mine`, not `current`: reconnecting another repo's worktrees costs a tmux
@@ -940,7 +945,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
           this.deps.host.addWorkspaceFolders({ path: wt.path, name: displayLabel(wt) });
           this.deps.gitWatcher.watch(wt.path, this.driftBaseFor(wt));
           this.deps.dockerMonitor.startPolling(composeProject(wt), () => this.ui.pushWebview());
-          this.deps.prMonitor.startPolling(wt.branch, wt.id, () => this.ui.pushWebview());
+          this.deps.prMonitor.startPolling(wt.branch, wt.id, wt.path, () => this.ui.pushWebview());
         } catch (e) {
           console.error('[foreman] post-create wiring failed (worktree and setup are unaffected):', e);
         }

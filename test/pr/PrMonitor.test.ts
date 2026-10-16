@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { PrMonitor, parsePrListOutput, defaultRunner } from '../../src/pr/PrMonitor';
-import type { IProcessRunner } from '../../src/ports/IProcessRunner';
+import type { IFileRunner } from '../../src/ports/IProcessRunner';
 
 const FIVE_MIN = 5 * 60 * 1000;
 
-function makeRunner(stdout = ''): IProcessRunner & { exec: ReturnType<typeof vi.fn> } {
-  return { exec: vi.fn().mockResolvedValue(stdout) };
+function makeRunner(stdout = ''): IFileRunner & { execFile: ReturnType<typeof vi.fn> } {
+  return { execFile: vi.fn().mockResolvedValue(stdout) };
 }
+
+const WT = '/repo/.worktrees/feat-x';
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -77,17 +79,21 @@ describe('PrMonitor', () => {
     expect(monitor.getStatus('nope')).toBeUndefined();
   });
 
-  it('startPolling immediately runs gh pr list with the quoted branch and a 15s timeout', async () => {
+  it('startPolling immediately runs gh pr list in the worktree, branch as its own argument, 15s timeout', async () => {
     const runner = makeRunner(OPEN_PR);
     const monitor = new PrMonitor(runner);
 
-    monitor.startPolling('feat/x', 'wt1', vi.fn());
+    monitor.startPolling('feat/x', 'wt1', WT, vi.fn());
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(runner.exec).toHaveBeenCalledTimes(1);
-    expect(runner.exec).toHaveBeenCalledWith(
-      'gh pr list --head "feat/x" --json number,state,url',
-      { timeout: 15000 },
+    expect(runner.execFile).toHaveBeenCalledTimes(1);
+    // cwd is the worktree: gh resolves the GitHub repo from the git remote of
+    // the directory it runs in, and without one it ran in the extension host's
+    // cwd — `/` when VS Code was launched from the Dock.
+    expect(runner.execFile).toHaveBeenCalledWith(
+      'gh',
+      ['pr', 'list', '--head', 'feat/x', '--json', 'number,state,url'],
+      { cwd: WT, timeout: 15000 },
     );
     expect(monitor.getStatus('wt1')).toEqual({
       number: 42, state: 'OPEN', url: 'https://github.com/o/r/pull/42',
@@ -98,18 +104,18 @@ describe('PrMonitor', () => {
     const runner = makeRunner(OPEN_PR);
     const monitor = new PrMonitor(runner);
 
-    monitor.startPolling('feat/x', 'wt1', vi.fn());
+    monitor.startPolling('feat/x', 'wt1', WT, vi.fn());
     await vi.advanceTimersByTimeAsync(0);
-    expect(runner.exec).toHaveBeenCalledTimes(1);
+    expect(runner.execFile).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(FIVE_MIN - 1);
-    expect(runner.exec).toHaveBeenCalledTimes(1);
+    expect(runner.execFile).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1);
-    expect(runner.exec).toHaveBeenCalledTimes(2);
+    expect(runner.execFile).toHaveBeenCalledTimes(2);
 
     await vi.advanceTimersByTimeAsync(FIVE_MIN);
-    expect(runner.exec).toHaveBeenCalledTimes(3);
+    expect(runner.execFile).toHaveBeenCalledTimes(3);
   });
 
   it('fires the callback only when the status actually changes', async () => {
@@ -117,14 +123,14 @@ describe('PrMonitor', () => {
     const monitor = new PrMonitor(runner);
     const callback = vi.fn();
 
-    monitor.startPolling('feat/x', 'wt1', callback);
+    monitor.startPolling('feat/x', 'wt1', WT, callback);
     await vi.advanceTimersByTimeAsync(0);
     expect(callback).toHaveBeenCalledTimes(1); // undefined -> OPEN
 
     await vi.advanceTimersByTimeAsync(FIVE_MIN);
     expect(callback).toHaveBeenCalledTimes(1); // OPEN -> OPEN (same JSON): no fire
 
-    runner.exec.mockResolvedValue('[{"number":42,"state":"MERGED","url":"https://github.com/o/r/pull/42"}]');
+    runner.execFile.mockResolvedValue('[{"number":42,"state":"MERGED","url":"https://github.com/o/r/pull/42"}]');
     await vi.advanceTimersByTimeAsync(FIVE_MIN);
     expect(callback).toHaveBeenCalledTimes(2); // OPEN -> MERGED: fires
     expect(monitor.getStatus('wt1')).toEqual({
@@ -133,13 +139,13 @@ describe('PrMonitor', () => {
   });
 
   it('survives gh CLI errors: caches null, fires once for the initial undefined->null transition, then stays quiet', async () => {
-    const runner: IProcessRunner & { exec: ReturnType<typeof vi.fn> } = {
-      exec: vi.fn().mockRejectedValue(new Error('gh: command not found')),
+    const runner: IFileRunner & { execFile: ReturnType<typeof vi.fn> } = {
+      execFile: vi.fn().mockRejectedValue(new Error('gh: command not found')),
     };
     const monitor = new PrMonitor(runner);
     const callback = vi.fn();
 
-    monitor.startPolling('feat/x', 'wt1', callback);
+    monitor.startPolling('feat/x', 'wt1', WT, callback);
     await vi.advanceTimersByTimeAsync(0);
     // real behavior: the very first poll fires (cache goes undefined -> null)
     expect(callback).toHaveBeenCalledTimes(1);
@@ -148,7 +154,7 @@ describe('PrMonitor', () => {
     // subsequent failing polls do NOT emit (null -> null) and polling keeps going
     await vi.advanceTimersByTimeAsync(FIVE_MIN);
     await vi.advanceTimersByTimeAsync(FIVE_MIN);
-    expect(runner.exec).toHaveBeenCalledTimes(3);
+    expect(runner.execFile).toHaveBeenCalledTimes(3);
     expect(callback).toHaveBeenCalledTimes(1);
   });
 
@@ -157,7 +163,7 @@ describe('PrMonitor', () => {
     const monitor = new PrMonitor(runner);
     const callback = vi.fn();
 
-    monitor.startPolling('feat/x', 'wt1', callback);
+    monitor.startPolling('feat/x', 'wt1', WT, callback);
     await vi.advanceTimersByTimeAsync(0);
     expect(callback).toHaveBeenCalledTimes(1);
     expect(monitor.getStatus('wt1')).toBeNull();
@@ -170,11 +176,11 @@ describe('PrMonitor', () => {
     const runner = makeRunner(OPEN_PR);
     const monitor = new PrMonitor(runner);
 
-    monitor.startPolling('feat/a', 'wtA', vi.fn());
+    monitor.startPolling('feat/a', 'wtA', WT, vi.fn());
     await vi.advanceTimersByTimeAsync(0);
 
-    runner.exec.mockResolvedValue('[]');
-    monitor.startPolling('feat/b', 'wtB', vi.fn());
+    runner.execFile.mockResolvedValue('[]');
+    monitor.startPolling('feat/b', 'wtB', WT, vi.fn());
     await vi.advanceTimersByTimeAsync(0);
 
     expect(monitor.getStatus('wtA')).toEqual({
@@ -187,13 +193,13 @@ describe('PrMonitor', () => {
     const runner = makeRunner(OPEN_PR);
     const monitor = new PrMonitor(runner);
 
-    monitor.startPolling('feat/x', 'wt1', vi.fn());
+    monitor.startPolling('feat/x', 'wt1', WT, vi.fn());
     await vi.advanceTimersByTimeAsync(0);
-    expect(runner.exec).toHaveBeenCalledTimes(1);
+    expect(runner.execFile).toHaveBeenCalledTimes(1);
 
     monitor.stopPolling('wt1');
     await vi.advanceTimersByTimeAsync(FIVE_MIN * 3);
-    expect(runner.exec).toHaveBeenCalledTimes(1); // no more polls
+    expect(runner.execFile).toHaveBeenCalledTimes(1); // no more polls
     expect(monitor.getStatus('wt1')).toEqual({    // cache survives stopPolling
       number: 42, state: 'OPEN', url: 'https://github.com/o/r/pull/42',
     });
@@ -206,13 +212,13 @@ describe('PrMonitor', () => {
 
   it('does not reschedule when stopped while a fetch is in flight (but still writes cache + fires)', async () => {
     const d = deferred<string>();
-    const runner: IProcessRunner & { exec: ReturnType<typeof vi.fn> } = {
-      exec: vi.fn().mockReturnValue(d.promise),
+    const runner: IFileRunner & { execFile: ReturnType<typeof vi.fn> } = {
+      execFile: vi.fn().mockReturnValue(d.promise),
     };
     const monitor = new PrMonitor(runner);
     const callback = vi.fn();
 
-    monitor.startPolling('feat/x', 'wt1', callback);
+    monitor.startPolling('feat/x', 'wt1', WT, callback);
     monitor.stopPolling('wt1'); // deregistered before the first fetch resolves
 
     d.resolve(OPEN_PR);
@@ -225,42 +231,42 @@ describe('PrMonitor', () => {
     expect(callback).toHaveBeenCalledTimes(1);
     // ...but no next poll is scheduled since the entry is gone
     await vi.advanceTimersByTimeAsync(FIVE_MIN * 3);
-    expect(runner.exec).toHaveBeenCalledTimes(1);
+    expect(runner.execFile).toHaveBeenCalledTimes(1);
   });
 
   it('startPolling for the same worktree stops the existing poll first', async () => {
     const runner = makeRunner(OPEN_PR);
     const monitor = new PrMonitor(runner);
 
-    monitor.startPolling('feat/old', 'wt1', vi.fn());
+    monitor.startPolling('feat/old', 'wt1', WT, vi.fn());
     await vi.advanceTimersByTimeAsync(0); // old poll completed, its 5min timer is set
 
-    monitor.startPolling('feat/new', 'wt1', vi.fn());
+    monitor.startPolling('feat/new', 'wt1', WT, vi.fn());
     await vi.advanceTimersByTimeAsync(0);
-    expect(runner.exec).toHaveBeenCalledTimes(2);
-    expect(runner.exec.mock.calls[1][0]).toBe('gh pr list --head "feat/new" --json number,state,url');
+    expect(runner.execFile).toHaveBeenCalledTimes(2);
+    expect(runner.execFile.mock.calls[1][1]).toContain('feat/new');
 
     // only the NEW poll runs after 5min — the old timer was cleared
     await vi.advanceTimersByTimeAsync(FIVE_MIN);
-    expect(runner.exec).toHaveBeenCalledTimes(3);
-    expect(runner.exec.mock.calls[2][0]).toBe('gh pr list --head "feat/new" --json number,state,url');
+    expect(runner.execFile).toHaveBeenCalledTimes(3);
+    expect(runner.execFile.mock.calls[2][1]).toContain('feat/new');
   });
 
   it('dispose stops all polls and clears the cache', async () => {
     const runner = makeRunner(OPEN_PR);
     const monitor = new PrMonitor(runner);
 
-    monitor.startPolling('feat/a', 'wtA', vi.fn());
-    monitor.startPolling('feat/b', 'wtB', vi.fn());
+    monitor.startPolling('feat/a', 'wtA', WT, vi.fn());
+    monitor.startPolling('feat/b', 'wtB', WT, vi.fn());
     await vi.advanceTimersByTimeAsync(0);
-    expect(runner.exec).toHaveBeenCalledTimes(2);
+    expect(runner.execFile).toHaveBeenCalledTimes(2);
 
     monitor.dispose();
     expect(monitor.getStatus('wtA')).toBeUndefined();
     expect(monitor.getStatus('wtB')).toBeUndefined();
 
     await vi.advanceTimersByTimeAsync(FIVE_MIN * 3);
-    expect(runner.exec).toHaveBeenCalledTimes(2); // no polls after dispose
+    expect(runner.execFile).toHaveBeenCalledTimes(2); // no polls after dispose
   });
 });
 
@@ -268,11 +274,11 @@ describe('PrMonitor', () => {
 
 describe('defaultRunner', () => {
   it('resolves with trimmed stdout', async () => {
-    await expect(defaultRunner.exec('printf "  hi  \\n"')).resolves.toBe('hi');
+    await expect(defaultRunner.execFile('printf', ['  hi  \n'])).resolves.toBe('hi');
   });
 
-  it('passes cwd, env and timeout through to child_process.exec', async () => {
-    const out = await defaultRunner.exec('echo "$FOREMAN_TEST_VAR:$(pwd)"', {
+  it('passes cwd, env and timeout through to child_process.execFile', async () => {
+    const out = await defaultRunner.execFile('sh', ['-c', 'echo "$FOREMAN_TEST_VAR:$(pwd)"'], {
       cwd: '/',
       env: { ...process.env, FOREMAN_TEST_VAR: 'pr-runner' },
       timeout: 10_000,
@@ -281,6 +287,13 @@ describe('defaultRunner', () => {
   });
 
   it('rejects when the command exits non-zero', async () => {
-    await expect(defaultRunner.exec('exit 7')).rejects.toThrow();
+    await expect(defaultRunner.execFile('sh', ['-c', 'exit 7'])).rejects.toThrow();
+  });
+
+  it('runs no shell: a branch carrying $(…) reaches the program as literal text', async () => {
+    // The injection this replaced: `gh pr list --head "<branch>"` through exec,
+    // where the shell ran whatever the (perfectly valid) branch name said.
+    const branch = 'feat/$(echo pwned)`id`';
+    await expect(defaultRunner.execFile('printf', ['%s', branch])).resolves.toBe(branch);
   });
 });

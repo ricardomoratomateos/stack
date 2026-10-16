@@ -39,9 +39,10 @@ export interface IGitPort {
   /**
    * Unified diff for a worktree. `base: 'working'` diffs the working tree against
    * HEAD (staged + unstaged + untracked); `base: 'branch'` diffs the whole branch
-   * against its merge-base with the main branch (`<base>...HEAD`). Returns '' on
-   * git failure or when there is nothing to show. Async — a big repo's diff can be
-   * large, so it must never block the extension host.
+   * against its merge-base with the main branch (`<base>...HEAD`). Returns ''
+   * only when there is nothing to show; rejects with a DiffError when git fails,
+   * so the two never look alike. Async — a big repo's diff can be large, so it
+   * must never block the extension host.
    */
   diff(worktreePath: string, opts: DiffOptions): Promise<string>;
   /**
@@ -61,4 +62,23 @@ export interface DiffOptions {
   base: DiffBase;
   /** Candidate main-branch names to resolve the merge-base against (branch mode). */
   mainBranchCandidates?: string[];
+}
+
+/**
+ * The diff could not be computed — as opposed to there being nothing to show.
+ *
+ * Those two used to be the same empty string, so a repository git could not
+ * read, a worktree removed underneath the panel, or a base ref that no longer
+ * resolves all told the reviewer "No changes to review" — the one answer that
+ * sends them away believing the agent did nothing. `reason` is git's own
+ * one-line complaint, meant to be shown as is.
+ */
+export class DiffError extends Error {
+  constructor(
+    readonly reason: string,
+    cause?: unknown,
+  ) {
+    super(`couldn't compute the diff: ${reason}`, { cause });
+    this.name = 'DiffError';
+  }
 }
