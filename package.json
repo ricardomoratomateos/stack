@@ -104,6 +104,15 @@
         "icon": "$(tag)"
       },
       {
+        "command": "foreman.focusNextAttention",
+        "title": "Foreman: Focus Next Worktree Needing Attention"
+      },
+      {
+        "command": "foreman.switchSidebarStyle",
+        "title": "Foreman: Switch Sidebar Style",
+        "icon": "$(layout)"
+      },
+      {
         "command": "foreman.focusSession",
         "title": "Foreman: Focus Session"
       },
@@ -140,6 +149,11 @@
         "command": "foreman.focusPrevWorktree",
         "key": "ctrl+shift+[",
         "mac": "cmd+shift+["
+      },
+      {
+        "command": "foreman.focusNextAttention",
+        "key": "ctrl+alt+j",
+        "mac": "cmd+alt+j"
       },
       {
         "command": "foreman.attachLatestScreenshot",
@@ -210,6 +224,21 @@
           "type": "string",
           "default": "opencode",
           "description": "Command to launch opencode"
+        },
+        "foreman.sidebarStyle": {
+          "type": "string",
+          "enum": [
+            "aside",
+            "claude",
+            "mission"
+          ],
+          "enumDescriptions": [
+            "Aside: monochrome with a single lime accent, a composer, filter chips, worktrees grouped by state and a health strip.",
+            "Claude: warm terracotta accent, a prompt composer at the top and worktrees grouped by what they need from you. Follows the VS Code theme.",
+            "Mission control: state counters that filter, an attention queue and cards with a metadata grid. Follows the VS Code theme."
+          ],
+          "default": "aside",
+          "description": "How the Foreman sidebar looks. Switches live, without a reload. The same worktrees and actions are in every style; only the layout and colours differ. Also under \"Foreman: Switch Sidebar Style\"."
         },
         "foreman.notifyOnAttention": {
           "type": "boolean",

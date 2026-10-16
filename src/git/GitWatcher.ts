@@ -94,6 +94,51 @@ export async function baseDrift(
   return undefined;
 }
 
+/** Sums `git diff --numstat`; binary files print "-" for both counts and add nothing. */
+export function parseNumstat(output: string): { added: number; removed: number } {
+  let added = 0;
+  let removed = 0;
+  for (const line of output.split('\n')) {
+    const [a, r] = line.split('\t');
+    // `r` is absent on a blank line; test() reads that as the text "undefined", which is no number.
+    if (/^\d+$/.test(a) && /^\d+$/.test(r)) {
+      added += Number(a);
+      removed += Number(r);
+    }
+  }
+  return { added, removed };
+}
+
+/**
+ * Lines added and removed since the branch left its base, uncommitted tracked
+ * changes included — the "+40 −9" on a row. Measured from the merge base rather
+ * than the base's tip, so commits the base gained since do not show up as work
+ * this branch deleted. Without a base (the main checkout) it is the working
+ * tree against HEAD. Untracked files are not counted: git has no diff for them.
+ *
+ * Undefined when there is nothing to count or git could not say; the sidebar
+ * falls back to the number of files then.
+ */
+export async function diffLines(
+  worktreePath: string,
+  base: BaseDrift | undefined,
+  run: (cmd: string) => Promise<string> = async (cmd) =>
+    (await execAsync(cmd, { cwd: worktreePath, maxBuffer: 16 * 1024 * 1024 })).stdout,
+): Promise<{ added: number; removed: number } | undefined> {
+  try {
+    let from = 'HEAD';
+    if (base) {
+      const mergeBase = (await run(`git merge-base HEAD ${quoteRef(base.ref)}`)).trim();
+      if (!/^[0-9a-f]{40,64}$/.test(mergeBase)) return undefined;
+      from = mergeBase;
+    }
+    const lines = parseNumstat(await run(`git diff --numstat ${from}`));
+    return lines.added + lines.removed > 0 ? lines : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Refs reach here from a config file and a branch name, so they are quoted.
  *
@@ -125,7 +170,10 @@ export async function fetchStatus(worktreePath: string, baseBranch?: string): Pr
 
     const base = baseBranch ? await baseDrift(worktreePath, baseBranch) : undefined;
 
-    return { hasChanges, staged, unstaged, untracked, ahead, behind, base };
+    // Only worth a process when there is something to count.
+    const lines = hasChanges || (base?.ahead ?? 0) > 0 ? await diffLines(worktreePath, base) : undefined;
+
+    return { hasChanges, staged, unstaged, untracked, ahead, behind, base, ...(lines ? { lines } : {}) };
   } catch {
     return DEFAULT_STATUS;
   }

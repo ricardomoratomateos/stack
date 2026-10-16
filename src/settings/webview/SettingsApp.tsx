@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { T } from '../../webview/tokens';
 import { PROVIDER_IDS, PROVIDER_INSTALL, type ProviderId } from '../../ports/IAgentProvider';
+import { SIDEBAR_STYLES, SIDEBAR_STYLE_INFO, type SidebarStyle } from '../../sidebarStyle';
 import { DEBUG_PRESETS, STACK_ORDER, presetFor } from '../presets';
 import type { FileField, ProjectValues, SettingsExtMessage, SettingsSnapshot, Stack, UserValues } from '../types';
 import { send } from './vscode';
@@ -63,6 +64,9 @@ const STR = {
   installed: 'installed',
   notFound: 'not on PATH',
   command: 'Command',
+  appearance: 'Appearance',
+  sidebarStyle: 'Sidebar style',
+  sidebarStyleHint: 'Switches live. The same worktrees and actions are in every style; only the layout and colours differ.',
   behaviour: 'Behaviour',
   notify: 'Native notification when an agent needs you and VS Code is in the background',
   focusMode: 'Focus mode: switching worktree closes the other worktrees’ tabs and terminals',
@@ -328,6 +332,17 @@ export function SettingsApp() {
                 />
               ))}
             </div>
+          </Section>
+
+          <Section title={STR.appearance}>
+            <Field label={STR.sidebarStyle} hint={`${SIDEBAR_STYLE_INFO[user.sidebarStyle].description} ${STR.sidebarStyleHint}`}>
+              <Select
+                value={user.sidebarStyle}
+                options={[...SIDEBAR_STYLES]}
+                labels={Object.fromEntries(SIDEBAR_STYLES.map((id) => [id, SIDEBAR_STYLE_INFO[id].label]))}
+                onChange={(v) => patchUser({ sidebarStyle: v as SidebarStyle })}
+              />
+            </Field>
           </Section>
 
           <Section title={STR.behaviour}>

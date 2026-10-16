@@ -4,6 +4,10 @@ export type AgentState = 'active' | 'waiting' | 'permission' | 'idle' | 'termina
 export type { ProviderId } from '../ports/IAgentProvider';
 import type { ProviderId } from '../ports/IAgentProvider';
 
+/** Which of the sidebar's layouts to render (type-only, erased at build). */
+export type { SidebarStyle } from '../sidebarStyle';
+import type { SidebarStyle } from '../sidebarStyle';
+
 export interface GitStatus {
   hasChanges: boolean;
   staged: number;
@@ -14,6 +18,8 @@ export interface GitStatus {
   behind: number;
   /** Against the branch this worktree was cut from: "should I rebase?". */
   base?: BaseDrift;
+  /** Lines added/removed since the branch left its base; see src/types.ts. */
+  lines?: { added: number; removed: number };
 }
 
 export interface BaseDrift {
@@ -63,11 +69,28 @@ export interface SessionItem {
   state: AgentState;
   /** Live task title from the agent's terminal title (falls back to `name` in the UI). */
   title?: string;
+  /**
+   * What the agent said when it asked for you — the notification's message, or
+   * the command it wants permission to run. Only set while the session is in
+   * `permission`/`waiting`; the sidebar shows it only for `permission`.
+   */
+  attention?: string;
   index: number;
 }
 
 export interface WorktreeItem {
   id: string;
+  /**
+   * The worktree's directory is gone (deleted behind git's back). Only ever
+   * present, and then `true`; the card offers an explicit "Forget".
+   */
+  missing?: true;
+  /**
+   * When (epoch ms) the worktree entered the state it is in now, as the
+   * extension host saw it — drives the age on a row and the order of the
+   * attention queue. Counts from when this window first saw the state.
+   */
+  since?: number;
   branch: string;
   alias?: string;
   path: string;
@@ -106,6 +129,8 @@ export interface ForemanState {
    * CLI missing). While set, an empty stack means "unknown", not "down".
    */
   dockerUnavailable?: string;
+  /** Which layout the sidebar renders (foreman.sidebarStyle). */
+  sidebarStyle?: SidebarStyle;
   /** Local branches offered as the base for a new worktree (filled on demand). */
   branches?: string[];
   /** Branch preselected as the base — the main repo's current branch. */
@@ -144,4 +169,6 @@ export type WebMessage =
   | { type: 'openNewTask' }
   | { type: 'createWorktree'; branch: string; title?: string; description?: string; baseBranch?: string }
   | { type: 'listBranches' }
-  | { type: 'selectWorktree'; worktreeId: string };
+  | { type: 'selectWorktree'; worktreeId: string }
+  /** The explicit answer to a `missing` worktree: drop its entry (nothing on disk is touched). */
+  | { type: 'forgetWorktree'; worktreeId: string };

@@ -1,4 +1,5 @@
 import type { ProviderId } from './ports/IAgentProvider';
+import type { SidebarStyle } from './sidebarStyle';
 
 export type AgentSessionState = 'active' | 'waiting' | 'permission' | 'idle' | 'terminated';
 
@@ -43,6 +44,12 @@ export interface GitStatus {
    * worktree, a base branch that no longer exists, a comparison git refused.
    */
   base?: BaseDrift;
+  /**
+   * Lines added and removed since the branch left its base (the main worktree:
+   * since HEAD), uncommitted tracked changes included. Absent when there is
+   * nothing to count or git could not say; untracked files are not in it.
+   */
+  lines?: { added: number; removed: number };
 }
 
 export interface BaseDrift {
@@ -136,6 +143,8 @@ export interface ForemanConfig {
    * VSCode keeps the tab order intact.
    */
   focusMode: boolean;
+  /** Which of the sidebar's layouts to render. */
+  sidebarStyle: SidebarStyle;
   /** Per-worktree docker orchestration (compose files + auto-generated ports). */
   docker: DockerConfig;
   debugBasePort: number;

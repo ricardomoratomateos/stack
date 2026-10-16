@@ -20,6 +20,7 @@ import { HookServer } from './server/HookServer';
 import { ForemanWebviewProvider } from './sidebar/ForemanWebviewProvider';
 import { PrMonitor } from './pr/PrMonitor';
 import { TmuxManager } from './session/TmuxManager';
+import { switchSidebarStyle } from './sidebar/switchSidebarStyle';
 import { WorktreeDimDecorationProvider } from './sidebar/WorktreeDimDecorationProvider';
 import { TerminalFileLinkProvider } from './terminal/TerminalFileLinkProvider';
 import { ImageDropCatcher } from './terminal/ImageDropCatcher';
@@ -428,6 +429,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
           opencodeCommand: effective.opencodeCommand,
           notifyOnAttention: effective.notifyOnAttention,
           focusMode: effective.focusMode,
+          sidebarStyle: effective.sidebarStyle,
           scopeSearchToActiveWorktree: effective.scopeSearchToActiveWorktree,
         },
         installedProviders: installedProviders(effective),
@@ -569,6 +571,13 @@ export async function activate(ctx: vscode.ExtensionContext) {
     openNewTask: () => newTaskPanel.open(),
   });
 
+  // What an agent said when it asked for you, for the sidebar's "needs you" rows.
+  ctx.subscriptions.push(
+    hookServer.onHookEvent((e) => {
+      if (agentManager.noteHookEvent(e)) webviewProvider.push();
+    }),
+  );
+
   // React when the user opens a folder — load its worktrees if it's a git repo.
   ctx.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders((e) => {
@@ -618,6 +627,16 @@ export async function activate(ctx: vscode.ExtensionContext) {
     vscode.commands.registerCommand('foreman.launchAgent', (item) => service.launchAgent(item?.worktree)),
     vscode.commands.registerCommand('foreman.focusNextWorktree', () => service.focusNextWorktree()),
     vscode.commands.registerCommand('foreman.focusPrevWorktree', () => service.focusPrevWorktree()),
+    vscode.commands.registerCommand('foreman.focusNextAttention', () => service.focusNextAttention()),
+    vscode.commands.registerCommand('foreman.switchSidebarStyle', () =>
+      switchSidebarStyle({
+        current: () => config.get().sidebarStyle,
+        pick: (items, placeHolder) => Promise.resolve(vscode.window.showQuickPick(items, { placeHolder, matchOnDetail: true })),
+        // Through saveUserValues so a workspace-level value, which would
+        // outrank a global write, is the one that changes.
+        save: (style) => config.saveUserValues({ sidebarStyle: style }),
+      }),
+    ),
     vscode.commands.registerCommand('foreman.focusSession', (terminal: vscode.Terminal | undefined) => terminal?.show()),
     vscode.commands.registerCommand('foreman.attachLatestScreenshot', async () => {
       const term = vscode.window.activeTerminal;

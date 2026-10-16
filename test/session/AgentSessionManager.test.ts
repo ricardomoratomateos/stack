@@ -70,7 +70,7 @@ function create(claudeCommand = 'claude', memento: vscode.Memento = new FakeMeme
 }
 
 /** Seed the private windows map directly (state combinations unreachable via public API). */
-function seed(mgr: AgentSessionManager, worktreeId: string, entries: Array<[number, { kind: 'agent' | 'shell'; provider?: ProviderId; state: AgentSessionState; name: string; hookSeen?: boolean; title?: string }]>) {
+function seed(mgr: AgentSessionManager, worktreeId: string, entries: Array<[number, { kind: 'agent' | 'shell'; provider?: ProviderId; state: AgentSessionState; name: string; hookSeen?: boolean; title?: string; attention?: string; attentionFromRequest?: boolean }]>) {
   const map = (mgr as unknown as { windowMap(id: string): Map<number, unknown> }).windowMap(worktreeId);
   for (const [idx, meta] of entries) map.set(idx, meta);
 }
@@ -302,6 +302,91 @@ describe('getSessions', () => {
     // Order puts 3 first, 1 second; window 2 is not listed → goes last.
     mgr.setSessionOrder('wt-1', [3, 1]);
     expect(mgr.getSessions('wt-1').map(s => s.index)).toEqual([3, 1, 2]);
+  });
+});
+
+// ── attention (what the agent asked) ──────────────────────────────────────────
+
+describe('attention message', () => {
+  const agent = (state: AgentSessionState = 'permission') =>
+    ({ kind: 'agent' as const, provider: 'claude' as const, state, name: 'claude' });
+  const sessionsOf = (mgr: AgentSessionManager) => mgr.getSessions('wt-1').map((s) => s.attention);
+
+  it('keeps a notification\'s message on the window that sent it', () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[1, agent()], [2, agent()]]);
+    expect(mgr.noteHookEvent({ event: 'Notification', workspaceId: 'wt-1', windowIndex: 2, message: 'Claude needs your permission to use Bash' })).toBe(true);
+    expect(sessionsOf(mgr)).toEqual([undefined, 'Claude needs your permission to use Bash']);
+  });
+
+  it('applies to every window asking when the hook could not say which sent it', () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[1, agent()], [2, agent('active')], [3, agent()]]);
+    mgr.noteHookEvent({ event: 'Notification', workspaceId: 'wt-1', message: 'Pick one' });
+    expect(sessionsOf(mgr)).toEqual(['Pick one', undefined, 'Pick one']);
+  });
+
+  it('reads the command out of a permission request, which has no message', () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[1, agent()]]);
+    mgr.noteHookEvent({ event: 'PermissionRequest', workspaceId: 'wt-1', windowIndex: 1, payload: { tool_name: 'Bash', tool_input: { command: ' composer test ' } } });
+    expect(sessionsOf(mgr)).toEqual(['Bash: composer test']);
+  });
+
+  it('names the file for a tool that edits one, and falls back to the message otherwise', () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[1, agent()]]);
+    mgr.noteHookEvent({ event: 'PermissionRequest', workspaceId: 'wt-1', windowIndex: 1, payload: { tool_name: 'Edit', tool_input: { file_path: 'src/a.ts' } } });
+    expect(sessionsOf(mgr)).toEqual(['Edit: src/a.ts']);
+    mgr.noteHookEvent({ event: 'PermissionRequest', workspaceId: 'wt-1', windowIndex: 1, message: 'plain', payload: { tool_name: 'Edit', tool_input: {} } });
+    expect(sessionsOf(mgr)).toEqual(['plain']);
+    mgr.noteHookEvent({ event: 'PermissionRequest', workspaceId: 'wt-1', windowIndex: 1, payload: { tool_name: 'Bash', tool_input: { command: '  ' } } });
+    expect(sessionsOf(mgr)).toEqual(['plain']);
+  });
+
+  it('does not let a notification\'s prose replace the command a request named', () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[1, agent()]]);
+    mgr.noteHookEvent({ event: 'PermissionRequest', workspaceId: 'wt-1', windowIndex: 1, payload: { tool_name: 'Bash', tool_input: { command: 'ls' } } });
+    expect(mgr.noteHookEvent({ event: 'Notification', workspaceId: 'wt-1', windowIndex: 1, message: 'Claude needs your permission' })).toBe(false);
+    expect(sessionsOf(mgr)).toEqual(['Bash: ls']);
+  });
+
+  it('lets a request replace a notification that arrived first', () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[1, agent()]]);
+    mgr.noteHookEvent({ event: 'Notification', workspaceId: 'wt-1', windowIndex: 1, message: 'Claude needs your permission' });
+    mgr.noteHookEvent({ event: 'PermissionRequest', workspaceId: 'wt-1', windowIndex: 1, payload: { tool_name: 'Bash', tool_input: { command: 'ls' } } });
+    expect(sessionsOf(mgr)).toEqual(['Bash: ls']);
+  });
+
+  it('ignores other events, empty messages, unknown worktrees and windows that are not asking', () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[1, agent('active')], [2, { kind: 'shell', state: 'permission', name: 'zsh' }]]);
+    expect(mgr.noteHookEvent({ event: 'PreToolUse', workspaceId: 'wt-1', message: 'x' })).toBe(false);
+    expect(mgr.noteHookEvent({ event: 'Notification', workspaceId: 'wt-1' })).toBe(false);
+    expect(mgr.noteHookEvent({ event: 'Notification', workspaceId: 'nope', message: 'x' })).toBe(false);
+    expect(mgr.noteHookEvent({ event: 'Notification', workspaceId: 'wt-1', message: 'x' })).toBe(false);
+    expect(sessionsOf(mgr)).toEqual([undefined, undefined]);
+  });
+
+  it('is cleared when the agent moves on, but kept while it is still asking or waiting', () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [[1, agent()], [2, agent()]]);
+    mgr.noteHookEvent({ event: 'Notification', workspaceId: 'wt-1', message: 'Pick one' });
+
+    mgr.updateState('wt-1', 'permission', 1);
+    expect(sessionsOf(mgr)).toEqual(['Pick one', 'Pick one']);
+    mgr.updateState('wt-1', 'waiting', 1);
+    expect(sessionsOf(mgr)).toEqual(['Pick one', 'Pick one']);
+
+    // Only the window that moved on forgets; the other is still asking.
+    mgr.updateState('wt-1', 'active', 1);
+    expect(sessionsOf(mgr)).toEqual([undefined, 'Pick one']);
+
+    // A hook that cannot say which window sent it clears them all.
+    mgr.updateState('wt-1', 'active');
+    expect(sessionsOf(mgr)).toEqual([undefined, undefined]);
   });
 });
 

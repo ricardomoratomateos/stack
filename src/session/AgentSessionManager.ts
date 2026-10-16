@@ -20,6 +20,14 @@ type WindowMeta = {
   title?: string;
   /** A hook event has arrived from this window: the agent is initialised and listening. */
   hookSeen?: boolean;
+  /**
+   * What the agent said when it asked for the user (a notification's message,
+   * or the command awaiting permission). Kept only while the window is in
+   * `permission` or `waiting`; see updateState.
+   */
+  attention?: string;
+  /** `attention` came from a permission request, which names the command and so outranks a notification's prose. */
+  attentionFromRequest?: boolean;
 };
 
 /**
@@ -28,6 +36,19 @@ type WindowMeta = {
  * again if the agent binary is missing or exits at once.
  */
 const SHELL_COMMANDS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'csh', 'tcsh']);
+
+/**
+ * "Bash: <command>" for a permission request that runs a command, "<Tool>: <file>"
+ * for one that touches a file; undefined when the payload says neither.
+ */
+function requestSummary(payload: Record<string, unknown> | undefined): string | undefined {
+  const tool = payload?.['tool_name'];
+  const input = payload?.['tool_input'];
+  if (typeof tool !== 'string' || !input || typeof input !== 'object') return undefined;
+  const { command, file_path: file } = input as Record<string, unknown>;
+  if (typeof command === 'string' && command.trim()) return `${tool}: ${command.trim()}`;
+  return typeof file === 'string' && file ? `${tool}: ${file}` : undefined;
+}
 
 export class AgentSessionManager {
   // worktreeId → (tmux window index → metadata)
@@ -804,11 +825,57 @@ export class AgentSessionManager {
         if (key.startsWith(`${workspaceId}:`)) for (const waiter of waiters) waiter(state);
       }
     }
+    this.dropStaleAttention(map, state, windowIndex);
     this.persistState(workspaceId);
     this.stateChangeEmitter.fire({ worktreeId: workspaceId, state: this.aggregateState(workspaceId), windowIndex });
     // Hook events are the heartbeat of a session — piggyback title syncing on them.
     this.refreshTitles(workspaceId).catch(() => {});
     this.scheduleTitleRefresh(workspaceId);
+  }
+
+  /** The agent has moved on from asking, so what it asked is no longer news. */
+  private dropStaleAttention(map: Map<number, WindowMeta>, state: AgentSessionState, windowIndex?: number): void {
+    if (state === 'permission' || state === 'waiting') return;
+    for (const [idx, meta] of map) {
+      if ((windowIndex !== undefined && idx !== windowIndex) || meta.attention === undefined) continue;
+      const { attention: _attention, attentionFromRequest: _request, ...rest } = meta;
+      map.set(idx, rest);
+    }
+  }
+
+  /**
+   * Keeps what an agent said when it asked for the user, so the sidebar can
+   * show the question instead of just "needs attention".
+   *
+   * Fed from HookServer.onHookEvent, after updateState has already moved the
+   * window to `permission`. A permission request carries the tool call rather
+   * than a message, so the command is read from it; a notification's prose
+   * does not overwrite that, since the command is the more useful of the two.
+   * Returns whether anything changed, so the caller knows to repaint the
+   * sidebar. Fires no state event on purpose: the state did not change, and listeners
+   * such as the attention notifier would take a second one for a second ask.
+   */
+  noteHookEvent(e: {
+    event: string;
+    workspaceId: string;
+    windowIndex?: number;
+    message?: string;
+    payload?: Record<string, unknown>;
+  }): boolean {
+    const isRequest = e.event === 'PermissionRequest';
+    if (!isRequest && e.event !== 'Notification') return false;
+    const text = (isRequest ? requestSummary(e.payload) : undefined) ?? e.message;
+    const map = this.windows.get(e.workspaceId);
+    if (!text || !map) return false;
+    let changed = false;
+    for (const [idx, meta] of map) {
+      if (meta.kind !== 'agent' || meta.state !== 'permission') continue;
+      if (e.windowIndex !== undefined && idx !== e.windowIndex) continue;
+      if (!isRequest && meta.attentionFromRequest) continue;
+      map.set(idx, { ...meta, attention: text, attentionFromRequest: isRequest });
+      changed = true;
+    }
+    return changed;
   }
 
   getSessions(worktreeId: string): SessionItem[] {
@@ -822,6 +889,7 @@ export class AgentSessionManager {
       provider: meta.provider,
       state: meta.state,
       title: meta.title,
+      attention: meta.attention,
       index,
     }));
     const order = this.orders.get(worktreeId);

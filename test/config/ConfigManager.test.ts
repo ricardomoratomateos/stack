@@ -60,6 +60,7 @@ describe('ConfigManager', () => {
       notifyOnAttention: true,
       scopeSearchToActiveWorktree: true,
       focusMode: false,
+      sidebarStyle: 'aside',
       docker: {
         composeFile: 'docker-compose.yml',
         overrideFile: 'docker-compose.worktree.yml',
@@ -77,6 +78,13 @@ describe('ConfigManager', () => {
     });
   });
 
+  it('falls back to the default sidebar style for a value it does not know', () => {
+    withSettings({ sidebarStyle: 'neon' });
+    expect(new ConfigManager().get().sidebarStyle).toBe('aside');
+    withSettings({ sidebarStyle: 'claude' });
+    expect(new ConfigManager().get().sidebarStyle).toBe('claude');
+  });
+
   it('returns user overrides when set', () => {
     const overrides: Record<string, unknown> = {
       worktreesDirectory: '/abs/worktrees',
@@ -90,6 +98,7 @@ describe('ConfigManager', () => {
       notifyOnAttention: false,
       scopeSearchToActiveWorktree: false,
       focusMode: true,
+      sidebarStyle: 'mission',
       docker: {
         composeFile: 'compose.yaml',
         overrideFile: 'compose.wt.yaml',

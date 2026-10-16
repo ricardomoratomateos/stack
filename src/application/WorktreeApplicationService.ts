@@ -23,6 +23,7 @@ import { displayLabel, truncateLabel } from '../worktree/displayLabel';
 import { findRepoRoot } from '../worktree/findRepoRoot';
 import { canonicalPath, worktreesInRepo } from '../worktree/worktreesInRepo';
 import { MAIN_BRANCH_CANDIDATES } from '../constants';
+import { attentionQueue, groupOf, nextInQueue, type WorktreeGroup } from '../webview/derive';
 import { envPrefix, shellQuote } from '../shell/shellQuote';
 
 /**
@@ -139,25 +140,9 @@ export interface WorktreeAppDeps {
 
 const NO_UI: UiBridge = { pushWebview() {}, syncDecorations() {}, openDiffPanel() {}, openNewTask() {} };
 
-/**
- * Messages the extension handles ahead of the webview protocol listing them.
- *
- * `forgetWorktree` is the explicit answer to a card flagged `missing`; it lives
- * here rather than in src/webview/types.ts only because the sidebar is being
- * redesigned and owns that file — it belongs in WebMessage once the button does.
- */
-export type PendingWebMessage = { type: 'forgetWorktree'; worktreeId: string };
-export type InboundMessage = WebMessage | PendingWebMessage;
-
-/**
- * A card's state as pushed to the webview. `missing` is only present (and then
- * true) for a worktree whose directory is gone — see findMissingWorktrees.
- */
-export type WorktreeItemState = WorktreeItem & { missing?: true };
-
-/** One strategy per webview message type; exhaustive over the InboundMessage union. */
+/** One strategy per webview message type; exhaustive over the WebMessage union. */
 type MessageHandlers = {
-  [K in InboundMessage['type']]: (msg: Extract<InboundMessage, { type: K }>) => void | Promise<void>;
+  [K in WebMessage['type']]: (msg: Extract<WebMessage, { type: K }>) => void | Promise<void>;
 };
 
 /**
@@ -182,6 +167,13 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * workspace, and never dropped from the store on Foreman's own initiative.
    */
   private missing = new Set<string>();
+  /**
+   * When each worktree entered the group it is in, for the age on its row and
+   * the order of the attention queue. Set when this window first sees the state
+   * (a window that has just loaded does not know how long an agent has been
+   * waiting), and reset whenever the group changes.
+   */
+  private groupSince = new Map<string, { group: WorktreeGroup; at: number }>();
   /**
    * What this window is watching and polling, by worktree id — so a reload can
    * stop what it no longer shows instead of only ever starting more.
@@ -560,11 +552,11 @@ export class WorktreeApplicationService implements DiffPanelHost {
     forgetWorktree: (msg) => this.forgetWorktree(msg.worktreeId),
   };
 
-  async handleMessage(msg: InboundMessage): Promise<void> {
+  async handleMessage(msg: WebMessage): Promise<void> {
     // Ignore any action targeting a worktree that is tearing down.
     if ('worktreeId' in msg && this.deleting.has(msg.worktreeId)) return;
     const handler = this.messageHandlers[msg.type] as
-      | ((m: InboundMessage) => void | Promise<void>)
+      | ((m: WebMessage) => void | Promise<void>)
       | undefined;
     if (handler) await handler(msg);
   }
@@ -845,7 +837,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const config = this.deps.config.get();
     const dockerOn = dockerConfigured(config);
     const worktrees = this.orderWorktrees(this.worktreesInWindow());
-    const items = worktrees.map((wt): WorktreeItemState => ({
+    const items = worktrees.map((wt): WorktreeItem => ({
       ...(this.missing.has(wt.id) ? { missing: true as const } : {}),
       id: wt.id,
       branch: wt.branch,
@@ -866,6 +858,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       ports: this.portsFor(wt),
       pr: this.deps.prMonitor.getStatus(wt.id) ?? null,
     }));
+    this.stampSince(items);
     const activeWorktreeId = worktrees.find((wt) => wt.id === this.currentWorktreeId)?.id;
     return {
       worktrees: items,
@@ -874,9 +867,40 @@ export class WorktreeApplicationService implements DiffPanelHost {
       installedProviders: (this.deps.installedProviders ?? installedProviders)(config),
       dockerEnabled: dockerOn,
       dockerUnavailable: dockerOn ? this.deps.dockerMonitor.unavailable() : undefined,
+      sidebarStyle: config.sidebarStyle,
       branches: this.branchOptions?.branches,
       baseBranch: this.branchOptions?.base,
     };
+  }
+
+  /** Fills in `since` on every item and forgets worktrees that have left. */
+  private stampSince(items: WorktreeItem[]): void {
+    const now = Date.now();
+    const seen = new Set<string>();
+    for (const item of items) {
+      const group = groupOf(item);
+      const known = this.groupSince.get(item.id);
+      const entry = known?.group === group ? known : { group, at: now };
+      this.groupSince.set(item.id, entry);
+      item.since = entry.at;
+      seen.add(item.id);
+    }
+    for (const id of this.groupSince.keys()) if (!seen.has(id)) this.groupSince.delete(id);
+  }
+
+  /**
+   * Jump to the next worktree that is waiting on you — asking, or finished and
+   * unreviewed — in the order the sidebar's attention queue lists them (longest
+   * waiting first), starting after the one you are on.
+   */
+  async focusNextAttention(): Promise<void> {
+    const items = this.buildState().worktrees.map((wt) => ({ wt, group: groupOf(wt) }));
+    const next = nextInQueue(attentionQueue(items), this.currentWorktreeId);
+    if (!next) {
+      this.deps.notify.showInfo('Foreman: nothing is waiting on you.');
+      return;
+    }
+    await this.handleMessage({ type: 'focusTerminal', worktreeId: next.wt.id });
   }
 
   // ── Diff review panel (DiffPanelHost) ──────────────────────────────────────
