@@ -931,8 +931,12 @@ export class WorktreeApplicationService implements DiffPanelHost {
     };
   }
 
-  /** Turn review comments into a prompt and route it to the chosen destination. */
-  async send(worktreeId: string, destination: SendDestination, comments: DiffComment[]): Promise<boolean> {
+  /**
+   * Turn review comments into a prompt and route it to the chosen destination.
+   * Resolves to where it actually went — which is `new`, not `live`, when the
+   * running agent the panel saw has exited since — or false when nothing was sent.
+   */
+  async send(worktreeId: string, destination: SendDestination, comments: DiffComment[]): Promise<SendDestination | false> {
     const wt = this.findWorktree(worktreeId);
     if (!wt) return false;
     const prompt = buildCommentPrompt(comments);
@@ -940,16 +944,16 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
     if (destination === 'clipboard') {
       await this.deps.host.writeClipboard(prompt);
-      return true;
+      return 'clipboard';
     }
     // 'live' finds no running agent when the one the panel saw has exited
     // since — the comments then go to a fresh agent rather than nowhere.
     if (destination === 'live' && (await this.deps.agentManager.sendPromptToAgent(wt, prompt))) {
-      return true;
+      return 'live';
     }
     // 'new' — launch a fresh agent seeded with the comments.
     await this.deps.agentManager.launchWithPrompt(wt, prompt);
-    return true;
+    return 'new';
   }
 
   /** Open a diff file (path relative to the worktree) in the editor. */

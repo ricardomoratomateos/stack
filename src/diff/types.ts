@@ -33,5 +33,12 @@ export type DiffPanelExtMessage =
       /** Set when the diff could not be computed; `unified` is then '' and means nothing. */
       error?: string;
     }
-  | { type: 'sent'; destination: SendDestination; ok: boolean }
+  | {
+      type: 'sent';
+      /** Where it actually went. */
+      destination: SendDestination;
+      ok: boolean;
+      /** The requested destination was not available, so it went somewhere else. */
+      fellBack?: true;
+    }
   | { type: 'error'; message: string };

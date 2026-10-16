@@ -2660,14 +2660,15 @@ describe('diff review panel', () => {
 
   it('send → live pastes into the running agent', async () => {
     const h = makeHarness({ worktrees: [wtA], liveAgentAccepts: true });
-    expect(await h.service.send('wt-a', 'live', [comment])).toBe(true);
+    expect(await h.service.send('wt-a', 'live', [comment])).toBe('live');
     expect(h.claude.sendPromptToAgent).toHaveBeenCalled();
   });
 
   it('send → live launches a fresh agent when none is running any more', async () => {
     // The panel offered "live" when it rendered; the agent can have exited since.
     const h = makeHarness({ worktrees: [wtA], liveAgentAccepts: false });
-    expect(await h.service.send('wt-a', 'live', [comment])).toBe(true);
+    // ...and says so: it went to a NEW agent, not the one the panel offered.
+    expect(await h.service.send('wt-a', 'live', [comment])).toBe('new');
     expect(h.claude.launchWithPrompt).toHaveBeenCalledWith(expect.objectContaining({ id: 'wt-a' }), expect.stringContaining('src/foo.ts:10'));
   });
 
@@ -2679,13 +2680,13 @@ describe('diff review panel', () => {
 
   it('send → new launches a fresh agent with the prompt', async () => {
     const h = makeHarness({ worktrees: [wtA] });
-    expect(await h.service.send('wt-a', 'new', [comment])).toBe(true);
+    expect(await h.service.send('wt-a', 'new', [comment])).toBe('new');
     expect(h.claude.launchWithPrompt).toHaveBeenCalled();
   });
 
   it('send → clipboard writes the prompt', async () => {
     const h = makeHarness({ worktrees: [wtA] });
-    expect(await h.service.send('wt-a', 'clipboard', [comment])).toBe(true);
+    expect(await h.service.send('wt-a', 'clipboard', [comment])).toBe('clipboard');
     expect(h.host.writeClipboard).toHaveBeenCalledWith(expect.stringContaining('src/foo.ts:10'));
   });
 

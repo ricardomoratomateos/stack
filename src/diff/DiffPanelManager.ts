@@ -7,7 +7,8 @@ import { DiffError } from '../ports/IGitPort';
 export interface DiffPanelHost {
   getDiff(worktreeId: string, base: DiffBase): Promise<string>;
   getContext(worktreeId: string): { label: string; hasLiveAgent: boolean } | undefined;
-  send(worktreeId: string, destination: SendDestination, comments: DiffComment[]): Promise<boolean>;
+  /** Where the comments actually went (a vanished live agent falls back to `new`), or false when nothing was sent. */
+  send(worktreeId: string, destination: SendDestination, comments: DiffComment[]): Promise<SendDestination | false>;
   /** Open a file (path relative to the worktree) in the editor at an optional line. */
   openFile(worktreeId: string, relativePath: string, line?: number): Promise<void>;
 }
@@ -62,8 +63,15 @@ export class DiffPanelManager {
         await this.pushDiff(worktreeId, panel, msg.base);
         break;
       case 'send': {
-        const ok = await this.host.send(worktreeId, msg.destination, msg.comments).catch(() => false);
-        this.post(panel, { type: 'sent', destination: msg.destination, ok });
+        const went = await this.host.send(worktreeId, msg.destination, msg.comments).catch(() => false as const);
+        // Reports where it went, not where it was asked to go, so the toast
+        // never claims a running agent took a prompt that launched a new one.
+        this.post(panel, {
+          type: 'sent',
+          destination: went || msg.destination,
+          ok: went !== false,
+          ...(went && went !== msg.destination ? { fellBack: true as const } : {}),
+        });
         break;
       }
       case 'openFile':
