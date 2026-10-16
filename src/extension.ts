@@ -677,6 +677,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
   const resyncDocker = () => {
     service.syncDockerPolling();
     webviewProvider.push();
+    // An open settings panel follows what changed under it — the sidebar style
+    // picked from the command, the file edited by hand. It keeps whatever the
+    // person is in the middle of editing (see reconcile in settings/draft.ts).
+    settingsPanel.refresh();
   };
   ctx.subscriptions.push(
     repoConfigWatcher,
