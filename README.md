@@ -58,6 +58,7 @@ For the heavier setup — Docker per worktree, a debugger port per worktree, set
 | `foreman.worktreesDirectory` | `.worktrees` | Where worktrees are created (relative to the workspace root) |
 | `foreman.defaultBaseBranch` | `develop` | Branch new worktrees start from, preselected in the New Task form. When it doesn't exist, Foreman uses the repo's own main line (first of `main`/`master`/`develop` it finds, local or remote), then the current branch |
 | `foreman.defaultProvider` | `claude` | Primary agent: the one the big launch button starts. The chevron beside it opens the rest |
+| `foreman.sidebarStyle` | `aside` | How the sidebar looks: `aside` (monochrome, one lime accent), `claude` (terracotta, worktrees grouped by state) or `mission` (state counters, attention queue, cards). Switches live; also under **Foreman: Switch Sidebar Style** and in the settings panel |
 | `foreman.claudeCommand` | `claude` | Command to launch Claude Code |
 | `foreman.codexCommand` | `codex` | Command to launch Codex CLI |
 | `foreman.opencodeCommand` | `opencode` | Command to launch opencode |

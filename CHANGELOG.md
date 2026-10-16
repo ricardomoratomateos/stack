@@ -6,7 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Three sidebar styles**, switchable live with `foreman.sidebarStyle`, **Foreman: Switch Sidebar Style** or the settings panel: `aside` (monochrome, one lime accent), `claude` (terracotta, worktrees grouped by what they need from you) and `mission` (state counters that filter, an attention queue, cards with a metadata grid). All three show the same things and offer the same actions; worktrees are grouped as needs you / ready for review / working / idle / missing, with the diff size, the age in that state, and the agent's own question when it asks for permission.
+- **A worktree whose folder is gone** now shows under "Missing" with a **Forget** button, instead of silently vanishing.
+- **Docker state on the sidebar**: the stack's start/stop is disabled while Foreman is working on it, a failed start shows compose's error on the worktree, and a docker daemon that is down says so in the health strip instead of looking like an empty stack.
+- **Foreman: Focus Next Worktree Needing Attention** (`Cmd+Alt+J`) walks the attention queue, longest-waiting first.
+
 ### Fixed
+
+- The review panel's confirmation no longer says "Sent to the running agent" when that agent had exited and the comments launched a new one.
 
 - **A syntax error in `~/.claude/settings.json` or `~/.codex/hooks.json` no longer costs you the file.** Foreman used to "start fresh" and write back only its own hooks; it now leaves the file untouched and says where the error is. Writes are atomic, follow symlinks, keep the file's permissions, and the first change keeps your original as `<file>.foreman-backup`.
 - **Several VS Code windows at once.** Each agent now reports to the window showing its worktree, instead of every event going to whichever window opened last. Closing a window no longer removes the hooks from under the others, and agents keep reporting across a window reload — opencode included.

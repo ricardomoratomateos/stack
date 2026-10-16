@@ -173,6 +173,11 @@
           "command": "foreman.newTask",
           "when": "view == foreman-sidebar",
           "group": "navigation@2"
+        },
+        {
+          "command": "foreman.switchSidebarStyle",
+          "when": "view == foreman-sidebar && !foreman.tmuxMissing",
+          "group": "1_appearance"
         }
       ],
       "view/item/context": []

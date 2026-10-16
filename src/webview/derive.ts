@@ -126,8 +126,9 @@ function lineFor(wt: WorktreeItem, group: WorktreeGroup, agent: SessionItem | un
     case 'missing':
       return 'Folder not found on disk';
     case 'needs': {
+      // The question itself is shown in a box under the row; the line only says what kind it is.
       const ask = attentionOf(wt);
-      return ask?.command ?? ask?.text ?? title ?? 'Wants your attention';
+      return ask?.command ? 'Wants to run a command' : ask?.text ? 'Needs your answer' : title ?? 'Wants your attention';
     }
     case 'working':
       return title ?? 'Working…';

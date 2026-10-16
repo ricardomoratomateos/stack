@@ -10,7 +10,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
-    include: ['test/**/*.test.ts'],
+    include: ['test/**/*.test.{ts,tsx}'],
     // The git/tmux integration suites shell out to real binaries against real
     // temp repos, so their wall-clock depends on machine load; 5s was tight
     // enough that they flaked when the whole suite runs in parallel.
