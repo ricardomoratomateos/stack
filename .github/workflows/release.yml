@@ -42,7 +42,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:coverage
 
-      - run: npx vsce package --no-dependencies --out "foreman-${VERSION}.vsix"
+      - run: npx vsce package --no-dependencies --out "stack-${VERSION}.vsix"
 
       - name: Release notes are the CHANGELOG entry for this version
         run: |
@@ -59,7 +59,7 @@ jobs:
       - name: GitHub release with the .vsix attached
         run: |
           PRE=""; case "$VERSION" in *-*) PRE="--prerelease" ;; esac
-          gh release create "v$VERSION" "foreman-$VERSION.vsix" \
+          gh release create "v$VERSION" "stack-$VERSION.vsix" \
             --title "v$VERSION" --notes-file RELEASE_NOTES.md $PRE
 
       # Both publishes are skipped, not failed, while the token is absent — so
@@ -68,8 +68,8 @@ jobs:
       # OVSX_PAT: open-vsx.org access token, after signing the publisher agreement.
       - name: Publish to the VS Code Marketplace
         if: env.VSCE_PAT != ''
-        run: npx vsce publish --no-dependencies --packagePath "foreman-${VERSION}.vsix" -p "$VSCE_PAT"
+        run: npx vsce publish --no-dependencies --packagePath "stack-${VERSION}.vsix" -p "$VSCE_PAT"
 
       - name: Publish to Open VSX
         if: env.OVSX_PAT != ''
-        run: npx ovsx publish "foreman-${VERSION}.vsix" -p "$OVSX_PAT"
+        run: npx ovsx publish "stack-${VERSION}.vsix" -p "$OVSX_PAT"

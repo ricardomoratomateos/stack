@@ -1,4 +1,4 @@
-# Releasing Foreman
+# Releasing Stack
 
 A release is a git tag. Everything else — tests, the `.vsix`, the GitHub
 release, the marketplaces — is done by `.github/workflows/release.yml` when the
@@ -32,9 +32,9 @@ exist — on both marketplaces a few minutes later.
 
 | Where | Who uses it | Secret | How to get the token |
 |---|---|---|---|
-| GitHub Releases | manual installs (`code --install-extension foreman-x.y.z.vsix`) | none | — |
-| [VS Code Marketplace](https://marketplace.visualstudio.com/manage) | VS Code | `VSCE_PAT` | Azure DevOps → Personal Access Token, scope *Marketplace → Manage*, all organizations. The `foreman` publisher must exist first. |
-| [Open VSX](https://open-vsx.org) | Cursor, Windsurf, VSCodium, code-server, Gitpod, Theia | `OVSX_PAT` | open-vsx.org → sign the publisher agreement → Access Tokens. Create the namespace once: `npx ovsx create-namespace foreman -p <token>`. |
+| GitHub Releases | manual installs (`code --install-extension stack-x.y.z.vsix`) | none | — |
+| [VS Code Marketplace](https://marketplace.visualstudio.com/manage) | VS Code | `VSCE_PAT` | Azure DevOps → Personal Access Token, scope *Marketplace → Manage*, all organizations. The `ricardomoratomateos` publisher (package.json `publisher`; the extension id is `ricardomoratomateos.stack`) must exist first. |
+| [Open VSX](https://open-vsx.org) | Cursor, Windsurf, VSCodium, code-server, Gitpod, Theia | `OVSX_PAT` | open-vsx.org → sign the publisher agreement → Access Tokens. Create the namespace once: `npx ovsx create-namespace ricardomoratomateos -p <token>`. |
 
 Both publish steps are skipped, not failed, while their secret is absent.
 Add them under Settings → Secrets and variables → Actions.
@@ -42,9 +42,9 @@ Add them under Settings → Secrets and variables → Actions.
 ## By hand, if ever needed
 
 ```sh
-npm run package                                        # foreman-x.y.z.vsix
-npx vsce publish --no-dependencies --packagePath foreman-x.y.z.vsix -p "$VSCE_PAT"
-npx ovsx publish foreman-x.y.z.vsix -p "$OVSX_PAT"
+npm run package                                        # stack-x.y.z.vsix
+npx vsce publish --no-dependencies --packagePath stack-x.y.z.vsix -p "$VSCE_PAT"
+npx ovsx publish stack-x.y.z.vsix -p "$OVSX_PAT"
 ```
 
 A pre-release version (`1.2.0-beta.1`) is marked as such on GitHub.
