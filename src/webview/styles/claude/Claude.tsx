@@ -5,7 +5,7 @@ import { Details, DiffStat } from '../../components/Details';
 import { LaunchSplit } from '../../components/LaunchSplit';
 import { ActionBar } from '../../components/ActionBar';
 import { ProviderMark, visualFor } from '../../components/providers';
-import { AskBox, ForgetActions, ReviewActions } from '../../components/RowParts';
+import { AskBox, ForgetActions } from '../../components/RowParts';
 import { SessionList } from '../../components/SessionList';
 import { EmptyState, HealthStrip, LoadingState } from '../../components/Status';
 import type { LayoutProps } from '../types';
@@ -141,7 +141,6 @@ function Row({ d, selected, now, state, select, drag }: {
 
       {wt.dockerError && !selected && <div className="fm-row-error cl-indent" title={wt.dockerError}>Stack: {wt.dockerError}</div>}
       {d.group === 'needs' && <AskBox d={d} select={pick} openLabel="Open agent" />}
-      {d.group === 'review' && <ReviewActions d={d} buttonClass="fm-btn-accent" />}
       {d.group === 'missing' && <ForgetActions d={d} />}
 
       {selected && d.group !== 'missing' && (
@@ -154,7 +153,7 @@ function Row({ d, selected, now, state, select, drag }: {
               installedProviders={state.installedProviders}
               tone="solid"
             />
-            <ActionBar wt={wt} dockerEnabled={state.dockerEnabled} />
+            <ActionBar wt={wt} dockerEnabled={state.dockerEnabled} emphasis={d.group === 'review' ? 'diff' : undefined} />
           </div>
         </div>
       )}
