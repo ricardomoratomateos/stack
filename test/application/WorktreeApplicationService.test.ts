@@ -22,6 +22,7 @@ import type { PrMonitor } from '../../src/pr/PrMonitor';
 import type { IGitPort } from '../../src/ports/IGitPort';
 import type { IWorktreeRepository } from '../../src/ports/IWorktreeRepository';
 import { MAIN_BRANCH_CANDIDATES } from '../../src/constants';
+import { composeProject } from '../../src/docker/dockerCompose';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Test doubles
@@ -73,8 +74,14 @@ interface HarnessOpts {
   liveAgentAccepts?: boolean;
   /** persisted worktree display order (ids) */
   worktreeOrder?: string[];
-  /** what dockerMonitor.refresh resolves to after a teardown (leftover containers) */
+  /** containers the monitor still lists once a compose down has run */
   containersLeftAfterDown?: Array<{ name: string; state: string }>;
+  /** what every `docker compose …` run resolves to */
+  composeResult?: { code: number | null; stdout: string; stderr: string; timedOut: boolean };
+  /** what the docker daemon check reports; undefined = reachable */
+  dockerDaemonError?: string;
+  /** an injected Docker output channel */
+  dockerOutput?: { append: (t: string) => void; reveal: () => void; showError: (m: string) => void };
   /** agents reported as runnable; defaults to none so tests never read the real PATH */
   installedProviders?: ProviderId[];
   /** omit the injection entirely and exercise the real PATH lookup */
@@ -239,19 +246,22 @@ function makeHarness(o: HarnessOpts = {}) {
     refreshNow: vi.fn(async (p: string) => { calls.push(`gitWatcher.refreshNow:${p}`); }),
     getStatus: vi.fn(() => ({ hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 })),
   };
+  let downRan = false;
   const dockerMonitor = {
     startPolling: vi.fn((project: string, cb: () => void) => { calls.push(`docker.startPolling:${project}`); dockerCallbacks.set(project, cb); }),
     stopPolling: vi.fn((name: string) => { calls.push(`docker.stopPolling:${name}`); }),
-    getContainers: vi.fn((): Array<{ name: string; state: string }> => []),
-    runCompose: vi.fn((name: string, cwd: string, args: string, env: Record<string, string>) => {
-      calls.push(`docker.runCompose:${name}:${cwd}:${args}:${JSON.stringify(env)}`);
-      return Promise.resolve();
+    // Containers only "outlive" a teardown once a down has actually run.
+    getContainers: vi.fn((): Array<{ name: string; state: string; ports?: number[] }> => (downRan ? o.containersLeftAfterDown ?? [] : [])),
+    runCompose: vi.fn(async (argv: string[], opts: { cwd?: string; env?: Record<string, string> }) => {
+      calls.push(`docker.runCompose:${argv.join(' ')}:${opts.cwd}:${JSON.stringify(opts.env)}`);
+      if (argv.includes('down')) downRan = true;
+      return o.composeResult ?? { code: 0, stdout: '', stderr: '', timedOut: false };
     }),
-    nudge: vi.fn((project: string) => { calls.push(`docker.nudge:${project}`); }),
-    refresh: vi.fn((project: string) => {
-      calls.push(`docker.refresh:${project}`);
-      return Promise.resolve(o.containersLeftAfterDown ?? []);
-    }),
+    nudge: vi.fn(() => { calls.push('docker.nudge'); }),
+    refresh: vi.fn(async () => { calls.push('docker.refresh'); return true; }),
+    checkDaemon: vi.fn(async (): Promise<string | undefined> => o.dockerDaemonError),
+    unavailable: vi.fn((): string | undefined => undefined),
+    projectPublishing: vi.fn((): string | undefined => undefined),
   };
   const prMonitor = {
     startPolling: vi.fn((branch: string, id: string, cb: () => void) => { calls.push(`pr.startPolling:${branch}:${id}`); prCallbacks.set(id, cb); }),
@@ -304,6 +314,7 @@ function makeHarness(o: HarnessOpts = {}) {
     prMonitor: prMonitor as unknown as PrMonitor,
     globalState,
     installedProviders: o.useRealInstalledProviders ? undefined : () => o.installedProviders ?? [],
+    dockerOutput: o.dockerOutput,
   });
   if (o.withUi !== false) service.setUi(ui);
 
@@ -317,6 +328,29 @@ function makeHarness(o: HarnessOpts = {}) {
 
 async function flushMicrotasks(): Promise<void> {
   for (let i = 0; i < 12; i++) await Promise.resolve();
+}
+
+/** Docker orchestration switched on: at least one generated port. */
+const DOCKER_ON: Partial<ForemanConfig> = {
+  docker: { composeFile: 'docker-compose.yml', overrideFile: '', ports: ['HTTP_PORT'], basePort: 20000, portStride: 100 },
+};
+
+/**
+ * The env prefix a lifecycle script is launched with: FOREMAN_* and their
+ * deprecated UNMESS_* twins, then whatever docker adds.
+ */
+function scriptEnv(path: string, branch: string, extra = ''): string {
+  const project = composeProject(makeWorktree({ path }));
+  const vars = { REPO_ROOT: '/repo', WORKTREE_PATH: path, BRANCH: branch, COMPOSE_PROJECT: project };
+  const render = (prefix: string) => Object.entries(vars).map(([k, v]) => `${prefix}_${k}="${v}"`).join(' ');
+  return `${render('FOREMAN')} ${render('UNMESS')}${extra ? ` ${extra}` : ''}`;
+}
+
+const COMPOSE_OK = { code: 0, stdout: '', stderr: '', timedOut: false };
+
+/** A docker start/stop is a long chain of awaits (daemon, listing, config, up); let it all land. */
+async function flushDocker(): Promise<void> {
+  for (let i = 0; i < 200; i++) await Promise.resolve();
 }
 
 afterEach(() => {
@@ -631,18 +665,24 @@ describe('handleMessage dockerUp / dockerDown', () => {
     },
   };
 
-  it('dockerUp opens a visible terminal and runs compose up with injected ports', async () => {
+  const project = (wt: Worktree) => composeProject(wt);
+
+  it('dockerUp runs compose up as an awaited process, with the injected ports, after checking the merged config', async () => {
     const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
     const h = makeHarness({
       worktrees: [b],
       config: dockerCfg,
-      existingPaths: ['/repo/docker-compose.worktree.yml'], // override lives in the MAIN repo
+      existingPaths: ['/repo/docker-compose.worktree.yml', '/repo/zer/feat-b'], // override lives in the MAIN repo
     });
     await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
-    expect(h.host.createTerminal).toHaveBeenCalledWith({ name: 'Docker: feat/b', cwd: '/repo/zer/feat-b' });
-    expect(h.calls).toContain(
-      'terminal.sendText:HTTP_PORT=20000 docker compose -p "feat-b" -f "/repo/docker-compose.yml" -f "/repo/docker-compose.worktree.yml" up -d',
-    );
+    await flushDocker();
+    const head = `compose -p ${project(b)} --project-directory /repo/zer/feat-b -f /repo/docker-compose.yml -f /repo/docker-compose.worktree.yml`;
+    expect(h.calls).toContain(`docker.runCompose:${head} config --format json:/repo/zer/feat-b:{"HTTP_PORT":"20000","PWD":"/repo/zer/feat-b"}`);
+    expect(h.calls).toContain(`docker.runCompose:${head} up -d:/repo/zer/feat-b:{"HTTP_PORT":"20000","PWD":"/repo/zer/feat-b"}`);
+    // No terminal any more: Foreman has to see the exit code.
+    expect(h.host.createTerminal).not.toHaveBeenCalled();
+    expect(h.dockerMonitor.checkDaemon).toHaveBeenCalled();
+    expect(h.ui.pushWebview).toHaveBeenCalled();
   });
 
   it('prefers the worktree\'s own compose file when its branch carries .foreman', async () => {
@@ -655,38 +695,86 @@ describe('handleMessage dockerUp / dockerDown', () => {
       existingPaths: ['/repo/zer/feat-b/.foreman/docker-compose.worktree.yml'],
     });
     await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
-    expect(h.calls).toContain(
-      'terminal.sendText:WORKTREE_PORT=8081 docker compose -p "feat-b" -f "/repo/zer/feat-b/.foreman/docker-compose.worktree.yml" up -d',
-    );
+    await flushDocker();
+    expect(h.calls.some((c) => c.startsWith(
+      `docker.runCompose:compose -p ${project(b)} --project-directory /repo/zer/feat-b -f /repo/zer/feat-b/.foreman/docker-compose.worktree.yml up -d:`,
+    ))).toBe(true);
   });
 
-  it('dockerUp falls back to the plain stack when the override file is absent', async () => {
+  it('dockerUp warns when the configured override is nowhere, then runs the plain stack', async () => {
     const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
     const h = makeHarness({ worktrees: [b], config: dockerCfg }); // no existingPaths -> override missing
     await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
-    expect(h.calls).toContain('terminal.sendText:HTTP_PORT=20000 docker compose -p "feat-b" -f "/repo/docker-compose.yml" up -d');
+    await flushDocker();
+    expect(h.calls.some((c) => c.startsWith(
+      `docker.runCompose:compose -p ${project(b)} --project-directory /repo/zer/feat-b -f /repo/docker-compose.yml up -d:`,
+    ))).toBe(true);
+    expect(h.notify.showWarning).toHaveBeenCalledWith(expect.stringContaining('docker-compose.worktree.yml was not found'));
   });
 
   it('dockerUp on the main repo runs the plain stack with no injected ports', async () => {
     const main = makeWorktree({ id: 'm', branch: 'main', path: '/repo', isMain: true });
-    const h = makeHarness({ worktrees: [main], config: dockerCfg });
+    const h = makeHarness({ worktrees: [main], config: dockerCfg, existingPaths: ['/repo'] });
     await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'm' });
-    expect(h.host.createTerminal).toHaveBeenCalledWith({ name: 'Docker: main', cwd: '/repo' });
-    expect(h.calls).toContain('terminal.sendText:docker compose up -d');
+    await flushDocker();
+    expect(h.calls).toContain('docker.runCompose:compose up -d:/repo:{"PWD":"/repo"}');
   });
 
-  it('dockerDown runs compose down headless via the monitor with the same ports', async () => {
+  it('dockerUp failure reaches the card and a toast, with compose\'s own error', async () => {
     const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
     const h = makeHarness({
       worktrees: [b],
       config: dockerCfg,
-      existingPaths: ['/repo/docker-compose.worktree.yml'],
+      composeResult: { code: 1, stdout: '', stderr: 'Error response from daemon: port is already allocated', timedOut: false },
+    });
+    await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
+    await flushDocker();
+    expect(h.notify.showError).toHaveBeenCalledWith(expect.stringContaining('port is already allocated'));
+    expect(h.service.buildState().worktrees[0].dockerError).toContain('port is already allocated');
+  });
+
+  it('dockerUp says Docker is not running instead of failing somewhere inside compose', async () => {
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({ worktrees: [b], config: dockerCfg, dockerDaemonError: 'Docker is not running.' });
+    await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
+    await flushDocker();
+    expect(h.dockerMonitor.runCompose).not.toHaveBeenCalled();
+    expect(h.notify.showError).toHaveBeenCalledWith('Docker stack for "feat/b" did not start: Docker is not running.');
+  });
+
+  it('dockerUp sends compose output to the injected Docker output', async () => {
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const dockerOutput = { append: vi.fn(), reveal: vi.fn(), showError: vi.fn() };
+    const h = makeHarness({ worktrees: [b], config: dockerCfg, dockerOutput, dockerDaemonError: 'down' });
+    await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
+    await flushDocker();
+    expect(dockerOutput.showError).toHaveBeenCalled();
+    expect(h.notify.showError).not.toHaveBeenCalled();
+  });
+
+  it('logs compose output to the console when no output channel is wired', async () => {
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const h = makeHarness({ worktrees: [b], config: dockerCfg });
+    await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
+    await flushDocker();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('[foreman] docker: $ docker compose'));
+    log.mockRestore();
+  });
+
+  it('dockerDown runs compose down headless with the same ports', async () => {
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({
+      worktrees: [b],
+      config: dockerCfg,
+      existingPaths: ['/repo/docker-compose.yml', '/repo/docker-compose.worktree.yml', '/repo/zer/feat-b'],
     });
     await h.service.handleMessage({ type: 'dockerDown', worktreeId: 'b' });
-    await flushMicrotasks();
+    await flushDocker();
     expect(h.calls).toContain(
-      'docker.runCompose:feat-b:/repo/zer/feat-b:-p "feat-b" -f "/repo/docker-compose.yml" -f "/repo/docker-compose.worktree.yml" down:{"HTTP_PORT":"20000","PWD":"/repo/zer/feat-b"}',
+      `docker.runCompose:compose -p ${project(b)} --project-directory /repo/zer/feat-b -f /repo/docker-compose.yml -f /repo/docker-compose.worktree.yml down:/repo/zer/feat-b:{"HTTP_PORT":"20000","PWD":"/repo/zer/feat-b"}`,
     );
+    expect(h.ui.pushWebview).toHaveBeenCalled();
   });
 
   it('does nothing for an unknown worktree', async () => {
@@ -1071,6 +1159,27 @@ describe('buildState', () => {
     expect(h.gitWatcher.getStatus).toHaveBeenCalledWith(a.path);
   });
 
+  it('passes each container\'s state, service and exit code through, so a crashed stack can say why', () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({ worktrees: [a], config: DOCKER_ON });
+    h.dockerMonitor.getContainers.mockImplementation((p: string) => (p === composeProject(a)
+      ? [{ name: 'db', state: 'exited', service: 'db', exitCode: 137, status: 'Exited (137) 1 minute ago', ports: [], workingDir: '/x' }]
+      : []));
+    expect(h.service.buildState().worktrees[0].docker).toEqual([
+      { name: 'db', state: 'exited', service: 'db', exitCode: 137, status: 'Exited (137) 1 minute ago' },
+    ]);
+  });
+
+  it('reports an unreachable docker only while docker is configured', () => {
+    const on = makeHarness({ config: DOCKER_ON });
+    on.dockerMonitor.unavailable.mockReturnValue('Cannot connect to the Docker daemon');
+    expect(on.service.buildState().dockerUnavailable).toBe('Cannot connect to the Docker daemon');
+
+    const off = makeHarness();
+    off.dockerMonitor.unavailable.mockReturnValue('Cannot connect to the Docker daemon');
+    expect(off.service.buildState().dockerUnavailable).toBeUndefined();
+  });
+
   it('maps missing PR status to null', () => {
     const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
     expect(h.service.buildState().worktrees[0].pr).toBeNull();
@@ -1250,10 +1359,8 @@ describe('loadWorktreesForRepo', () => {
       'host.removeWorkspaceFolder:1',
       'host.addWorkspaceFolders:/repo/zer/feat-b=feat/b',
       'gitWatcher.watch:/repo',
-      'docker.startPolling:repo',
       'pr.startPolling:main:a',
       'gitWatcher.watch:/repo/zer/feat-b',
-      'docker.startPolling:feat-b',
       'pr.startPolling:feat/b:b',
       'claude.reconnect',
       'ui.pushWebview',
@@ -1261,6 +1368,19 @@ describe('loadWorktreesForRepo', () => {
       'host.updateFolderSetting:/repo/zer/feat-b:search.exclude:{"**":true}',
     ]);
     expect(h.claude.reconnect).toHaveBeenCalledWith(h.worktrees);
+  });
+
+  it('polls docker only when it is configured — main under compose\'s default name, worktrees under theirs', async () => {
+    const a = makeWorktree({ id: 'a', path: '/repo', branch: 'main', isMain: true });
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({ worktrees: [a, b], config: DOCKER_ON });
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(h.calls.filter((c) => c.startsWith('docker.'))).toEqual([
+      'docker.startPolling:repo',
+      `docker.startPolling:${composeProject(b)}`,
+    ]);
+    // The legacy name rides along, so a stack started by an older Foreman shows.
+    expect(h.dockerMonitor.startPolling).toHaveBeenCalledWith(composeProject(b), expect.any(Function), ['feat-b']);
   });
 
   it('uses alias as workspace folder display name when present', async () => {
@@ -1323,7 +1443,7 @@ describe('loadWorktreesForRepo', () => {
 
   it('docker poll callback pushes webview state; pr poll callback pushes too', async () => {
     const a = makeWorktree({ id: 'a', path: '/repo', branch: 'main', isMain: true });
-    const h = makeHarness({ worktrees: [a], workspaceFolders: ['/repo'] });
+    const h = makeHarness({ worktrees: [a], workspaceFolders: ['/repo'], config: DOCKER_ON });
     await h.service.loadWorktreesForRepo('/repo');
     h.calls.length = 0;
     h.dockerCallbacks.get('repo')!(); // composeProject = basename('/repo')
@@ -1492,7 +1612,6 @@ describe('createWorktree', () => {
       'report:Adding to workspace...',
       'host.addWorkspaceFolders:/repo/zer/feat-x=feat/x',
       'gitWatcher.watch:/repo/zer/feat-x',
-      'docker.startPolling:feat-x',
       'pr.startPolling:feat/x:new',
       'ui.pushWebview',
       'ui.pushWebview',
@@ -1512,10 +1631,10 @@ describe('createWorktree', () => {
     // only appeared in the sidebar after reloading the window: the setup script
     // brought the stack up minutes later and nothing ever repainted.
     vi.useFakeTimers();
-    const { h } = createHarness();
+    const { h } = createHarness({ config: DOCKER_ON });
     await h.service.createWorktree({ branch: 'feat/x' });
     h.calls.length = 0;
-    h.dockerCallbacks.get('feat-x')!();
+    h.dockerCallbacks.get(composeProject(makeWorktree({ path: '/repo/zer/feat-x' })))!();
     expect(h.calls).toEqual(['ui.pushWebview']);
   });
 
@@ -1536,8 +1655,11 @@ describe('createWorktree', () => {
     expect(h.calls).toContain('host.createTerminal:Init: feat/x:/repo/zer/feat-x');
     expect(h.calls).toContain('claude.register:new');
     expect(h.calls).toContain('terminal.show:Init: feat/x');
+    const project = composeProject(makeWorktree({ path: '/repo/zer/feat-x' }));
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      'FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-x" FOREMAN_BRANCH="feat/x" FOREMAN_COMPOSE_PROJECT="feat-x" bash "/scripts/setup.sh" && echo "✓ Setup complete"',
+      `FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-x" FOREMAN_BRANCH="feat/x" FOREMAN_COMPOSE_PROJECT="${project}" ` +
+        `UNMESS_REPO_ROOT="/repo" UNMESS_WORKTREE_PATH="/repo/zer/feat-x" UNMESS_BRANCH="feat/x" UNMESS_COMPOSE_PROJECT="${project}" ` +
+        'bash "/scripts/setup.sh" && echo "✓ Setup complete"',
     );
   });
 
@@ -1720,7 +1842,7 @@ describe('deleteWorktree', () => {
       'ui.pushWebview',
       // then the cascade
       'gitWatcher.unwatch:/repo/zer/feat-a',
-      'docker.stopPolling:feat-a',
+      `docker.stopPolling:${composeProject(a)}`,
       'pr.stopPolling:a',
       'claude.killWorktreeSession:a',
       'manager.delete:a:false',
@@ -1747,7 +1869,7 @@ describe('deleteWorktree', () => {
     await h.service.deleteWorktree(a);
 
     expect(h.calls).toContain(`host.createTerminal:Teardown: feat/a:${a.path}`);
-    const downAt = h.calls.findIndex((c) => c.startsWith('docker.runCompose:feat-a') && c.includes(' down'));
+    const downAt = h.calls.findIndex((c) => c.startsWith(`docker.runCompose:compose -p ${composeProject(a)} `) && c.includes(' down:'));
     const deleteAt = h.calls.indexOf('manager.delete:a:false');
     expect(downAt).toBeGreaterThanOrEqual(0);
     // The stack must be down BEFORE the worktree directory goes away.
@@ -1783,6 +1905,57 @@ describe('deleteWorktree', () => {
     await h.service.deleteWorktree(a);
 
     expect(h.notify.showWarning).not.toHaveBeenCalled();
+  });
+
+  it('does not hang on a wedged daemon: a timed-out down warns and the delete goes on', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({
+      worktrees: [a],
+      confirmResult: 'Delete',
+      config: DOCKER_ON,
+      composeResult: { code: null, stdout: '', stderr: '', timedOut: true },
+    });
+
+    await h.service.deleteWorktree(a);
+
+    expect(h.dockerMonitor.runCompose).toHaveBeenCalledWith(expect.arrayContaining(['down']), expect.objectContaining({ timeoutMs: 60_000 }));
+    expect(h.notify.showWarning).toHaveBeenCalledWith(expect.stringContaining('docker compose down timed out'));
+    expect(h.manager.delete).toHaveBeenCalledWith('a', false);
+    expect(h.service.buildState().worktrees[0].deleting).toBe(false);
+  });
+
+  it('a failed down warns with compose\'s reason and the delete goes on', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({
+      worktrees: [a],
+      confirmResult: 'Delete',
+      config: DOCKER_ON,
+      composeResult: { code: 1, stdout: '', stderr: 'Error: daemon said no', timedOut: false },
+    });
+
+    await h.service.deleteWorktree(a);
+
+    expect(h.notify.showWarning).toHaveBeenCalledWith(expect.stringContaining('docker compose down failed (Error: daemon said no)'));
+    expect(h.notify.showError).not.toHaveBeenCalled();
+    expect(h.manager.delete).toHaveBeenCalled();
+  });
+
+  it('deleting while a start is still running warns that containers may outlive the worktree', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({ worktrees: [a], confirmResult: 'Delete', config: DOCKER_ON });
+    let release!: () => void;
+    h.dockerMonitor.runCompose.mockImplementation((argv: string[]) => (argv.includes('up')
+      ? new Promise((r) => { release = () => r(COMPOSE_OK); })
+      : Promise.resolve(COMPOSE_OK)));
+    await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'a' });
+    await flushDocker();
+
+    await h.service.deleteWorktree(a);
+
+    expect(h.notify.showWarning).toHaveBeenCalledWith(expect.stringContaining('docker compose down failed (see the Foreman: Docker output)'));
+    expect(h.manager.delete).toHaveBeenCalled();
+    release();
+    await flushDocker();
   });
 
   it('skips compose entirely when docker is not configured', async () => {
@@ -1830,7 +2003,7 @@ describe('deleteWorktree', () => {
     });
     // Hold the delete on its one real await — the compose down.
     let release!: () => void;
-    h.dockerMonitor.runCompose.mockReturnValue(new Promise<void>((r) => { release = r; }));
+    h.dockerMonitor.runCompose.mockReturnValue(new Promise((r) => { release = () => r(COMPOSE_OK); }));
 
     const done = h.service.deleteWorktree(a);
     await Promise.resolve();
@@ -1849,7 +2022,7 @@ describe('deleteWorktree', () => {
       existingPaths: [a.path],
     });
     let release!: () => void;
-    h.dockerMonitor.runCompose.mockReturnValue(new Promise<void>((r) => { release = r; }));
+    h.dockerMonitor.runCompose.mockReturnValue(new Promise((r) => { release = () => r(COMPOSE_OK); }));
 
     const done = h.service.deleteWorktree(a);
     await Promise.resolve();
@@ -1871,7 +2044,7 @@ describe('deleteWorktree', () => {
       existingPaths: [a.path],
     });
     let release!: () => void;
-    h.dockerMonitor.runCompose.mockReturnValue(new Promise<void>((r) => { release = r; }));
+    h.dockerMonitor.runCompose.mockReturnValue(new Promise((r) => { release = () => r(COMPOSE_OK); }));
 
     const done = h.service.deleteWorktree(a);
     await Promise.resolve();
@@ -1997,11 +2170,11 @@ describe('initWorktree', () => {
       'host.createTerminal:Init: My task:/repo/zer/feat-a',
       'claude.register:a',
       'terminal.show:Init: My task',
-      'terminal.sendText:FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-a" FOREMAN_BRANCH="feat/a" FOREMAN_COMPOSE_PROJECT="feat-a" bash "/scripts/setup.sh"',
+      `terminal.sendText:${scriptEnv('/repo/zer/feat-a', 'feat/a')} bash "/scripts/setup.sh"`,
     ]);
   });
 
-  it('resolves a relative setup script in the worktree and injects the docker ports', async () => {
+  it('resolves a relative setup script in the worktree and injects the compose project, files and ports', async () => {
     const a = makeWorktree({ id: 'a', branch: 'feat/b', path: '/repo/zer/feat-b' });
     const h = makeHarness({
       worktrees: [a],
@@ -2013,7 +2186,7 @@ describe('initWorktree', () => {
     });
     await h.service.initWorktree(a);
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      'FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-b" FOREMAN_BRANCH="feat/b" FOREMAN_COMPOSE_PROJECT="feat-b" WORKTREE_PORT="8081" bash "/repo/zer/feat-b/.foreman/setup.sh"',
+      `${scriptEnv('/repo/zer/feat-b', 'feat/b', `COMPOSE_PROJECT_NAME="${composeProject(a)}" COMPOSE_FILE="/repo/.foreman/docker-compose.worktree.yml" WORKTREE_PORT="8081"`)} bash "/repo/zer/feat-b/.foreman/setup.sh"`,
     );
   });
 
@@ -2022,7 +2195,7 @@ describe('initWorktree', () => {
     const h = makeHarness({ worktrees: [a], config: { setupScript: '/abs/setup.sh' }, existingPaths: ['/abs/setup.sh'] });
     await h.service.initWorktree(a);
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      'FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-a" FOREMAN_BRANCH="feat/a" FOREMAN_COMPOSE_PROJECT="feat-a" bash "/abs/setup.sh"',
+      `${scriptEnv('/repo/zer/feat-a', 'feat/a')} bash "/abs/setup.sh"`,
     );
   });
 
@@ -2031,7 +2204,7 @@ describe('initWorktree', () => {
     const h = makeHarness({ worktrees: [a], config: { setupScript: 'scripts/setup.sh' } }); // present in neither
     await h.service.initWorktree(a);
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      'FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-a" FOREMAN_BRANCH="feat/a" FOREMAN_COMPOSE_PROJECT="feat-a" bash "/repo/scripts/setup.sh"',
+      `${scriptEnv('/repo/zer/feat-a', 'feat/a')} bash "/repo/scripts/setup.sh"`,
     );
   });
 
@@ -2347,11 +2520,38 @@ describe('port re-check before setup / compose up', () => {
     reassignTo(h, 9903, 8083); // 8083 held by a foreign container
 
     await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
+    await flushDocker();
 
     // Slot 4 → WORKTREE_PORT 8085. The old 8083 must appear nowhere.
-    expect(h.calls).toContain(
-      'terminal.sendText:WORKTREE_PORT=8085 DEBUG_PORT=9903 docker compose -p "feat-b" -f "/repo/.foreman/docker-compose.worktree.yml" up -d',
-    );
+    const up = h.calls.find((c) => c.startsWith('docker.runCompose:') && c.includes(' up -d:'));
+    expect(up).toContain('"WORKTREE_PORT":"8085","DEBUG_PORT":"9903"');
+    expect(h.calls.join('\n')).not.toContain('8083"');
+  });
+
+  it('tells the re-check which ports its own running stack holds, so ▶ does not move it', async () => {
+    // Probing found the stack's OWN containers on its ports, called them
+    // squatters, and moved a running stack to a fresh slot on every ▶.
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b', debugPort: 9901 });
+    const h = makeHarness({ worktrees: [b], config: dockerCfg });
+    h.dockerMonitor.getContainers.mockImplementation((p: string) =>
+      p === composeProject(b) ? [{ name: 'web', state: 'running', ports: [8083] }] : []);
+
+    await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
+    await flushDocker();
+
+    expect(h.manager.ensureFreePorts).toHaveBeenCalledWith(b, new Set([9901, 8083]));
+  });
+
+  it('a re-init also spares the stack\'s own ports, from a fresh listing', async () => {
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b', debugPort: 9901 });
+    const h = makeHarness({ worktrees: [b], config: { ...dockerCfg, setupScript: '/s.sh' } });
+    h.dockerMonitor.getContainers.mockImplementation((p: string) =>
+      p === composeProject(b) ? [{ name: 'web', state: 'running', ports: [8083] }] : []);
+
+    await h.service.initWorktree(b);
+
+    expect(h.calls.indexOf('docker.refresh')).toBeGreaterThanOrEqual(0);
+    expect(h.manager.ensureFreePorts).toHaveBeenCalledWith(b, new Set([9901, 8083]));
   });
 
   it('names the busy port and the new block so the user can see what moved', async () => {
@@ -2360,6 +2560,7 @@ describe('port re-check before setup / compose up', () => {
     reassignTo(h, 9903, 8083);
 
     await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
+    await flushDocker();
 
     expect(h.notify.showWarning).toHaveBeenCalledWith(
       'Port 8083 is already in use — "feat/b" moved to 9903, 8085.',
@@ -2371,6 +2572,7 @@ describe('port re-check before setup / compose up', () => {
     const h = makeHarness({ worktrees: [b], config: dockerCfg });
 
     await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
+    await flushDocker();
 
     expect(h.notify.showWarning).not.toHaveBeenCalled();
   });
@@ -2383,8 +2585,7 @@ describe('port re-check before setup / compose up', () => {
     await h.service.initWorktree(b);
 
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
-      'FOREMAN_REPO_ROOT="/repo" FOREMAN_WORKTREE_PATH="/repo/zer/feat-b" FOREMAN_BRANCH="feat/b" ' +
-        'FOREMAN_COMPOSE_PROJECT="feat-b" WORKTREE_PORT="8085" DEBUG_PORT="9903" bash "/s.sh"',
+      `${scriptEnv('/repo/zer/feat-b', 'feat/b', `COMPOSE_PROJECT_NAME="${composeProject(b)}" COMPOSE_FILE="/repo/.foreman/docker-compose.worktree.yml" WORKTREE_PORT="8085" DEBUG_PORT="9903"`)} bash "/s.sh"`,
     );
   });
 
@@ -2407,11 +2608,11 @@ describe('port re-check before setup / compose up', () => {
     h.manager.ensureFreePorts.mockRejectedValue(new Error('no free slot in range'));
 
     await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
+    await flushDocker();
 
     // Still brings the stack up; docker reports the collision itself if it comes.
-    expect(h.calls).toContain(
-      'terminal.sendText:WORKTREE_PORT=8081 DEBUG_PORT=9899 docker compose -p "feat-b" -f "/repo/.foreman/docker-compose.worktree.yml" up -d',
-    );
+    const up = h.calls.find((c) => c.startsWith('docker.runCompose:') && c.includes(' up -d:'));
+    expect(up).toContain('"WORKTREE_PORT":"8081","DEBUG_PORT":"9899"');
     expect(h.notify.showWarning).not.toHaveBeenCalled();
   });
 });
@@ -2590,13 +2791,33 @@ describe('docker state refresh', () => {
     docker: { composeFile: 'docker-compose.yml', overrideFile: '', ports: ['HTTP_PORT'], basePort: 20000, portStride: 100 },
   };
 
-  it('dockerUp nudges the monitor, because compose runs in a terminal we cannot await', async () => {
+  it('dockerUp re-lists right after compose returns and then watches closely, to catch a crash on boot', async () => {
     const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
     const h = makeHarness({ worktrees: [b], config: dockerCfg });
 
     await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
+    await flushDocker();
 
-    expect(h.dockerMonitor.nudge).toHaveBeenCalledWith('feat-b');
+    const upAt = h.calls.findIndex((c) => c.includes(' up -d:'));
+    expect(h.calls.indexOf('docker.refresh', upAt)).toBeGreaterThan(upAt);
+    expect(h.dockerMonitor.nudge).toHaveBeenCalled();
+  });
+
+  it('shows the stack as starting while compose runs', async () => {
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({ worktrees: [b], config: dockerCfg });
+    let release!: () => void;
+    h.dockerMonitor.runCompose.mockImplementation((argv: string[]) => (argv.includes('up')
+      ? new Promise((r) => { release = () => r(COMPOSE_OK); })
+      : Promise.resolve(COMPOSE_OK)));
+
+    await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'b' });
+    await flushDocker();
+    expect(h.service.buildState().worktrees[0].dockerBusy).toBe('starting');
+
+    release();
+    await flushDocker();
+    expect(h.service.buildState().worktrees[0].dockerBusy).toBeUndefined();
   });
 
   it('dockerDown pushes state, so a stopped stack stops showing as running', async () => {
@@ -2605,6 +2826,7 @@ describe('docker state refresh', () => {
     h.calls.length = 0;
 
     await h.service.handleMessage({ type: 'dockerDown', worktreeId: 'b' });
+    await flushDocker();
 
     expect(h.calls).toContain('ui.pushWebview');
   });
@@ -2612,10 +2834,11 @@ describe('docker state refresh', () => {
   it('dockerDown still pushes state when compose itself failed', async () => {
     const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
     const h = makeHarness({ worktrees: [b], config: dockerCfg });
-    h.dockerMonitor.runCompose.mockRejectedValue(new Error('no such project'));
+    h.dockerMonitor.runCompose.mockResolvedValue({ code: 1, stdout: '', stderr: 'no such project', timedOut: false });
     h.calls.length = 0;
 
     await h.service.handleMessage({ type: 'dockerDown', worktreeId: 'b' });
+    await flushDocker();
 
     // Otherwise a failed teardown leaves the badge frozen with no way back.
     expect(h.calls).toContain('ui.pushWebview');
@@ -2632,7 +2855,7 @@ describe('deleteWorktree stops every poller', () => {
     await h.service.deleteWorktree(a);
 
     expect(h.calls).toContain('pr.stopPolling:a');
-    expect(h.calls).toContain('docker.stopPolling:feat-a');
+    expect(h.calls).toContain(`docker.stopPolling:${composeProject(a)}`);
     expect(h.calls).toContain('gitWatcher.unwatch:/repo/zer/feat-a');
   });
 });
@@ -2995,6 +3218,22 @@ describe('worktrees are scoped to the window\'s repository', () => {
   });
 });
 
+describe('syncDockerPolling', () => {
+  it('starts polling this window\'s worktrees when docker gets configured, and stops when it is turned off', () => {
+    const mine = makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/feat-a' });
+    const other = makeWorktree({ id: 'z', branch: 'x', path: '/other/zer/x', repoRoot: '/other' });
+    const h = makeHarness({ worktrees: [mine, other], config: DOCKER_ON });
+
+    h.service.syncDockerPolling();
+    expect(h.calls).toEqual([`docker.startPolling:${composeProject(mine)}`]);
+
+    h.calls.length = 0;
+    h.cfg.docker = { ...h.cfg.docker, ports: [] };
+    h.service.syncDockerPolling();
+    expect(h.calls).toEqual([`docker.stopPolling:${composeProject(mine)}`]);
+  });
+});
+
 describe('loadWorktreesForRepo keeps to its own repository', () => {
   const foreignWorktree = makeWorktree({
     id: 'z', branch: 'other/feat', path: '/other/zer/feat', repoRoot: '/other',
@@ -3063,14 +3302,15 @@ describe('loadWorktreesForRepo keeps to its own repository', () => {
     // These ran against every worktree of every repo the extension had seen:
     // a git watcher, a docker poll and a gh call each, forever.
     const mine = makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/feat-a' });
-    const h = makeHarness({ worktrees: [mine, foreignWorktree], workspaceFolders: ['/repo'] });
+    const h = makeHarness({ worktrees: [mine, foreignWorktree], workspaceFolders: ['/repo'], config: DOCKER_ON });
 
     await h.service.loadWorktreesForRepo('/repo');
 
     expect(h.calls).toContain('gitWatcher.watch:/repo/zer/feat-a');
     expect(h.calls.some((c) => c.startsWith('gitWatcher.watch:/other'))).toBe(false);
     expect(h.calls.some((c) => c === 'pr.startPolling:other/feat:z')).toBe(false);
-    expect(h.calls.some((c) => c.startsWith('docker.startPolling:feat'))).toBe(true);
+    expect(h.calls).toContain(`docker.startPolling:${composeProject(mine)}`);
+    expect(h.calls).not.toContain(`docker.startPolling:${composeProject(foreignWorktree)}`);
   });
 });
 

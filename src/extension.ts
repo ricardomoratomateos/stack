@@ -303,7 +303,22 @@ export async function activate(ctx: vscode.ExtensionContext) {
   const tabManager = new TabManager(ctx.globalState, worktreesHere);
   const breakpointManager = new BreakpointManager(ctx.globalState, worktreesHere);
 
+  // Compose's own words for every start/stop, so a stack that did not come up
+  // has a "Show output" behind its error toast rather than nothing at all.
+  const dockerChannel = vscode.window.createOutputChannel('Foreman: Docker');
+  ctx.subscriptions.push(dockerChannel);
+  const dockerOutput = {
+    append: (text: string) => dockerChannel.append(text),
+    reveal: () => dockerChannel.show(true),
+    showError: (message: string) => {
+      void vscode.window.showErrorMessage(`Foreman: ${message}`, 'Show output').then((pick) => {
+        if (pick === 'Show output') dockerChannel.show();
+      });
+    },
+  };
+
   const service = new WorktreeApplicationService({
+    dockerOutput,
     manager,
     agentManager,
     tabManager,
@@ -526,6 +541,24 @@ export async function activate(ctx: vscode.ExtensionContext) {
       // repo's folder can now be relabelled to its branch (the async add in
       // loadWorktreesForRepo still reads a count of 1 and can't).
       service.syncMainFolderLabel();
+    }),
+  );
+
+  // Docker polling follows the setting without a reload — from settings.json,
+  // or from `.foreman/config.json` saved by the panel, edited by hand or
+  // changed by a checkout (which no configuration event reports).
+  const repoConfigWatcher = vscode.workspace.createFileSystemWatcher(`**/${REPO_CONFIG_RELATIVE}`);
+  const resyncDocker = () => {
+    service.syncDockerPolling();
+    webviewProvider.push();
+  };
+  ctx.subscriptions.push(
+    repoConfigWatcher,
+    repoConfigWatcher.onDidChange(resyncDocker),
+    repoConfigWatcher.onDidCreate(resyncDocker),
+    repoConfigWatcher.onDidDelete(resyncDocker),
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('foreman')) resyncDocker();
     }),
   );
 
