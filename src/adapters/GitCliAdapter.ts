@@ -1,6 +1,6 @@
 import { exec, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import { GitWorktreeEntry, IGitPort, DiffOptions } from '../ports/IGitPort';
+import { GitWorktreeEntry, GitWorktreePath, IGitPort, DiffOptions } from '../ports/IGitPort';
 import { MAIN_BRANCH_CANDIDATES } from '../constants';
 
 const execAsync = promisify(exec);
@@ -23,10 +23,35 @@ export function parseWorktreeList(output: string): GitWorktreeEntry[] {
       if (line.startsWith('worktree ')) wt.path = line.slice(9).trim();
       if (line.startsWith('HEAD ')) wt.head = line.slice(5).trim();
       if (line.startsWith('branch ')) wt.branch = line.slice(7).replace('refs/heads/', '').trim();
+      if (isPrunableLine(line)) wt.prunable = true;
     }
     if (wt.path && wt.branch) worktrees.push(wt as GitWorktreeEntry);
   }
   return worktrees;
+}
+
+/** `prunable` alone, or followed by git's reason ("gitdir file points to non-existent location"). */
+function isPrunableLine(line: string): boolean {
+  return line === 'prunable' || line.startsWith('prunable ');
+}
+
+/**
+ * Every block's path, detached and bare ones included.
+ *
+ * Separate from parseWorktreeList on purpose: that one answers "what can be
+ * adopted as a branch worktree", this one answers "what does git still know
+ * about" — and conflating the two is how a worktree in the middle of a rebase
+ * (detached HEAD, so no branch line) would read as one git had let go of.
+ */
+export function parseWorktreePaths(output: string): GitWorktreePath[] {
+  const paths: GitWorktreePath[] = [];
+  for (const block of output.trim().split('\n\n')) {
+    const lines = block.trim().split('\n');
+    const head = lines.find((l) => l.startsWith('worktree '));
+    if (!head) continue;
+    paths.push({ path: head.slice(9).trim(), prunable: lines.some(isPrunableLine) });
+  }
+  return paths;
 }
 
 /** IGitPort implementation backed by the git CLI (synchronous, matching the port). */
@@ -37,6 +62,15 @@ export class GitCliAdapter implements IGitPort {
       return parseWorktreeList(output);
     } catch {
       return [];
+    }
+  }
+
+  async listWorktreePaths(repoRoot: string): Promise<GitWorktreePath[] | undefined> {
+    try {
+      const { stdout } = await execAsync('git worktree list --porcelain', { cwd: repoRoot, maxBuffer: MAX_BUFFER });
+      return parseWorktreePaths(stdout);
+    } catch {
+      return undefined;
     }
   }
 

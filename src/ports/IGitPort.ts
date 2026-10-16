@@ -2,11 +2,30 @@ export interface GitWorktreeEntry {
   path: string;
   branch: string;
   head: string;
+  /**
+   * Git itself reports the directory as gone (`prunable` in the porcelain
+   * output): the administrative entry outlived an `rm -rf` of the worktree.
+   */
+  prunable?: boolean;
+}
+
+/** One block of `git worktree list --porcelain`, whatever its HEAD is doing. */
+export interface GitWorktreePath {
+  path: string;
+  /** See GitWorktreeEntry.prunable. */
+  prunable: boolean;
 }
 
 export interface IGitPort {
   /** `git worktree list --porcelain`, parsed. Returns [] on git failure. */
   listWorktrees(repoRoot: string): GitWorktreeEntry[];
+  /**
+   * Every worktree git knows about, detached ones included — listWorktrees
+   * drops any block without a branch line, which is every worktree in the middle
+   * of a rebase. Resolves `undefined` when git failed, so "git could not answer"
+   * can never be read as "git has no worktrees".
+   */
+  listWorktreePaths(repoRoot: string): Promise<GitWorktreePath[] | undefined>;
   /** `git worktree add` (reuses branch) or `add -b` (creates it, off `baseBranch`
    *  when given, else the repo's current HEAD). Async so the huge checkout never
    *  blocks the extension host. Rejects on git failure. */

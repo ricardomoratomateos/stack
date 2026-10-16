@@ -1,5 +1,6 @@
 import * as path from 'node:path';
-import { canonicalPath } from './worktreesInRepo';
+import { canonicalPath, worktreesInRepo } from './worktreesInRepo';
+import { findMissingWorktrees, nodePathProbe, type PathProbe } from './missingWorktrees';
 import { randomUUID } from 'node:crypto';
 import { Worktree } from '../types';
 import { PortAllocator } from './portAllocator';
@@ -20,6 +21,7 @@ export class WorktreeManager {
     private agentManager?: AgentSessionManager,
     private git: IGitPort = new GitCliAdapter(),
     private fs: IFileSystem = new NodeFileSystem(),
+    private probe: PathProbe = nodePathProbe,
   ) {}
 
   list(): Worktree[] {
@@ -27,21 +29,24 @@ export class WorktreeManager {
   }
 
   /**
-   * Two-way sync between git worktree list and the store.
-   * - Removes store entries that no longer exist in git.
+   * Sync between `git worktree list` and the store.
    * - Adds git worktrees not yet in the store.
+   * - Patches isMain/branch on this repository's entries.
+   * - Reports this repository's entries whose worktree is gone as `missing`.
+   *
+   * It never removes an entry. A version that pruned the store against git's
+   * list deleted live worktrees (see findMissingWorktrees for how); what is gone
+   * is reported, and forgetting it is the user's call — forget().
    * Returns the full current list after sync.
    */
-  async reconcile(repoRoot: string): Promise<{ adopted: Worktree[]; removed: Worktree[]; current: Worktree[] }> {
+  async reconcile(repoRoot: string): Promise<{ adopted: Worktree[]; missing: Worktree[]; current: Worktree[] }> {
     const gitWorktrees = this.listFromGit(repoRoot);
     const normalizedRepoRoot = canonicalPath(repoRoot);
 
     // If git failed (returned empty), abort — never wipe the store on a git error
     if (gitWorktrees.length === 0) {
-      return { adopted: [], removed: [], current: this.store.getAll() };
+      return { adopted: [], missing: [], current: this.store.getAll() };
     }
-
-    const removed: Worktree[] = [];
 
     // Add git worktrees missing from store (including main worktree)
     const storedPaths = new Set(this.store.getAll().map((w) => canonicalPath(w.path)));
@@ -74,6 +79,10 @@ export class WorktreeManager {
 
     for (const wt of gitWorktrees) {
       if (storedPaths.has(canonicalPath(wt.path))) continue;
+      // Git keeps listing a worktree whose directory was deleted by hand until
+      // it is pruned. Adopting one wrote launch.json into it — mkdir -p
+      // resurrecting an empty ghost directory — and undid any forget().
+      if (wt.prunable) continue;
 
       const isMain = canonicalPath(wt.path) === normalizedRepoRoot;
       const debugPort = isMain ? 0 : await this.portAllocator.allocate();
@@ -99,11 +108,35 @@ export class WorktreeManager {
       adopted.push(worktree);
     }
 
-    return { adopted, removed, current: this.store.getAll() };
+    return { adopted, missing: await this.findMissing(repoRoot), current: this.store.getAll() };
   }
 
   listFromGit(repoRoot: string): GitWorktreeEntry[] {
     return this.git.listWorktrees(repoRoot);
+  }
+
+  /** This repository's entries whose worktree is gone. See findMissingWorktrees. */
+  private async findMissing(repoRoot: string): Promise<Worktree[]> {
+    const candidates = worktreesInRepo(this.store.getAll(), repoRoot);
+    return findMissingWorktrees(repoRoot, candidates, await this.git.listWorktreePaths(repoRoot), this.probe);
+  }
+
+  /**
+   * Drops a missing worktree's entry from the store, on the user's say-so.
+   *
+   * Re-checks first rather than trusting a flag computed at the last load: the
+   * directory may have come back since (a volume remounted, a restore), and
+   * forgetting a live worktree orphans its alias, tabs and session order under
+   * an id the next reconcile will not reuse. Touches nothing on disk and runs
+   * no git command that changes anything. Returns whether it forgot.
+   */
+  async forget(id: string): Promise<boolean> {
+    const worktree = this.store.get(id);
+    if (!worktree) return false;
+    const missing = await this.findMissing(worktree.repoRoot);
+    if (!missing.some((w) => w.id === id)) return false;
+    await this.store.remove(id);
+    return true;
   }
 
   async create(branch: string, repoRoot: string, alias?: string, baseBranch?: string): Promise<Worktree> {
