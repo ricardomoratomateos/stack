@@ -29,11 +29,17 @@ vi.mock('node:child_process', async (importOriginal) => {
   };
 });
 
-import { execSync } from 'node:child_process'; // real (spread from original module)
+import { execSync, spawn } from 'node:child_process'; // real (spread from original module)
+import type { ChildProcess } from 'node:child_process';
 import { TmuxManager, utf8LocaleFor } from '../../src/session/TmuxManager';
 
 let hasTmux = false;
 try { execSync('which tmux', { stdio: 'ignore' }); hasTmux = true; } catch { /* no tmux in CI */ }
+// A tmux client needs a terminal to attach from; python's pty module lends
+// one without a shell in between (util-linux and BSD `script` disagree on
+// their arguments).
+let hasPty = false;
+try { execSync('python3 -c "import pty"', { stdio: 'ignore' }); hasPty = true; } catch { /* no python3 */ }
 
 afterEach(() => { execOverride = null; });
 
@@ -86,6 +92,51 @@ describe('sessionName', () => {
   });
 });
 
+// ── view sessions (pure) ─────────────────────────────────────────────────────
+
+describe('view sessions', () => {
+  it('names a view after its base and window, and parses it back', () => {
+    const view = TmuxManager.viewSessionName('foreman-abc-1', 3);
+    expect(view).toBe('foreman-abc-1__w3');
+    expect(TmuxManager.parseViewSessionName(view)).toEqual({ base: 'foreman-abc-1', windowIndex: 3 });
+  });
+
+  it('parses nothing else: bases, other people\'s sessions, malformed suffixes', () => {
+    expect(TmuxManager.parseViewSessionName('foreman-abc')).toBeUndefined();
+    expect(TmuxManager.parseViewSessionName('work__w1')).toBeUndefined();
+    expect(TmuxManager.parseViewSessionName('foreman-abc__wx')).toBeUndefined();
+  });
+
+  it('attaches the single viewer to the base by EXACT name, no shell in between', () => {
+    expect(TmuxManager.attachArgs('foreman-a')).toEqual(['attach-session', '-t', '=foreman-a']);
+  });
+
+  it('builds one self-contained sequence: create-or-attach, link the window in, drop the placeholder, options', () => {
+    expect(TmuxManager.viewAttachArgs('foreman-a', 4)).toEqual([
+      'new-session', '-A', '-s', 'foreman-a__w4', '-n', 'foreman-placeholder', 'sleep 5',
+      ';', 'link-window', '-d', '-s', '=foreman-a:4', '-t', '=foreman-a__w4:',
+      ';', 'unlink-window', '-k', '-t', '=foreman-a__w4:^',
+      ';', 'set-option', '-t', '=foreman-a__w4:', 'status', 'off',
+      ';', 'set-option', '-t', '=foreman-a__w4:', 'destroy-unattached', 'on',
+    ]);
+  });
+
+  it('reads the attached session back from every launch argv Foreman has used', () => {
+    expect(TmuxManager.sessionOfAttachArgs(TmuxManager.attachArgs('foreman-a'))).toBe('foreman-a');
+    expect(TmuxManager.sessionOfAttachArgs(TmuxManager.viewAttachArgs('foreman-a', 2))).toBe('foreman-a__w2');
+    // The /bin/sh form viewers had before this version — restored after an upgrade.
+    expect(TmuxManager.sessionOfAttachArgs(['-c', 'tmux attach -t "foreman-a"'])).toBe('foreman-a');
+    expect(TmuxManager.sessionOfAttachArgs('tmux attach -t "foreman-b"')).toBe('foreman-b');
+  });
+
+  it('reads nothing from argv that is not an attach', () => {
+    for (const args of [undefined, 42, [], ['-l'], ['-c', 'npm test'], ['attach-session', '-x', 'a'], ['attach-session', '-t', 3],
+      ['new-session', '-d', '-s', 'x'], ['new-session', '-A', '-s', 7], 'zsh']) {
+      expect(TmuxManager.sessionOfAttachArgs(args)).toBeUndefined();
+    }
+  });
+});
+
 // ── command construction (mocked exec) ───────────────────────────────────────
 
 describe('command construction', () => {
@@ -102,24 +153,26 @@ describe('command construction', () => {
   it('hasSession probes the session and maps success/error to boolean', async () => {
     let calls = captureExec(() => ({}));
     await expect(tmux.hasSession('s1')).resolves.toBe(true);
-    expect(calls).toEqual([['tmux', 'has-session', '-t', 's1']]);
+    // Exact (`=`): a bare name also matches a unique PREFIX, and every view
+    // session's name starts with its base's.
+    expect(calls).toEqual([['tmux', 'has-session', '-t', '=s1']]);
     calls = captureExec(() => ({ err: new Error('no session') }));
     await expect(tmux.hasSession('s1')).resolves.toBe(false);
   });
 
-  const RENUMBER_OFF = ['tmux', 'set-option', '-t', 's1', 'renumber-windows', 'off'];
+  const RENUMBER_OFF = ['tmux', 'set-option', '-t', '=s1:', 'renumber-windows', 'off'];
 
   it('ensureSession creates nothing when the session exists, but still pins renumber-windows off', async () => {
     const calls = captureExec(() => ({}));
     await tmux.ensureSession('s1', '/some/cwd');
-    expect(calls).toEqual([['tmux', 'has-session', '-t', 's1'], RENUMBER_OFF]);
+    expect(calls).toEqual([['tmux', 'has-session', '-t', '=s1'], RENUMBER_OFF]);
   });
 
   it('ensureSession creates a detached session with -c cwd when missing', async () => {
     const calls = captureExec(cmd => cmd.startsWith('tmux has-session') ? { err: new Error('nope') } : {});
     await tmux.ensureSession('s1', '/some/cwd');
     expect(calls).toEqual([
-      ['tmux', 'has-session', '-t', 's1'],
+      ['tmux', 'has-session', '-t', '=s1'],
       ['tmux', 'new-session', '-d', '-s', 's1', '-c', '/some/cwd'],
       RENUMBER_OFF,
     ]);
@@ -265,13 +318,13 @@ describe('command construction', () => {
   it('killSession swallows errors (session may not exist)', async () => {
     const calls = captureExec(() => ({ err: new Error('gone') }));
     await expect(tmux.killSession('s1')).resolves.toBeUndefined();
-    expect(calls).toEqual([['tmux', 'kill-session', '-t', 's1']]);
+    expect(calls).toEqual([['tmux', 'kill-session', '-t', '=s1']]);
   });
 
   it('detachClients detaches by session and swallows errors', async () => {
     let calls = captureExec(() => ({}));
     await tmux.detachClients('s1');
-    expect(calls).toEqual([['tmux', 'detach-client', '-s', 's1']]);
+    expect(calls).toEqual([['tmux', 'detach-client', '-s', '=s1']]);
     calls = captureExec(() => ({ err: new Error('no clients') }));
     await expect(tmux.detachClients('s1')).resolves.toBeUndefined();
   });
@@ -295,7 +348,7 @@ describe('command construction', () => {
       { index: 2, name: 'my window name', title: '', command: 'npm', pid: 300 },
     ]);
     expect(calls).toEqual([[
-      'tmux', 'list-windows', '-t', 's1',
+      'tmux', 'list-windows', '-t', '=s1',
       '-F', '#{window_index}|:foreman:|#{window_name}|:foreman:|#{pane_title}|:foreman:|#{pane_current_command}|:foreman:|#{pane_pid}',
     ]]);
   });
@@ -310,6 +363,27 @@ describe('command construction', () => {
     const expected = process.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8';
     expect(execOptsSeen[0]?.env?.LC_ALL).toBe(expected);
     expect(execOptsSeen[0]?.env?.LANG).toBe(expected);
+  });
+
+  it('listSessions reads each session with its client count, [] without a server', async () => {
+    let calls = captureExec(() => ({ stdout: 'foreman-a|:foreman:|0\nfo o|:foreman:|2\nweird|:foreman:|\nbare\n' }));
+    await expect(tmux.listSessions()).resolves.toEqual([
+      { name: 'foreman-a', attached: 0 },
+      { name: 'fo o', attached: 2 },
+      { name: 'weird', attached: 0 },
+      { name: 'bare', attached: 0 },
+    ]);
+    expect(calls).toEqual([['tmux', 'list-sessions', '-F', '#{session_name}|:foreman:|#{session_attached}']]);
+    calls = captureExec(() => ({ err: new Error('no server running') }));
+    await expect(tmux.listSessions()).resolves.toEqual([]);
+  });
+
+  it('listClients reads each client\'s pid and session, skipping lines it cannot', async () => {
+    let calls = captureExec(() => ({ stdout: '123|:foreman:|foreman-a__w1\nxyz|:foreman:|s\n9|:foreman:|\n' }));
+    await expect(tmux.listClients()).resolves.toEqual([{ pid: 123, session: 'foreman-a__w1' }]);
+    expect(calls).toEqual([['tmux', 'list-clients', '-F', '#{client_pid}|:foreman:|#{session_name}']]);
+    calls = captureExec(() => ({ err: new Error('no server running') }));
+    await expect(tmux.listClients()).resolves.toEqual([]);
   });
 
   it('listWindows tolerates lines missing name/title fields', async () => {
@@ -491,6 +565,143 @@ describe('TmuxManager (integration)', () => {
     expect(await tmux.hasSession(SES)).toBe(false);
     await expect(tmux.killSession(SES)).resolves.toBeUndefined(); // idempotent
     expect(await tmux.listWindows(SES)).toEqual([]);
+  });
+});
+
+describe('session tabs: view sessions (integration)', () => {
+  const BASE = `foreman-itview-${process.pid}`;
+  const tmux = new TmuxManager();
+  const clients: ChildProcess[] = [];
+  /** Window indexes by name, set up by the first test. */
+  const idx: Record<string, number> = {};
+
+  /** A real tmux client running `tmux <args>`, attached from a pseudo-terminal, as a VS Code terminal would. */
+  function attach(args: string[]): ChildProcess {
+    const child = spawn('python3', ['-c', 'import pty,sys; pty.spawn(sys.argv[1:])', 'tmux', ...args], {
+      stdio: 'ignore',
+      env: { ...process.env, TERM: 'xterm-256color' },
+    });
+    clients.push(child);
+    return child;
+  }
+
+  /** Polls until `want` holds of the server's sessions, rather than sleeping a guessed interval. */
+  async function sessionsUntil(want: (s: Map<string, number>) => boolean, tries = 50): Promise<Map<string, number>> {
+    let seen = new Map<string, number>();
+    for (let i = 0; i < tries; i++) {
+      seen = new Map((await tmux.listSessions()).map((s) => [s.name, s.attached]));
+      if (want(seen)) return seen;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return seen;
+  }
+
+  const show = (target: string, format: string) =>
+    execSync(`tmux display-message -p -t '${target}' '${format}'`).toString().trim();
+  /** The window ids a session holds, in index order. */
+  const windowIds = (session: string) =>
+    execSync(`tmux list-windows -t '=${session}' -F '#{window_id}'`).toString().trim().split('\n');
+
+  afterAll(() => {
+    for (const c of clients) c.kill('SIGKILL');
+    if (!hasTmux) return;
+    const names = execSync('tmux list-sessions -F "#{session_name}" 2>/dev/null || true').toString().split('\n');
+    for (const name of names.filter((n) => n.startsWith(BASE))) {
+      try { execSync(`tmux kill-session -t '=${name}'`, { stdio: 'ignore' }); } catch { /* already gone */ }
+    }
+  });
+
+  it.runIf(hasTmux && hasPty)('gives each window a view of its own, holding that window and nothing else', async () => {
+    await tmux.ensureSession(BASE, os.tmpdir());
+    for (const name of ['claude', 'shell', 'third']) idx[name] = await tmux.newWindow(BASE, name, os.tmpdir());
+    await tmux.selectWindow(BASE, idx.third);
+    const ids = new Map(windowIds(BASE).map((id, i) => [i, id]));
+
+    for (const name of ['claude', 'shell', 'third']) attach(TmuxManager.viewAttachArgs(BASE, idx[name]));
+    const views = ['claude', 'shell', 'third'].map((n) => TmuxManager.viewSessionName(BASE, idx[n]));
+    const seen = await sessionsUntil((s) => views.every((v) => s.get(v) === 1));
+    expect(views.map((v) => seen.get(v)), JSON.stringify([...seen])).toEqual([1, 1, 1]);
+
+    // Linked, not copied: the very window of the base, and only it — the
+    // placeholder the view was created with is gone.
+    const claudeId = show(`=${BASE}:${idx.claude}`, '#{window_id}');
+    expect(windowIds(views[0])).toEqual([claudeId]);
+    expect(show(`=${views[0]}:`, '#{window_id}')).toBe(claudeId);
+    expect(show(`=${views[0]}:`, '#{status}')).toBe('off');
+    // The base keeps its own windows and its own current window.
+    expect(windowIds(BASE)).toEqual([...ids.values()]);
+    expect(show(`=${BASE}:`, '#{window_index}')).toBe(String(idx.third));
+
+    // The client is what a VS Code terminal's processId is.
+    const byClient = await tmux.listClients();
+    expect(byClient.some((c) => c.session === views[0] && c.pid > 0)).toBe(true);
+  });
+
+  it.runIf(hasTmux && hasPty)('a second client on the same view shares it, without duplicating or killing the window', async () => {
+    const view = TmuxManager.viewSessionName(BASE, idx.claude);
+    attach(TmuxManager.viewAttachArgs(BASE, idx.claude));
+    const seen = await sessionsUntil((s) => s.get(view) === 2);
+    expect(seen.get(view)).toBe(2);
+    expect(windowIds(view)).toEqual([show(`=${BASE}:${idx.claude}`, '#{window_id}')]);
+    expect((await tmux.listWindows(BASE)).some((w) => w.index === idx.claude)).toBe(true);
+  });
+
+  it.runIf(hasTmux && hasPty)('closes a view — and only that one — when its window is killed or its process exits', async () => {
+    const shellView = TmuxManager.viewSessionName(BASE, idx.shell);
+    const thirdView = TmuxManager.viewSessionName(BASE, idx.third);
+    const claudeView = TmuxManager.viewSessionName(BASE, idx.claude);
+    await tmux.killWindow(BASE, idx.shell);
+    let seen = await sessionsUntil((s) => !s.has(shellView));
+    expect(seen.has(shellView)).toBe(false);
+
+    await tmux.respawnWindow(BASE, idx.third, 'exit 0');
+    seen = await sessionsUntil((s) => !s.has(thirdView));
+    expect(seen.has(thirdView)).toBe(false);
+    expect(seen.get(claudeView)).toBe(2); // the other tab keeps showing its own window
+    expect(seen.has(BASE)).toBe(true);
+  });
+
+  it.runIf(hasTmux && hasPty)('takes the view with its last client, never the window it shared', async () => {
+    const view = TmuxManager.viewSessionName(BASE, idx.claude);
+    for (const c of await tmux.listClients()) {
+      if (c.session === view) process.kill(c.pid, 'SIGHUP');
+    }
+    const seen = await sessionsUntil((s) => !s.has(view));
+    expect(seen.has(view)).toBe(false);
+    expect((await tmux.listWindows(BASE)).some((w) => w.index === idx.claude)).toBe(true);
+  });
+
+  it.runIf(hasTmux && hasPty)('a tab revived for a window that is gone ends by itself', async () => {
+    const view = TmuxManager.viewSessionName(BASE, 99);
+    attach(TmuxManager.viewAttachArgs(BASE, 99));
+    expect((await sessionsUntil((s) => s.has(view))).has(view)).toBe(true);
+    // The placeholder's sleep runs out, taking the view and its client along.
+    expect((await sessionsUntil((s) => !s.has(view), 100)).has(view)).toBe(false);
+    expect(await tmux.hasSession(BASE)).toBe(true);
+  });
+
+  it.runIf(hasTmux && hasPty)('re-creates a view on attach after it went — what a terminal revived after a restart runs', async () => {
+    const view = TmuxManager.viewSessionName(BASE, idx.claude);
+    attach(TmuxManager.viewAttachArgs(BASE, idx.claude));
+    expect((await sessionsUntil((s) => s.get(view) === 1)).get(view)).toBe(1);
+    expect(windowIds(view)).toEqual([show(`=${BASE}:${idx.claude}`, '#{window_id}')]);
+  });
+
+  it.runIf(hasTmux && hasPty)('killing a view keeps its window; a lone view never answers for its base', async () => {
+    await tmux.killSession(TmuxManager.viewSessionName(BASE, idx.claude));
+    expect((await tmux.listWindows(BASE)).some((w) => w.index === idx.claude)).toBe(true);
+
+    // tmux matches a bare session name as a unique prefix: with a base gone
+    // and one view left, `has-session -t base` would find the view.
+    const solo = `${BASE}-solo`;
+    const soloView = TmuxManager.viewSessionName(solo, 0);
+    await tmux.ensureSession(solo, os.tmpdir());
+    execSync(`tmux new-session -d -s '${soloView}'`);
+    await tmux.killSession(solo);
+    expect(await tmux.hasSession(solo)).toBe(false);
+    expect(await tmux.hasSession(soloView)).toBe(true);
+    await tmux.killSession(soloView);
+    expect(await tmux.hasSession(soloView)).toBe(false);
   });
 });
 

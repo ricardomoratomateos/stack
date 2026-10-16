@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import type { ISessionManager, TmuxWindow } from '../ports/ISessionManager';
+import type { ISessionManager, TmuxClient, TmuxSession, TmuxWindow } from '../ports/ISessionManager';
 
 /**
  * A UTF-8 locale that actually exists on the given platform.
@@ -24,6 +24,102 @@ export class TmuxManager implements ISessionManager {
       .replace(/-{2,}/g, '-')
       .replace(/^-|-$/g, '')
       .slice(0, 50);
+  }
+
+  /**
+   * The tmux session behind ONE session tab: a session of its own holding a
+   * LINK to that one window of the worktree's session (link-window shares the
+   * window, it does not copy it). Two terminals attached to the same session
+   * would mirror each other — tmux has one current window per session, shared
+   * by all its clients — which is why one terminal per worktree was all there
+   * could be.
+   *
+   * Linked rather than grouped (`new-session -t base`), deliberately: a view
+   * that holds nothing but its window is destroyed by tmux the moment that
+   * window dies — the agent exited, the shell was `exit`ed — and its client
+   * with it, so the tab closes by itself. A grouped view shares every window
+   * and just moves on to another one, mirroring a session that has its own
+   * tab; the hooks that could catch that are not delivered reliably to group
+   * members. It also leaves nothing to navigate to from inside the tab, and
+   * no group to keep window numbering in sync with.
+   *
+   * `__w` cannot occur in a base name (sessionName keeps only [a-zA-Z0-9-]), so
+   * a view name always parses back to exactly one base and window.
+   */
+  static viewSessionName(base: string, windowIndex: number): string {
+    return `${base}${TmuxManager.VIEW_MARK}${windowIndex}`;
+  }
+
+  /** The base session and window a view session belongs to; undefined for any other session. */
+  static parseViewSessionName(name: string): { base: string; windowIndex: number } | undefined {
+    const m = /^(foreman-[a-zA-Z0-9-]+)__w(\d+)$/.exec(name);
+    return m ? { base: m[1], windowIndex: Number(m[2]) } : undefined;
+  }
+
+  private static readonly VIEW_MARK = '__w';
+
+  /**
+   * The argv a single-mode viewer terminal runs as `tmux …` — no shell in
+   * between. `=` makes the target exact: tmux otherwise also accepts a unique
+   * PREFIX, and every view session's name starts with its base's.
+   */
+  static attachArgs(base: string): string[] {
+    return ['attach-session', '-t', `=${base}`];
+  }
+
+  /**
+   * The argv a session tab runs as `tmux …`: one tmux command sequence (`;` as
+   * its own argument separates commands; no shell parses any of it) that
+   * creates the view if it is missing and attaches to it either way.
+   *
+   * Self-contained on purpose. VS Code revives editor terminals after a
+   * restart by running their command again, and by then the old view is gone
+   * (destroy-unattached, below) — a plain `attach -t view` would die with "no
+   * such session" and leave a dead tab; `new-session -A` re-creates it.
+   *
+   * A session cannot be created empty, so it starts with a placeholder window,
+   * the window is linked in, and the lowest window is unlinked — the
+   * placeholder, which `-k` then kills as linked nowhere else. Attaching to a
+   * view that already exists (a second VS Code window on the same session)
+   * links the window a second time and unlinks one of the two links again:
+   * `-k` never kills a window still linked into the base. If the window is
+   * gone the link fails, the sequence stops there, and the placeholder's
+   * short `sleep` ends the view — and the tab — on its own.
+   *
+   * - `status off`: the tab title and the sidebar name the session; there is
+   *   nothing else in the view to list.
+   * - `destroy-unattached on`, on the VIEW only: when its last terminal goes
+   *   (tab closed, VS Code quit), the view goes too. Killing a session only
+   *   unlinks the windows that are linked elsewhere; the window lives on in
+   *   the base.
+   */
+  static viewAttachArgs(base: string, windowIndex: number): string[] {
+    const view = TmuxManager.viewSessionName(base, windowIndex);
+    return [
+      'new-session', '-A', '-s', view, '-n', 'foreman-placeholder', 'sleep 5',
+      ';', 'link-window', '-d', '-s', `=${base}:${windowIndex}`, '-t', `=${view}:`,
+      ';', 'unlink-window', '-k', '-t', `=${view}:^`,
+      ';', 'set-option', '-t', `=${view}:`, 'status', 'off',
+      ';', 'set-option', '-t', `=${view}:`, 'destroy-unattached', 'on',
+    ];
+  }
+
+  /**
+   * Which session a Foreman terminal attaches to, read back from its launch
+   * argv — exact, where matching the terminal's NAME is a guess. Also reads
+   * the `/bin/sh -c 'tmux attach -t "…"'` form viewers were launched with
+   * before, so a reload into this version still recognises them.
+   */
+  static sessionOfAttachArgs(shellArgs: unknown): string | undefined {
+    if (typeof shellArgs === 'string') {
+      return /tmux attach(?:-session)? -t "=?([^"]+)"/.exec(shellArgs)?.[1];
+    }
+    if (!Array.isArray(shellArgs)) return undefined;
+    const args = shellArgs as unknown[];
+    if (args[0] === 'attach-session' && args[1] === '-t' && typeof args[2] === 'string') return args[2].replace(/^=/, '');
+    if (args[0] === 'new-session' && args[1] === '-A' && args[2] === '-s' && typeof args[3] === 'string') return args[3];
+    if (args[0] === '-c' && typeof args[1] === 'string') return TmuxManager.sessionOfAttachArgs(args[1]);
+    return undefined;
   }
 
   private static readonly UTF8_LOCALE = utf8LocaleFor(process.platform);
@@ -66,9 +162,14 @@ export class TmuxManager implements ISessionManager {
     });
   }
 
+  /**
+   * Exact (`=`): a bare name is also matched as a unique prefix, so with the
+   * base session gone a single view session would answer for it — and
+   * ensureSession would then open windows in the view, where they die with it.
+   */
   async hasSession(name: string): Promise<boolean> {
     try {
-      await this.tmux('has-session', '-t', name);
+      await this.tmux('has-session', '-t', `=${name}`);
       return true;
     } catch { return false; }
   }
@@ -95,7 +196,7 @@ export class TmuxManager implements ISessionManager {
     // from tmux, and reconnect finds the session's first window wherever it
     // starts.) Best-effort, on every call so sessions from older versions
     // get it too.
-    await this.tmux('set-option', '-t', name, 'renumber-windows', 'off').catch(() => {});
+    await this.tmux('set-option', '-t', `=${name}:`, 'renumber-windows', 'off').catch(() => {});
   }
 
   /** Creates a new window and returns its index. */
@@ -180,13 +281,39 @@ export class TmuxManager implements ISessionManager {
     await this.tmux('select-window', '-t', `${session}:${windowIndex}`);
   }
 
+  /** Exact, like hasSession: a prefix match would kill some other session. */
   async killSession(name: string): Promise<void> {
-    try { await this.tmux('kill-session', '-t', name); } catch { /* may not exist */ }
+    try { await this.tmux('kill-session', '-t', `=${name}`); } catch { /* may not exist */ }
   }
 
   /** Detaches all VSCode viewer clients from the session (session keeps running). */
   async detachClients(sessionName: string): Promise<void> {
-    try { await this.tmux('detach-client', '-s', sessionName); } catch { /* no clients attached */ }
+    try { await this.tmux('detach-client', '-s', `=${sessionName}`); } catch { /* no clients attached */ }
+  }
+
+  /** Every session on the server, with how many clients each has; [] when there is no server. */
+  async listSessions(): Promise<TmuxSession[]> {
+    const SEP = '|:foreman:|';
+    try {
+      const out = await this.tmux('list-sessions', '-F', `#{session_name}${SEP}#{session_attached}`);
+      return out.split('\n').filter(Boolean).map((line) => {
+        const [name, attached] = line.split(SEP);
+        return { name, attached: parseInt(attached ?? '', 10) || 0 };
+      });
+    } catch { return []; }
+  }
+
+  /** Every attached client: its process (a terminal's processId) and the session it shows. */
+  async listClients(): Promise<TmuxClient[]> {
+    const SEP = '|:foreman:|';
+    try {
+      const out = await this.tmux('list-clients', '-F', `#{client_pid}${SEP}#{session_name}`);
+      return out.split('\n').filter(Boolean).flatMap((line) => {
+        const [pid, session] = line.split(SEP);
+        const n = parseInt(pid, 10);
+        return Number.isNaN(n) || !session ? [] : [{ pid: n, session }];
+      });
+    } catch { return []; }
   }
 
   async killWindow(session: string, windowIndex: number): Promise<void> {
@@ -210,7 +337,7 @@ export class TmuxManager implements ISessionManager {
     const SEP = '|:foreman:|';
     try {
       const out = await this.tmux(
-        'list-windows', '-t', session,
+        'list-windows', '-t', `=${session}`,
         '-F', `#{window_index}${SEP}#{window_name}${SEP}#{pane_title}${SEP}#{pane_current_command}${SEP}#{pane_pid}`,
       );
       return out.split('\n').filter(Boolean).map(line => {

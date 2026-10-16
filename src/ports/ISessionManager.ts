@@ -14,6 +14,18 @@ export interface TmuxWindow {
   pid?: number;
 }
 
+export interface TmuxSession {
+  name: string;
+  /** Clients attached right now. */
+  attached: number;
+}
+
+export interface TmuxClient {
+  /** The client process — what a VS Code terminal running `tmux` reports as its processId. */
+  pid: number;
+  session: string;
+}
+
 /** Port over tmux session operations (implemented by TmuxManager). */
 export interface ISessionManager {
   hasSession(name: string): Promise<boolean>;
@@ -37,6 +49,10 @@ export interface ISessionManager {
   /** Detaches all clients; the session keeps running. */
   detachClients(sessionName: string): Promise<void>;
   listWindows(session: string): Promise<TmuxWindow[]>;
+  /** Every session on the tmux server; [] when there is none. */
+  listSessions(): Promise<TmuxSession[]>;
+  /** Every attached client; [] when there is none. */
+  listClients(): Promise<TmuxClient[]>;
   /** Whether a process has at least one child — the way to see an agent a shell started. */
   hasChildProcess(pid: number): Promise<boolean>;
   /** A process's full command line (argv joined). Rejects when it cannot be read. */
