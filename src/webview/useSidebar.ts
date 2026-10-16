@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
-import { send } from './vscode';
+import { getState, send, setState } from './vscode';
+import { normalizeSidebarStyle } from '../sidebarStyle';
 import { describeAll, type Described } from './derive';
 import type { ExtMessage, ForemanState, WorktreeItem } from './types';
 
-const EMPTY: ForemanState = { worktrees: [] };
+/**
+ * The style the sidebar wore last time, so a reload paints it from the first
+ * frame instead of flashing the default until the extension's first push.
+ */
+function initialState(): ForemanState {
+  const saved = (getState() as { sidebarStyle?: unknown } | null | undefined)?.sidebarStyle;
+  return { worktrees: [], sidebarStyle: saved === undefined ? undefined : normalizeSidebarStyle(saved) };
+}
 
 function reducer(current: ForemanState, msg: ExtMessage): ForemanState {
   return msg.type === 'state' ? msg.payload : current;
@@ -87,7 +95,7 @@ export interface Sidebar {
  * The layouts only draw it.
  */
 export function useSidebar(): Sidebar {
-  const [state, dispatch] = useReducer(reducer, EMPTY);
+  const [state, dispatch] = useReducer(reducer, undefined, initialState);
   const [loaded, setLoaded] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const now = useNow();
@@ -102,6 +110,12 @@ export function useSidebar(): Sidebar {
     send({ type: 'ready' });
     return () => window.removeEventListener('message', handler);
   }, []);
+
+  useEffect(() => {
+    if (!loaded || !state.sidebarStyle) return;
+    // Merged into the existing webview state, never clobbering whatever else is in it.
+    setState({ ...((getState() as Record<string, unknown> | null) ?? {}), sidebarStyle: state.sidebarStyle });
+  }, [loaded, state.sidebarStyle]);
 
   // When the extension tells us the active worktree, always follow it (reload / terminal focus)
   useEffect(() => {
