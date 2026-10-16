@@ -966,8 +966,13 @@ export class WorktreeApplicationService implements DiffPanelHost {
       await this.switchToWorktree(wt.id);
       const description = opts?.description;
       setTimeout(() => {
-        if (description) this.deps.agentManager.launchWithPrompt(wt, description);
-        else this.deps.agentManager.launch(wt);
+        // Nothing awaits this timer, so a failure must be reported here or it
+        // vanishes as an unhandled rejection — the worktree then simply never
+        // got its agent, with nothing on screen to say why.
+        const launched = description
+          ? this.deps.agentManager.launchWithPrompt(wt, description)
+          : this.deps.agentManager.launch(wt);
+        launched.catch((e) => this.deps.notify.showError(`Failed to launch agent: ${String(e)}`));
       }, 300);
     }
   }
@@ -1113,7 +1118,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   launchAgent(worktree?: Worktree, provider?: ProviderId): void {
     const wt = this.resolveWorktree(worktree);
-    if (wt) this.deps.agentManager.launch(wt, { provider });
+    if (wt) {
+      this.deps.agentManager.launch(wt, { provider })
+        .catch((e) => this.deps.notify.showError(`Failed to launch agent: ${String(e)}`));
+    }
   }
 
   // ── Cyclic navigation ──────────────────────────────────────────────────────

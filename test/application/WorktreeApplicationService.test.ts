@@ -1605,6 +1605,16 @@ describe('createWorktree', () => {
     expect(h.claude.launch).not.toHaveBeenCalled();
   });
 
+  it('reports a launch that fails after the worktree was created, instead of losing it', async () => {
+    // Nothing awaits the delayed launch: an unhandled rejection is all it was.
+    vi.useFakeTimers();
+    const { h } = createHarness();
+    h.claude.launchWithPrompt.mockRejectedValue(new Error('no server running'));
+    await h.service.createWorktree({ branch: 'feat/x', description: 'Fix the bug' });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(h.notify.showError).toHaveBeenCalledWith('Failed to launch agent: Error: no server running');
+  });
+
   it('schedules no launch when withProgress resolves without a worktree', async () => {
     vi.useFakeTimers();
     const { h } = createHarness();
@@ -2080,6 +2090,16 @@ describe('launchAgent command', () => {
     h = makeHarness();
     h.service.launchAgent(undefined);
     expect(h.claude.launch).not.toHaveBeenCalled();
+  });
+
+  it('reports a failed launch rather than dropping the rejection', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({ worktrees: [a] });
+    h.claude.launch.mockRejectedValue(new Error('no server running'));
+    h.service.launchAgent(a);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(h.notify.showError).toHaveBeenCalledWith('Failed to launch agent: Error: no server running');
   });
 });
 

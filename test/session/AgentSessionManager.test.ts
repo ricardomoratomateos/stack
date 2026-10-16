@@ -573,6 +573,30 @@ describe('launch command line', () => {
       await mgr.launch(wt, { prompt: 'go' });
       expectSubmitted(stub, `${SESSION}:1`, 'go');
     });
+
+    it('stops waiting, and pastes nothing, when the window is closed meanwhile', async () => {
+      const { mgr, stub } = createHung();
+      const launched = mgr.launch(wt, { prompt: 'go' });
+      await flush();
+      await mgr.killWindow('wt-1', 1);
+      await launched; // released by the kill, not by the (never-ending) cap
+      expect(stub.paste).not.toHaveBeenCalled();
+    });
+
+    it('survives the worktree being deleted mid-launch, and does not resurrect its entry', async () => {
+      // waitForHook asserted the window's meta was there (a TypeError) and
+      // looked it up through windowMap(), which re-created the worktree.
+      const { mgr, stub } = create();
+      let killed = false;
+      (stub.listWindows as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+        if (!killed) { killed = true; await mgr.killWorktreeSession('wt-1'); }
+        return [{ index: 1, name: 'claude', command: 'node', pid: 7 }];
+      });
+      await expect(mgr.launch(wt, { prompt: 'go' })).resolves.toBeDefined();
+      expect(stub.paste).not.toHaveBeenCalled();
+      expect(mgr.hasTerminals('wt-1')).toBe(false);
+      expect((mgr as unknown as { windows: Map<string, unknown> }).windows.has('wt-1')).toBe(false);
+    });
   });
 
   it('does not paste, or wait, when there is no prompt', async () => {
@@ -1712,6 +1736,14 @@ describe('compat API', () => {
     seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
     mgr.updateState('wt-1', 'active');
     expect(stateEvents).toEqual([]);
+  });
+
+  it('dispose drops its onDidCloseTerminal listener', () => {
+    const { mgr } = create();
+    const subscription = window.onDidCloseTerminal.mock.results.at(-1)?.value as { dispose: ReturnType<typeof vi.fn> };
+    expect(subscription.dispose).not.toHaveBeenCalled();
+    mgr.dispose();
+    expect(subscription.dispose).toHaveBeenCalledTimes(1);
   });
 });
 

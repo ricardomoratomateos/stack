@@ -85,6 +85,9 @@ export class AgentSessionManager {
   // worktreeId → (tmux window index → user-chosen name)
   private aliases = new Map<string, Map<number, string>>();
 
+  /** Kept to be disposed: the listener otherwise outlives the manager and pins it in memory. */
+  private closeTerminalSubscription: vscode.Disposable;
+
   constructor(
     private providers: ProviderFactory,
     private globalState: vscode.Memento,
@@ -93,7 +96,7 @@ export class AgentSessionManager {
     private hostname: string = os.hostname(),
     private sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
   ) {
-    vscode.window.onDidCloseTerminal(terminal => {
+    this.closeTerminalSubscription = vscode.window.onDidCloseTerminal(terminal => {
       for (const [id, viewer] of this.viewers.entries()) {
         if (viewer === terminal) { this.viewers.delete(id); break; }
       }
@@ -551,11 +554,17 @@ export class AgentSessionManager {
   /**
    * Resolves once the window's agent has sent its first hook event, or after
    * AGENT_READY_TIMEOUT_MS: hooks the user has not trusted never fire, and a
-   * launch must not hang on them. The window's meta was written by launch()
-   * moments ago, hence the assertion.
+   * launch must not hang on them.
+   *
+   * launch() wrote the window's meta moments ago, but the process wait in
+   * between is up to ten seconds long, and the window can be killed or the
+   * worktree deleted during it. This used to assert the meta was there — a
+   * TypeError for a launch the user had already abandoned — and to look it
+   * up through windowMap(), which re-created the deleted worktree's entry.
    */
   private waitForHook(worktreeId: string, windowIndex: number): Promise<boolean> {
-    const meta = this.windowMap(worktreeId).get(windowIndex)!;
+    const meta = this.windows.get(worktreeId)?.get(windowIndex);
+    if (!meta) return Promise.resolve(false);
     if (meta.hookSeen) return Promise.resolve(true);
     const key = `${worktreeId}:${windowIndex}`;
     const seen = new Promise<boolean>((resolve) => this.readyWaiters.set(key, () => resolve(true)));
@@ -584,6 +593,9 @@ export class AgentSessionManager {
    * which is the part of the fix that does not depend on hooks at all.
    */
   private async submitPrompt(worktreeId: string, windowIndex: number, text: string, submit: boolean): Promise<void> {
+    // Closed — or its worktree deleted — while a launch waited for the agent:
+    // the paste would fail, or land in whatever has taken the index since.
+    if (!this.windows.get(worktreeId)?.has(windowIndex)) return;
     const target = `${TmuxManager.sessionName(worktreeId)}:${windowIndex}`;
     await this.tmux.paste(target, text);
     if (!submit) return;
@@ -905,6 +917,9 @@ export class AgentSessionManager {
     const sessionName = TmuxManager.sessionName(worktreeId);
     await this.tmux.killWindow(sessionName, windowIndex);
     this.windows.get(worktreeId)?.delete(windowIndex);
+    // A launch still waiting for this window's agent stops waiting now (and
+    // then finds the window gone) instead of sitting out its timeout.
+    this.readyWaiters.get(`${worktreeId}:${windowIndex}`)?.();
     this.forgetAlias(worktreeId, windowIndex);
     const order = this.orders.get(worktreeId);
     if (order?.includes(windowIndex)) {
@@ -943,6 +958,9 @@ export class AgentSessionManager {
     const sessionName = TmuxManager.sessionName(worktreeId);
     await this.tmux.killSession(sessionName);
     this.windows.delete(worktreeId);
+    for (const [key, release] of this.readyWaiters) {
+      if (key.startsWith(`${worktreeId}:`)) release();
+    }
     this.aliases.delete(worktreeId);
     this.persistAliases();
     this.viewers.get(worktreeId)?.dispose();
@@ -1035,6 +1053,7 @@ export class AgentSessionManager {
     for (const timer of this.titleTimers.values()) clearTimeout(timer);
     this.titleTimers.clear();
     if (this.shellTimer) { clearInterval(this.shellTimer); this.shellTimer = undefined; }
+    this.closeTerminalSubscription.dispose();
     this.stateChangeEmitter.dispose();
     this.terminalsChangeEmitter.dispose();
   }
