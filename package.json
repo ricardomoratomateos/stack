@@ -346,7 +346,7 @@
           {
             "id": "new-agent",
             "title": "Create a worktree and launch an agent",
-            "description": "One task, one branch, one worktree, one agent. Describe the task; Stack cuts the branch, creates the worktree and starts the agent in it.\n[New agent](command:stack.newTask)",
+            "description": "One task, one branch, one worktree, one agent. Describe the task; Stack cuts the branch, creates the worktree and starts the agent in it.\n[New task](command:stack.newTask)",
             "media": {
               "markdown": "media/walkthrough/new-agent.md"
             },

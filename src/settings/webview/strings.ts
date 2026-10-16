@@ -59,7 +59,7 @@ export const STR = {
   worktreesDir: 'Worktrees folder',
   worktreesDirHint: 'Where worktrees are created, relative to the repository root.',
   baseBranch: 'Start new work from',
-  baseBranchHint: 'Preselected in the New agent form.',
+  baseBranchHint: 'Preselected in the New task panel.',
   required: 'This can’t be empty.',
   behaviour: 'Behaviour',
   focusMode: 'Focus mode',
