@@ -444,7 +444,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     workspaceState: ctx.workspaceState,
   });
 
-  const diffPanelManager = new DiffPanelManager(ctx.extensionUri, service);
+  const diffPanelManager = new DiffPanelManager(ctx.extensionUri, service, () => config.get().sidebarStyle);
 
   const newTaskPanel = new NewTaskPanelManager(ctx.extensionUri, {
     branchOptions: () => service.newTaskBranchOptions(),
@@ -685,6 +685,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     repoConfigWatcher.onDidDelete(resyncDocker),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('stack')) resyncDocker();
+      if (e.affectsConfiguration('stack.sidebarStyle')) diffPanelManager.refreshStyle();
     }),
   );
 

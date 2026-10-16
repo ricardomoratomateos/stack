@@ -18,6 +18,15 @@ describe('buildCommentPrompt', () => {
     expect(out).toContain('do not open a pull request');
   });
 
+  it('says which side of the diff a line number refers to', () => {
+    const out = buildCommentPrompt([
+      { file: 'a.ts', side: 'old', line: 7, body: 'why was this removed' },
+      { file: 'a.ts', side: 'new', line: 7, body: 'rename this' },
+    ]);
+    expect(out).toContain('**a.ts:7 (line in the old file, before the change; it was removed or edited)**');
+    expect(out).toContain('**a.ts:7 (line in the new file, after the change)**');
+  });
+
   it('groups by file and orders comments by line', () => {
     const comments: DiffComment[] = [
       { file: 'a.ts', side: 'new', line: 20, body: 'second' },

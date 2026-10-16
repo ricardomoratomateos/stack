@@ -3,6 +3,7 @@ import { window, Uri } from '../__mocks__/vscode';
 import { DiffPanelManager, type DiffPanelHost } from '../../src/diff/DiffPanelManager';
 import type { DiffPanelMessage, DiffPanelExtMessage } from '../../src/diff/types';
 import { DiffError } from '../../src/ports/IGitPort';
+import type { SidebarStyle } from '../../src/sidebarStyle';
 
 interface FakePanel {
   webview: {
@@ -52,6 +53,8 @@ function makeHost(over: Partial<DiffPanelHost> = {}): DiffPanelHost {
 }
 
 const extUri = Uri.file('/ext');
+let style: SidebarStyle = 'aside';
+const make = (host: DiffPanelHost) => new DiffPanelManager(extUri, host, () => style);
 
 beforeEach(() => {
   window.createWebviewPanel.mockReset();
@@ -62,25 +65,25 @@ describe('DiffPanelManager', () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
     const host = makeHost();
-    new DiffPanelManager(extUri, host).open('wt-1');
+    make(host).open('wt-1');
 
     expect(window.createWebviewPanel).toHaveBeenCalledTimes(1);
     expect(window.createWebviewPanel.mock.calls[0][1]).toBe('Review: Fix X');
     expect(panel.webview.html).toContain('diffPanel.js');
-    expect(panel.webview.html).toContain('diff2html.css');
+    expect(panel.webview.html).toContain('codicon.css');
   });
 
   it('titles the panel "Review" when there is no context', () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
-    new DiffPanelManager(extUri, makeHost({ getContext: vi.fn(() => undefined) })).open('wt-1');
+    make(makeHost({ getContext: vi.fn(() => undefined) })).open('wt-1');
     expect(window.createWebviewPanel.mock.calls[0][1]).toBe('Review');
   });
 
   it('reveals the existing panel instead of creating a second one', () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
-    const mgr = new DiffPanelManager(extUri, makeHost());
+    const mgr = make(makeHost());
     mgr.open('wt-1');
     mgr.open('wt-1');
     expect(window.createWebviewPanel).toHaveBeenCalledTimes(1);
@@ -91,7 +94,7 @@ describe('DiffPanelManager', () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
     const host = makeHost();
-    new DiffPanelManager(extUri, host).open('wt-1');
+    make(host).open('wt-1');
 
     await panel.fire({ type: 'ready' });
     expect(host.getDiff).toHaveBeenCalledWith('wt-1', 'branch');
@@ -102,7 +105,7 @@ describe('DiffPanelManager', () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
     const host = makeHost();
-    new DiffPanelManager(extUri, host).open('wt-1');
+    make(host).open('wt-1');
 
     await panel.fire({ type: 'requestDiff', base: 'working' });
     expect(host.getDiff).toHaveBeenCalledWith('wt-1', 'working');
@@ -116,7 +119,7 @@ describe('DiffPanelManager', () => {
     const getContext = vi.fn()
       .mockReturnValueOnce({ label: 'Fix X', hasLiveAgent: false })
       .mockReturnValue(undefined);
-    new DiffPanelManager(extUri, makeHost({ getContext })).open('wt-1');
+    make(makeHost({ getContext })).open('wt-1');
 
     await panel.fire({ type: 'ready' });
     expect(panel.posted).toContainEqual({ type: 'error', message: 'Worktree not found.' });
@@ -130,7 +133,7 @@ describe('DiffPanelManager', () => {
     const host = makeHost({
       getDiff: vi.fn(async () => { throw new DiffError('not a git repository (or any of the parent directories): .git'); }),
     });
-    new DiffPanelManager(extUri, host).open('wt-1');
+    make(host).open('wt-1');
 
     await panel.fire({ type: 'requestDiff', base: 'branch' });
     expect(panel.posted.at(-1)).toEqual({
@@ -143,7 +146,7 @@ describe('DiffPanelManager', () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
     const host = makeHost({ getDiff: vi.fn(async () => { throw new Error('git boom'); }) });
-    new DiffPanelManager(extUri, host).open('wt-1');
+    make(host).open('wt-1');
 
     await panel.fire({ type: 'requestDiff', base: 'working' });
     expect(panel.posted.at(-1)).toMatchObject({ type: 'diff', base: 'working', unified: '', error: 'git boom' });
@@ -153,7 +156,7 @@ describe('DiffPanelManager', () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
     const host = makeHost({ getDiff: vi.fn(async () => { throw 'git vanished'; }) });
-    new DiffPanelManager(extUri, host).open('wt-1');
+    make(host).open('wt-1');
 
     await panel.fire({ type: 'requestDiff', base: 'working' });
     expect(panel.posted.at(-1)).toMatchObject({ type: 'diff', base: 'working', unified: '', error: 'git vanished' });
@@ -162,7 +165,7 @@ describe('DiffPanelManager', () => {
   it('carries no error field on success, so a clean tree still reads "no changes"', async () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
-    new DiffPanelManager(extUri, makeHost({ getDiff: vi.fn(async () => '') })).open('wt-1');
+    make(makeHost({ getDiff: vi.fn(async () => '') })).open('wt-1');
 
     await panel.fire({ type: 'ready' });
     expect(panel.posted.at(-1)).not.toHaveProperty('error');
@@ -172,7 +175,7 @@ describe('DiffPanelManager', () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
     const host = makeHost();
-    new DiffPanelManager(extUri, host).open('wt-1');
+    make(host).open('wt-1');
 
     const comments = [{ file: 'a.ts', side: 'new' as const, line: 1, body: 'x' }];
     await panel.fire({ type: 'send', destination: 'new', comments });
@@ -184,7 +187,7 @@ describe('DiffPanelManager', () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
     const host = makeHost({ send: vi.fn(async () => 'new' as const) });
-    new DiffPanelManager(extUri, host).open('wt-1');
+    make(host).open('wt-1');
 
     await panel.fire({ type: 'send', destination: 'live', comments: [] });
     expect(panel.posted).toContainEqual({ type: 'sent', destination: 'new', ok: true, fellBack: true });
@@ -194,7 +197,7 @@ describe('DiffPanelManager', () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
     const host = makeHost({ send: vi.fn(async () => false as const) });
-    new DiffPanelManager(extUri, host).open('wt-1');
+    make(host).open('wt-1');
 
     await panel.fire({ type: 'send', destination: 'clipboard', comments: [] });
     expect(panel.posted).toContainEqual({ type: 'sent', destination: 'clipboard', ok: false });
@@ -204,7 +207,7 @@ describe('DiffPanelManager', () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
     const host = makeHost({ send: vi.fn(async () => { throw new Error('nope'); }) });
-    new DiffPanelManager(extUri, host).open('wt-1');
+    make(host).open('wt-1');
 
     await panel.fire({ type: 'send', destination: 'live', comments: [] });
     expect(panel.posted).toContainEqual({ type: 'sent', destination: 'live', ok: false });
@@ -214,7 +217,7 @@ describe('DiffPanelManager', () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
     const host = makeHost();
-    new DiffPanelManager(extUri, host).open('wt-1');
+    make(host).open('wt-1');
 
     await panel.fire({ type: 'openFile', path: 'src/a.ts', line: 5 });
     expect(host.openFile).toHaveBeenCalledWith('wt-1', 'src/a.ts', 5);
@@ -224,7 +227,7 @@ describe('DiffPanelManager', () => {
     const panel = makePanel();
     window.createWebviewPanel.mockReturnValue(panel);
     const host = makeHost({ openFile: vi.fn(async () => { throw new Error('missing'); }) });
-    new DiffPanelManager(extUri, host).open('wt-1');
+    make(host).open('wt-1');
     await expect(panel.fire({ type: 'openFile', path: 'x' })).resolves.toBeUndefined();
   });
 
@@ -232,7 +235,7 @@ describe('DiffPanelManager', () => {
     const p1 = makePanel();
     const p2 = makePanel();
     window.createWebviewPanel.mockReturnValueOnce(p1).mockReturnValueOnce(p2);
-    const mgr = new DiffPanelManager(extUri, makeHost());
+    const mgr = make(makeHost());
     mgr.open('wt-1');
     p1.triggerDispose();
     mgr.open('wt-1');
@@ -243,11 +246,36 @@ describe('DiffPanelManager', () => {
     const p1 = makePanel();
     const p2 = makePanel();
     window.createWebviewPanel.mockReturnValueOnce(p1).mockReturnValueOnce(p2);
-    const mgr = new DiffPanelManager(extUri, makeHost());
+    const mgr = make(makeHost());
     mgr.open('wt-1');
     mgr.open('wt-2');
     mgr.dispose();
     expect(p1.dispose).toHaveBeenCalled();
     expect(p2.dispose).toHaveBeenCalled();
+  });
+
+  it('tells the panel which sidebar style to borrow its accent from, on ready', async () => {
+    const panel = makePanel();
+    window.createWebviewPanel.mockReturnValue(panel);
+    style = 'claude';
+    make(makeHost()).open('wt-1');
+    await panel.fire({ type: 'ready' });
+    expect(panel.posted[0]).toEqual({ type: 'style', style: 'claude' });
+    style = 'aside';
+  });
+
+  it('repaints every open panel when the style setting changes', () => {
+    const p1 = makePanel();
+    const p2 = makePanel();
+    window.createWebviewPanel.mockReturnValueOnce(p1).mockReturnValueOnce(p2);
+    const mgr = make(makeHost());
+    mgr.refreshStyle(); // nothing open: nothing to do
+    mgr.open('wt-1');
+    mgr.open('wt-2');
+    style = 'mission';
+    mgr.refreshStyle();
+    expect(p1.posted).toEqual([{ type: 'style', style: 'mission' }]);
+    expect(p2.posted).toEqual([{ type: 'style', style: 'mission' }]);
+    style = 'aside';
   });
 });

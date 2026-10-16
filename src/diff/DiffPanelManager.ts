@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as crypto from 'node:crypto';
 import type { DiffBase, SendDestination, DiffComment, DiffPanelMessage, DiffPanelExtMessage } from './types';
 import { DiffError } from '../ports/IGitPort';
+import type { SidebarStyle } from '../sidebarStyle';
 
 /** Business logic the panel needs, provided by the application service. */
 export interface DiffPanelHost {
@@ -23,6 +24,8 @@ export class DiffPanelManager {
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly host: DiffPanelHost,
+    /** The `stack.sidebarStyle` setting: the panel wears the sidebar's accent. */
+    private readonly sidebarStyle: () => SidebarStyle,
   ) {}
 
   open(worktreeId: string): void {
@@ -50,6 +53,11 @@ export class DiffPanelManager {
     panel.onDidDispose(() => this.panels.delete(worktreeId));
   }
 
+  /** The setting changed: repaint every open panel in the new accent. */
+  refreshStyle(): void {
+    for (const panel of this.panels.values()) this.post(panel, { type: 'style', style: this.sidebarStyle() });
+  }
+
   private post(panel: vscode.WebviewPanel, msg: DiffPanelExtMessage): void {
     void panel.webview.postMessage(msg);
   }
@@ -57,6 +65,7 @@ export class DiffPanelManager {
   private async handle(worktreeId: string, panel: vscode.WebviewPanel, msg: DiffPanelMessage): Promise<void> {
     switch (msg.type) {
       case 'ready':
+        this.post(panel, { type: 'style', style: this.sidebarStyle() });
         await this.pushDiff(worktreeId, panel, 'branch');
         break;
       case 'requestDiff':
@@ -111,7 +120,7 @@ export class DiffPanelManager {
   private getHtml(webview: vscode.Webview): string {
     const nonce = crypto.randomBytes(16).toString('hex');
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'diffPanel.js'));
-    const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'diff2html.css'));
+    const iconsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'codicon.css'));
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -120,7 +129,7 @@ export class DiffPanelManager {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline' ${webview.cspSource}; font-src ${webview.cspSource};">
   <title>Review</title>
-  <link rel="stylesheet" href="${cssUri}">
+  <link rel="stylesheet" href="${iconsUri}">
 </head>
 <body>
   <div id="root"></div>

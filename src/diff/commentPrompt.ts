@@ -1,5 +1,8 @@
 import type { DiffComment } from './types';
 
+const SIDE_NEW = 'line in the new file, after the change';
+const SIDE_OLD = 'line in the old file, before the change; it was removed or edited';
+
 /**
  * Serialize review comments into a deterministic markdown prompt for the agent.
  * Comments are grouped by file and ordered by line so the agent reads them in a
@@ -19,7 +22,9 @@ export function buildCommentPrompt(comments: DiffComment[]): string {
   for (const [file, list] of byFile) {
     const sorted = [...list].sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
     const blocks = sorted.map((c) => {
-      const loc = c.line !== undefined ? `${file}:${c.line}` : file;
+      // Old and new line numbers are different numberings of the same file, so
+      // a bare `file:12` is ambiguous on any line that moved. Say which one.
+      const loc = c.line !== undefined ? `${file}:${c.line} (${c.side === 'old' ? SIDE_OLD : SIDE_NEW})` : file;
       const codeLine = c.code ? `\n\`${c.code.trim()}\`` : '';
       return `- **${loc}**${codeLine}\n  → ${c.body.trim()}`;
     });

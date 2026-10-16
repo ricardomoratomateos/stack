@@ -12,13 +12,6 @@ function copyCodeicons() {
   fs.copyFileSync(path.join(src, 'codicon.ttf'), path.join(dst, 'codicon.ttf'));
 }
 
-function copyDiff2HtmlCss() {
-  const src = path.join(__dirname, 'node_modules', 'diff2html', 'bundles', 'css', 'diff2html.min.css');
-  const dst = path.join(__dirname, 'dist', 'diff2html.css');
-  fs.mkdirSync(path.dirname(dst), { recursive: true });
-  fs.copyFileSync(src, dst);
-}
-
 const extensionConfig = {
   entryPoints: ['src/extension.ts'],
   bundle: true,
@@ -90,7 +83,6 @@ async function build() {
     ]);
     await Promise.all([extCtx.watch(), webCtx.watch(), diffCtx.watch(), newTaskCtx.watch(), settingsCtx.watch()]);
     copyCodeicons();
-    copyDiff2HtmlCss();
     console.log('Watching for changes...');
   } else {
     await Promise.all([
@@ -101,7 +93,6 @@ async function build() {
       esbuild.build(settingsPanelConfig),
     ]);
     copyCodeicons();
-    copyDiff2HtmlCss();
     console.log('Build complete.');
   }
 }

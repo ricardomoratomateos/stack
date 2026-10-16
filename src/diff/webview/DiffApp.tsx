@@ -1,384 +1,475 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { html as diff2html, parse as parseDiff } from 'diff2html';
-import { ColorSchemeType } from 'diff2html/lib/types';
-import { send } from './vscode';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { send, loadState, saveState } from './vscode';
 import type { DiffBase, DiffComment, SendDestination, DiffPanelExtMessage } from '../types';
+import { DEFAULT_SIDEBAR_STYLE, normalizeSidebarStyle, type SidebarStyle } from '../../sidebarStyle';
+import {
+  anchorOf, filterReview, hasAnchor, prepareReview, type FileEntry, type Line, type Review, type Side,
+} from './model';
+import { FileView, type FileHandlers, type FocusReq } from './FileView';
+import { FileTree } from './FileTree';
+import { Toolbar, ShortcutsHelp } from './Toolbar';
+import { SendDialog } from './SendDialog';
+import type { CommentActions } from './CommentCard';
+import type { CommentIndex } from './Lines';
+import { Icon, Visibility, type ReviewComment, type View } from './ui';
 
-type OutputFormat = 'line-by-line' | 'side-by-side';
+const EMPTY_INDEX: CommentIndex = new Map();
+const EMPTY_SET: ReadonlySet<string> = new Set();
+const EMPTY_REVIEW: Review = prepareReview('');
+const TREE_MIN = 200;
+const TREE_MAX = 560;
 
-interface Comment extends DiffComment {
-  id: number;
+interface Cursor { file: FileEntry; line: Line; side?: Side }
+
+function sameList<T>(a: T[], b: T[]): boolean {
+  return a.length === b.length && a.every((x, i) => x === b[i]);
 }
 
 export function DiffApp() {
+  const saved = useMemo(loadState, []);
+  const [style, setStyle] = useState<SidebarStyle>(DEFAULT_SIDEBAR_STYLE);
   const [base, setBase] = useState<DiffBase>('branch');
-  const [format, setFormat] = useState<OutputFormat>('line-by-line');
-  const [unified, setUnified] = useState<string>('');
-  const [label, setLabel] = useState<string>('');
+  const [view, setView] = useState<View>(saved.format ?? 'inline');
+  const [wrap, setWrap] = useState(saved.wrap ?? false);
+  const [treeOpen, setTreeOpen] = useState(saved.treeOpen ?? (typeof window === 'undefined' || window.innerWidth >= 780));
+  const [treeWidth, setTreeWidth] = useState(saved.treeWidth ?? 288);
+  const [collapsedDirs, setCollapsedDirs] = useState<ReadonlySet<string>>(() => new Set(saved.collapsedDirs ?? []));
+  const [viewed, setViewed] = useState<ReadonlySet<string>>(() => new Set(saved.viewed ?? []));
+  // signature -> the user's own choice for the file, over the default (open, unless viewed or heavy).
+  const [openOverride, setOpenOverride] = useState<Readonly<Record<string, boolean>>>({});
+
+  const [review, setReview] = useState<Review>(EMPTY_REVIEW);
+  const [label, setLabel] = useState('');
   const [hasLiveAgent, setHasLiveAgent] = useState(false);
   const [loading, setLoading] = useState(true);
-  // Why the diff could not be computed, if it could not — shown in place of
-  // "No changes", which would otherwise be the panel's answer to a git error.
+  const [refreshing, setRefreshing] = useState(false);
   const [diffError, setDiffError] = useState<string | undefined>(undefined);
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [filesOpen, setFilesOpen] = useState(true);
-  const [modalOpen, setModalOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [comments, setComments] = useState<ReviewComment[]>([]);
+  const [activePos, setActivePos] = useState(0);
+  const [focus, setFocus] = useState<(FocusReq & { fileIndex: number }) | undefined>(undefined);
+  const [dialog, setDialog] = useState(false);
+  const [help, setHelp] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [vis, setVis] = useState<Visibility | null>(null);
 
-  const diffRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const stream = useRef<HTMLDivElement>(null);
+  const filterInput = useRef<HTMLInputElement>(null);
   const nextId = useRef(1);
-  // comment id → the diff row it is anchored to (for the highlight marker).
-  const rowFor = useRef(new Map<number, HTMLElement>());
-  // comment id → the injected <td> the inline editor portal renders into.
-  const mountFor = useRef(new Map<number, HTMLElement>());
+  const nonce = useRef(1);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const cursor = useRef<Cursor | null>(null);
+  const hunkAt = useRef<{ pos: number; block: number } | null>(null);
 
-  /** Remove every injected comment row + highlight from the current DOM. */
-  const clearAnchors = useCallback(() => {
-    for (const row of rowFor.current.values()) row.classList.remove('u-commented');
-    for (const td of mountFor.current.values()) td.parentElement?.remove();
-    rowFor.current.clear();
-    mountFor.current.clear();
-  }, []);
+  // ── Derived ────────────────────────────────────────────────────────────────
+  const filtered = useMemo(() => filterReview(review, query), [review, query]);
+  const shown = filtered.files;
+  const ready = useMemo(() => comments.filter((c) => c.body.trim().length > 0), [comments]);
+
+  // A file's comment index keeps its identity while that file's comments do not
+  // change, so typing in one box rebuilds one file, not the whole review.
+  const cache = useRef(new Map<string, { list: ReviewComment[]; index: CommentIndex }>());
+  const indexes = useMemo(() => {
+    const byFile = new Map<string, ReviewComment[]>();
+    for (const c of comments) {
+      const l = byFile.get(c.file);
+      if (l) l.push(c); else byFile.set(c.file, [c]);
+    }
+    const next = new Map<string, { list: ReviewComment[]; index: CommentIndex }>();
+    for (const [path, list] of byFile) {
+      const prev = cache.current.get(path);
+      if (prev && sameList(prev.list, list)) { next.set(path, prev); continue; }
+      const index = new Map<string, ReviewComment[]>();
+      for (const c of list) {
+        if (c.line === undefined) continue;
+        const k = `${c.side}:${c.line}`;
+        const l = index.get(k);
+        if (l) l.push(c); else index.set(k, [c]);
+      }
+      next.set(path, { list, index });
+    }
+    cache.current = next;
+    return next;
+  }, [comments]);
+  const commentCounts = useMemo(() => new Map([...indexes].map(([p, v]) => [p, v.list.length])), [indexes]);
+
+  const isOpen = useCallback((f: FileEntry) => openOverride[f.signature] ?? !(viewed.has(f.signature) || f.heavy), [openOverride, viewed]);
+
+  // Handlers read the latest state through a ref so their identity never changes
+  // and a keystroke in a comment box does not re-render every file.
+  const latest = useRef({ comments, shown, isOpen, viewed, activePos, view, hasLiveAgent });
+  latest.current = { comments, shown, isOpen, viewed, activePos, view, hasLiveAgent };
 
   // ── Extension messages ─────────────────────────────────────────────────────
+  const flash = useCallback((text: string, ms = 4000) => {
+    setToast(text);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), ms);
+  }, []);
+
   useEffect(() => {
     const handler = (e: MessageEvent) => {
       const msg = e.data as DiffPanelExtMessage;
-      if (msg.type === 'diff') {
-        setUnified(msg.unified);
+      if (msg.type === 'style') {
+        setStyle(normalizeSidebarStyle(msg.style));
+      } else if (msg.type === 'diff') {
+        // Parsed here, once; everything the UI shows is derived from this.
+        const next = msg.error ? EMPTY_REVIEW : prepareReview(msg.unified);
+        setReview(next);
         setDiffError(msg.error);
         setBase(msg.base);
         setHasLiveAgent(msg.hasLiveAgent);
         setLabel(msg.label);
         setLoading(false);
-      } else if (msg.type === 'sent') {
-        setModalOpen(false);
-        if (msg.ok) {
-          clearAnchors();
-          setComments([]);
-          setToast(sentMessage(msg.destination, msg.fellBack === true));
-        } else {
-          setToast('Nothing sent — no target available.');
+        setRefreshing(false);
+        // Comments whose line is not in the new diff have nothing to point at.
+        const before = latest.current.comments;
+        const kept = before.filter((c) => hasAnchor(next, c.file, c.side, c.line));
+        if (kept.length !== before.length) {
+          setComments(kept);
+          flash(`${before.length - kept.length} comment${before.length - kept.length === 1 ? '' : 's'} dropped: the line is not in this diff.`);
         }
-        setTimeout(() => setToast(null), 4000);
+      } else if (msg.type === 'sent') {
+        setDialog(false);
+        if (msg.ok) {
+          setComments([]);
+          flash(sentMessage(msg.destination, msg.fellBack === true));
+        } else {
+          flash('Nothing sent — no target available.');
+        }
       } else if (msg.type === 'error') {
-        setToast(msg.message);
+        flash(msg.message);
         setLoading(false);
+        setRefreshing(false);
       }
     };
     window.addEventListener('message', handler);
     send({ type: 'ready' });
-    return () => window.removeEventListener('message', handler);
-  }, [clearAnchors]);
+    return () => { window.removeEventListener('message', handler); clearTimeout(toastTimer.current); };
+  }, [flash]);
 
-  // Expose the diff scrollport's visible width (scrollbar excluded) as a CSS var
-  // so inline comment boxes can match it instead of stretching to the full
-  // (often huge) table width.
+  // ── Lazy rendering: one observer rooted at the scroller ────────────────────
+  useLayoutEffect(() => {
+    if (!scroller.current) return;
+    const v = new Visibility(scroller.current);
+    setVis(v);
+    return () => v.dispose();
+  }, []);
+
+  // ── Persist what should survive the panel being hidden ─────────────────────
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const update = () => el.style.setProperty('--u-view-width', `${el.clientWidth}px`);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+    saveState({ format: view, wrap, treeOpen, treeWidth, collapsedDirs: [...collapsedDirs], viewed: [...viewed].slice(-4000) });
+  }, [view, wrap, treeOpen, treeWidth, collapsedDirs, viewed]);
 
-  const requestDiff = useCallback((next: DiffBase) => {
-    setLoading(true);
-    clearAnchors();
-    setComments([]);
-    send({ type: 'requestDiff', base: next });
-  }, [clearAnchors]);
-
-  // ── Render the diff HTML ────────────────────────────────────────────────────
-  const rendered = useMemo(() => {
-    if (!unified.trim()) return '';
-    // Match diff2html's palette to the active VSCode theme (body carries the class).
-    const colorScheme = document.body.classList.contains('vscode-light')
-      ? ColorSchemeType.LIGHT
-      : ColorSchemeType.DARK;
-    // matching:'none' skips the (costly) intra-line word diffing; the file list
-    // is drawn as our own sidebar instead of diff2html's top summary.
-    return diff2html(unified, { drawFileList: false, matching: 'none', outputFormat: format, colorScheme });
-  }, [unified, format]);
-
-  // Parsed file summary, powering the GitHub-style sidebar (same order as render).
-  const files = useMemo(() => (unified.trim() ? parseDiff(unified) : []), [unified]);
-
-  const scrollToFile = useCallback((index: number) => {
-    const wrappers = diffRef.current?.querySelectorAll<HTMLElement>('.d2h-file-wrapper');
-    wrappers?.[index]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, []);
-
-  /** Inject a full-width row right under `row` and record its cell as the portal target. */
-  const anchorRow = useCallback((row: HTMLElement, id: number) => {
-    row.classList.add('u-commented');
-    rowFor.current.set(id, row);
-    const tr = document.createElement('tr');
-    tr.className = 'u-comment-row';
-    const td = document.createElement('td');
-    td.colSpan = row.children.length || 2;
-    tr.appendChild(td);
-    row.parentNode?.insertBefore(tr, row.nextSibling);
-    mountFor.current.set(id, td);
-  }, []);
-
-  // ── Line-click → add an inline comment ──────────────────────────────────────
-  const addComment = useCallback((row: HTMLElement) => {
-    const info = extractLine(row);
-    if (!info) return;
-    const id = nextId.current++;
-    anchorRow(row, id);
-    setComments((cs) => [...cs, { id, body: '', ...info }]);
-  }, [anchorRow]);
-
-  const updateBody = useCallback((id: number, body: string) => {
-    setComments((cs) => cs.map((c) => (c.id === id ? { ...c, body } : c)));
-  }, []);
-
-  const removeComment = useCallback((id: number) => {
-    rowFor.current.get(id)?.classList.remove('u-commented');
-    mountFor.current.get(id)?.parentElement?.remove();
-    rowFor.current.delete(id);
-    mountFor.current.delete(id);
-    setComments((cs) => cs.filter((c) => c.id !== id));
-  }, []);
-
-  // ── Re-anchor after the diff DOM is (re)built (format toggle / new diff) ─────
-  // diff2html replaces innerHTML wholesale, destroying our injected rows. Rebuild
-  // them from the comment list, dropping any whose line no longer exists.
+  // ── Scroll-spy: which file is at the top ───────────────────────────────────
   useEffect(() => {
-    const container = diffRef.current;
-    if (!container) return;
-    rowFor.current.clear();
-    mountFor.current.clear();
-    setComments((cs) => {
-      const survivors = cs.filter((c) => {
-        const row = findRowForComment(container, c);
-        if (!row) return false;
-        anchorRow(row, c.id);
-        return true;
+    const sc = scroller.current;
+    if (!sc) return;
+    let raf = 0;
+    const measure = () => {
+      raf = 0;
+      const els = stream.current?.children;
+      if (!els || els.length === 0) return;
+      const y = sc.scrollTop + 16;
+      let lo = 0, hi = els.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if ((els[mid] as HTMLElement).offsetTop <= y) lo = mid; else hi = mid - 1;
+      }
+      setActivePos((cur) => {
+        if (cur !== lo && hunkAt.current && hunkAt.current.pos !== lo) hunkAt.current = null;
+        return cur === lo ? cur : lo;
       });
-      return survivors.length === cs.length ? cs : survivors;
-    });
-  }, [rendered, anchorRow]);
-
-  const ready = comments.filter((c) => c.body.trim().length > 0);
-
-  const doSend = useCallback(
-    (destination: SendDestination) => {
-      const payload: DiffComment[] = ready.map(({ file, side, line, code, body }) => ({ file, side, line, code, body }));
-      send({ type: 'send', destination, comments: payload });
-    },
-    [ready],
-  );
-
-  return (
-    <div className="u-diff-root">
-      <div className="u-toolbar">
-        {files.length > 0 && (
-          <button
-            className="u-files-toggle"
-            title={filesOpen ? 'Hide file list' : 'Show file list'}
-            onClick={() => setFilesOpen((v) => !v)}
-          >
-            ☰
-          </button>
-        )}
-        <span className="u-title">{label ? `Review — ${label}` : 'Review'}</span>
-        <div className="u-seg">
-          <button className={base === 'branch' ? 'on' : ''} onClick={() => requestDiff('branch')}>branch</button>
-          <button className={base === 'working' ? 'on' : ''} onClick={() => requestDiff('working')}>working</button>
-        </div>
-        <div className="u-seg">
-          <button className={format === 'line-by-line' ? 'on' : ''} onClick={() => setFormat('line-by-line')}>inline</button>
-          <button className={format === 'side-by-side' ? 'on' : ''} onClick={() => setFormat('side-by-side')}>split</button>
-        </div>
-        <span className="u-spacer" />
-        {comments.length > 0 && (
-          <span className="u-count">{ready.length}/{comments.length} comments</span>
-        )}
-        <button className="u-send" disabled={ready.length === 0} onClick={() => setModalOpen(true)}>
-          Send to agent
-        </button>
-      </div>
-
-      <div className="u-body">
-        {files.length > 0 && filesOpen && (
-          <div className="u-files">
-            <div className="u-files-head">{files.length} file{files.length === 1 ? '' : 's'} changed</div>
-            {files.map((f, i) => {
-              const name = f.newName && f.newName !== '/dev/null' ? f.newName : f.oldName;
-              const status = f.isNew ? 'A' : f.isDeleted ? 'D' : f.isRename ? 'R' : 'M';
-              const slash = name.lastIndexOf('/');
-              const fileBase = name.slice(slash + 1);
-              const dir = slash >= 0 ? name.slice(0, slash + 1) : '';
-              return (
-                <div key={`${name}-${i}`} className="u-file" title={name} onClick={() => scrollToFile(i)}>
-                  <span className={`u-file-status u-st-${status}`}>{status}</span>
-                  <span className="u-file-name">
-                    <span className="u-file-base">{fileBase}</span>
-                    {dir && <span className="u-file-dir">{dir.replace(/\/$/, '')}</span>}
-                  </span>
-                  <span className="u-file-stat">
-                    {f.addedLines > 0 && <span className="u-add">+{f.addedLines}</span>}
-                    {f.deletedLines > 0 && <span className="u-del">−{f.deletedLines}</span>}
-                  </span>
-                  {status !== 'D' && (
-                    <button
-                      className="u-file-open"
-                      title="Open in editor"
-                      onClick={(e) => { e.stopPropagation(); send({ type: 'openFile', path: name }); }}
-                    >
-                      ↗
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-        <div className="u-diff-scroll" ref={scrollRef}>
-          {loading ? (
-            <div className="u-empty">Loading diff…</div>
-          ) : diffError ? (
-            <div className="u-empty">Couldn't compute the diff: {diffError}</div>
-          ) : rendered ? (
-            <DiffHtml html={rendered} containerRef={diffRef} onRowClick={addComment} />
-          ) : (
-            <div className="u-empty">No changes to review on this {base === 'branch' ? 'branch' : 'working tree'}.</div>
-          )}
-          {!loading && rendered && (
-            <div className="u-hint">Click any line to attach a comment.</div>
-          )}
-        </div>
-      </div>
-
-      {/* Inline comment editors, portalled into the rows injected under each line. */}
-      {comments.map((c) => {
-        const mount = mountFor.current.get(c.id);
-        return mount
-          ? createPortal(
-              <InlineComment
-                comment={c}
-                onChange={(b) => updateBody(c.id, b)}
-                onRemove={() => removeComment(c.id)}
-                onOpen={() => send({ type: 'openFile', path: c.file, line: c.line })}
-              />,
-              mount,
-              String(c.id),
-            )
-          : null;
-      })}
-
-      {toast && <div className="u-toast">{toast}</div>}
-
-      {modalOpen && (
-        <SendModal
-          count={ready.length}
-          hasLiveAgent={hasLiveAgent}
-          onPick={doSend}
-          onClose={() => setModalOpen(false)}
-        />
-      )}
-    </div>
-  );
-}
-
-function InlineComment({
-  comment,
-  onChange,
-  onRemove,
-  onOpen,
-}: {
-  comment: Comment;
-  onChange: (body: string) => void;
-  onRemove: () => void;
-  onOpen: () => void;
-}) {
-  return (
-    <div className="u-inline-comment">
-      <div className="u-ic-head">
-        <button className="u-ic-loc" title="Open in editor" onClick={onOpen}>
-          {comment.file}{comment.line !== undefined ? `:${comment.line}` : ''}
-        </button>
-        <button className="u-x" title="Remove comment" onClick={onRemove}>✕</button>
-      </div>
-      <textarea
-        autoFocus
-        value={comment.body}
-        placeholder="Leave a comment…"
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </div>
-  );
-}
-
-/**
- * The rendered diff, isolated behind React.memo so it never re-renders (nor
- * re-parses the large HTML) when comments change or the modal opens. It only
- * re-renders when the diff `html` string itself changes, and owns the click
- * listener that turns a line click into a comment.
- */
-const DiffHtml = React.memo(function DiffHtml({
-  html,
-  containerRef,
-  onRowClick,
-}: {
-  html: string;
-  containerRef: React.RefObject<HTMLDivElement | null>;
-  onRowClick: (row: HTMLElement) => void;
-}) {
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    const onClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      // Ignore clicks inside an inline comment editor (it lives in an injected row).
-      if (target.closest('.u-comment-row')) return;
-      const row = target.closest('tr') as HTMLElement | null;
-      if (!row || !row.querySelector('.d2h-code-line, .d2h-code-side-line')) return;
-      onRowClick(row);
     };
-    container.addEventListener('click', onClick);
-    return () => container.removeEventListener('click', onClick);
-  }, [html, containerRef, onRowClick]);
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(measure); };
+    sc.addEventListener('scroll', onScroll, { passive: true });
+    return () => { sc.removeEventListener('scroll', onScroll); if (raf) cancelAnimationFrame(raf); };
+  }, []);
 
-  return <div ref={containerRef} className="u-diff" dangerouslySetInnerHTML={{ __html: html }} />;
-});
+  // ── Actions ────────────────────────────────────────────────────────────────
+  const requestDiff = useCallback((next: DiffBase, keepView = false) => {
+    if (keepView) setRefreshing(true); else setLoading(true);
+    send({ type: 'requestDiff', base: next });
+  }, []);
 
-function SendModal({
-  count,
-  hasLiveAgent,
-  onPick,
-  onClose,
-}: {
-  count: number;
-  hasLiveAgent: boolean;
-  onPick: (d: SendDestination) => void;
-  onClose: () => void;
-}) {
+  const goToFile = useCallback((pos: number) => {
+    const { shown: list } = latest.current;
+    const p = Math.max(0, Math.min(list.length - 1, pos));
+    const el = stream.current?.children[p] as HTMLElement | undefined;
+    if (!el || !scroller.current) return;
+    scroller.current.scrollTo({ top: el.offsetTop - 1 });
+    setActivePos(p);
+    hunkAt.current = null;
+  }, []);
+
+  const paintCursor = useCallback((c: Cursor | null, visible: boolean) => {
+    scroller.current?.querySelectorAll('.rv-cursor').forEach((n) => n.classList.remove('rv-cursor'));
+    if (!c || !visible) return;
+    const a = anchorOf(c.line, c.side);
+    if (!a) return;
+    document.getElementById(`rv-f-${c.file.index}`)
+      ?.querySelectorAll(`[data-a~="${a.side}:${a.line}"]`)
+      .forEach((n) => n.classList.add('rv-cursor'));
+  }, []);
+
+  const startComment = useCallback((file: FileEntry, line: Line, side?: Side) => {
+    const a = anchorOf(line, side);
+    if (!a) return;
+    cursor.current = { file, line, side };
+    setComments((cs) => {
+      const existing = cs.find((c) => c.file === file.path && c.side === a.side && c.line === a.line);
+      // Never leave empty boxes behind: they are what a stray click produces.
+      const base = cs.filter((c) => !(c.editing && c.prev === undefined && c.body.trim() === '' && c !== existing));
+      if (existing) {
+        return base.map((c) => (c === existing && !c.editing ? { ...c, editing: true, prev: c.body } : c));
+      }
+      return [...base, { id: nextId.current++, file: file.path, side: a.side, line: a.line, code: line.text, body: '', editing: true }];
+    });
+  }, []);
+
+  const actions = useMemo<CommentActions>(() => ({
+    change: (id, body) => setComments((cs) => cs.map((c) => (c.id === id ? { ...c, body } : c))),
+    commit: (id) => setComments((cs) => cs.map((c) => (c.id === id ? { ...c, editing: false, prev: undefined } : c))),
+    cancel: (id) => setComments((cs) => cs.flatMap((c) => {
+      if (c.id !== id) return [c];
+      return c.prev === undefined ? [] : [{ ...c, body: c.prev, editing: false, prev: undefined }];
+    })),
+    edit: (id) => setComments((cs) => cs.map((c) => (c.id === id ? { ...c, editing: true, prev: c.body } : c))),
+    remove: (id) => setComments((cs) => cs.filter((c) => c.id !== id)),
+    open: (file, line) => send({ type: 'openFile', path: file, line }),
+  }), []);
+
+  const handlers = useMemo<FileHandlers>(() => ({
+    actions,
+    toggleOpen: (f) => setOpenOverride((o) => {
+      const cur = o[f.signature] ?? !(latest.current.viewed.has(f.signature) || f.heavy);
+      return { ...o, [f.signature]: !cur };
+    }),
+    toggleViewed: (f) => {
+      setViewed((v) => {
+        const n = new Set(v);
+        if (n.has(f.signature)) n.delete(f.signature); else n.add(f.signature);
+        return n;
+      });
+      // Viewing (or un-viewing) decides again whether it is open.
+      setOpenOverride((o) => {
+        if (!(f.signature in o)) return o;
+        const { [f.signature]: _gone, ...rest } = o;
+        return rest;
+      });
+    },
+    openInEditor: (f) => send({ type: 'openFile', path: f.path }),
+    line: startComment,
+    hover: (file, line, side) => { cursor.current = { file, line, side }; paintCursor(null, false); },
+    landed: (file, line, side) => { cursor.current = { file, line, side }; paintCursor(cursor.current, true); },
+  }), [actions, startComment, paintCursor]);
+
+  const moveHunk = useCallback((dir: 1 | -1) => {
+    const { shown: list, isOpen: open, activePos: pos } = latest.current;
+    const from = hunkAt.current ?? { pos, block: dir === 1 ? -1 : list[pos]?.blocks.length ?? 0 };
+    let p = from.pos;
+    let b = from.block + dir;
+    for (;;) {
+      const f = list[p];
+      if (!f) return;
+      if (open(f) && !f.binary && b >= 0 && b < f.blocks.length) break;
+      p += dir;
+      const nf = list[p];
+      if (!nf) return;
+      b = dir === 1 ? 0 : nf.blocks.length - 1;
+    }
+    hunkAt.current = { pos: p, block: b };
+    setActivePos(p);
+    setFocus({ fileIndex: list[p].index, block: b, nonce: nonce.current++ });
+  }, []);
+
+  const toggleDir = useCallback((id: string) => {
+    setCollapsedDirs((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  }, []);
+
+  const doSend = useCallback((destination: SendDestination) => {
+    const payload: DiffComment[] = latest.current.comments
+      .filter((c) => c.body.trim().length > 0)
+      .map(({ file, side, line, code, body }) => ({ file, side, line, code, body }));
+    send({ type: 'send', destination, comments: payload });
+  }, []);
+
+  const readyCount = ready.length;
+  const requestSend = useCallback(() => { if (readyCount > 0) setDialog(true); }, [readyCount]);
+
+  // ── Keyboard ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const inText = !!t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable);
+      if (e.key === 'Escape') {
+        if (dialog) setDialog(false); else if (help) setHelp(false);
+        return;
+      }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        if (t?.tagName === 'TEXTAREA' || dialog) return;
+        e.preventDefault();
+        requestSend();
+        return;
+      }
+      if (inText || dialog || e.metaKey || e.ctrlKey || e.altKey) return;
+      const { shown: list, activePos: pos } = latest.current;
+      switch (e.key) {
+        case 'j': goToFile(pos + 1); break;
+        case 'k': goToFile(pos - 1); break;
+        case 'n': moveHunk(1); break;
+        case 'p': moveHunk(-1); break;
+        case 'c': if (cursor.current) startComment(cursor.current.file, cursor.current.line, cursor.current.side); break;
+        case 'v': if (list[pos]) handlers.toggleViewed(list[pos]); break;
+        case '/': e.preventDefault(); setTreeOpen(true); setTimeout(() => filterInput.current?.focus(), 0); break;
+        case '?': setHelp((h) => !h); break;
+        default: return;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [dialog, help, goToFile, moveHunk, startComment, handlers, requestSend]);
+
+  // ── Resizing the file tree ─────────────────────────────────────────────────
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = treeWidth;
+    const move = (ev: PointerEvent) => setTreeWidth(Math.max(TREE_MIN, Math.min(TREE_MAX, startW + ev.clientX - startX)));
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  const hasFiles = review.files.length > 0;
+  const activeIndex = shown[Math.min(activePos, shown.length - 1)]?.index ?? -1;
+
+  const pickFile = useCallback((f: FileEntry) => {
+    const pos = latest.current.shown.findIndex((x) => x.index === f.index);
+    if (pos >= 0) goToFile(pos);
+  }, [goToFile]);
+
   return (
-    <div className="u-modal-backdrop" onClick={onClose}>
-      <div className="u-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="u-modal-title">Send {count} comment{count === 1 ? '' : 's'} to…</div>
-        <button className="u-modal-opt" disabled={!hasLiveAgent} onClick={() => onPick('live')}>
-          <strong>Running agent</strong>
-          <span>{hasLiveAgent ? 'Paste into the live session in this worktree' : 'No agent running in this worktree'}</span>
-        </button>
-        <button className="u-modal-opt" onClick={() => onPick('new')}>
-          <strong>New agent</strong>
-          <span>Launch a fresh agent seeded with the comments</span>
-        </button>
-        <button className="u-modal-opt" onClick={() => onPick('clipboard')}>
-          <strong>Clipboard</strong>
-          <span>Copy the prompt to paste it yourself</span>
-        </button>
-        <button className="u-modal-cancel" onClick={onClose}>Cancel</button>
+    <div className="rv-root" data-style={style}>
+      <Toolbar
+        label={label}
+        base={base}
+        onBase={(b) => b !== base && requestDiff(b)}
+        view={view}
+        onView={setView}
+        wrap={wrap}
+        onWrap={setWrap}
+        hasFiles={hasFiles}
+        treeOpen={treeOpen}
+        onTree={() => setTreeOpen((v) => !v)}
+        files={review.files.length}
+        added={review.added}
+        deleted={review.deleted}
+        refreshing={refreshing}
+        onRefresh={() => requestDiff(base, true)}
+        ready={readyCount}
+        onSend={requestSend}
+        onHelp={() => setHelp((h) => !h)}
+      />
+
+      <div className="rv-main">
+        {hasFiles && treeOpen && (
+          <>
+            <div className="rv-side" style={{ width: treeWidth }}>
+              <FileTree
+                tree={filtered.tree}
+                total={review.files.length}
+                shown={shown.length}
+                query={query}
+                onQuery={setQuery}
+                collapsed={collapsedDirs}
+                onToggleDir={toggleDir}
+                activeIndex={activeIndex}
+                viewed={viewed.size ? viewed : EMPTY_SET}
+                commentCounts={commentCounts}
+                onPick={pickFile}
+                filterRef={filterInput}
+              />
+            </div>
+            <div className="rv-resizer" role="separator" aria-orientation="vertical" aria-label="Resize file list" onPointerDown={startResize} />
+          </>
+        )}
+
+        <div className="rv-scroll" ref={scroller} tabIndex={-1}>
+          {loading ? (
+            <Loading />
+          ) : diffError ? (
+            <State icon="error" title={`Couldn't compute the diff: ${diffError}`}>
+              <button className="rv-btn" onClick={() => requestDiff(base)}>Try again</button>
+            </State>
+          ) : !hasFiles ? (
+            <State icon="check-all" title={`No changes to review on this ${base === 'branch' ? 'branch' : 'working tree'}.`}>
+              <button className="rv-btn" onClick={() => requestDiff(base === 'branch' ? 'working' : 'branch')}>
+                Look at the {base === 'branch' ? 'working tree' : 'branch'} instead
+              </button>
+            </State>
+          ) : shown.length === 0 ? (
+            <State icon="search" title={`No files match “${query}”.`}>
+              <button className="rv-btn" onClick={() => setQuery('')}>Clear filter</button>
+            </State>
+          ) : (
+            <>
+              <div className="rv-stream" ref={stream}>
+                {shown.map((f) => (
+                  <FileView
+                    key={f.index}
+                    file={f}
+                    view={view}
+                    wrap={wrap}
+                    open={isOpen(f)}
+                    viewed={viewed.has(f.signature)}
+                    comments={indexes.get(f.path)?.index ?? EMPTY_INDEX}
+                    commentCount={commentCounts.get(f.path) ?? 0}
+                    vis={vis}
+                    focusReq={focus && focus.fileIndex === f.index ? focus : undefined}
+                    handlers={handlers}
+                  />
+                ))}
+              </div>
+              <div className="rv-end">
+                <Icon name="check-all" /> End of review · {shown.length} file{shown.length === 1 ? '' : 's'}.
+                Click a line, or press <kbd className="rv-kbd">c</kbd>, to leave a comment.
+              </div>
+            </>
+          )}
+        </div>
       </div>
+
+      {help && <ShortcutsHelp onClose={() => setHelp(false)} />}
+      {toast && <div className="rv-toast" role="status">{toast}</div>}
+      {dialog && <SendDialog count={readyCount} hasLiveAgent={hasLiveAgent} onPick={doSend} onClose={() => setDialog(false)} />}
+    </div>
+  );
+}
+
+function Loading() {
+  return (
+    <div className="rv-state" role="status" aria-label="Computing the diff">
+      <div className="rv-shimmer" style={{ width: '38%' }} />
+      <div className="rv-shimmer" style={{ width: '82%' }} />
+      <div className="rv-shimmer" style={{ width: '64%' }} />
+      <div className="rv-shimmer" style={{ width: '71%' }} />
+      <p>Computing the diff…</p>
+    </div>
+  );
+}
+
+function State({ icon, title, children }: { icon: string; title: string; children?: React.ReactNode }) {
+  return (
+    <div className="rv-state">
+      <Icon name={icon} className="rv-state-icon" />
+      <p>{title}</p>
+      {children}
     </div>
   );
 }
@@ -389,47 +480,4 @@ function sentMessage(d: SendDestination, fellBack: boolean): string {
   if (d === 'new' && fellBack) return 'The agent had exited, so a new one was launched with your comments.';
   if (d === 'new') return 'Launched a new agent with your comments.';
   return 'Prompt copied to clipboard.';
-}
-
-/** Pull (file, side, line, code) out of a diff2html table row. */
-function extractLine(row: HTMLElement): Omit<DiffComment, 'body'> | undefined {
-  const lineEl = row.querySelector('.d2h-code-line, .d2h-code-side-line');
-  if (!lineEl) return undefined;
-
-  const fileEl = row.closest('.d2h-file-wrapper')?.querySelector('.d2h-file-name');
-  const file = fileEl?.textContent?.trim() || 'unknown';
-
-  const newNum = row.querySelector('.line-num2')?.textContent?.trim();
-  const oldNum = row.querySelector('.line-num1')?.textContent?.trim();
-  // Side-by-side rows carry a single line-number cell instead of num1/num2.
-  const soleNum = row.querySelector('.d2h-code-side-linenumber')?.textContent?.trim();
-
-  let side: 'old' | 'new' = 'new';
-  let line: number | undefined;
-  if (newNum) { side = 'new'; line = parseInt(newNum, 10); }
-  else if (oldNum) { side = 'old'; line = parseInt(oldNum, 10); }
-  else if (soleNum) { line = parseInt(soleNum, 10); }
-  if (line !== undefined && Number.isNaN(line)) line = undefined;
-
-  const code = lineEl.querySelector('.d2h-code-line-ctn')?.textContent
-    ?? lineEl.textContent
-    ?? '';
-
-  return { file, side, line, code };
-}
-
-/** Find the diff row a comment was anchored to (used to re-anchor after re-render). */
-function findRowForComment(container: HTMLElement, c: Comment): HTMLElement | undefined {
-  const wrappers = Array.from(container.querySelectorAll<HTMLElement>('.d2h-file-wrapper'));
-  for (const w of wrappers) {
-    const name = w.querySelector('.d2h-file-name')?.textContent?.trim();
-    if (name !== c.file) continue;
-    const rows = Array.from(w.querySelectorAll<HTMLElement>('tr'));
-    for (const row of rows) {
-      if (!row.querySelector('.d2h-code-line, .d2h-code-side-line')) continue;
-      const info = extractLine(row);
-      if (info && info.side === c.side && info.line === c.line) return row;
-    }
-  }
-  return undefined;
 }
