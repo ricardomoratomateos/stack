@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { GitCliAdapter } from '../../src/adapters/GitCliAdapter';
+import { GitCliAdapter, parseWorktreePaths } from '../../src/adapters/GitCliAdapter';
 import { DiffError } from '../../src/ports/IGitPort';
 import { NodeFileSystem } from '../../src/adapters/NodeFileSystem';
 import { NodeProcessRunner } from '../../src/adapters/NodeProcessRunner';
@@ -67,6 +67,55 @@ describe('GitCliAdapter (integration, real temp git repo)', () => {
       const notARepo = path.join(tmp, 'not-a-repo');
       fs.mkdirSync(notARepo, { recursive: true });
       expect(adapter.listWorktrees(notARepo)).toEqual([]);
+    });
+
+    it('flags a worktree whose directory was deleted by hand as prunable', () => {
+      const wtPath = path.join(tmp, 'wt-rmrf');
+      git(`worktree add -b rmrf "${wtPath}"`);
+      fs.rmSync(wtPath, { recursive: true, force: true });
+      expect(adapter.listWorktrees(repo).find((w) => w.path === wtPath)?.prunable).toBe(true);
+      expect(adapter.listWorktrees(repo).find((w) => w.path === repo)?.prunable).toBeUndefined();
+      git('worktree prune');
+      git('branch -D rmrf');
+    });
+  });
+
+  describe('listWorktreePaths', () => {
+    it('lists every worktree, detached ones included', async () => {
+      const wtPath = path.join(tmp, 'wt-paths-detached');
+      git(`worktree add --detach "${wtPath}"`);
+      const list = await adapter.listWorktreePaths(repo);
+      expect(list).toContainEqual({ path: repo, prunable: false });
+      expect(list).toContainEqual({ path: wtPath, prunable: false });
+      git(`worktree remove --force "${wtPath}"`);
+    });
+
+    it('marks a worktree deleted by hand as prunable', async () => {
+      const wtPath = path.join(tmp, 'wt-paths-rmrf');
+      git(`worktree add --detach "${wtPath}"`);
+      fs.rmSync(wtPath, { recursive: true, force: true });
+      expect(await adapter.listWorktreePaths(repo)).toContainEqual({ path: wtPath, prunable: true });
+      git('worktree prune');
+    });
+
+    it('resolves undefined — not [] — when git fails', async () => {
+      const notARepo = path.join(tmp, 'not-a-repo-either');
+      fs.mkdirSync(notARepo, { recursive: true });
+      expect(await adapter.listWorktreePaths(notARepo)).toBeUndefined();
+    });
+  });
+
+  describe('parseWorktreePaths', () => {
+    it('keeps blocks without a branch line and reads a bare "prunable"', () => {
+      const out = [
+        'worktree /repo\nHEAD a\nbranch refs/heads/main',
+        'worktree /repo/wt\nHEAD b\ndetached\nprunable',
+        'garbage without a worktree line',
+      ].join('\n\n');
+      expect(parseWorktreePaths(out)).toEqual([
+        { path: '/repo', prunable: false },
+        { path: '/repo/wt', prunable: true },
+      ]);
     });
   });
 

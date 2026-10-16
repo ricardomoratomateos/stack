@@ -34,6 +34,21 @@ export class BreakpointManager {
     for (const [id, bps] of Object.entries(stored)) this.saved.set(id, bps);
   }
 
+  /**
+   * Drop the stashed breakpoints of every worktree not in `liveIds` — the
+   * whole store, every repository, for the same reason as TabManager.prune.
+   * A deleted worktree's stash could never be restored and was kept forever.
+   */
+  prune(liveIds: ReadonlySet<string>): void {
+    let changed = false;
+    for (const id of [...this.saved.keys()]) {
+      if (liveIds.has(id)) continue;
+      this.saved.delete(id);
+      changed = true;
+    }
+    if (changed) this.persist();
+  }
+
   /** Stashed (hidden) breakpoints for a worktree — exposed for tests. */
   getStashed(worktreeId: string): SavedBreakpoint[] {
     return this.saved.get(worktreeId) ?? [];

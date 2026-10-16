@@ -189,7 +189,7 @@ describe('PrMonitor', () => {
     expect(monitor.getStatus('wtB')).toBeNull();
   });
 
-  it('stopPolling clears the timer but keeps the cached status', async () => {
+  it('stopPolling clears the timer and the cached status', async () => {
     const runner = makeRunner(OPEN_PR);
     const monitor = new PrMonitor(runner);
 
@@ -200,9 +200,9 @@ describe('PrMonitor', () => {
     monitor.stopPolling('wt1');
     await vi.advanceTimersByTimeAsync(FIVE_MIN * 3);
     expect(runner.execFile).toHaveBeenCalledTimes(1); // no more polls
-    expect(monitor.getStatus('wt1')).toEqual({    // cache survives stopPolling
-      number: 42, state: 'OPEN', url: 'https://github.com/o/r/pull/42',
-    });
+    // A stopped worktree is deleted or forgotten: its PR entry used to stay in
+    // the cache for the life of the window.
+    expect(monitor.getStatus('wt1')).toBeUndefined();
   });
 
   it('stopPolling for an unknown worktree is a no-op', () => {
@@ -210,7 +210,7 @@ describe('PrMonitor', () => {
     expect(() => monitor.stopPolling('nope')).not.toThrow();
   });
 
-  it('does not reschedule when stopped while a fetch is in flight (but still writes cache + fires)', async () => {
+  it('ignores a result that lands after stopPolling: no cache, no callback, no reschedule', async () => {
     const d = deferred<string>();
     const runner: IFileRunner & { execFile: ReturnType<typeof vi.fn> } = {
       execFile: vi.fn().mockReturnValue(d.promise),
@@ -224,14 +224,55 @@ describe('PrMonitor', () => {
     d.resolve(OPEN_PR);
     await vi.advanceTimersByTimeAsync(0);
 
-    // real behavior: cache set + callback fired unconditionally on completion...
-    expect(monitor.getStatus('wt1')).toEqual({
-      number: 42, state: 'OPEN', url: 'https://github.com/o/r/pull/42',
-    });
-    expect(callback).toHaveBeenCalledTimes(1);
-    // ...but no next poll is scheduled since the entry is gone
+    expect(monitor.getStatus('wt1')).toBeUndefined();
+    expect(callback).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(FIVE_MIN * 3);
     expect(runner.execFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('a restart during an in-flight fetch leaves exactly one poll chain', async () => {
+    // The old chain's late result used to reschedule itself onto the NEW
+    // entry's timer slot: two chains per restart, the older one unstoppable.
+    const first = deferred<string>();
+    const runner: IFileRunner & { execFile: ReturnType<typeof vi.fn> } = {
+      execFile: vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(OPEN_PR),
+    };
+    const monitor = new PrMonitor(runner);
+    const oldCallback = vi.fn();
+
+    monitor.startPolling('feat/old', 'wt1', WT, oldCallback);
+    monitor.startPolling('feat/new', 'wt1', WT, vi.fn()); // restarted mid-fetch
+    await vi.advanceTimersByTimeAsync(0);
+    first.resolve('[]');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(oldCallback).not.toHaveBeenCalled();
+    expect(runner.execFile).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(FIVE_MIN);
+    expect(runner.execFile).toHaveBeenCalledTimes(3); // one chain, not two
+    expect(runner.execFile.mock.calls[2][1]).toContain('feat/new');
+
+    monitor.stopPolling('wt1');
+    await vi.advanceTimersByTimeAsync(FIVE_MIN * 3);
+    expect(runner.execFile).toHaveBeenCalledTimes(3); // and it stops
+  });
+
+  it('startPolling for the same branch keeps the running poll and takes the new callback', async () => {
+    const runner = makeRunner(OPEN_PR);
+    const monitor = new PrMonitor(runner);
+    const first = vi.fn();
+    const second = vi.fn();
+
+    monitor.startPolling('feat/x', 'wt1', WT, first);
+    await vi.advanceTimersByTimeAsync(0);
+    monitor.startPolling('feat/x', 'wt1', WT, second); // a window reload re-registers everything
+    await vi.advanceTimersByTimeAsync(0);
+    expect(runner.execFile).toHaveBeenCalledTimes(1); // no extra `gh` call
+
+    runner.execFile.mockResolvedValue('[]');
+    await vi.advanceTimersByTimeAsync(FIVE_MIN);
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(first).toHaveBeenCalledTimes(1); // only its own initial answer
   });
 
   it('startPolling for the same worktree stops the existing poll first', async () => {

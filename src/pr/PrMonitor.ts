@@ -65,7 +65,17 @@ export class PrMonitor {
    * "no PR".
    */
   startPolling(branch: string, worktreeId: string, cwd: string, callback: () => void): void {
-    // Stop any existing poll for this worktree
+    const running = this.polls.get(worktreeId);
+    // Same branch in the same place, already polling: keep the schedule, take
+    // the new callback. Every window load re-registers every worktree, and
+    // restarting would put a `gh` call per worktree behind each one for an
+    // answer we already have.
+    if (running?.branch === branch && running.cwd === cwd) {
+      running.callback = callback;
+      return;
+    }
+    // A different branch is a different question, and the old answer is not
+    // one to keep showing for it.
     this.stopPolling(worktreeId);
 
     const entry: PollEntry = { branch, worktreeId, cwd, callback, timer: undefined };
@@ -73,17 +83,19 @@ export class PrMonitor {
 
     const poll = () => {
       this.fetchPrStatus(branch, cwd).then((status) => {
+        // The entry is this poll's generation token. Stopped or restarted
+        // while `gh` was running, the answer is for a poll nobody wants: it
+        // used to land anyway — re-populating a cache stopPolling had just
+        // cleared, and rescheduling itself onto whatever entry was current,
+        // which left two chains running per restart, neither of them stoppable.
+        if (this.polls.get(worktreeId) !== entry) return;
         const previous = this.cache.get(worktreeId);
         this.cache.set(worktreeId, status);
         // Fire callback if status changed
         if (JSON.stringify(previous) !== JSON.stringify(status)) {
-          callback();
+          entry.callback();
         }
-        // Schedule next poll
-        const current = this.polls.get(worktreeId);
-        if (current) {
-          current.timer = setTimeout(poll, POLL_INTERVAL_MS);
-        }
+        entry.timer = setTimeout(poll, POLL_INTERVAL_MS);
       });
     };
 
@@ -95,7 +107,13 @@ export class PrMonitor {
     return this.cache.get(worktreeId);
   }
 
+  /** Stops the poll and forgets its answer — a stopped worktree shows no PR. */
   stopPolling(worktreeId: string): void {
+    this.cancel(worktreeId);
+    this.cache.delete(worktreeId);
+  }
+
+  private cancel(worktreeId: string): void {
     const entry = this.polls.get(worktreeId);
     if (entry?.timer !== undefined) {
       clearTimeout(entry.timer);

@@ -12,7 +12,10 @@ import {
   fetchStatus,
   baseDrift,
   DEFAULT_STATUS,
+  FILE_DEBOUNCE_MS,
+  MAX_DEBOUNCE_WAIT_MS,
 } from '../../src/git/GitWatcher';
+import { EventEmitter } from 'node:events';
 import type { GitStatus } from '../../src/types';
 
 // Auto-spy on node:fs (keeps real implementations) so fs.watch calls/listeners
@@ -78,7 +81,7 @@ function makeDebounceWatcher(fetchFn: (worktreePath: string) => Promise<GitStatu
   const listeners: Array<(event: string, filename: string | null) => void> = [];
   const watchFn = ((_p: unknown, _o: unknown, listener: (e: string, f: string | null) => void) => {
     listeners.push(listener);
-    return { close: () => {} } as unknown as fs.FSWatcher;
+    return { close: () => {}, on: () => {} } as unknown as fs.FSWatcher;
   }) as unknown as typeof fs.watch;
   const w = new GitWatcher(fetchFn, watchFn);
   activeWatchers.push(w);
@@ -747,6 +750,224 @@ describe('GitWatcher base branch', () => {
     await expect(w.refreshNow(repo)).resolves.toBeUndefined();
 
     expect(w.getStatus(repo)).toEqual(STATUS_A);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// leaks and runaway refreshes
+// ---------------------------------------------------------------------------
+
+/** An FSWatcher stand-in that can emit 'error' and reports whether it was closed. */
+function makeEmittingWatcher() {
+  const emitter = new EventEmitter() as EventEmitter & { close: ReturnType<typeof vi.fn> };
+  emitter.close = vi.fn();
+  return emitter;
+}
+
+describe('GitWatcher leaks', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('a stream of edits still refreshes every 30s instead of never', async () => {
+    const fetchFn = vi.fn(async () => STATUS_A);
+    const repo = makeFakeRepo();
+    const { w, listeners } = makeDebounceWatcher(fetchFn);
+    w.watch(repo);
+    await vi.advanceTimersByTimeAsync(0);
+    fetchFn.mockClear();
+
+    // A write every 5s, for a minute: a pure trailing 10s debounce never fires.
+    for (let t = 0; t < 60_000; t += 5_000) {
+      listeners[0]('change', 'dist/bundle.js');
+      await vi.advanceTimersByTimeAsync(5_000);
+    }
+
+    expect(fetchFn).toHaveBeenCalledTimes(2); // at 30s and at 60s
+    expect(MAX_DEBOUNCE_WAIT_MS).toBe(30_000);
+  });
+
+  it('a quiet spell after a refresh starts a fresh window', async () => {
+    const fetchFn = vi.fn(async () => STATUS_A);
+    const repo = makeFakeRepo();
+    const { w, listeners } = makeDebounceWatcher(fetchFn);
+    w.watch(repo);
+    await vi.advanceTimersByTimeAsync(0);
+    fetchFn.mockClear();
+
+    listeners[0]('change', 'a.ts');
+    await vi.advanceTimersByTimeAsync(FILE_DEBOUNCE_MS);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    listeners[0]('change', 'a.ts');
+    await vi.advanceTimersByTimeAsync(FILE_DEBOUNCE_MS - 1);
+    expect(fetchFn).toHaveBeenCalledTimes(1); // full debounce again, not the old deadline
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('a watch that throws (EMFILE, ENOSPC) is logged and skipped, never thrown at the caller', async () => {
+    const good = makeFakeRepo();
+    const bad = makeFakeRepo();
+    const fetchFn = vi.fn(async () => STATUS_A);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const watchFn = vi.fn((p: fs.PathLike) => {
+      if (p === bad) throw Object.assign(new Error('EMFILE: too many open files'), { code: 'EMFILE' });
+      return makeEmittingWatcher() as unknown as fs.FSWatcher;
+    });
+    const w = new GitWatcher(fetchFn, watchFn as unknown as typeof fs.watch);
+    activeWatchers.push(w);
+
+    expect(() => { w.watch(bad); w.watch(good); }).not.toThrow();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(error).toHaveBeenCalledWith(expect.stringContaining(`cannot watch ${bad}`), expect.any(Error));
+    expect(fetchFn).toHaveBeenCalledWith(good, undefined);
+    expect(fetchFn).not.toHaveBeenCalledWith(bad, undefined);
+    // Nothing recorded for the bad one, so a later attempt can retry.
+    watchFn.mockImplementation(() => makeEmittingWatcher() as unknown as fs.FSWatcher);
+    w.watch(bad);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchFn).toHaveBeenCalledWith(bad, undefined);
+    error.mockRestore();
+  });
+
+  it('closes what it had opened when the second watch of a linked worktree throws', () => {
+    // A linked worktree: `.git` is a file pointing at a git dir that exists.
+    const linked = makeTmpDir();
+    fs.writeFileSync(path.join(linked, '.git'), `gitdir: ${makeTmpDir()}\n`);
+    const first = makeEmittingWatcher();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const watchFn = vi.fn()
+      .mockReturnValueOnce(first)
+      .mockImplementationOnce(() => { throw new Error('ENOSPC'); });
+    const w = new GitWatcher(vi.fn(async () => STATUS_A), watchFn as unknown as typeof fs.watch);
+    activeWatchers.push(w);
+
+    w.watch(linked);
+
+    expect(first.close).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it('a watcher error closes that worktree\'s watchers instead of crashing, and allows a retry', async () => {
+    const repo = makeFakeRepo();
+    const watchers: ReturnType<typeof makeEmittingWatcher>[] = [];
+    const watchFn = vi.fn(() => { const x = makeEmittingWatcher(); watchers.push(x); return x; });
+    const fetchFn = vi.fn(async () => STATUS_A);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const w = new GitWatcher(fetchFn, watchFn as unknown as typeof fs.watch);
+    activeWatchers.push(w);
+    w.watch(repo);
+
+    expect(() => watchers[0].emit('error', new Error('EPERM'))).not.toThrow();
+    expect(watchers[0].close).toHaveBeenCalled();
+
+    w.watch(repo); // not "already watched" any more
+    expect(watchFn).toHaveBeenCalledTimes(2);
+    // An error from the replaced watcher is old news and touches nothing.
+    watchers[0].emit('error', new Error('late'));
+    expect(watchers[1].close).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it('a read in flight when the worktree is unwatched does not refill the cache', async () => {
+    const repo = makeFakeRepo();
+    let answer!: (s: GitStatus) => void;
+    const { w } = makeDebounceWatcher(() => new Promise<GitStatus>((r) => { answer = r; }));
+    const handler = vi.fn();
+    w.onChange(handler);
+    w.watch(repo); // starts a read
+
+    w.unwatch(repo);
+    answer(STATUS_A);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(w.getStatus(repo)).toEqual(DEFAULT_STATUS);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('a read in flight at dispose is dropped too', async () => {
+    const repo = makeFakeRepo();
+    let answer!: (s: GitStatus) => void;
+    const { w } = makeDebounceWatcher(() => new Promise<GitStatus>((r) => { answer = r; }));
+    w.watch(repo);
+
+    w.dispose();
+    answer(STATUS_A);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(w.getStatus(repo)).toEqual(DEFAULT_STATUS);
+  });
+
+  it('notifies only when the status actually changed', async () => {
+    const repo = makeFakeRepo();
+    let next: GitStatus = STATUS_A;
+    const w = makeWatcher(async () => next);
+    const handler = vi.fn();
+    w.onChange(handler);
+
+    await w.refreshNow(repo);
+    await w.refreshNow(repo);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    next = { ...STATUS_A, untracked: 9 };
+    await w.refreshNow(repo);
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it('onChange returns a way to unsubscribe', async () => {
+    const repo = makeFakeRepo();
+    const w = makeWatcher(async () => STATUS_A);
+    const kept = vi.fn();
+    const dropped = vi.fn();
+    w.onChange(kept);
+    const sub = w.onChange(dropped);
+
+    sub.dispose();
+    await w.refreshNow(repo);
+
+    expect(kept).toHaveBeenCalledOnce();
+    expect(dropped).not.toHaveBeenCalled();
+  });
+
+  it('the main checkout ignores changes inside a worktree nested under it', async () => {
+    const fetchFn = vi.fn(async () => STATUS_A);
+    const root = makeFakeRepo();
+    const nested = path.join(root, '.worktrees', 'feat-x');
+    fs.mkdirSync(path.join(nested, '.git'), { recursive: true });
+    const { w, listeners } = makeDebounceWatcher(fetchFn);
+    w.watch(root);
+    w.watch(nested);
+    await vi.advanceTimersByTimeAsync(0);
+    fetchFn.mockClear();
+
+    listeners[0]('change', '.worktrees/feat-x/src/a.ts'); // the root's watcher
+    await vi.advanceTimersByTimeAsync(MAX_DEBOUNCE_WAIT_MS);
+    expect(fetchFn).not.toHaveBeenCalled();
+
+    listeners[0]('change', '.worktrees/notes.md'); // the root's own file
+    await vi.advanceTimersByTimeAsync(FILE_DEBOUNCE_MS);
+    expect(fetchFn).toHaveBeenCalledWith(root, undefined);
+  });
+
+  it('a watched parent of a worktree is not mistaken for a nested one', async () => {
+    const fetchFn = vi.fn(async () => STATUS_A);
+    const parent = makeFakeRepo();
+    const child = path.join(parent, 'zer', 'feat-y');
+    fs.mkdirSync(path.join(child, '.git'), { recursive: true });
+    const { w, listeners } = makeDebounceWatcher(fetchFn);
+    w.watch(child);
+    w.watch(parent);
+    await vi.advanceTimersByTimeAsync(0);
+    fetchFn.mockClear();
+
+    listeners[0]('change', 'src/b.ts'); // the child's own watcher
+    await vi.advanceTimersByTimeAsync(FILE_DEBOUNCE_MS);
+    expect(fetchFn).toHaveBeenCalledWith(child, undefined);
+  });
+
+  it('ignores linked worktrees\' admin files under the main .git', () => {
+    expect(shouldIgnore('.git/worktrees/feat-x/index')).toBe(true);
+    expect(shouldIgnore('.git/worktrees/feat-x/HEAD')).toBe(true);
   });
 });
 

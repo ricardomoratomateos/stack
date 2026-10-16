@@ -26,7 +26,8 @@ import { OsaNotifyAdapter } from './adapters/OsaNotifyAdapter';
 import { VsCodeNotifyAdapter } from './adapters/VsCodeNotifyAdapter';
 import { TabManager } from './worktree/TabManager';
 import { BreakpointManager } from './worktree/BreakpointManager';
-import { WorktreeApplicationService, IWorkspaceHost, HostTerminal } from './application/WorktreeApplicationService';
+import { WorktreeApplicationService, IWorkspaceHost, HostTerminal, HostScriptRun } from './application/WorktreeApplicationService';
+import { runScript } from './adapters/scriptRunner';
 import { DiffPanelManager } from './diff/DiffPanelManager';
 import { NewTaskPanelManager } from './newtask/NewTaskPanelManager';
 import { SettingsPanelManager } from './settings/SettingsPanelManager';
@@ -135,6 +136,8 @@ async function findLatestScreenshot(): Promise<string | undefined> {
 
 /** IWorkspaceHost implemented over the live VSCode workspace/window APIs. */
 class VsCodeWorkspaceHost implements IWorkspaceHost {
+  constructor(private readonly scriptOutput: vscode.OutputChannel) {}
+
   workspaceFolderPaths(): string[] {
     return (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
   }
@@ -162,6 +165,10 @@ class VsCodeWorkspaceHost implements IWorkspaceHost {
   }
   createTerminal(options: { name: string; cwd: string }): HostTerminal {
     return vscode.window.createTerminal({ name: options.name, cwd: options.cwd });
+  }
+  runScript(run: HostScriptRun): Promise<number | null> {
+    this.scriptOutput.show(true);
+    return runScript(run, this.scriptOutput);
   }
   showInputBox(options: { prompt: string; value?: string; placeHolder?: string }): Promise<string | undefined> {
     return Promise.resolve(vscode.window.showInputBox(options));
@@ -298,6 +305,11 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // window that does not manage it, into state its own window then restores.
   const worktreesHere = () => worktreesInRepo(manager.list(), repoRootOf());
 
+  // Teardown scripts run headless so a delete can wait for them; this is where
+  // their output goes instead of a terminal.
+  const scriptOutput = vscode.window.createOutputChannel('Foreman');
+  ctx.subscriptions.push(scriptOutput);
+
   const tabManager = new TabManager(ctx.globalState, worktreesHere);
   const breakpointManager = new BreakpointManager(ctx.globalState, worktreesHere);
 
@@ -309,7 +321,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     store,
     config,
     notify: new VsCodeNotifyAdapter(),
-    host: new VsCodeWorkspaceHost(),
+    host: new VsCodeWorkspaceHost(scriptOutput),
     git,
     gitWatcher,
     dockerMonitor,

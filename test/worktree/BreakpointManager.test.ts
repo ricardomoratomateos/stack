@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { BreakpointManager } from '../../src/worktree/BreakpointManager';
 import {
   FakeMemento,
@@ -113,5 +113,31 @@ describe('BreakpointManager.activate', () => {
     const mgr = new BreakpointManager(memento as never, () => WORKTREES);
     mgr.activate('b'); // no explicit list
     expect(fsPaths()).toEqual([]);
+  });
+});
+
+describe('BreakpointManager.prune', () => {
+  it('drops the stash of a worktree no longer in the store, and persists', async () => {
+    await memento.update('foreman.breakpoints', {
+      a: [{ uri: '/repo/zer/feat-a/x.php', line: 1, character: 0, enabled: true }],
+      gone: [{ uri: '/repo/zer/gone/y.php', line: 1, character: 0, enabled: true }],
+    });
+    const mgr = new BreakpointManager(memento as never, () => WORKTREES);
+
+    mgr.prune(new Set(['main', 'a', 'b']));
+
+    expect(mgr.getStashed('gone')).toEqual([]);
+    expect(mgr.getStashed('a')).toHaveLength(1);
+    expect(Object.keys(memento.get<Record<string, unknown>>('foreman.breakpoints', {}))).toEqual(['a']);
+  });
+
+  it('writes nothing when every stash is still alive', async () => {
+    await memento.update('foreman.breakpoints', { a: [] });
+    const mgr = new BreakpointManager(memento as never, () => WORKTREES);
+    const update = vi.spyOn(memento, 'update');
+
+    mgr.prune(new Set(['a']));
+
+    expect(update).not.toHaveBeenCalled();
   });
 });
