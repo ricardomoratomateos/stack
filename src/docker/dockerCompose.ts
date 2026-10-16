@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import type { ForemanConfig, Worktree } from '../types';
+import { isEnvName, shellQuote } from '../shell/shellQuote';
 
 /**
  * The docker compose project name for a worktree = its directory basename,
@@ -70,8 +71,22 @@ export function buildComposeArgs(
   subcommand: string,
 ): string {
   if (worktree.isMain) return subcommand;
-  const files = overridePath ? `-f "${composePath}" -f "${overridePath}"` : `-f "${composePath}"`;
+  const files = overridePath ? `-f ${quotePath(composePath)} -f ${quotePath(overridePath)}` : `-f ${quotePath(composePath)}`;
   return `-p "${composeProject(worktree)}" ${files} ${subcommand}`;
+}
+
+/**
+ * A compose path for a command line that goes through a shell (`exec`, or a
+ * terminal's sendText).
+ *
+ * The path sits under the worktree, whose directory is named after the branch,
+ * and a branch may legally contain `$(…)` — which double quotes do not stop.
+ * Double quotes are kept when they are safe (nothing in the path that is
+ * special inside them), so the command the user watches in the terminal reads
+ * as it always has; anything else is single-quoted.
+ */
+function quotePath(p: string): string {
+  return /[$`"\\!]/.test(p) ? shellQuote(p) : `"${p}"`;
 }
 
 /** Env vars (string values) to inject when running compose for a worktree. */
@@ -79,6 +94,11 @@ export function dockerEnv(worktree: Worktree, config: ForemanConfig): Record<str
   if (worktree.isMain) return {};
   const out: Record<string, string> = {};
   for (const [name, port] of Object.entries(computeDockerPorts(worktree, config))) {
+    // Names come from `foreman.docker.ports` and are typed into a terminal as
+    // `NAME=value` (dockerUp). One that is not an identifier is not an
+    // assignment but a command — `A;curl x|sh` — so it is dropped here, where
+    // every consumer gets the same answer. No shell could have exported it.
+    if (!isEnvName(name)) continue;
     out[name] = String(port);
   }
   return out;
