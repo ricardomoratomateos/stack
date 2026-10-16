@@ -25,6 +25,7 @@ import { canonicalPath, worktreesInRepo } from '../worktree/worktreesInRepo';
 import { MAIN_BRANCH_CANDIDATES } from '../constants';
 import { attentionQueue, groupOf, nextInQueue, type WorktreeGroup } from '../webview/derive';
 import { envPrefix, shellQuote } from '../shell/shellQuote';
+import type { NewTaskInit } from '../newtask/types';
 
 /**
  * The selected worktree, in workspaceState: it is a property of a WINDOW.
@@ -485,15 +486,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       });
       if (choice) await this.deps.config.setDefaultProvider(choice as ProviderId);
     },
-    showProviderInstall: async (msg) => {
-      const { label, install } = PROVIDER_INSTALL[msg.provider];
-      const copy = await this.deps.notify.confirm(
-        `${label} is not on your PATH`,
-        `Install it with:\n\n${install}`,
-        'Copy command',
-      );
-      if (copy === 'Copy command') await this.deps.host.writeClipboard(install);
-    },
+    showProviderInstall: (msg) => this.showProviderInstall(msg.provider),
     openTerminal: (msg) => {
       const wt = this.findWorktree(msg.worktreeId);
       if (wt) this.deps.agentManager.openTerminal(wt);
@@ -544,9 +537,12 @@ export class WorktreeApplicationService implements DiffPanelHost {
     initWorktree: (msg) => this.initWorktree(this.findWorktree(msg.worktreeId)),
     openDiff: (msg) => this.ui.openDiffPanel(msg.worktreeId),
     openNewTask: () => this.ui.openNewTask(),
-    createWorktree: (msg) => this.createWorktree({
-      branch: msg.branch, title: msg.title, description: msg.description, baseBranch: msg.baseBranch,
-    }),
+    createWorktree: async (msg) => {
+      await this.createWorktree({
+        branch: msg.branch, title: msg.title, description: msg.description, baseBranch: msg.baseBranch,
+        provider: msg.provider,
+      });
+    },
     listBranches: () => {
       const root = this.findRepoRoot();
       if (!root) return;
@@ -1004,7 +1000,35 @@ export class WorktreeApplicationService implements DiffPanelHost {
     return findRepoRoot(folders, (p) => this.deps.host.isDirectory(p));
   }
 
-  /** Branch list + preselected base for the new-agent panel's "from" selector. */
+  /** Tell the user how to install an agent whose command is not on PATH. */
+  async showProviderInstall(provider: ProviderId): Promise<void> {
+    const { label, install } = PROVIDER_INSTALL[provider];
+    const copy = await this.deps.notify.confirm(
+      `${label} is not on your PATH`,
+      `Install it with:\n\n${install}`,
+      'Copy command',
+    );
+    if (copy === 'Copy command') await this.deps.host.writeClipboard(install);
+  }
+
+  /** Everything the new-task panel renders from: branches, accent, and which agents can run. */
+  newTaskInit(): NewTaskInit {
+    const config = this.deps.config.get();
+    return {
+      ...this.newTaskBranchOptions(),
+      sidebarStyle: config.sidebarStyle,
+      defaultProvider: config.defaultProvider,
+      installedProviders: (this.deps.installedProviders ?? installedProviders)(config),
+    };
+  }
+
+  /** Asked by the new-task panel before it closes over a prompt the user has written. */
+  async confirmDiscardNewTask(): Promise<boolean> {
+    const discard = 'Discard';
+    return (await this.deps.notify.confirm('Discard this task?', 'The description you wrote will be lost.', discard)) === discard;
+  }
+
+  /** Branch list + preselected base for the new-task panel's "from" selector. */
   newTaskBranchOptions(): { branches: string[]; baseBranch: string } {
     const root = this.findRepoRoot();
     if (!root) return { branches: [], baseBranch: 'main' };
@@ -1280,17 +1304,31 @@ export class WorktreeApplicationService implements DiffPanelHost {
     try { return this.deps.git.currentBranch(root); } catch { return ''; }
   }
 
-  async createWorktree(opts?: { branch?: string; title?: string; description?: string; baseBranch?: string }): Promise<void> {
+  /**
+   * Cut the branch, create its worktree and start an agent in it.
+   *
+   * Resolves with how it went rather than throwing: the new-task panel keeps
+   * its text and shows the reason inline, while the palette command has only
+   * the toast. `silent` makes the failure the caller's to show, so the panel
+   * does not say it twice.
+   */
+  async createWorktree(opts?: {
+    branch?: string; title?: string; description?: string; baseBranch?: string;
+    /** Agent to start in the new worktree; the configured default when omitted. */
+    provider?: ProviderId;
+    silent?: boolean;
+  }): Promise<{ ok: boolean; error?: string }> {
+    const fail = (error: string) => {
+      if (!opts?.silent) this.deps.notify.showError(error);
+      return { ok: false, error };
+    };
     const root = this.findRepoRoot();
-    if (!root) {
-      this.deps.notify.showError('No git repository found in workspace.');
-      return;
-    }
+    if (!root) return fail('No git repository found in workspace.');
     const branch = opts?.branch ?? (await this.deps.host.showInputBox({
       prompt: 'Branch name',
       placeHolder: 'e.g. AS-7090-fix-payments',
     }));
-    if (!branch) return;
+    if (!branch) return { ok: false };
 
     // The command palette passes no base at all, where git would silently use
     // HEAD. Resolve the configured default for that path too, so both entry
@@ -1332,8 +1370,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       this.ui.pushWebview();
       this.refreshDecorations();
     } catch (e) {
-      this.deps.notify.showError(`Failed to create worktree: ${String(e)}`);
-      return;
+      return fail(`Failed to create worktree: ${String(e)}`);
     }
 
     // Launch Claude after the progress notification closes so VSCode has settled
@@ -1346,16 +1383,18 @@ export class WorktreeApplicationService implements DiffPanelHost {
       // so this reveals nothing; launch() below brings the terminal up.
       await this.switchToWorktree(wt.id);
       const description = opts?.description;
+      const provider = opts?.provider;
       setTimeout(() => {
         // Nothing awaits this timer, so a failure must be reported here or it
         // vanishes as an unhandled rejection — the worktree then simply never
         // got its agent, with nothing on screen to say why.
         const launched = description
-          ? this.deps.agentManager.launchWithPrompt(wt, description)
-          : this.deps.agentManager.launch(wt);
+          ? this.deps.agentManager.launchWithPrompt(wt, description, provider)
+          : this.deps.agentManager.launch(wt, provider ? { provider } : undefined);
         launched.catch((e) => this.deps.notify.showError(`Failed to launch agent: ${String(e)}`));
       }, 300);
     }
+    return { ok: true };
   }
 
   // ── Delete ─────────────────────────────────────────────────────────────────

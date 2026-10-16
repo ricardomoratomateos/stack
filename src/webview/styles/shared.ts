@@ -10,6 +10,12 @@ import { T } from '../tokens';
  * instead of three copies of them.
  */
 export const SHARED_CSS = `
+/* An app, not a document: text in the chrome is not selectable and shows the
+   normal cursor; only real inputs take a caret. A stray drag used to highlight
+   labels, and the I-beam over every name read as "editable". */
+.fm { -webkit-user-select: none; user-select: none; cursor: default; } /* both inherit: set once, on the root */
+.fm input, .fm textarea, .fm [contenteditable='true'] { -webkit-user-select: text; user-select: text; cursor: text; }
+.fm button:not(:disabled), .fm a[href], .fm select, .fm [role='button'], .fm [draggable='true'] { cursor: pointer; }
 .fm {
   height: 100%; min-height: 0; position: relative;
   display: flex; flex-direction: column;
@@ -118,7 +124,10 @@ body.vscode-high-contrast .fm .fm-split-solid .fm-split-chev, body.vscode-high-c
   padding: 5px 4px; border: 0; border-radius: var(--fm-radius-sm); background: transparent; text-align: left;
 }
 .fm-sess-main:hover { background: var(--fm-hover); }
-.fm-sess-mark { display: flex; align-items: center; justify-content: center; }
+.fm-sess-mark { position: relative; display: flex; align-items: center; justify-content: center; }
+.fm-sess-shell { font-size: 13px; color: var(--fm-text-dim); }
+/* The state, as a badge on the agent mark's corner, cut out of the row's background. */
+.fm-sess-mark .fm-sess-dot { position: absolute; right: -2px; bottom: -2px; width: 6px; height: 6px; box-shadow: 0 0 0 1.5px var(--fm-surface, var(--vscode-sideBar-background)); }
 .fm-sess-prompt { font-family: var(--fm-mono); font-size: 11px; color: var(--fm-text-dim); }
 .fm-sess-text { min-width: 0; display: flex; gap: 6px; align-items: baseline; }
 .fm-sess-name { flex: none; max-width: 60%; font-size: 12px; color: var(--fm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -1,7 +1,6 @@
 import React from 'react';
 import { send } from '../vscode';
 import { sessionToOpen, type Described } from '../derive';
-import { PrBadge } from './Details';
 
 /** Brings up the session that is asking (or the worktree's terminal when none is). */
 export function openAsking(d: Described, select: () => void): void {
@@ -32,18 +31,6 @@ export function AskBox({ d, select, openLabel = 'Open the session that is asking
           <i className="codicon codicon-arrow-right" aria-hidden="true" />
         </button>
       </div>
-    </div>
-  );
-}
-
-/** Review diff, plus the PR when there is one. */
-export function ReviewActions({ d, buttonClass }: { d: Described; buttonClass: string }) {
-  return (
-    <div className="fm-row-actions">
-      <button type="button" className={`fm-btn fm-btn-icon ${buttonClass}`} aria-label="Review diff" title="Review diff & comment" onClick={() => send({ type: 'openDiff', worktreeId: d.wt.id })}>
-        <i className="codicon codicon-git-compare" aria-hidden="true" />
-      </button>
-      {d.pr && <PrBadge pr={d.pr} />}
     </div>
   );
 }

@@ -66,7 +66,13 @@ export function visibleCount(width: number | undefined, count: number): number {
  * given: everything inline when it fits, and a "⋯" only for what does not —
  * not a menu by default that hides actions there was room for.
  */
-export function ActionBar({ wt, dockerEnabled, className = '' }: { wt: WorktreeItem; dockerEnabled?: boolean; className?: string }) {
+export function ActionBar({ wt, dockerEnabled, className = '', emphasis }: {
+  wt: WorktreeItem;
+  dockerEnabled?: boolean;
+  className?: string;
+  /** The action the worktree's state calls for (e.g. 'diff' when it is ready for review), drawn in the accent. */
+  emphasis?: string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState<number>();
   const menu = useDropdown();
@@ -90,7 +96,7 @@ export function ActionBar({ wt, dockerEnabled, className = '' }: { wt: WorktreeI
         <button
           key={a.id}
           type="button"
-          className={`fm-btn fm-btn-icon${a.danger ? ' fm-btn-danger' : ''}`}
+          className={`fm-btn fm-btn-icon${a.danger ? ' fm-btn-danger' : ''}${a.id === emphasis ? ' fm-btn-primary' : ''}`}
           aria-label={a.label}
           title={a.label}
           disabled={a.disabled}

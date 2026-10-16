@@ -1,182 +1,214 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { T } from '../../webview/tokens';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { send } from './vscode';
+import { Picker, type PickerItem } from './Picker';
+import { BranchChip } from './BranchChip';
+import { useAutoGrow } from './useAutoGrow';
+import { PROVIDER_ORDER, ProviderMark } from '../../webview/components/providers';
+import { normalizeSidebarStyle } from '../../sidebarStyle';
+import { isCancelKey, isSubmitKey, providerName, resolveBranch, submitShortcutLabel } from '../composer';
+import type { ProviderId } from '../../ports/IAgentProvider';
 import type { NewTaskExtMessage, NewTaskInit } from '../types';
 
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+
 export function NewTaskPanel() {
-  const [init, setInit] = useState<NewTaskInit>({ branches: [], baseBranch: '' });
+  const [init, setInit] = useState<NewTaskInit>({
+    branches: [], baseBranch: '', defaultProvider: 'claude', installedProviders: ['claude', 'codex', 'opencode'],
+    // The extension writes the style into <body> so the first paint is already right.
+    sidebarStyle: normalizeSidebarStyle(document.body.dataset.style),
+  });
+  // What the user chose; null means "whatever the extension currently suggests".
+  const [pickedBase, setPickedBase] = useState<string | null>(null);
+  const [pickedProvider, setPickedProvider] = useState<ProviderId | null>(null);
+  const [manualBranch, setManualBranch] = useState<string | null>(null);
   const [title, setTitle] = useState('');
-  const [branchName, setBranchName] = useState('');
-  const [base, setBase] = useState('');
   const [description, setDescription] = useState('');
-  const titleRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string>();
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const busyRef = useRef(false);
+  const errorId = useId();
+
+  const base = pickedBase ?? init.baseBranch;
+  const provider = pickedProvider ?? init.defaultProvider;
+  const installed = init.installedProviders.includes(provider);
+  // The task's name is the worktree's name in the sidebar, and the branch is
+  // cut from it; without one, both fall back to the description.
+  const nameSource = title.trim() || description;
+  const branch = resolveBranch(manualBranch, nameSource);
+  const generated = resolveBranch(null, nameSource).name;
+  const dirty = title.trim().length > 0 || description.trim().length > 0;
+  const canSubmit = !!branch.name && !branch.error && installed && !busy;
+
+  useAutoGrow(textRef, description);
 
   // Announce readiness only after the listener is attached, so the init reply
-  // (branches + base) can't be missed — same handshake the sidebar uses.
+  // can't be missed — the same handshake the sidebar uses.
   useEffect(() => {
-    const handler = (e: MessageEvent) => {
+    const onMessage = (e: MessageEvent) => {
       const msg = e.data as NewTaskExtMessage;
-      if (msg.type === 'init') {
-        setInit(msg.init);
-        setBase((b) => b || msg.init.baseBranch);
+      if (msg.type === 'init') setInit(msg.init);
+      else {
+        busyRef.current = false;
+        setBusy(false);
+        setFailure(msg.message);
+        textRef.current?.focus();
       }
     };
-    window.addEventListener('message', handler);
+    // Coming back to the tab (retainContextWhenHidden keeps the page alive)
+    // should leave the cursor where the typing is.
+    const onFocus = () => { if (document.activeElement === document.body) textRef.current?.focus(); };
+    window.addEventListener('message', onMessage);
+    window.addEventListener('focus', onFocus);
     send({ type: 'ready' });
     titleRef.current?.focus();
-    return () => window.removeEventListener('message', handler);
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); send({ type: 'cancel' }); }
+    return () => {
+      window.removeEventListener('message', onMessage);
+      window.removeEventListener('focus', onFocus);
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const canSubmit = !!(title.trim() || description.trim() || branchName.trim());
-
-  const handleSubmit = () => {
-    const b = branchName.trim() || slugify(title) || slugify(description);
-    if (!b) return;
+  const submit = useCallback(() => {
+    // The guard is a ref: two ⌘↵ in the same frame both see the same render's state.
+    if (!canSubmit || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setFailure(undefined);
     send({
       type: 'create',
-      branch: b,
+      branch: branch.name,
       title: title.trim() || undefined,
       description: description.trim() || undefined,
       baseBranch: base || undefined,
+      provider,
     });
+  }, [canSubmit, branch.name, title, description, base, provider]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isSubmitKey(e)) {
+        e.preventDefault();
+        submit();
+      } else if (isCancelKey(e) && !e.defaultPrevented && !busyRef.current) {
+        e.preventDefault();
+        send({ type: 'cancel', dirty });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [submit, dirty]);
+
+  const baseItems = useMemo<PickerItem[]>(
+    () => [...new Set([base, ...init.branches].filter(Boolean))].map((b) => ({ value: b, label: b })),
+    [base, init.branches],
+  );
+  const providerItems = PROVIDER_ORDER.map<PickerItem>((id) => {
+    const ok = init.installedProviders.includes(id);
+    return { value: id, label: providerName(id), icon: <ProviderMark provider={id} size={13} />, dim: !ok, hint: ok ? undefined : 'not installed' };
+  });
+
+  const chooseProvider = (id: string) => {
+    if (init.installedProviders.includes(id as ProviderId)) setPickedProvider(id as ProviderId);
+    else send({ type: 'showProviderInstall', provider: id as ProviderId });
   };
 
-  const onTextKey = (e: React.KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') handleSubmit();
-  };
-
-  // Keep the selected base representable even before the list arrives.
-  const baseOptions = [...new Set([...(base ? [base] : []), ...init.branches])];
-  if (baseOptions.length === 0) baseOptions.push('main');
+  const shortcut = submitShortcutLabel(IS_MAC);
+  const sendTitle = busy ? 'Creating…' : !installed ? `${providerName(provider)} is not installed` : canSubmit ? `Create and start (${shortcut})` : 'Describe the task to start';
 
   return (
-    <div style={{
-      height: '100%', display: 'flex', flexDirection: 'column',
-      alignItems: 'center',
-      background: 'var(--vscode-editor-background)',
-    }}>
-      <div style={{
-        width: '100%', maxWidth: 860, height: '100%',
-        display: 'flex', flexDirection: 'column',
-        padding: '32px 32px 24px', gap: 16,
-      }}>
-        {/* Header: title + which branch it's cut from */}
-        <div>
+    <div className={`nt nt-${init.sidebarStyle}`}>
+      <main className="nt-col">
+        <h1 className="nt-title">
           <input
             ref={titleRef}
+            className="nt-title-input"
             value={title}
+            readOnly={busy}
+            placeholder="New task"
+            aria-label="Task name — shown as the worktree's name in the sidebar"
+            title="Name the task. It becomes the worktree's name, and the branch is generated from it."
+            spellCheck={false}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="New agent"
-            style={{
-              width: '100%', background: 'transparent', border: 'none', outline: 'none',
-              fontFamily: T.sans, fontSize: 26, fontWeight: 700, color: T.textStrong,
+            onKeyDown={(e) => {
+              // Enter moves on to the description; ⌘↵ still submits (window handler).
+              if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                textRef.current?.focus();
+              }
             }}
           />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 12, color: T.textMuted }}>from</span>
-              <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-                <select
-                  value={base}
-                  onChange={(e) => setBase(e.target.value)}
-                  title="Branch the new one is created from"
-                  style={{
-                    appearance: 'none', WebkitAppearance: 'none',
-                    padding: '3px 20px 3px 8px',
-                    border: `1px solid ${T.border}`, borderRadius: 6, background: T.surface2,
-                    fontFamily: T.mono, fontSize: 12, color: T.textDim, outline: 'none', cursor: 'pointer',
-                    maxWidth: 360, textOverflow: 'ellipsis',
-                  }}
-                >
-                  {baseOptions.map((b) => <option key={b} value={b}>{b}</option>)}
-                </select>
-                <i className="codicon codicon-chevron-down" style={{
-                  position: 'absolute', right: 5, fontSize: 12, color: T.textMuted, pointerEvents: 'none',
-                }} />
-              </span>
-            </span>
-            <input
-              value={branchName}
-              onChange={(e) => setBranchName(e.target.value)}
-              placeholder="branch-name (auto if empty)"
-              style={{
-                flex: 1, minWidth: 200,
-                background: 'transparent', border: 'none', borderBottom: `1px solid ${T.border}`,
-                outline: 'none', padding: '3px 2px',
-                fontFamily: T.mono, fontSize: 12, color: T.textMuted,
-              }}
+        </h1>
+        <p className="nt-sub">One task, one branch, one worktree, one agent.</p>
+
+        <div className="nt-card">
+          <textarea
+            ref={textRef}
+            className="nt-text"
+            value={description}
+            readOnly={busy}
+            placeholder="Describe the task…"
+            aria-label="Task description"
+            onChange={(e) => setDescription(e.target.value)}
+          />
+          <div className="nt-bar">
+            <Picker
+              items={baseItems} value={base} onSelect={setPickedBase} mono searchable disabled={busy}
+              label={`Base branch: ${base || 'none'}`} title="Branch the new one is created from"
+              searchPlaceholder="Search branches"
+            >
+              <i className="codicon codicon-git-branch" aria-hidden="true" />
+              <span className="nt-chip-label">{base || 'branch'}</span>
+            </Picker>
+            <BranchChip
+              name={branch.name} manual={manualBranch} generated={generated} error={branch.error}
+              errorId={errorId} disabled={busy} onChange={setManualBranch}
             />
+            {branch.error && (
+              <span id={errorId} role="alert" className="nt-inline-error">
+                <i className="codicon codicon-error" aria-hidden="true" />{branch.error}
+              </span>
+            )}
+            <Picker
+              items={providerItems} value={provider} onSelect={chooseProvider} dim={!installed} disabled={busy}
+              label={`Agent: ${providerName(provider)}`} title="Agent that works on the task"
+            >
+              <span className="nt-mark"><ProviderMark provider={provider} size={13} /></span>
+              <span>{providerName(provider)}</span>
+            </Picker>
+            <span className="nt-spacer" />
+            <button
+              type="button" className="nt-send" disabled={!canSubmit} aria-busy={busy}
+              title={sendTitle} aria-label={sendTitle} onClick={submit}
+            >
+              <i className={busy ? 'codicon codicon-loading codicon-modifier-spin' : 'codicon codicon-arrow-up'} aria-hidden="true" />
+            </button>
           </div>
         </div>
 
-        {/* The reason this panel exists: a prompt area with room to think. */}
-        <textarea
-          ref={textRef}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          onKeyDown={onTextKey}
-          placeholder="Describe the task for the agent…  ⌘↵ to create"
-          style={{
-            flex: 1, width: '100%', resize: 'none',
-            background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 10,
-            outline: 'none', padding: '18px 20px',
-            fontFamily: T.sans, fontSize: 15, color: T.textBody, lineHeight: 1.65,
-          }}
-        />
+        {failure && (
+          <div className="nt-failure" role="alert">
+            <i className="codicon codicon-error" aria-hidden="true" /><span>{failure}</span>
+          </div>
+        )}
 
-        {/* Footer */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontFamily: T.mono, fontSize: 12, color: T.textMuted }}>
-            ⌘↵ create · Esc cancel
-          </span>
-          <span style={{ flex: 1 }} />
-          <button
-            onClick={() => send({ type: 'cancel' })}
-            style={{
-              padding: '7px 16px', borderRadius: 6, border: `1px solid ${T.border}`,
-              background: 'transparent', color: T.textDim, fontFamily: T.sans, fontSize: 13,
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={!canSubmit}
-            style={{
-              padding: '7px 20px', borderRadius: 6, border: 'none',
-              background: canSubmit ? T.accent : T.surface4,
-              color: canSubmit ? T.accentInk : T.textMuted,
-              fontFamily: T.sans, fontSize: 13, fontWeight: 500,
-              cursor: canSubmit ? 'pointer' : 'default',
-              transition: 'background .12s, color .12s',
-            }}
-          >
-            Create worktree
-          </button>
-        </div>
-
-        <p style={{ textAlign: 'center', fontSize: 12, color: T.textMuted }}>
-          Creates a new branch, git worktree, and launches the agent
+        <p className="nt-note">
+          {busy ? 'Creating the worktree…' : !installed ? (
+            <>
+              <span className="nt-warn">{providerName(provider)} is not on your PATH.</span>{' '}
+              <button type="button" className="nt-link" onClick={() => send({ type: 'showProviderInstall', provider })}>How to install it</button>
+              {' '}or pick another agent.
+            </>
+          ) : (
+            <>
+              {init.branches.includes(branch.name)
+                ? <>Reuses <code>{branch.name}</code></>
+                : <>Creates {branch.name ? <code>{branch.name}</code> : 'a branch'} from <code>{base || 'HEAD'}</code></>}
+              {' '}and starts {providerName(provider)} · Esc to cancel
+            </>
+          )}
         </p>
-      </div>
+      </main>
     </div>
   );
-}
-
-function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .trim()
-    .replace(/\s+/g, '-')
-    .slice(0, 50);
 }

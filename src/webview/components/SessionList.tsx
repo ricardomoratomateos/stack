@@ -14,11 +14,17 @@ const STATE_LABEL: Record<AgentState, string> = {
 };
 
 /** What the marker in front of a session looks like, per layout. */
-function Mark({ session, variant }: { session: SessionItem; variant: SessionVariant }) {
-  if (variant !== 'claude') return <span className="fm-sess-dot" aria-hidden="true" />;
-  return session.kind === 'agent'
-    ? <ProviderMark provider={session.provider} size={13} />
-    : <span className="fm-sess-prompt" aria-hidden="true">&gt;_</span>;
+// Every layout draws what is running — the agent's own mark, or a terminal for
+// a shell — with the state as a small dot on the agent's corner. A bare dot
+// said "something" but not what; the icon is what the eye looks for.
+function Mark({ session }: { session: SessionItem; variant: SessionVariant }) {
+  if (session.kind !== 'agent') return <i className="codicon codicon-terminal fm-sess-shell" aria-hidden="true" />;
+  return (
+    <>
+      <ProviderMark provider={session.provider} size={13} />
+      <span className="fm-sess-dot" aria-hidden="true" />
+    </>
+  );
 }
 
 /**
