@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { HookEntry } from '../../types';
+import { ConfigFileError, displayPath, readJsonObject, writeFileAtomic } from './configFile';
 
 /**
  * The notify script, byte-for-byte identical on every install.
@@ -81,12 +82,18 @@ export class JsonHookInstaller {
     this.urlPath = path.join(storagePath, 'hook-url');
   }
 
+  /**
+   * Throws ConfigFileError when the agent's config cannot be edited safely
+   * (syntax error, unexpected shape). The file is then left byte-identical and
+   * the message is meant to be shown to the user as is.
+   */
   install(hookUrl: string): void {
     this.writeScript();
     this.writeUrl(hookUrl);
     this.inject();
   }
 
+  /** Same contract as install(): refuses, rather than clobbers, a broken config. */
   uninstall(): void {
     this.remove();
   }
@@ -109,25 +116,59 @@ export class JsonHookInstaller {
     fs.writeFileSync(this.urlPath, hookUrl);
   }
 
-  protected readSettings(): Record<string, unknown> {
-    if (!fs.existsSync(this.settingsPath)) return {};
-    try {
-      return JSON.parse(fs.readFileSync(this.settingsPath, 'utf8')) as Record<string, unknown>;
-    } catch {
-      // A hand-edited file with a syntax error must not cost the user their
-      // config: bail out rather than overwrite it with our own.
-      return {};
-    }
+  /**
+   * The agent's config, or a ConfigFileError when it cannot be edited safely.
+   *
+   * This used to come back as `{}` on a syntax error, and inject() then wrote
+   * that back with only our hooks in it: one stray comma in a hand-edited
+   * settings.json cost the user their permissions, env and model. Refusing is
+   * the only answer that cannot lose anything.
+   */
+  protected readSettings(action: string): Record<string, unknown> {
+    return readJsonObject(this.settingsPath, action);
   }
 
   private writeSettings(settings: Record<string, unknown>): void {
-    fs.mkdirSync(path.dirname(this.settingsPath), { recursive: true });
-    fs.writeFileSync(this.settingsPath, JSON.stringify(settings, null, 2));
+    writeFileAtomic(this.settingsPath, JSON.stringify(settings, null, 2), { backup: true });
+  }
+
+  /** `settings.hooks`, refusing any shape we would have to clobber to edit. */
+  private hooksOf(settings: Record<string, unknown>, action: string): Record<string, unknown[]> {
+    const hooks = settings['hooks'] ?? {};
+    const bad = (where: string) =>
+      new ConfigFileError(
+        `Foreman couldn't ${action}: "${where}" in ${displayPath(this.settingsPath)} is not the documented hooks shape. ` +
+        'The file was left untouched.',
+      );
+    if (typeof hooks !== 'object' || hooks === null || Array.isArray(hooks)) throw bad('hooks');
+    for (const event of this.events) {
+      const entries = (hooks as Record<string, unknown>)[event];
+      if (entries !== undefined && !Array.isArray(entries)) throw bad(`hooks.${event}`);
+    }
+    return hooks as Record<string, unknown[]>;
+  }
+
+  /**
+   * One event's entries with our commands taken out. A group not shaped
+   * `{ hooks: [...] }` is not ours to interpret, so it passes through as is.
+   */
+  private withoutOurs(entries: unknown[] | undefined): unknown[] {
+    return (entries ?? [])
+      .map((group) => {
+        const g = group as HookEntry | null;
+        if (!g || !Array.isArray(g.hooks)) return group;
+        return { ...g, hooks: g.hooks.filter((c) => !this.isOurs(c?.command)) };
+      })
+      .filter((group) => {
+        const g = group as HookEntry | null;
+        return !g || !Array.isArray(g.hooks) || g.hooks.length > 0;
+      });
   }
 
   private inject(): void {
-    const settings = this.readSettings();
-    const hooks = (settings['hooks'] as Record<string, HookEntry[]>) ?? {};
+    const action = 'install its hooks';
+    const settings = this.readSettings(action);
+    const hooks = this.hooksOf(settings, action);
 
     for (const event of this.events) {
       const command = this.commandFor(event);
@@ -135,10 +176,7 @@ export class JsonHookInstaller {
       // changed script path or command format never leaves a stale duplicate.
       // Other tools' entries are left untouched — Codex users commonly have
       // another harness registered in the very same file.
-      const others = (hooks[event] ?? [])
-        .map((group) => ({ ...group, hooks: group.hooks.filter((c) => !this.isOurs(c.command)) }))
-        .filter((group) => group.hooks.length > 0);
-      hooks[event] = [...others, { matcher: '', hooks: [{ type: 'command', command }] }];
+      hooks[event] = [...this.withoutOurs(hooks[event]), { matcher: '', hooks: [{ type: 'command', command }] }];
     }
 
     settings['hooks'] = hooks;
@@ -147,25 +185,20 @@ export class JsonHookInstaller {
 
   private remove(): void {
     if (!fs.existsSync(this.settingsPath)) return;
-    try {
-      const settings = this.readSettings();
-      const hooks = settings['hooks'] as Record<string, HookEntry[]> | undefined;
-      if (!hooks) return;
-      for (const event of this.events) {
-        if (!hooks[event]) continue;
-        hooks[event] = hooks[event]
-          .map((group) => ({ ...group, hooks: group.hooks.filter((c) => !this.isOurs(c.command)) }))
-          .filter((group) => group.hooks.length > 0);
-      }
-      settings['hooks'] = hooks;
-      this.writeSettings(settings);
-    } catch {
-      // best effort
+    const action = 'remove its hooks';
+    const settings = this.readSettings(action);
+    if (settings['hooks'] === undefined) return;
+    const hooks = this.hooksOf(settings, action);
+    for (const event of this.events) {
+      if (!hooks[event]) continue;
+      hooks[event] = this.withoutOurs(hooks[event]);
     }
+    settings['hooks'] = hooks;
+    this.writeSettings(settings);
   }
 
   /** Ours iff it invokes our script, whatever quoting or event suffix it carries. */
-  private isOurs(command: string): boolean {
-    return command.includes(this.scriptPath);
+  private isOurs(command: unknown): boolean {
+    return typeof command === 'string' && command.includes(this.scriptPath);
   }
 }

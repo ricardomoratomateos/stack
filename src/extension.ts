@@ -11,6 +11,7 @@ import { REPO_CONFIG_RELATIVE, readRepoConfig, renderRepoConfig, type RepoScoped
 import { AgentSessionManager } from './session/AgentSessionManager';
 import { AttentionNotifier } from './session/AttentionNotifier';
 import { ProviderFactory } from './providers/ProviderFactory';
+import { ConfigFileError } from './providers/shared/configFile';
 import { DockerMonitor } from './docker/DockerMonitor';
 import { GitWatcher } from './git/GitWatcher';
 import { HookServer } from './server/HookServer';
@@ -261,7 +262,17 @@ export async function activate(ctx: vscode.ExtensionContext) {
 
   const manager = new WorktreeManager(store, portAllocator, config, agentManager);
 
-  for (const provider of providerFactory.all()) provider.installHooks(hookUrl);
+  for (const provider of providerFactory.all()) {
+    try {
+      provider.installHooks(hookUrl);
+    } catch (e) {
+      // A broken agent config (say, a syntax error in ~/.claude/settings.json)
+      // costs that one agent its sidebar state, never the activation — and the
+      // file is left as the user wrote it. Say so instead of failing silently.
+      const message = e instanceof ConfigFileError ? e.message : `Foreman couldn't install the ${provider.label} hooks: ${String(e)}`;
+      void vscode.window.showWarningMessage(message);
+    }
+  }
 
   const prMonitor = new PrMonitor();
 
@@ -576,7 +587,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
       prMonitor.dispose();
       dimProvider.dispose();
       diffPanelManager.dispose();
-      for (const provider of providerFactory.all()) provider.uninstallHooks();
+      for (const provider of providerFactory.all()) {
+        // Best effort on the way out; a broken config was already reported at install.
+        try { provider.uninstallHooks(); } catch { /* left untouched */ }
+      }
     },
   });
 

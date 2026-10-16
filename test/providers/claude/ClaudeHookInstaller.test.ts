@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { ClaudeHookInstaller } from '../../../src/providers/claude/ClaudeHookInstaller';
 import { HookEntry } from '../../../src/types';
+import { ConfigFileError } from '../../../src/providers/shared/configFile';
 
 const HOOK_EVENTS = [
   'SessionStart',
@@ -202,15 +203,104 @@ describe('ClaudeHookInstaller', () => {
       expect(Object.keys(hooks)).toHaveLength(7);
     });
 
-    it('handles corrupt JSON settings (starts fresh)', () => {
+    it('refuses to touch settings with a syntax error, and says where it is', () => {
+      // This used to "start fresh": the user's permissions, env and model were
+      // overwritten by a file holding only Foreman's hooks.
       fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-      fs.writeFileSync(settingsPath, '{ not valid json !!!');
+      const broken = '{\n  "model": "opus",\n  "permissions": { "allow": ["Bash"], }\n}';
+      fs.writeFileSync(settingsPath, broken);
 
-      expect(() => makeHook().install(hookUrl)).not.toThrow();
+      expect(() => makeHook().install(hookUrl)).toThrow(ConfigFileError);
+      expect(() => makeHook().install(hookUrl)).toThrow(/couldn't install its hooks: .*settings\.json has a syntax error at line 3, column \d+/);
 
-      const settings = readSettings();
-      const hooks = settings['hooks'] as Record<string, HookEntry[]>;
-      expect(Object.keys(hooks)).toHaveLength(7);
+      expect(fs.readFileSync(settingsPath, 'utf8')).toBe(broken);
+      expect(fs.existsSync(`${settingsPath}.foreman-backup`)).toBe(false);
+    });
+
+    it('refuses JSON that is not an object rather than replacing it', () => {
+      writeSettings(['not', 'settings']);
+      const before = fs.readFileSync(settingsPath, 'utf8');
+      expect(() => makeHook().install(hookUrl)).toThrow(/is not a JSON object/);
+      expect(fs.readFileSync(settingsPath, 'utf8')).toBe(before);
+    });
+
+    it('refuses a hooks block of an unexpected shape rather than clobbering it', () => {
+      writeSettings({ model: 'opus', hooks: { Stop: 'say done' } });
+      const before = fs.readFileSync(settingsPath, 'utf8');
+      expect(() => makeHook().install(hookUrl)).toThrow(/"hooks\.Stop"/);
+      expect(fs.readFileSync(settingsPath, 'utf8')).toBe(before);
+    });
+
+    it('passes through groups of a shape it does not know', () => {
+      writeSettings({ hooks: { Stop: [{ matcher: 'x', run: 'other-tool' }] } });
+      makeHook().install(hookUrl);
+      const hooks = readSettings()['hooks'] as Record<string, unknown[]>;
+      expect(hooks['Stop']).toEqual([
+        { matcher: 'x', run: 'other-tool' },
+        { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Stop` }] },
+      ]);
+    });
+
+    it('treats an empty settings file as empty settings', () => {
+      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+      fs.writeFileSync(settingsPath, '\n');
+      makeHook().install(hookUrl);
+      expect(Object.keys(readSettings()['hooks'] as object)).toHaveLength(7);
+    });
+
+    it('keeps a one-time backup of the settings as they were before Foreman', () => {
+      writeSettings({ model: 'opus' });
+      const original = fs.readFileSync(settingsPath, 'utf8');
+
+      makeHook().install(hookUrl);
+      expect(fs.readFileSync(`${settingsPath}.foreman-backup`, 'utf8')).toBe(original);
+
+      // A later change must not replace the user's own version with ours.
+      writeSettings({ model: 'sonnet', hooks: {} });
+      makeHook().install(hookUrl);
+      expect(fs.readFileSync(`${settingsPath}.foreman-backup`, 'utf8')).toBe(original);
+    });
+
+    it('does not rewrite settings that already hold exactly our hooks', () => {
+      makeHook().install(hookUrl);
+      const past = new Date(Date.now() - 60_000);
+      fs.utimesSync(settingsPath, past, past);
+      const before = fs.statSync(settingsPath).mtimeMs;
+
+      makeHook().install(hookUrl);
+
+      expect(fs.statSync(settingsPath).mtimeMs).toBe(before);
+    });
+
+    it('writes through a symlinked settings file instead of replacing the link', () => {
+      // Dotfiles repos link ~/.claude/settings.json; an atomic rename over the
+      // link would silently detach it from the repo.
+      const real = path.join(tmpDir, 'dotfiles', 'claude-settings.json');
+      fs.mkdirSync(path.dirname(real), { recursive: true });
+      fs.writeFileSync(real, JSON.stringify({ model: 'opus' }));
+      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+      fs.symlinkSync(real, settingsPath);
+
+      makeHook().install(hookUrl);
+
+      expect(fs.lstatSync(settingsPath).isSymbolicLink()).toBe(true);
+      const written = JSON.parse(fs.readFileSync(real, 'utf8'));
+      expect(written.model).toBe('opus');
+      expect(Object.keys(written.hooks)).toHaveLength(7);
+    });
+
+    it("keeps the settings file's permissions", () => {
+      writeSettings({ env: { TOKEN: 'secret' } });
+      fs.chmodSync(settingsPath, 0o600);
+      makeHook().install(hookUrl);
+      expect(fs.statSync(settingsPath).mode & 0o777).toBe(0o600);
+    });
+
+    it('leaves no temp files behind', () => {
+      writeSettings({ model: 'opus' });
+      makeHook().install(hookUrl);
+      const leftovers = fs.readdirSync(path.dirname(settingsPath)).filter((f) => f.endsWith('.tmp'));
+      expect(leftovers).toEqual([]);
     });
   });
 
@@ -270,13 +360,12 @@ describe('ClaudeHookInstaller', () => {
       expect(fs.readFileSync(settingsPath, 'utf8')).toBe(before);
     });
 
-    it('never throws (best effort) on corrupt JSON', () => {
+    it('refuses to touch corrupt JSON, with a message saying so', () => {
       fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
       fs.writeFileSync(settingsPath, '{ broken');
 
-      expect(() => makeHook().uninstall()).not.toThrow();
+      expect(() => makeHook().uninstall()).toThrow(/couldn't remove its hooks: .*syntax error/);
 
-      // File left as-is (best effort bail-out)
       expect(fs.readFileSync(settingsPath, 'utf8')).toBe('{ broken');
     });
   });

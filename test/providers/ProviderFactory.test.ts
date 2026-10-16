@@ -7,6 +7,7 @@ import { ClaudeProvider, ConfigSource } from '../../src/providers/claude/ClaudeP
 import { CodexProvider } from '../../src/providers/codex/CodexProvider';
 import { CodexHookInstaller } from '../../src/providers/codex/CodexHookInstaller';
 import { OpenCodeProvider } from '../../src/providers/opencode/OpenCodeProvider';
+import { ConfigFileError } from '../../src/providers/shared/configFile';
 import { PROVIDER_IDS, isAgentWindowName, providerForWindowName } from '../../src/ports/IAgentProvider';
 
 describe('ProviderFactory', () => {
@@ -274,22 +275,28 @@ describe('CodexProvider', () => {
       .toBe(path.join(os.homedir(), '.codex/hooks.json'));
   });
 
-  it('uninstall gives up quietly when the config cannot be written', () => {
+  it('leaves a read-only config alone, saying why', () => {
     const provider = make();
     provider.installHooks('http://127.0.0.1:43110');
-    // Read-only config: dispose must not throw on the way out of the window.
+    const before = fs.readFileSync(hooksPath(), 'utf8');
+    // The atomic write renames over the file, which only needs the directory
+    // to be writable — it must still honour a file made read-only on purpose.
     fs.chmodSync(hooksPath(), 0o444);
     try {
-      expect(() => provider.uninstallHooks()).not.toThrow();
+      expect(() => provider.uninstallHooks()).toThrow(ConfigFileError);
+      expect(fs.readFileSync(hooksPath(), 'utf8')).toBe(before);
+      expect(fs.statSync(hooksPath()).mode & 0o777).toBe(0o444);
     } finally {
       fs.chmodSync(hooksPath(), 0o644);
     }
   });
 
-  it('survives a hand-corrupted hooks.json instead of throwing', () => {
+  it('refuses to overwrite a hand-corrupted hooks.json', () => {
+    // Codex users commonly keep another harness's hooks in this file; "starting
+    // fresh" on a syntax error used to delete them along with everything else.
     fs.mkdirSync(path.dirname(hooksPath()), { recursive: true });
     fs.writeFileSync(hooksPath(), '{ not json');
-    expect(() => make().installHooks('http://127.0.0.1:43110')).not.toThrow();
-    expect(Object.keys(readHooks().hooks)).toContain('Stop');
+    expect(() => make().installHooks('http://127.0.0.1:43110')).toThrow(/hooks\.json has a syntax error/);
+    expect(fs.readFileSync(hooksPath(), 'utf8')).toBe('{ not json');
   });
 });
