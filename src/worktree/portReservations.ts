@@ -98,6 +98,16 @@ export class PortReservationFile implements SharedPortReservations {
     const fd = await this.acquire();
     if (fd === undefined) return undefined;
     try {
+      return this.rewrite(fn);
+    } finally {
+      fs.closeSync(fd);
+      try { fs.rmSync(this.lock, { force: true }); } catch { /* gone */ }
+    }
+  }
+
+  /** update()'s work, with the lock held. Undefined when the file could not be written. */
+  private rewrite(fn: (entries: Record<number, Entry>) => boolean): boolean | undefined {
+    try {
       const entries = this.read();
       for (const [port, e] of Object.entries(entries)) {
         if (this.now() - e.at > CLAIM_TTL_MS || !this.isAlive(e.pid)) delete entries[Number(port)];
@@ -109,9 +119,6 @@ export class PortReservationFile implements SharedPortReservations {
       return result;
     } catch {
       return undefined;
-    } finally {
-      fs.closeSync(fd);
-      try { fs.rmSync(this.lock, { force: true }); } catch { /* gone */ }
     }
   }
 

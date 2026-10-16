@@ -169,6 +169,15 @@ describe('parseHook', () => {
     expect(h('0')?.windowIndex).toBe(0);
   });
 
+  it('takes the first of a header sent twice', () => {
+    const e = parseHook(
+      { 'x-foreman-hook': '2', 'x-foreman-event': 'Stop', 'x-foreman-workspace': ['wt-1', 'wt-2'] },
+      new URLSearchParams(),
+      '',
+    );
+    expect(e?.workspaceId).toBe('wt-1');
+  });
+
   it('is undefined without an event', () => {
     expect(parseHook({ 'x-foreman-hook': '2' }, new URLSearchParams(), '{}')).toBeUndefined();
     expect(parseHook({}, new URLSearchParams(), undefined)).toBeUndefined();

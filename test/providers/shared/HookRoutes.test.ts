@@ -1,8 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { HookRoutes } from '../../../src/providers/shared/HookRoutes';
+
+// Auto-spy on node:fs (real implementations kept) so one removal can fail.
+vi.mock('node:fs', { spy: true });
 
 describe('HookRoutes', () => {
   let storage: string;
@@ -56,6 +59,31 @@ describe('HookRoutes', () => {
     new HookRoutes(storage).setDefault(B);
     new HookRoutes(storage).release(A);
     expect(fs.readFileSync(new HookRoutes(storage).defaultUrlPath, 'utf8')).toBe(B);
+  });
+
+  it('reads an empty route as no route', () => {
+    const routes = new HookRoutes(storage);
+    fs.mkdirSync(routes.dir, { recursive: true });
+    fs.writeFileSync(path.join(routes.dir, 'wt-1'), '  \n');
+    expect(routes.lookup('wt-1')).toBeUndefined();
+  });
+
+  it("closing a window leaves a claim's temp file alone — it is someone's write in progress", () => {
+    const routes = new HookRoutes(storage);
+    fs.mkdirSync(routes.dir, { recursive: true });
+    const tmp = path.join(routes.dir, '.wt-1.123.tmp');
+    fs.writeFileSync(tmp, A);
+    routes.release(A);
+    expect(fs.existsSync(tmp)).toBe(true);
+  });
+
+  it('closing a window goes on past a route it cannot remove', () => {
+    const routes = new HookRoutes(storage);
+    routes.claim(['wt-1', 'wt-2'], A);
+    vi.mocked(fs.rmSync).mockImplementationOnce(() => { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); });
+    expect(() => routes.release(A)).not.toThrow();
+    // One of the two survived the failed removal; the other is gone.
+    expect(['wt-1', 'wt-2'].filter((id) => routes.lookup(id) === A)).toHaveLength(1);
   });
 
   it('release is a no-op before anything was claimed', () => {
