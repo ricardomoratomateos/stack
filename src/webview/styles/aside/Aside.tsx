@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { send } from '../../vscode';
 import { PRODUCT_NAME } from '../../brand';
-import { GROUP_LABEL, GROUP_ORDER, GROUP_SHORT, countByGroup, formatAge, type Described, type WorktreeGroup } from '../../derive';
+import { GROUP_LABEL, GROUP_SHORT, countByGroup, formatAge, type Described, type WorktreeGroup } from '../../derive';
 import { Details, DiffStat } from '../../components/Details';
 import { LaunchSplit } from '../../components/LaunchSplit';
 import { ActionBar } from '../../components/ActionBar';
@@ -57,9 +57,6 @@ export function Aside({ state, loaded, items, selectedId, select, dragFor, now }
   const [filter, setFilter] = useState<WorktreeGroup | 'all'>('all');
   const counts = countByGroup(items);
   const visible = items.filter((d) => filter === 'all' || d.group === filter);
-  const groups = GROUP_ORDER
-    .map((group) => ({ group, items: visible.filter((d) => d.group === group) }))
-    .filter((g) => g.items.length > 0);
 
   return (
     <div className="fm fm-aside">
@@ -94,15 +91,12 @@ export function Aside({ state, loaded, items, selectedId, select, dragFor, now }
       )}
 
       <div className="as-list">
-        {!loaded ? <LoadingState /> : items.length === 0 ? <EmptyState /> : groups.length === 0 ? (
+        {/* The user's own order, never re-sorted by state: rows jumping between
+            groups as agents worked was disorienting. The chips still filter. */}
+        {!loaded ? <LoadingState /> : items.length === 0 ? <EmptyState /> : visible.length === 0 ? (
           <NothingHere text={NONE[filter as WorktreeGroup]} onClear={() => setFilter('all')} />
-        ) : groups.map(({ group, items: rows }) => (
-          <section key={group} aria-label={GROUP_LABEL[group]}>
-            <h2 className="as-group-head">{GROUP_LABEL[group]}</h2>
-            {rows.map((d) => (
-              <Row key={d.wt.id} d={d} selected={d.wt.id === selectedId} now={now} state={state} select={select} drag={dragFor(d.wt)} />
-            ))}
-          </section>
+        ) : visible.map((d) => (
+          <Row key={d.wt.id} d={d} selected={d.wt.id === selectedId} now={now} state={state} select={select} drag={dragFor(d.wt)} />
         ))}
       </div>
 

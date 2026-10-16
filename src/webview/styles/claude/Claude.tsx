@@ -1,6 +1,6 @@
 import React from 'react';
 import { send } from '../../vscode';
-import { GROUP_LABEL, GROUP_ORDER, formatAge, type Described, type WorktreeGroup } from '../../derive';
+import { GROUP_LABEL, formatAge, type Described, type WorktreeGroup } from '../../derive';
 import { Details, DiffStat } from '../../components/Details';
 import { LaunchSplit } from '../../components/LaunchSplit';
 import { ActionBar } from '../../components/ActionBar';
@@ -46,9 +46,6 @@ function Glyph({ group }: { group: WorktreeGroup }) {
 }
 
 export function Claude({ state, loaded, items, selectedId, select, dragFor, now }: LayoutProps) {
-  const groups = GROUP_ORDER
-    .map((group) => ({ group, items: items.filter((d) => d.group === group) }))
-    .filter((g) => g.items.length > 0);
   const selected = items.find((d) => d.wt.id === selectedId);
 
   return (
@@ -63,25 +60,19 @@ export function Claude({ state, loaded, items, selectedId, select, dragFor, now 
       </div>
 
       <div className="cl-list">
-        {!loaded ? <LoadingState /> : items.length === 0 ? <EmptyState /> : groups.map(({ group, items: rows }) => (
-          <section key={group} aria-label={GROUP_LABEL[group]} className="cl-group" data-group={group}>
-            <h2 className="cl-group-head">
-              <span className="cl-group-dot" aria-hidden="true" />
-              <span className="cl-group-label">{GROUP_LABEL[group]}</span>
-              <span className="cl-group-count">{rows.length}</span>
-            </h2>
-            {rows.map((d) => (
-              <Row
-                key={d.wt.id}
-                d={d}
-                selected={d.wt.id === selectedId}
-                now={now}
-                state={state}
-                select={select}
-                drag={dragFor(d.wt)}
-              />
-            ))}
-          </section>
+        {/* One list in the user's own order (drag to reorder). Grouping by state
+            moved worktrees up and down every time an agent changed state; the
+            state is on the row instead — its glyph, the question, the diff. */}
+        {!loaded ? <LoadingState /> : items.length === 0 ? <EmptyState /> : items.map((d) => (
+          <Row
+            key={d.wt.id}
+            d={d}
+            selected={d.wt.id === selectedId}
+            now={now}
+            state={state}
+            select={select}
+            drag={dragFor(d.wt)}
+          />
         ))}
       </div>
 
