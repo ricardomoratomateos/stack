@@ -46,6 +46,7 @@ function makeStub(): ISessionManager & Record<string, Fn> {
       }
     }),
     listWindows: vi.fn().mockResolvedValue([]),
+    adoptLegacySession: vi.fn().mockResolvedValue(false),
     listSessions: vi.fn().mockResolvedValue([]),
     listClients: vi.fn().mockResolvedValue([]),
     hasChildProcess: vi.fn().mockResolvedValue(false),
@@ -510,6 +511,31 @@ describe('reconnect: claiming restored terminals exactly', () => {
     window.terminals = [legacy];
     await mgr.reconnect([wt]);
     expect(mgr.getTargetForTerminal(legacy as never)).toEqual({ worktreeId: 'wt-1' });
+  });
+
+  it("adopts Foreman's session first, then claims the tabs and viewer Foreman opened on it", async () => {
+    // What a window reloaded from Foreman into Stack finds: a foreman-<id>
+    // session (renamed to stack-<id> by adoptLegacySession, still attached)
+    // and terminals whose launch argv still names the old sessions.
+    const { mgr, stub } = reloaded([{ index: 1, name: 'claude' }, { index: 2, name: 'shell' }]);
+    const legacyBase = TmuxManager.legacySessionName('wt-1');
+    const tab = makeTerminal({ name: 'feat/login · claude', shellPath: 'tmux', shellArgs: TmuxManager.viewAttachArgs(legacyBase, 1) });
+    const viewer = makeTerminal({ name: 'feat/login', shellPath: 'tmux', shellArgs: TmuxManager.attachArgs(legacyBase) });
+    window.terminals = [tab, viewer];
+
+    await mgr.reconnect([wt]);
+
+    expect(stub.adoptLegacySession).toHaveBeenCalledWith('wt-1');
+    expect(stub.adoptLegacySession.mock.invocationCallOrder[0]).toBeLessThan(stub.hasSession.mock.invocationCallOrder[0]!);
+    expect(mgr.getTargetForTerminal(tab as never)).toEqual({ worktreeId: 'wt-1', windowIndex: 1 });
+    expect(mgr.getTargetForTerminal(viewer as never)).toEqual({ worktreeId: 'wt-1' });
+  });
+
+  it('a failed adoption costs nothing but the adoption', async () => {
+    const { mgr, stub } = reloaded([{ index: 1, name: 'claude' }]);
+    stub.adoptLegacySession.mockRejectedValue(new Error('no server'));
+    await mgr.reconnect([wt]);
+    expect(mgr.getSessions('wt-1').map((x) => x.index)).toEqual([1]);
   });
 
   it('never lets "feat" take "feat-login"\'s terminal: the name fallback is anchored at the separator', async () => {

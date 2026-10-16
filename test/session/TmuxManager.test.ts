@@ -92,6 +92,29 @@ describe('sessionName', () => {
   });
 });
 
+// ── legacy names: sessions Foreman (the old name) created ────────────────────
+
+describe('legacy session names', () => {
+  it("names a worktree's Foreman-era session the same way, under foreman-", () => {
+    expect(TmuxManager.legacySessionName('abc/1')).toBe('foreman-abc-1');
+    expect(TmuxManager.sessionName('abc/1')).toBe('stack-abc-1');
+  });
+
+  it('maps a Foreman-era name — base or view — to the name it is adopted under', () => {
+    expect(TmuxManager.currentSessionName('foreman-abc')).toBe('stack-abc');
+    expect(TmuxManager.currentSessionName('foreman-abc__w3')).toBe('stack-abc__w3');
+    expect(TmuxManager.currentSessionName('stack-abc')).toBe('stack-abc');
+    expect(TmuxManager.currentSessionName('work')).toBe('work');
+  });
+
+  it('parses a legacy view only when asked for that prefix', () => {
+    expect(TmuxManager.parseViewSessionName('foreman-abc__w3')).toBeUndefined();
+    expect(TmuxManager.parseViewSessionName('foreman-abc__w3', TmuxManager.LEGACY_SESSION_PREFIX))
+      .toEqual({ base: 'foreman-abc', windowIndex: 3 });
+    expect(TmuxManager.parseViewSessionName('stack-abc__w3', TmuxManager.LEGACY_SESSION_PREFIX)).toBeUndefined();
+  });
+});
+
 // ── view sessions (pure) ─────────────────────────────────────────────────────
 
 describe('view sessions', () => {
@@ -194,6 +217,82 @@ describe('command construction', () => {
       : cmd.startsWith('tmux new-session') ? { err: new Error('no server running') }
       : {});
     await expect(tmux.ensureSession('s1', '/some/cwd')).rejects.toThrow('no server running');
+  });
+
+  describe('adoptLegacySession', () => {
+    /** A fake server holding `names`, answering has-session / list-sessions / rename-session from it. */
+    const server = (names: string[], failRenames: string[] = []) => {
+      const live = new Set(names);
+      const calls = captureExec((cmd) => {
+        const target = /-t =(\S+)/.exec(cmd)?.[1] ?? '';
+        if (cmd.startsWith('tmux has-session')) return live.has(target) ? {} : { err: new Error('no session') };
+        if (cmd.startsWith('tmux list-sessions')) return { stdout: [...live].map((n) => `${n}|:stack:|1`).join('\n') };
+        if (cmd.startsWith('tmux rename-session')) {
+          if (failRenames.includes(target)) return { err: new Error("can't find session") };
+          live.delete(target);
+          live.add(cmd.split(' ').at(-1)!);
+          return {};
+        }
+        if (cmd.startsWith('tmux kill-session')) { live.delete(target); return {}; }
+        return {};
+      });
+      return { live, calls };
+    };
+
+    it("renames foreman-<id> to stack-<id>, and its tabs' views with it", async () => {
+      const { live, calls } = server(['foreman-wt1', 'foreman-wt1__w2', 'foreman-wt1__w5', 'foreman-other__w1', 'mine']);
+      await expect(tmux.adoptLegacySession('wt1')).resolves.toBe(true);
+      expect([...live].sort()).toEqual(['foreman-other__w1', 'mine', 'stack-wt1', 'stack-wt1__w2', 'stack-wt1__w5']);
+      expect(calls.filter((c) => c[1] === 'rename-session')).toEqual([
+        ['tmux', 'rename-session', '-t', '=foreman-wt1', 'stack-wt1'],
+        ['tmux', 'rename-session', '-t', '=foreman-wt1__w2', 'stack-wt1__w2'],
+        ['tmux', 'rename-session', '-t', '=foreman-wt1__w5', 'stack-wt1__w5'],
+      ]);
+    });
+
+    it('kills a legacy view whose new name is taken instead of renaming over it', async () => {
+      const { live } = server(['foreman-wt1', 'foreman-wt1__w2', 'stack-wt1__w2']);
+      await expect(tmux.adoptLegacySession('wt1')).resolves.toBe(true);
+      expect([...live].sort()).toEqual(['stack-wt1', 'stack-wt1__w2']);
+    });
+
+    it('keeps going past a view that cannot be renamed', async () => {
+      const { live } = server(['foreman-wt1', 'foreman-wt1__w2', 'foreman-wt1__w3'], ['foreman-wt1__w2']);
+      await expect(tmux.adoptLegacySession('wt1')).resolves.toBe(true);
+      expect(live.has('stack-wt1__w3')).toBe(true);
+    });
+
+    it('does nothing without a legacy session', async () => {
+      const { calls } = server(['stack-wt1']);
+      await expect(tmux.adoptLegacySession('wt1')).resolves.toBe(false);
+      expect(calls.some((c) => c[1] === 'rename-session')).toBe(false);
+    });
+
+    it('touches neither when both names exist — the legacy one may hold running agents', async () => {
+      const { live, calls } = server(['foreman-wt1', 'stack-wt1']);
+      await expect(tmux.adoptLegacySession('wt1')).resolves.toBe(false);
+      expect([...live].sort()).toEqual(['foreman-wt1', 'stack-wt1']);
+      expect(calls.some((c) => c[1] === 'rename-session' || c[1] === 'kill-session')).toBe(false);
+    });
+
+    it('losing the rename to another window counts as adopted when stack-<id> is there', async () => {
+      // The other window renamed it between our check and our rename.
+      let renamedElsewhere = false;
+      captureExec((cmd) => {
+        if (cmd === 'tmux has-session -t =foreman-wt1') return renamedElsewhere ? { err: new Error('gone') } : {};
+        if (cmd === 'tmux has-session -t =stack-wt1') return renamedElsewhere ? {} : { err: new Error('none') };
+        if (cmd.startsWith('tmux rename-session')) { renamedElsewhere = true; return { err: new Error("can't find session") }; }
+        return {};
+      });
+      await expect(tmux.adoptLegacySession('wt1')).resolves.toBe(true);
+
+      captureExec((cmd) => {
+        if (cmd === 'tmux has-session -t =foreman-wt1') return {};
+        if (cmd.startsWith('tmux rename-session')) return { err: new Error('server exited') };
+        return { err: new Error('no session') };
+      });
+      await expect(tmux.adoptLegacySession('wt1')).resolves.toBe(false);
+    });
   });
 
   it('ensureSession tolerates a tmux that rejects the renumber option', async () => {
@@ -702,6 +801,75 @@ describe('session tabs: view sessions (integration)', () => {
     expect(await tmux.hasSession(soloView)).toBe(true);
     await tmux.killSession(soloView);
     expect(await tmux.hasSession(soloView)).toBe(false);
+  });
+});
+
+describe('adopting a session Foreman left running (integration)', () => {
+  const ID = `adopt-${process.pid}`;
+  const LEGACY = TmuxManager.legacySessionName(ID);
+  const CURRENT = TmuxManager.sessionName(ID);
+  const tmux = new TmuxManager();
+  const clients: ChildProcess[] = [];
+
+  function attach(args: string[]): ChildProcess {
+    const child = spawn('python3', ['-c', 'import pty,sys; pty.spawn(sys.argv[1:])', 'tmux', ...args], {
+      stdio: 'ignore',
+      env: { ...process.env, TERM: 'xterm-256color' },
+    });
+    clients.push(child);
+    return child;
+  }
+
+  async function sessionsUntil(want: (s: Map<string, number>) => boolean, tries = 50): Promise<Map<string, number>> {
+    let seen = new Map<string, number>();
+    for (let i = 0; i < tries; i++) {
+      seen = new Map((await tmux.listSessions()).map((s) => [s.name, s.attached]));
+      if (want(seen)) return seen;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return seen;
+  }
+
+  afterAll(() => {
+    for (const c of clients) c.kill('SIGKILL');
+    if (!hasTmux) return;
+    const names = execSync('tmux list-sessions -F "#{session_name}" 2>/dev/null || true').toString().split('\n');
+    for (const name of names.filter((n) => n.includes(ID))) {
+      try { execSync(`tmux kill-session -t '=${name}'`, { stdio: 'ignore' }); } catch { /* already gone */ }
+    }
+  });
+
+  it.runIf(hasTmux && hasPty)('renames it with the agent still running and its tab still attached', async () => {
+    // What Foreman left: its session, an "agent" (a long sleep standing in
+    // for claude) in a window of it, and a session tab's view attached to it.
+    await tmux.ensureSession(LEGACY, os.tmpdir());
+    const agentWindow = await tmux.newWindow(LEGACY, 'claude', os.tmpdir());
+    await tmux.respawnWindow(LEGACY, agentWindow, 'sleep 300');
+    const agentPid = (await tmux.listWindows(LEGACY)).find((w) => w.index === agentWindow)?.pid;
+    expect(agentPid).toBeGreaterThan(0);
+    const legacyView = TmuxManager.viewSessionName(LEGACY, agentWindow);
+    attach(TmuxManager.viewAttachArgs(LEGACY, agentWindow));
+    expect((await sessionsUntil((s) => s.get(legacyView) === 1)).get(legacyView)).toBe(1);
+
+    await expect(tmux.adoptLegacySession(ID)).resolves.toBe(true);
+
+    const view = TmuxManager.viewSessionName(CURRENT, agentWindow);
+    const seen = await sessionsUntil((s) => s.get(view) === 1);
+    expect(seen.has(LEGACY)).toBe(false);
+    expect(seen.has(legacyView)).toBe(false);
+    expect(seen.has(CURRENT)).toBe(true);
+    // The tab's client stayed attached through the rename…
+    expect(seen.get(view)).toBe(1);
+    expect((await tmux.listClients()).some((c) => c.session === view)).toBe(true);
+    // …and the agent is the same process, in the same window.
+    const after = (await tmux.listWindows(CURRENT)).find((w) => w.index === agentWindow);
+    expect(after?.name).toBe('claude');
+    expect(after?.pid).toBe(agentPid);
+    expect(() => process.kill(agentPid!, 0)).not.toThrow();
+
+    // Idempotent: a second window of the same repository finds nothing to do.
+    await expect(tmux.adoptLegacySession(ID)).resolves.toBe(false);
+    expect(await tmux.hasSession(CURRENT)).toBe(true);
   });
 });
 

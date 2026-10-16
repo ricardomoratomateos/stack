@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { HookEntry } from '../../types';
 import { ConfigFileError, displayPath, readJsonObject, writeFileAtomic } from './configFile';
 import { HookRoutes } from './HookRoutes';
+import { legacyStoragePath } from '../../migration/legacyStorage';
 
 /**
  * The notify script, byte-for-byte identical on every install — and meant to
@@ -25,6 +26,9 @@ import { HookRoutes } from './HookRoutes';
  * - Bounded. A connect timeout and --max-time cap the wait, because a paused
  *   extension host (a debugger, a hung window) accepts the connection and then
  *   never answers, and the agent waits on its hook.
+ * - Both names. STACK_* is read first, then FOREMAN_* (the names before the
+ *   rename), and a tmux session named either way is recognised — written once
+ *   so the rename does not cost a second re-trust later.
  *
  * $1 is the event name, because the agents disagree on how they announce it
  * (Claude sets HOOK_EVENT_NAME, Codex sends hook_event_name on stdin); $2 the
@@ -43,8 +47,9 @@ AGENT="\${2:-}"
 # Drain stdin first: the agent blocks writing the payload until it is all read.
 PAYLOAD=$(cat)
 
-WORKSPACE_ID="\${STACK_WORKSPACE_ID:-}"
-WINDOW_INDEX="\${STACK_WINDOW_INDEX:-}"
+# FOREMAN_* are the names from before the extension was renamed to Stack.
+WORKSPACE_ID="\${STACK_WORKSPACE_ID:-\${FOREMAN_WORKSPACE_ID:-}}"
+WINDOW_INDEX="\${STACK_WINDOW_INDEX:-\${FOREMAN_WINDOW_INDEX:-}}"
 
 # Ask tmux where we are whenever the launcher did not say. Those variables are
 # baked in when Stack starts an agent, so an agent the user starts BY HAND —
@@ -56,13 +61,17 @@ if [ -n "\${TMUX_PANE:-}" ] && command -v tmux >/dev/null 2>&1; then
     WINDOW_INDEX=$(tmux display-message -p -t "$TMUX_PANE" '#{window_index}' 2>/dev/null) || WINDOW_INDEX=""
   fi
   if [ -z "$WORKSPACE_ID" ]; then
-    # Session names are "stack-<worktree id>". Worktree ids are UUIDs, so they
-    # survive sessionName()'s sanitising and 50-char cap unchanged and the
-    # prefix strip round-trips exactly.
+    # Session names are "stack-<worktree id>" ("foreman-<worktree id>" before
+    # the rename), and a session tab's own session adds "__w<window>", which a
+    # worktree id cannot contain. Worktree ids are UUIDs, so they survive
+    # sessionName()'s sanitising and 50-char cap unchanged and the strip
+    # round-trips exactly.
     SESSION=$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}' 2>/dev/null) || SESSION=""
     case "$SESSION" in
       stack-*) WORKSPACE_ID="\${SESSION#stack-}" ;;
+      foreman-*) WORKSPACE_ID="\${SESSION#foreman-}" ;;
     esac
+    WORKSPACE_ID="\${WORKSPACE_ID%%__w*}"
   fi
 fi
 
@@ -81,7 +90,7 @@ esac
 FALLBACK=$(cat "$DIR/hook-url" 2>/dev/null) || FALLBACK=""
 
 TRIED=" "
-for URL in "$ROUTE" "\${STACK_HOOK_URL:-}" "$FALLBACK"; do
+for URL in "$ROUTE" "\${STACK_HOOK_URL:-}" "\${FOREMAN_HOOK_URL:-}" "$FALLBACK"; do
   [ -n "$URL" ] || continue
   case "$TRIED" in *" $URL "*) continue ;; esac
   TRIED="$TRIED$URL "
@@ -121,6 +130,13 @@ export class JsonHookInstaller {
 
   readonly urlPath: string;
 
+  /**
+   * Foreman's notify.sh — the same script under the extension's old id. An
+   * entry running it is ours too: it is replaced by one running scriptPath,
+   * never left beside it to report every event twice.
+   */
+  readonly legacyScriptPath: string;
+
   private routes: HookRoutes;
 
   private hookUrl?: string;
@@ -135,6 +151,7 @@ export class JsonHookInstaller {
     private agent: string,
   ) {
     this.scriptPath = path.join(storagePath, 'notify.sh');
+    this.legacyScriptPath = path.join(legacyStoragePath(storagePath), 'notify.sh');
     this.routes = new HookRoutes(storagePath);
     this.urlPath = this.routes.defaultUrlPath;
   }
@@ -260,8 +277,11 @@ export class JsonHookInstaller {
     this.writeSettings(settings);
   }
 
-  /** Ours iff it invokes our script, whatever quoting or event suffix it carries. */
+  /**
+   * Ours iff it invokes our script — or Foreman's, which this extension was
+   * called before — whatever quoting or event suffix it carries.
+   */
   private isOurs(command: unknown): boolean {
-    return typeof command === 'string' && command.includes(this.scriptPath);
+    return typeof command === 'string' && (command.includes(this.scriptPath) || command.includes(this.legacyScriptPath));
   }
 }

@@ -45,6 +45,15 @@ describe('POST /hook (v2: X-Stack-* headers)', () => {
     cwd: '/repo',
   });
 
+  it('takes a post from the notify.sh Foreman installed, X-Foreman-* headers and all', async () => {
+    const url = await start();
+    const status = await post(url, {
+      'X-Foreman-Hook': '2', 'X-Foreman-Event': 'Stop', 'X-Foreman-Workspace': 'ws-old', 'X-Foreman-Window': '1',
+    }, '{}');
+    expect(status).toBe(200);
+    expect(updateState).toHaveBeenCalledWith('ws-old', 'waiting', 1);
+  });
+
   it('reads the ids from headers and maps the event to a state', async () => {
     const url = await start();
     const status = await post(url, {
@@ -176,6 +185,27 @@ describe('parseHook', () => {
       '',
     );
     expect(e?.workspaceId).toBe('wt-1');
+  });
+
+  it("reads Foreman's X-Foreman-* headers — what agents started before the rename still send", () => {
+    const e = parseHook({
+      'x-foreman-hook': '2', 'x-foreman-event': 'PermissionRequest', 'x-foreman-agent': 'codex',
+      'x-foreman-workspace': 'wt-old', 'x-foreman-window': '2', 'x-foreman-pane': '%7',
+    }, new URLSearchParams(), '{"session_id":"s"}');
+    expect(e).toMatchObject({
+      event: 'PermissionRequest', state: 'permission', agent: 'codex',
+      workspaceId: 'wt-old', windowIndex: 2, pane: '%7', sessionId: 's',
+    });
+  });
+
+  it('prefers X-Stack-* when both names arrive', () => {
+    const e = parseHook(
+      { 'x-stack-hook': '2', 'x-stack-event': 'Stop', 'x-foreman-event': 'SessionEnd', 'x-foreman-workspace': ['wt-old'] },
+      new URLSearchParams(),
+      '',
+    );
+    expect(e?.event).toBe('Stop');
+    expect(e?.workspaceId).toBe('wt-old');
   });
 
   it('is undefined without an event', () => {

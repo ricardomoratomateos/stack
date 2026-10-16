@@ -46,6 +46,12 @@ export interface ISessionManager {
   selectWindow(session: string, windowIndex: number): Promise<void>;
   killWindow(session: string, windowIndex: number): Promise<void>;
   killSession(name: string): Promise<void>;
+  /**
+   * Renames the session Foreman (the extension's old name) left for this
+   * worktree, and its views, to Stack's names — running agents included.
+   * True when it did.
+   */
+  adoptLegacySession(worktreeId: string): Promise<boolean>;
   /** Detaches all clients; the session keeps running. */
   detachClients(sessionName: string): Promise<void>;
   listWindows(session: string): Promise<TmuxWindow[]>;

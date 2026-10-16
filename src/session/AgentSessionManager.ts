@@ -542,14 +542,15 @@ export class AgentSessionManager {
     // Window is named after the provider id so reconnect() can restore ownership.
     const windowIndex = await this.tmux.newWindow(sessionName, provider.id, worktree.path);
     // STACK_WINDOW_INDEX lets hook events target THIS window's state instead
-    // of lighting up every agent window of the worktree.
+    // of lighting up every agent window of the worktree. FOREMAN_WINDOW_INDEX
+    // is its deprecated pre-rename alias, like the rest of launchEnv's.
     // Respawn (not send-keys): typing the command into the shell flashes the
     // env-var soup at the user until the agent clears the screen. The trailing
     // exec keeps a shell in the window after the agent exits, like before.
     await this.tmux.respawnWindow(
       sessionName,
       windowIndex,
-      `STACK_WINDOW_INDEX="${windowIndex}" ${provider.buildCommand(worktree.id)}; exec "\${SHELL:-/bin/sh}"`,
+      `STACK_WINDOW_INDEX="${windowIndex}" FOREMAN_WINDOW_INDEX="${windowIndex}" ${provider.buildCommand(worktree.id)}; exec "\${SHELL:-/bin/sh}"`,
     );
 
     this.windowMap(worktree.id).set(windowIndex, { kind: 'agent', provider: provider.id, state: 'waiting', name: provider.id });
@@ -1142,6 +1143,9 @@ export class AgentSessionManager {
   async reconnect(worktrees: Worktree[]): Promise<void> {
     for (const wt of worktrees) {
       const sessionName = TmuxManager.sessionName(wt.id);
+      // A session from before the rename to Stack, agents and all, becomes
+      // this worktree's session here — before anything looks for it.
+      await this.tmux.adoptLegacySession(wt.id).catch(() => false);
       if (!(await this.tmux.hasSession(sessionName))) continue;
 
       const tmuxWindows = await this.tmux.listWindows(sessionName);
