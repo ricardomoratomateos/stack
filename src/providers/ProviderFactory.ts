@@ -52,7 +52,7 @@ export class ProviderFactory {
       case 'opencode':
         return new OpenCodeProvider(
           this.config,
-          new OpenCodeHookInstaller(path.join(this.homeDir, OPENCODE_PLUGIN_PATH)),
+          new OpenCodeHookInstaller(this.storagePath, path.join(this.homeDir, OPENCODE_PLUGIN_PATH)),
         );
     }
   }

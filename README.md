@@ -87,7 +87,9 @@ Foreman registers a notify hook with each agent so the sidebar can show live sta
   ```
 
   Codex also has no session-end event, so a Codex session settles on *waiting* rather than ever showing *terminated*.
-- **Codex requires you to trust hooks** before they run (`/hooks`). Foreman's notify script is byte-identical on every install for exactly this reason — the endpoint lives in a sibling file, so a restart never changes the script's hash and never costs you that trust.
+- **Codex requires you to trust hooks** before they run (`/hooks`). Foreman's notify script is byte-identical on every install for exactly this reason — it looks up which window to report to when it runs, so a restart never changes the script's hash and never costs you that trust. (Upgrading from 0.1.0 changes the script once; Codex asks to trust it again.)
+
+The hooks are global — one entry in `~/.claude/settings.json` serves every VS Code window — but each agent reports to the window showing its worktree, so several windows can run side by side, and an agent keeps reporting across a window reload. With no Foreman window open the hook does nothing and exits at once. Foreman never rewrites an agent config it cannot parse: it leaves the file alone and says so, and the first time it changes one it keeps the original as `<file>.foreman-backup`.
 
 
 ## Switching worktrees

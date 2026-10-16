@@ -2,9 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { createHash } from 'node:crypto';
 import { ClaudeHookInstaller } from '../../../src/providers/claude/ClaudeHookInstaller';
 import { HookEntry } from '../../../src/types';
 import { ConfigFileError } from '../../../src/providers/shared/configFile';
+
+/** First 16 hex chars of sha256(notify.sh). See the "is pinned" test. */
+const NOTIFY_SH_HASH = '66fc598fbbca4ff7';
 
 const HOOK_EVENTS = [
   'SessionStart',
@@ -52,13 +56,42 @@ describe('ClaudeHookInstaller', () => {
       expect(fs.statSync(scriptPath).mode & 0o777).toBe(0o755);
     });
 
-    it('curls the endpoint read from the sibling url file', () => {
+    it('forwards the payload untouched, with our ids in headers, bounded in time', () => {
       makeHook().install(hookUrl);
       const content = fs.readFileSync(scriptPath, 'utf8');
       expect(content.startsWith('#!/bin/bash\n')).toBe(true);
-      expect(content).toContain('curl -s -X POST "$URL/hook"');
       expect(content).toContain('EVENT_NAME="${1:-${HOOK_EVENT_NAME:-}}"');
-      expect(content).toContain('"{\\"event\\":\\"$EVENT_NAME\\",\\"terminalId\\":\\"$FOREMAN_TERMINAL_ID\\",\\"workspaceId\\":\\"$WORKSPACE_ID\\",\\"windowIndex\\":\\"$WINDOW_INDEX\\"}"');
+      expect(content).toContain('AGENT="${2:-}"');
+      expect(content).toContain('ANSWER=$(printf \'%s\' "$PAYLOAD" | curl -sf --connect-timeout 1 --max-time 2');
+      expect(content).toContain('--data-binary @-');
+      for (const h of ['Hook: 2', 'Event: $EVENT_NAME', 'Agent: $AGENT', 'Workspace: $WORKSPACE_ID', 'Window: $WINDOW_INDEX']) {
+        expect(content).toContain(`-H "X-Foreman-${h}"`);
+      }
+    });
+
+    it('looks the endpoint up per worktree, then the launch env, then the shared file', () => {
+      makeHook().install(hookUrl);
+      const content = fs.readFileSync(scriptPath, 'utf8');
+      expect(content).toContain('ROUTE=$(cat "$DIR/routes/$WORKSPACE_ID" 2>/dev/null)');
+      expect(content).toContain('for URL in "$ROUTE" "${FOREMAN_HOOK_URL:-}" "$FALLBACK"; do');
+      // A worktree id that is not a plain token never becomes a path.
+      expect(content).toContain('""|*[!A-Za-z0-9_-]*) ;;');
+    });
+
+    it('is pinned: changing it costs every Codex user a re-trust', () => {
+      // Codex hashes the hook definition and silently skips a hook whose hash
+      // no longer matches. If this fails, the change is a decision, not a
+      // refactor: make it future-proof, mention it in the changelog, update
+      // the hash.
+      makeHook().install(hookUrl);
+      const hash = createHash('sha256').update(fs.readFileSync(scriptPath)).digest('hex').slice(0, 16);
+      expect(hash).toBe(NOTIFY_SH_HASH);
+    });
+
+    it('registers the provider id as $2', () => {
+      makeHook().install(hookUrl);
+      const hooks = readSettings()['hooks'] as Record<string, HookEntry[]>;
+      expect(hooks['Stop']?.[0]?.hooks[0]?.command).toBe(`"${scriptPath}" Stop claude`);
     });
 
     it('falls back to asking tmux when the launcher set no FOREMAN variables', () => {
@@ -123,7 +156,7 @@ describe('ClaudeHookInstaller', () => {
       expect(Object.keys(hooks).sort()).toEqual([...HOOK_EVENTS].sort());
       for (const event of HOOK_EVENTS) {
         expect(hooks[event]).toEqual([
-          { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" ${event}` }] },
+          { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" ${event} claude` }] },
         ]);
       }
     });
@@ -149,7 +182,7 @@ describe('ClaudeHookInstaller', () => {
       // Unrelated hook on a managed event preserved, ours appended after
       expect(hooks['Stop']).toEqual([
         { matcher: '', hooks: [{ type: 'command', command: 'say done' }] },
-        { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Stop` }] },
+        { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Stop claude` }] },
       ]);
     });
 
@@ -191,7 +224,7 @@ describe('ClaudeHookInstaller', () => {
       const hooks = readSettings()['hooks'] as Record<string, HookEntry[]>;
       expect(hooks['Stop']).toEqual([
         { matcher: '', hooks: [{ type: 'command', command: 'keep-me' }] },
-        { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Stop` }] },
+        { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Stop claude` }] },
       ]);
     });
 
@@ -237,7 +270,7 @@ describe('ClaudeHookInstaller', () => {
       const hooks = readSettings()['hooks'] as Record<string, unknown[]>;
       expect(hooks['Stop']).toEqual([
         { matcher: 'x', run: 'other-tool' },
-        { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Stop` }] },
+        { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Stop claude` }] },
       ]);
     });
 

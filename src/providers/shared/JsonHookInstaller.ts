@@ -2,31 +2,45 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { HookEntry } from '../../types';
 import { ConfigFileError, displayPath, readJsonObject, writeFileAtomic } from './configFile';
+import { HookRoutes } from './HookRoutes';
 
 /**
- * The notify script, byte-for-byte identical on every install.
+ * The notify script, byte-for-byte identical on every install — and meant to
+ * stay that way across releases.
  *
- * The endpoint deliberately lives in a sibling file instead of being baked in
- * here. Codex records hook trust against a hash of the hook definition and
- * skips anything that no longer matches, and the HookServer binds a *random*
- * port on every activation — so a URL baked into this script would change its
- * hash on every window reload, silently untrusting the hook and freezing every
- * agent's state in the sidebar with no error anywhere.
+ * Codex records hook trust against a hash of the hook definition and silently
+ * skips anything that no longer matches, so every change here costs every
+ * Codex user a re-trust, with their sidebar frozen until they do it. Hence:
  *
- * The event name is passed as $1 because the agents disagree on how they
- * announce it (Claude sets HOOK_EVENT_NAME, Codex sends hook_event_name on
- * stdin). We register the command ourselves, so an explicit argument sidesteps
- * the difference.
+ * - No endpoint baked in. The HookServer binds a random port per window, and
+ *   the script finds the right one at send time (see HookRoutes).
+ * - No interpretation. The agent's payload is forwarded verbatim as the body —
+ *   session_id, transcript_path, tool_name, message, whatever later agent
+ *   versions add — and Foreman's own ids ride in X-Foreman-* headers. What the
+ *   extension reads out of an event can grow without the script changing.
+ * - A reply channel. A response body starting with `foreman-reply:` is printed
+ *   to stdout, which is how Claude Code and Codex take a hook's answer (extra
+ *   context, a permission decision). Nothing uses it yet; it is here so that
+ *   using it later does not mean changing this file.
+ * - Bounded. A connect timeout and --max-time cap the wait, because a paused
+ *   extension host (a debugger, a hung window) accepts the connection and then
+ *   never answers, and the agent waits on its hook.
+ *
+ * $1 is the event name, because the agents disagree on how they announce it
+ * (Claude sets HOOK_EVENT_NAME, Codex sends hook_event_name on stdin); $2 the
+ * provider the hook was registered for. We register the command ourselves, so
+ * explicit arguments sidestep the differences.
  */
 const SCRIPT = `#!/bin/bash
 # Foreman notify hook — generated, do not edit manually.
-URL_FILE="$(dirname "$0")/hook-url"
-[ -r "$URL_FILE" ] || exit 0
-URL=$(cat "$URL_FILE")
-[ -n "$URL" ] || exit 0
+#
+# Forwards the agent's hook payload (stdin, untouched) to the VS Code window
+# that owns this session. Never fails, and never holds the agent for long:
+# whether Foreman is running must not be something the agent notices.
+DIR="$(dirname "$0")"
 EVENT_NAME="\${1:-\${HOOK_EVENT_NAME:-}}"
-# Drain stdin: the agent writes the event payload there and would block on a
-# reader that never consumes it. We key off the environment instead.
+AGENT="\${2:-}"
+# Drain stdin first: the agent blocks writing the payload until it is all read.
 PAYLOAD=$(cat)
 
 WORKSPACE_ID="\${FOREMAN_WORKSPACE_ID:-}"
@@ -52,10 +66,46 @@ if [ -n "\${TMUX_PANE:-}" ] && command -v tmux >/dev/null 2>&1; then
   fi
 fi
 
-curl -s -X POST "$URL/hook" \\
-  -H "Content-Type: application/json" \\
-  -d "{\\"event\\":\\"$EVENT_NAME\\",\\"terminalId\\":\\"$FOREMAN_TERMINAL_ID\\",\\"workspaceId\\":\\"$WORKSPACE_ID\\",\\"windowIndex\\":\\"$WINDOW_INDEX\\"}" \\
-  > /dev/null 2>&1 || true
+command -v curl >/dev/null 2>&1 || exit 0
+
+# Where the window that owns this session is listening, freshest first: the
+# route that window keeps current (it moves on every reload), the URL baked in
+# at launch, the last window to start. "Nobody there" (refused) and "not my
+# worktree" (404) move on to the next; a timeout does not — a window that is up
+# but stuck costs one wait, never three.
+ROUTE=""
+case "$WORKSPACE_ID" in
+  ""|*[!A-Za-z0-9_-]*) ;;
+  *) ROUTE=$(cat "$DIR/routes/$WORKSPACE_ID" 2>/dev/null) || ROUTE="" ;;
+esac
+FALLBACK=$(cat "$DIR/hook-url" 2>/dev/null) || FALLBACK=""
+
+TRIED=" "
+for URL in "$ROUTE" "\${FOREMAN_HOOK_URL:-}" "$FALLBACK"; do
+  [ -n "$URL" ] || continue
+  case "$TRIED" in *" $URL "*) continue ;; esac
+  TRIED="$TRIED$URL "
+  ANSWER=$(printf '%s' "$PAYLOAD" | curl -sf --connect-timeout 1 --max-time 2 \\
+    -X POST "$URL/hook" \\
+    -H "Content-Type: application/json" \\
+    -H "X-Foreman-Hook: 2" \\
+    -H "X-Foreman-Event: $EVENT_NAME" \\
+    -H "X-Foreman-Agent: $AGENT" \\
+    -H "X-Foreman-Workspace: $WORKSPACE_ID" \\
+    -H "X-Foreman-Window: $WINDOW_INDEX" \\
+    -H "X-Foreman-Pane: \${TMUX_PANE:-}" \\
+    --data-binary @- 2>/dev/null)
+  case $? in
+    7|22) continue ;;
+  esac
+  # The agent reads a hook's stdout (as context, or as a decision), so only a
+  # reply that says it is one is relayed — never whatever else answered.
+  case "$ANSWER" in
+    foreman-reply:*) printf '%s\\n' "\${ANSWER#foreman-reply:}" ;;
+  esac
+  break
+done
+exit 0
 `;
 
 /**
@@ -71,15 +121,22 @@ export class JsonHookInstaller {
 
   readonly urlPath: string;
 
+  private routes: HookRoutes;
+
+  private hookUrl?: string;
+
   constructor(
     storagePath: string,
     /** Absolute path to the agent's JSON hook config. */
     private settingsPath: string,
     /** Events this agent emits, out of the ones Foreman understands. */
     private events: readonly string[],
+    /** Provider id, passed to the script as $2 so the server knows whose payload it is. */
+    private agent?: string,
   ) {
     this.scriptPath = path.join(storagePath, 'notify.sh');
-    this.urlPath = path.join(storagePath, 'hook-url');
+    this.routes = new HookRoutes(storagePath);
+    this.urlPath = this.routes.defaultUrlPath;
   }
 
   /**
@@ -88,8 +145,9 @@ export class JsonHookInstaller {
    * the message is meant to be shown to the user as is.
    */
   install(hookUrl: string): void {
+    this.hookUrl = hookUrl;
     this.writeScript();
-    this.writeUrl(hookUrl);
+    this.routes.setDefault(hookUrl);
     this.inject();
   }
 
@@ -98,9 +156,14 @@ export class JsonHookInstaller {
     this.remove();
   }
 
-  /** `"<script>" <Event>` — quoted so paths like "Application Support" survive. */
+  /** Env prefix for launching an agent in `worktreeId`; see HookRoutes.launchEnv. */
+  launchEnv(worktreeId: string): string {
+    return this.routes.launchEnv(worktreeId, this.hookUrl);
+  }
+
+  /** `"<script>" <Event> [agent]` — quoted so paths like "Application Support" survive. */
   protected commandFor(event: string): string {
-    return `"${this.scriptPath}" ${event}`;
+    return this.agent ? `"${this.scriptPath}" ${event} ${this.agent}` : `"${this.scriptPath}" ${event}`;
   }
 
   private writeScript(): void {
@@ -108,12 +171,12 @@ export class JsonHookInstaller {
     // more importantly keeps whatever trust the agent has recorded for it.
     if (fs.existsSync(this.scriptPath) && fs.readFileSync(this.scriptPath, 'utf8') === SCRIPT) return;
     fs.mkdirSync(path.dirname(this.scriptPath), { recursive: true });
-    fs.writeFileSync(this.scriptPath, SCRIPT, { mode: 0o755 });
-  }
-
-  private writeUrl(hookUrl: string): void {
-    fs.mkdirSync(path.dirname(this.urlPath), { recursive: true });
-    fs.writeFileSync(this.urlPath, hookUrl);
+    // Atomic: agents run this file at any moment, and one executing it in the
+    // middle of a rewrite would run half a script.
+    const tmp = `${this.scriptPath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, SCRIPT, { mode: 0o755 });
+    fs.chmodSync(tmp, 0o755);
+    fs.renameSync(tmp, this.scriptPath);
   }
 
   /**

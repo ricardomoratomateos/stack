@@ -12,6 +12,7 @@ import { AgentSessionManager } from './session/AgentSessionManager';
 import { AttentionNotifier } from './session/AttentionNotifier';
 import { ProviderFactory } from './providers/ProviderFactory';
 import { ConfigFileError } from './providers/shared/configFile';
+import { HookRoutes } from './providers/shared/HookRoutes';
 import { DockerMonitor } from './docker/DockerMonitor';
 import { GitWatcher } from './git/GitWatcher';
 import { HookServer } from './server/HookServer';
@@ -309,6 +310,19 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // window that does not manage it, into state its own window then restores.
   const worktreesHere = () => worktreesInRepo(manager.list(), repoRootOf());
 
+  // Point the hooks of this window's worktrees at this window's server. Done
+  // now, so agents still running from before a reload reach the new port on
+  // their very next event; again once the worktrees are loaded; and whenever
+  // sessions come or go, so the window the user is working in is the one that
+  // answers when the same repository is open twice. Launches claim their own
+  // route as well (see HookRoutes.launchEnv).
+  const hookRoutes = new HookRoutes(ctx.globalStorageUri.fsPath);
+  const claimHookRoutes = () => {
+    try { hookRoutes.claim(worktreesHere().map((w) => w.id), hookUrl); } catch { /* best effort */ }
+  };
+  claimHookRoutes();
+  ctx.subscriptions.push(agentManager.onTerminalsChange(claimHookRoutes));
+
   const tabManager = new TabManager(ctx.globalState, worktreesHere);
   const breakpointManager = new BreakpointManager(ctx.globalState, worktreesHere);
 
@@ -587,17 +601,19 @@ export async function activate(ctx: vscode.ExtensionContext) {
       prMonitor.dispose();
       dimProvider.dispose();
       diffPanelManager.dispose();
-      for (const provider of providerFactory.all()) {
-        // Best effort on the way out; a broken config was already reported at install.
-        try { provider.uninstallHooks(); } catch { /* left untouched */ }
-      }
+      // Withdraw this window's routes, but leave the hooks registered. They are
+      // global — one entry in ~/.claude/settings.json serves every window — and
+      // uninstalling them here, as this used to, pulled them out from under
+      // every other window still open, and from the new window of a reload.
+      // With no Foreman listening the hook finds no endpoint and exits 0.
+      try { hookRoutes.release(hookUrl); } catch { /* best effort */ }
     },
   });
 
   // Load worktrees if a repo is already open (e.g. reload window). Fire-and-forget
   // so activation never blocks — the webview renders immediately and folder
   // mutations (which may reload the window) happen after activate() resolves.
-  void service.start().catch((e) => {
+  void service.start().then(claimHookRoutes, (e) => {
     vscode.window.showErrorMessage(`Foreman failed to load worktrees: ${String(e)}`);
   });
 

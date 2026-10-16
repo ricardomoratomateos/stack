@@ -184,11 +184,15 @@ describe('POST /hook', () => {
     expect(soundExec).toHaveBeenCalledWith('afplay /System/Library/Sounds/Glass.aiff');
   });
 
-  it('plays the sound on darwin even when ids are missing (state not updated)', async () => {
+  it('plays no sound for an unattributed event (an agent outside Foreman)', async () => {
+    // The hook is global, so every Claude session on the machine reaches some
+    // window — including ones the user started in a plain terminal. Their
+    // Stop is none of Foreman's business.
     const url = await startServer('darwin');
     await postHook(url, { event: 'Stop' });
+    await postHook(url, { event: 'Stop', workspaceId: '' });
     expect(updateState).not.toHaveBeenCalled();
-    expect(soundExec).toHaveBeenCalledTimes(1);
+    expect(soundExec).not.toHaveBeenCalled();
   });
 
   it('does NOT play the sound on Stop on linux', async () => {
