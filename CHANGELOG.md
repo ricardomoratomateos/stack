@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A syntax error in `~/.claude/settings.json` or `~/.codex/hooks.json` no longer costs you the file.** Foreman used to "start fresh" and write back only its own hooks; it now leaves the file untouched and says where the error is. Writes are atomic, follow symlinks, keep the file's permissions, and the first change keeps your original as `<file>.foreman-backup`.
+- **Several VS Code windows at once.** Each agent now reports to the window showing its worktree, instead of every event going to whichever window opened last. Closing a window no longer removes the hooks from under the others, and agents keep reporting across a window reload — opencode included.
+- **Codex will ask you to trust Foreman's hooks once more.** The notify script changes in this release (it now forwards the agent's full event and never blocks it for more than two seconds); it is built so that it should not need to change again.
+- Search and Quick Open finding nothing, and the whole explorer dimmed, after selecting a worktree in another window or deleting the selected one. The selection is now per window.
+- Saved tabs and stashed breakpoints of one window being overwritten by another.
+- Two windows creating a worktree at the same moment being given the same port slot.
+
 ## [0.1.0] — 2026-08-30
 
 First release.

@@ -17,7 +17,7 @@ export class ClaudeProvider implements IAgentProvider {
   ) {}
 
   buildCommand(worktreeId: string): string {
-    return `FOREMAN_WORKSPACE_ID="${worktreeId}" ${this.config.get().claudeCommand}`;
+    return `${this.hooks.launchEnv(worktreeId)} ${this.config.get().claudeCommand}`;
   }
 
   installHooks(hookUrl: string): void {

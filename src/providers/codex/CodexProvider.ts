@@ -12,7 +12,7 @@ export class CodexProvider implements IAgentProvider {
   ) {}
 
   buildCommand(worktreeId: string): string {
-    return `FOREMAN_WORKSPACE_ID="${worktreeId}" ${this.config.get().codexCommand}`;
+    return `${this.hooks.launchEnv(worktreeId)} ${this.config.get().codexCommand}`;
   }
 
   installHooks(hookUrl: string): void {

@@ -6,11 +6,14 @@ import { exec } from 'node:child_process';
 import { WorktreeStore } from './worktree/WorktreeStore';
 import { WorktreeManager } from './worktree/WorktreeManager';
 import { PortAllocator } from './worktree/portAllocator';
+import { PortReservationFile } from './worktree/portReservations';
 import { ConfigManager } from './config/ConfigManager';
 import { REPO_CONFIG_RELATIVE, readRepoConfig, renderRepoConfig, updateRepoConfig, type RepoScopedKey } from './config/RepoConfig';
 import { AgentSessionManager } from './session/AgentSessionManager';
 import { AttentionNotifier } from './session/AttentionNotifier';
 import { ProviderFactory } from './providers/ProviderFactory';
+import { ConfigFileError } from './providers/shared/configFile';
+import { HookRoutes } from './providers/shared/HookRoutes';
 import { DockerMonitor } from './docker/DockerMonitor';
 import { GitWatcher } from './git/GitWatcher';
 import { HookServer } from './server/HookServer';
@@ -256,6 +259,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // not just the debug port, before handing a slot out.
   const portAllocator = new PortAllocator(store, config.get().debugBasePort, {
     config: () => config.get(),
+    shared: new PortReservationFile(ctx.globalStorageUri.fsPath),
   });
   const providerFactory = new ProviderFactory(config, ctx.globalStorageUri.fsPath);
   const agentManager = new AgentSessionManager(providerFactory, ctx.globalState);
@@ -268,7 +272,17 @@ export async function activate(ctx: vscode.ExtensionContext) {
 
   const manager = new WorktreeManager(store, portAllocator, config, agentManager);
 
-  for (const provider of providerFactory.all()) provider.installHooks(hookUrl);
+  for (const provider of providerFactory.all()) {
+    try {
+      provider.installHooks(hookUrl);
+    } catch (e) {
+      // A broken agent config (say, a syntax error in ~/.claude/settings.json)
+      // costs that one agent its sidebar state, never the activation — and the
+      // file is left as the user wrote it. Say so instead of failing silently.
+      const message = e instanceof ConfigFileError ? e.message : `Foreman couldn't install the ${provider.label} hooks: ${String(e)}`;
+      void vscode.window.showWarningMessage(message);
+    }
+  }
 
   const prMonitor = new PrMonitor();
 
@@ -310,6 +324,19 @@ export async function activate(ctx: vscode.ExtensionContext) {
   const scriptOutput = vscode.window.createOutputChannel('Foreman');
   ctx.subscriptions.push(scriptOutput);
 
+  // Point the hooks of this window's worktrees at this window's server. Done
+  // now, so agents still running from before a reload reach the new port on
+  // their very next event; again once the worktrees are loaded; and whenever
+  // sessions come or go, so the window the user is working in is the one that
+  // answers when the same repository is open twice. Launches claim their own
+  // route as well (see HookRoutes.launchEnv).
+  const hookRoutes = new HookRoutes(ctx.globalStorageUri.fsPath);
+  const claimHookRoutes = () => {
+    try { hookRoutes.claim(worktreesHere().map((w) => w.id), hookUrl); } catch { /* best effort */ }
+  };
+  claimHookRoutes();
+  ctx.subscriptions.push(agentManager.onTerminalsChange(claimHookRoutes));
+
   const tabManager = new TabManager(ctx.globalState, worktreesHere);
   const breakpointManager = new BreakpointManager(ctx.globalState, worktreesHere);
 
@@ -327,6 +354,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     dockerMonitor,
     prMonitor,
     globalState: ctx.globalState,
+    workspaceState: ctx.workspaceState,
   });
 
   const diffPanelManager = new DiffPanelManager(ctx.extensionUri, service);
@@ -584,14 +612,19 @@ export async function activate(ctx: vscode.ExtensionContext) {
       prMonitor.dispose();
       dimProvider.dispose();
       diffPanelManager.dispose();
-      for (const provider of providerFactory.all()) provider.uninstallHooks();
+      // Withdraw this window's routes, but leave the hooks registered. They are
+      // global — one entry in ~/.claude/settings.json serves every window — and
+      // uninstalling them here, as this used to, pulled them out from under
+      // every other window still open, and from the new window of a reload.
+      // With no Foreman listening the hook finds no endpoint and exits 0.
+      try { hookRoutes.release(hookUrl); } catch { /* best effort */ }
     },
   });
 
   // Load worktrees if a repo is already open (e.g. reload window). Fire-and-forget
   // so activation never blocks — the webview renders immediately and folder
   // mutations (which may reload the window) happen after activate() resolves.
-  void service.start().catch((e) => {
+  void service.start().then(claimHookRoutes, (e) => {
     vscode.window.showErrorMessage(`Foreman failed to load worktrees: ${String(e)}`);
   });
 

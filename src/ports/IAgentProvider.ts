@@ -40,6 +40,10 @@ export interface IAgentProvider {
    * aborts the whole command and the agent never starts, and backticks silently
    * substitute away the text they wrap — which is every code line the review
    * panel attaches. Prompts are pasted into the running agent instead.
+   *
+   * Carries FOREMAN_WORKSPACE_ID and, once installHooks() has run,
+   * FOREMAN_HOOK_URL — and claims the worktree's hook route for this window
+   * (see HookRoutes), because the launch waits on the agent's first hook.
    */
   buildCommand(worktreeId: string): string;
   /** Wire the provider's hook/plugin system to POST state events to hookUrl. */

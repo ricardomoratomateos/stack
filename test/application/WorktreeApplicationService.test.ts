@@ -44,7 +44,8 @@ function makeWorktree(over: Partial<Worktree> = {}): Worktree {
 
 interface HarnessOpts {
   worktrees?: Worktree[];
-  persistedActiveId?: string;
+  persistedActiveId?: string | null;
+  legacyGlobalActiveId?: string;
   config?: Partial<ForemanConfig>;
   /** worktree ids that currently have an open viewer terminal */
   viewerIds?: string[];
@@ -291,11 +292,19 @@ function makeHarness(o: HarnessOpts = {}) {
   };
   const globalState = {
     get: vi.fn(<T,>(k: string): T | undefined => {
-      if (k === ACTIVE_WORKTREE_KEY) return o.persistedActiveId as T | undefined;
+      // Where 0.1.0 kept the selection, shared by every window.
+      if (k === ACTIVE_WORKTREE_KEY) return o.legacyGlobalActiveId as T | undefined;
       if (k === WORKTREE_ORDER_KEY) return o.worktreeOrder as T | undefined;
       return undefined;
     }),
     update: vi.fn(async (k: string, v: unknown) => { calls.push(`globalState.update:${k}:${v}`); }),
+  };
+  const workspaceState = {
+    get: vi.fn(<T,>(k: string): T | undefined => {
+      if (k === ACTIVE_WORKTREE_KEY) return o.persistedActiveId as T | undefined;
+      return undefined;
+    }),
+    update: vi.fn(async (k: string, v: unknown) => { calls.push(`workspaceState.update:${k}:${v}`); }),
   };
   const ui = {
     pushWebview: vi.fn(() => { calls.push('ui.pushWebview'); }),
@@ -320,13 +329,14 @@ function makeHarness(o: HarnessOpts = {}) {
     dockerMonitor: dockerMonitor as unknown as DockerMonitor,
     prMonitor: prMonitor as unknown as PrMonitor,
     globalState,
+    workspaceState,
     installedProviders: o.useRealInstalledProviders ? undefined : () => o.installedProviders ?? [],
   });
   if (o.withUi !== false) service.setUi(ui);
 
   return {
     service, calls, worktrees, viewers, makeViewer, claude, tabManager, breakpointManager, host, notify, store,
-    manager, gitWatcher, dockerMonitor, prMonitor, git, globalState, ui, cfg, config,
+    manager, gitWatcher, dockerMonitor, prMonitor, git, globalState, workspaceState, ui, cfg, config,
     dockerCallbacks, prCallbacks, terminalsCreated,
     setActiveTerminal: (t: unknown) => { activeTerminal = t; },
   };
@@ -801,7 +811,7 @@ describe('switchToWorktree', () => {
   it('persists activeWorktreeId under foreman.activeWorktreeId before any UI work', async () => {
     const { h } = switchHarness();
     await h.service.switchToWorktree('b');
-    expect(h.calls[0]).toBe('globalState.update:foreman.activeWorktreeId:b');
+    expect(h.calls[0]).toBe('workspaceState.update:foreman.activeWorktreeId:b');
   });
 
   it('creates viewer only when target hasTerminals', async () => {
@@ -834,7 +844,7 @@ describe('switchToWorktree', () => {
       const { h } = switchHarness({ viewerIds: ['a'], terminalIds: ['b'] });
       await h.service.switchToWorktree('b');
       expect(h.calls).toEqual([
-        'globalState.update:foreman.activeWorktreeId:b',
+        'workspaceState.update:foreman.activeWorktreeId:b',
         'ui.pushWebview',
         'claude.getOrCreateViewer:b',
         'viewer.show:b',
@@ -910,7 +920,7 @@ describe('switchToWorktree', () => {
       const { h } = focus({ viewerIds: ['a'], terminalIds: ['b'] });
       await h.service.switchToWorktree('b');
       expect(h.calls).toEqual([
-        'globalState.update:foreman.activeWorktreeId:b',
+        'workspaceState.update:foreman.activeWorktreeId:b',
         'ui.pushWebview',
         'tab.updateViewerState:a,b,c:a',
         'host.saveAll:false',
@@ -965,7 +975,7 @@ describe('activeTerminal sync', () => {
     const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
     const h = makeHarness({ worktrees: [a, b], persistedActiveId: 'a', viewerIds: ['a', 'b'] });
     h.service.handleActiveTerminalChange(h.viewers.get('b'));
-    expect(h.globalState.update).toHaveBeenCalledWith(ACTIVE_WORKTREE_KEY, 'b');
+    expect(h.workspaceState.update).toHaveBeenCalledWith(ACTIVE_WORKTREE_KEY, 'b');
     expect(h.service.buildState().activeWorktreeId).toBe('b');
   });
 
@@ -987,7 +997,7 @@ describe('activeTerminal sync', () => {
     const h = makeHarness({ worktrees: [a, b], persistedActiveId: 'a', viewerIds: ['b'] });
     h.service.handleActiveTerminalChange(h.viewers.get('b'));
     expect(h.calls).toEqual([
-      `globalState.update:${ACTIVE_WORKTREE_KEY}:b`,
+      `workspaceState.update:${ACTIVE_WORKTREE_KEY}:b`,
       'ui.pushWebview',
       'host.updateFolderSetting:/repo/zer/feat-a:search.exclude:{"**":true}',
       'host.updateFolderSetting:/repo/zer/feat-b:search.exclude:clear',
@@ -1043,7 +1053,88 @@ describe('explorer dimming (syncDecorations)', () => {
     const a = makeWorktree({ id: 'a', path: '/repo', branch: 'main', isMain: true });
     const h = makeHarness({ worktrees: [a], workspaceFolders: ['/repo'] });
     await h.service.loadWorktreesForRepo('/repo');
-    expect(h.ui.syncDecorations).toHaveBeenCalledWith([a], undefined);
+    // Nothing selected: main is the active one, so nothing is dimmed.
+    expect(h.ui.syncDecorations).toHaveBeenCalledWith([a], 'a');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Active worktree is per window
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('active worktree, per window', () => {
+  const main = () => makeWorktree({ id: 'main', path: '/repo', branch: 'main', isMain: true });
+  const a = () => makeWorktree({ id: 'a', path: '/repo/.worktrees/a', branch: 'feat-a' });
+  const elsewhere = () => makeWorktree({ id: 'x', path: '/other/.worktrees/x', branch: 'feat-x', repoRoot: '/other' });
+
+  const scoping = (h: ReturnType<typeof makeHarness>) =>
+    h.calls.filter((c) => c.startsWith('host.updateFolderSetting:') && c.includes(':search.exclude:'));
+
+  it('migrates the old global selection once, when it is one of this window\'s worktrees', () => {
+    const h = makeHarness({ worktrees: [main(), a()], workspaceFolders: ['/repo'], legacyGlobalActiveId: 'a' });
+    expect(h.service.activeWorktreeId()).toBe('a');
+    expect(h.workspaceState.update).toHaveBeenCalledWith(ACTIVE_WORKTREE_KEY, 'a');
+  });
+
+  it("ignores another window's global selection", () => {
+    const h = makeHarness({
+      worktrees: [main(), a(), elsewhere()], workspaceFolders: ['/repo'], legacyGlobalActiveId: 'x',
+    });
+    expect(h.service.activeWorktreeId()).toBeUndefined();
+    expect(h.workspaceState.update).not.toHaveBeenCalled();
+  });
+
+  it('prefers its own selection over the global one', () => {
+    const h = makeHarness({
+      worktrees: [main(), a()], workspaceFolders: ['/repo'], persistedActiveId: 'main', legacyGlobalActiveId: 'a',
+    });
+    expect(h.service.activeWorktreeId()).toBe('main');
+  });
+
+  it('an explicitly cleared selection does not re-run the migration', () => {
+    const h = makeHarness({
+      worktrees: [main(), a()], workspaceFolders: ['/repo'], persistedActiveId: null, legacyGlobalActiveId: 'a',
+    });
+    expect(h.service.activeWorktreeId()).toBeUndefined();
+  });
+
+  it('a selection that resolves to no worktree here scopes search to main, never to nothing', async () => {
+    // The bug: search.exclude {"**": true} on EVERY folder — search and Quick
+    // Open found nothing, and the explorer was dimmed end to end.
+    const h = makeHarness({
+      worktrees: [main(), a()], workspaceFolders: ['/repo'], persistedActiveId: 'gone',
+      config: { scopeSearchToActiveWorktree: true },
+    });
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(scoping(h)).toContain('host.updateFolderSetting:/repo:search.exclude:clear');
+    expect(scoping(h)).toContain('host.updateFolderSetting:/repo/.worktrees/a:search.exclude:{"**":true}');
+    expect(h.ui.syncDecorations).toHaveBeenLastCalledWith(expect.anything(), 'main');
+  });
+
+  it('deleting the selected worktree hands the selection back to main', async () => {
+    const h = makeHarness({
+      worktrees: [main(), a()], workspaceFolders: ['/repo'], persistedActiveId: 'a',
+      confirmResult: 'Delete', existingPaths: ['/repo/.worktrees/a'],
+      config: { scopeSearchToActiveWorktree: true },
+    });
+    await h.service.deleteWorktree(a());
+    expect(h.service.activeWorktreeId()).toBeUndefined();
+    expect(h.workspaceState.update).toHaveBeenCalledWith(ACTIVE_WORKTREE_KEY, null);
+    expect(scoping(h)).toContain('host.updateFolderSetting:/repo:search.exclude:clear');
+  });
+
+  it("switching to another repository's worktree does nothing", async () => {
+    const h = makeHarness({ worktrees: [main(), a(), elsewhere()], workspaceFolders: ['/repo'] });
+    await h.service.switchToWorktree('x');
+    expect(h.service.activeWorktreeId()).toBeUndefined();
+    expect(h.breakpointManager.activate).not.toHaveBeenCalled();
+  });
+
+  it("switching hands only this window's worktrees to the breakpoint manager", async () => {
+    const h = makeHarness({ worktrees: [main(), a(), elsewhere()], workspaceFolders: ['/repo'] });
+    await h.service.switchToWorktree('a');
+    const [, passed] = h.breakpointManager.activate.mock.calls[0] as [string, Worktree[]];
+    expect(passed.map((w) => w.id).sort()).toEqual(['a', 'main']);
   });
 });
 
@@ -1130,7 +1221,7 @@ describe('buildState', () => {
 describe('selection restore after reload', () => {
   it('constructor hydrates currentWorktreeId from foreman.activeWorktreeId', () => {
     const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], persistedActiveId: 'a' });
-    expect(h.globalState.get).toHaveBeenCalledWith(ACTIVE_WORKTREE_KEY);
+    expect(h.workspaceState.get).toHaveBeenCalledWith(ACTIVE_WORKTREE_KEY);
     expect(h.service.buildState().activeWorktreeId).toBe('a');
   });
 
@@ -1147,7 +1238,7 @@ describe('selection restore after reload', () => {
     const h = makeHarness({ worktrees: [a, b], persistedActiveId: 'a', viewerIds: ['b'] });
     h.service.handleActiveTerminalChange(h.viewers.get('b'));
     expect(h.service.buildState().activeWorktreeId).toBe('b');
-    expect(h.globalState.update).toHaveBeenCalledWith(ACTIVE_WORKTREE_KEY, 'b');
+    expect(h.workspaceState.update).toHaveBeenCalledWith(ACTIVE_WORKTREE_KEY, 'b');
   });
 });
 
@@ -3032,7 +3123,7 @@ describe('worktrees are scoped to the window\'s repository', () => {
     h.service.focusNextWorktree();
 
     // Only one worktree here, so cycling lands back on it rather than on /other.
-    expect(h.calls.filter((c) => c.startsWith('globalState.update:foreman.activeWorktreeId'))
+    expect(h.calls.filter((c) => c.startsWith('workspaceState.update:foreman.activeWorktreeId'))
       .every((c) => !c.includes('z'))).toBe(true);
   });
 

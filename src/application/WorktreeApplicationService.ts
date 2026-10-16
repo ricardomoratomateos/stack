@@ -24,6 +24,12 @@ import { canonicalPath, worktreesInRepo } from '../worktree/worktreesInRepo';
 import { MAIN_BRANCH_CANDIDATES } from '../constants';
 import { envPrefix, shellQuote } from '../shell/shellQuote';
 
+/**
+ * The selected worktree, in workspaceState: it is a property of a WINDOW.
+ * It used to live in globalState, shared by every window, so one window read
+ * another's selection — an id none of its worktrees has, which scoped search
+ * and dimmed the explorer as if the user had selected nothing at all.
+ */
 export const ACTIVE_WORKTREE_KEY = 'foreman.activeWorktreeId';
 export const WORKTREE_ORDER_KEY = 'foreman.worktreeOrder';
 /**
@@ -116,6 +122,8 @@ export interface WorktreeAppDeps {
   dockerMonitor: DockerMonitor;
   prMonitor: PrMonitor;
   globalState: GlobalStateLike;
+  /** Per-window state (ctx.workspaceState): the selected worktree. */
+  workspaceState: GlobalStateLike;
   /**
    * Which agents are runnable on this machine. Injected so tests do not depend
    * on whatever the developer happens to have on their PATH.
@@ -179,7 +187,50 @@ export class WorktreeApplicationService implements DiffPanelHost {
   private driftBaseCache = new Map<string, { base: string; at: number }>();
 
   constructor(private readonly deps: WorktreeAppDeps) {
-    this.currentWorktreeId = deps.globalState.get<string>(ACTIVE_WORKTREE_KEY);
+    this.currentWorktreeId = this.restoreActiveWorktreeId();
+  }
+
+  /**
+   * The selection this window had, from workspaceState.
+   *
+   * One-time migration from the old global key: adopted only when it names one
+   * of THIS window's worktrees — the global value is whichever window selected
+   * last — and then written per window, so it is never consulted again.
+   */
+  private restoreActiveWorktreeId(): string | undefined {
+    const own = this.deps.workspaceState.get<string | null>(ACTIVE_WORKTREE_KEY);
+    if (own !== undefined) return own ?? undefined;
+    const legacy = this.deps.globalState.get<string>(ACTIVE_WORKTREE_KEY);
+    if (!legacy || !this.worktreesInWindow().some((w) => w.id === legacy)) return undefined;
+    void this.deps.workspaceState.update(ACTIVE_WORKTREE_KEY, legacy);
+    return legacy;
+  }
+
+  private setActiveWorktreeId(id: string | undefined): void {
+    this.currentWorktreeId = id;
+    // null rather than undefined: undefined would read back as "never set" and
+    // re-run the migration from the global key.
+    this.deps.workspaceState.update(ACTIVE_WORKTREE_KEY, id ?? null);
+  }
+
+  /** A deleted worktree stops being the selection; search goes back to main. */
+  private forgetActive(deletedId: string): void {
+    if (this.currentWorktreeId !== deletedId) return;
+    this.setActiveWorktreeId(undefined);
+    this.syncSearchScoping();
+  }
+
+  /**
+   * The worktree to treat as active: the selection when it is one of this
+   * window's worktrees, otherwise the main checkout.
+   *
+   * A selection that resolves to nothing — another window's, or a worktree
+   * since deleted — used to be passed on as is, and every consumer reads "no
+   * worktree is X" as "exclude everything": search.exclude `**` on every
+   * folder (search and Quick Open find nothing) and the whole explorer dimmed.
+   */
+  private effectiveActiveId(worktrees: Worktree[] = this.worktreesInWindow()): string | undefined {
+    return worktrees.find((w) => w.id === this.currentWorktreeId)?.id ?? worktrees.find((w) => w.isMain)?.id;
   }
 
   setUi(ui: UiBridge): void {
@@ -192,7 +243,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   /** Push the current worktree list + active worktree to the explorer dimming. */
   private refreshDecorations(): void {
-    this.ui.syncDecorations(this.worktreesInWindow(), this.currentWorktreeId);
+    const worktrees = this.worktreesInWindow();
+    this.ui.syncDecorations(worktrees, this.effectiveActiveId(worktrees));
   }
 
   /**
@@ -551,13 +603,16 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   async switchToWorktree(worktreeId: string): Promise<void> {
     if (this.currentWorktreeId === worktreeId) return;
-    const worktrees = this.deps.manager.list();
+    // This window's worktrees only. The whole store used to go to the
+    // breakpoint and tab managers from here, bypassing the scoping they are
+    // otherwise given — so a switch stashed breakpoints and closed tabs that
+    // belonged to other repositories' worktrees.
+    const worktrees = this.worktreesInWindow();
     const target = worktrees.find((w) => w.id === worktreeId);
     if (!target) return;
 
     console.log(`[foreman] switch to id=${worktreeId} path=${target.path} exists=${this.deps.host.exists(target.path)}`);
-    this.currentWorktreeId = worktreeId;
-    this.deps.globalState.update(ACTIVE_WORKTREE_KEY, worktreeId);
+    this.setActiveWorktreeId(worktreeId);
     // Push eagerly — the terminal-change event that normally syncs the webview
     // never fires for a worktree with no sessions to show.
     this.ui.pushWebview();
@@ -629,11 +684,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   handleActiveTerminalChange(terminal: unknown): void {
     if (!terminal) return;
-    for (const wt of this.deps.manager.list()) {
+    for (const wt of this.worktreesInWindow()) {
       if (this.deps.agentManager.getViewer(wt.id) === terminal) {
         if (this.currentWorktreeId !== wt.id) {
-          this.currentWorktreeId = wt.id;
-          this.deps.globalState.update(ACTIVE_WORKTREE_KEY, wt.id);
+          this.setActiveWorktreeId(wt.id);
           this.ui.pushWebview();
           this.refreshDecorations();
           this.syncSearchScoping();
@@ -915,11 +969,13 @@ export class WorktreeApplicationService implements DiffPanelHost {
   private syncSearchScoping(): void {
     const enabled = this.deps.config.get().scopeSearchToActiveWorktree;
     const worktrees = this.worktreesInWindow();
-    // With no worktree selected, keep the main repo searchable as the fallback.
-    const activeId = this.currentWorktreeId ?? worktrees.find((w) => w.isMain)?.id;
+    // With no worktree selected — or one that no longer resolves — keep the main
+    // repo searchable as the fallback. And if even that is missing, exclude
+    // nothing: a window where search finds nothing at all is the worst outcome.
+    const activeId = this.effectiveActiveId(worktrees);
     for (const wt of worktrees) {
       if (this.missing.has(wt.id)) continue; // no folder to scope
-      const exclude = enabled && wt.id !== activeId ? { '**': true } : undefined;
+      const exclude = enabled && activeId !== undefined && wt.id !== activeId ? { '**': true } : undefined;
       void this.deps.host.updateFolderSetting(wt.path, 'search.exclude', exclude).catch(() => {});
     }
   }
@@ -1071,6 +1127,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       const folderIdx = this.deps.host.workspaceFolderPaths().findIndex((p) => p === wt.path);
       if (folderIdx !== -1) this.deps.host.removeWorkspaceFolder(folderIdx);
       this.pruneWorktreeState();
+      this.forgetActive(wt.id);
     } else {
       this.deps.notify.showWarning(`"${displayLabel(wt)}" no longer looks gone — keeping it.`);
       this.startMonitoring(wt);
@@ -1232,6 +1289,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       // Stale store entry pointing at repoRoot with a mismatched branch — remove
       // from the store only. manager.delete swallows the git error.
       await this.deps.manager.delete(wt.id, false);
+      this.forgetActive(wt.id);
       this.ui.pushWebview();
       this.refreshDecorations();
       return;
@@ -1288,6 +1346,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
         await this.deps.manager.delete(wt.id, confirm === 'Delete + branch');
         this.missing.delete(wt.id);
         this.pruneWorktreeState();
+        this.forgetActive(wt.id);
       } catch (e) {
         // The manager refuses to purge the store while git still registers the
         // worktree, so the card stays and the user is told why — better than a

@@ -2,8 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { createHash } from 'node:crypto';
 import { ClaudeHookInstaller } from '../../../src/providers/claude/ClaudeHookInstaller';
 import { HookEntry } from '../../../src/types';
+import { ConfigFileError } from '../../../src/providers/shared/configFile';
+
+/** First 16 hex chars of sha256(notify.sh). See the "is pinned" test. */
+const NOTIFY_SH_HASH = '66fc598fbbca4ff7';
 
 const HOOK_EVENTS = [
   'SessionStart',
@@ -51,13 +56,42 @@ describe('ClaudeHookInstaller', () => {
       expect(fs.statSync(scriptPath).mode & 0o777).toBe(0o755);
     });
 
-    it('curls the endpoint read from the sibling url file', () => {
+    it('forwards the payload untouched, with our ids in headers, bounded in time', () => {
       makeHook().install(hookUrl);
       const content = fs.readFileSync(scriptPath, 'utf8');
       expect(content.startsWith('#!/bin/bash\n')).toBe(true);
-      expect(content).toContain('curl -s -X POST "$URL/hook"');
       expect(content).toContain('EVENT_NAME="${1:-${HOOK_EVENT_NAME:-}}"');
-      expect(content).toContain('"{\\"event\\":\\"$EVENT_NAME\\",\\"terminalId\\":\\"$FOREMAN_TERMINAL_ID\\",\\"workspaceId\\":\\"$WORKSPACE_ID\\",\\"windowIndex\\":\\"$WINDOW_INDEX\\"}"');
+      expect(content).toContain('AGENT="${2:-}"');
+      expect(content).toContain('ANSWER=$(printf \'%s\' "$PAYLOAD" | curl -sf --connect-timeout 1 --max-time 2');
+      expect(content).toContain('--data-binary @-');
+      for (const h of ['Hook: 2', 'Event: $EVENT_NAME', 'Agent: $AGENT', 'Workspace: $WORKSPACE_ID', 'Window: $WINDOW_INDEX']) {
+        expect(content).toContain(`-H "X-Foreman-${h}"`);
+      }
+    });
+
+    it('looks the endpoint up per worktree, then the launch env, then the shared file', () => {
+      makeHook().install(hookUrl);
+      const content = fs.readFileSync(scriptPath, 'utf8');
+      expect(content).toContain('ROUTE=$(cat "$DIR/routes/$WORKSPACE_ID" 2>/dev/null)');
+      expect(content).toContain('for URL in "$ROUTE" "${FOREMAN_HOOK_URL:-}" "$FALLBACK"; do');
+      // A worktree id that is not a plain token never becomes a path.
+      expect(content).toContain('""|*[!A-Za-z0-9_-]*) ;;');
+    });
+
+    it('is pinned: changing it costs every Codex user a re-trust', () => {
+      // Codex hashes the hook definition and silently skips a hook whose hash
+      // no longer matches. If this fails, the change is a decision, not a
+      // refactor: make it future-proof, mention it in the changelog, update
+      // the hash.
+      makeHook().install(hookUrl);
+      const hash = createHash('sha256').update(fs.readFileSync(scriptPath)).digest('hex').slice(0, 16);
+      expect(hash).toBe(NOTIFY_SH_HASH);
+    });
+
+    it('registers the provider id as $2', () => {
+      makeHook().install(hookUrl);
+      const hooks = readSettings()['hooks'] as Record<string, HookEntry[]>;
+      expect(hooks['Stop']?.[0]?.hooks[0]?.command).toBe(`"${scriptPath}" Stop claude`);
     });
 
     it('falls back to asking tmux when the launcher set no FOREMAN variables', () => {
@@ -122,7 +156,7 @@ describe('ClaudeHookInstaller', () => {
       expect(Object.keys(hooks).sort()).toEqual([...HOOK_EVENTS].sort());
       for (const event of HOOK_EVENTS) {
         expect(hooks[event]).toEqual([
-          { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" ${event}` }] },
+          { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" ${event} claude` }] },
         ]);
       }
     });
@@ -148,7 +182,7 @@ describe('ClaudeHookInstaller', () => {
       // Unrelated hook on a managed event preserved, ours appended after
       expect(hooks['Stop']).toEqual([
         { matcher: '', hooks: [{ type: 'command', command: 'say done' }] },
-        { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Stop` }] },
+        { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Stop claude` }] },
       ]);
     });
 
@@ -190,7 +224,7 @@ describe('ClaudeHookInstaller', () => {
       const hooks = readSettings()['hooks'] as Record<string, HookEntry[]>;
       expect(hooks['Stop']).toEqual([
         { matcher: '', hooks: [{ type: 'command', command: 'keep-me' }] },
-        { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Stop` }] },
+        { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Stop claude` }] },
       ]);
     });
 
@@ -202,15 +236,104 @@ describe('ClaudeHookInstaller', () => {
       expect(Object.keys(hooks)).toHaveLength(7);
     });
 
-    it('handles corrupt JSON settings (starts fresh)', () => {
+    it('refuses to touch settings with a syntax error, and says where it is', () => {
+      // This used to "start fresh": the user's permissions, env and model were
+      // overwritten by a file holding only Foreman's hooks.
       fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-      fs.writeFileSync(settingsPath, '{ not valid json !!!');
+      const broken = '{\n  "model": "opus",\n  "permissions": { "allow": ["Bash"], }\n}';
+      fs.writeFileSync(settingsPath, broken);
 
-      expect(() => makeHook().install(hookUrl)).not.toThrow();
+      expect(() => makeHook().install(hookUrl)).toThrow(ConfigFileError);
+      expect(() => makeHook().install(hookUrl)).toThrow(/couldn't install its hooks: .*settings\.json has a syntax error at line 3, column \d+/);
 
-      const settings = readSettings();
-      const hooks = settings['hooks'] as Record<string, HookEntry[]>;
-      expect(Object.keys(hooks)).toHaveLength(7);
+      expect(fs.readFileSync(settingsPath, 'utf8')).toBe(broken);
+      expect(fs.existsSync(`${settingsPath}.foreman-backup`)).toBe(false);
+    });
+
+    it('refuses JSON that is not an object rather than replacing it', () => {
+      writeSettings(['not', 'settings']);
+      const before = fs.readFileSync(settingsPath, 'utf8');
+      expect(() => makeHook().install(hookUrl)).toThrow(/is not a JSON object/);
+      expect(fs.readFileSync(settingsPath, 'utf8')).toBe(before);
+    });
+
+    it('refuses a hooks block of an unexpected shape rather than clobbering it', () => {
+      writeSettings({ model: 'opus', hooks: { Stop: 'say done' } });
+      const before = fs.readFileSync(settingsPath, 'utf8');
+      expect(() => makeHook().install(hookUrl)).toThrow(/"hooks\.Stop"/);
+      expect(fs.readFileSync(settingsPath, 'utf8')).toBe(before);
+    });
+
+    it('passes through groups of a shape it does not know', () => {
+      writeSettings({ hooks: { Stop: [{ matcher: 'x', run: 'other-tool' }] } });
+      makeHook().install(hookUrl);
+      const hooks = readSettings()['hooks'] as Record<string, unknown[]>;
+      expect(hooks['Stop']).toEqual([
+        { matcher: 'x', run: 'other-tool' },
+        { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Stop claude` }] },
+      ]);
+    });
+
+    it('treats an empty settings file as empty settings', () => {
+      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+      fs.writeFileSync(settingsPath, '\n');
+      makeHook().install(hookUrl);
+      expect(Object.keys(readSettings()['hooks'] as object)).toHaveLength(7);
+    });
+
+    it('keeps a one-time backup of the settings as they were before Foreman', () => {
+      writeSettings({ model: 'opus' });
+      const original = fs.readFileSync(settingsPath, 'utf8');
+
+      makeHook().install(hookUrl);
+      expect(fs.readFileSync(`${settingsPath}.foreman-backup`, 'utf8')).toBe(original);
+
+      // A later change must not replace the user's own version with ours.
+      writeSettings({ model: 'sonnet', hooks: {} });
+      makeHook().install(hookUrl);
+      expect(fs.readFileSync(`${settingsPath}.foreman-backup`, 'utf8')).toBe(original);
+    });
+
+    it('does not rewrite settings that already hold exactly our hooks', () => {
+      makeHook().install(hookUrl);
+      const past = new Date(Date.now() - 60_000);
+      fs.utimesSync(settingsPath, past, past);
+      const before = fs.statSync(settingsPath).mtimeMs;
+
+      makeHook().install(hookUrl);
+
+      expect(fs.statSync(settingsPath).mtimeMs).toBe(before);
+    });
+
+    it('writes through a symlinked settings file instead of replacing the link', () => {
+      // Dotfiles repos link ~/.claude/settings.json; an atomic rename over the
+      // link would silently detach it from the repo.
+      const real = path.join(tmpDir, 'dotfiles', 'claude-settings.json');
+      fs.mkdirSync(path.dirname(real), { recursive: true });
+      fs.writeFileSync(real, JSON.stringify({ model: 'opus' }));
+      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+      fs.symlinkSync(real, settingsPath);
+
+      makeHook().install(hookUrl);
+
+      expect(fs.lstatSync(settingsPath).isSymbolicLink()).toBe(true);
+      const written = JSON.parse(fs.readFileSync(real, 'utf8'));
+      expect(written.model).toBe('opus');
+      expect(Object.keys(written.hooks)).toHaveLength(7);
+    });
+
+    it("keeps the settings file's permissions", () => {
+      writeSettings({ env: { TOKEN: 'secret' } });
+      fs.chmodSync(settingsPath, 0o600);
+      makeHook().install(hookUrl);
+      expect(fs.statSync(settingsPath).mode & 0o777).toBe(0o600);
+    });
+
+    it('leaves no temp files behind', () => {
+      writeSettings({ model: 'opus' });
+      makeHook().install(hookUrl);
+      const leftovers = fs.readdirSync(path.dirname(settingsPath)).filter((f) => f.endsWith('.tmp'));
+      expect(leftovers).toEqual([]);
     });
   });
 
@@ -270,13 +393,12 @@ describe('ClaudeHookInstaller', () => {
       expect(fs.readFileSync(settingsPath, 'utf8')).toBe(before);
     });
 
-    it('never throws (best effort) on corrupt JSON', () => {
+    it('refuses to touch corrupt JSON, with a message saying so', () => {
       fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
       fs.writeFileSync(settingsPath, '{ broken');
 
-      expect(() => makeHook().uninstall()).not.toThrow();
+      expect(() => makeHook().uninstall()).toThrow(/couldn't remove its hooks: .*syntax error/);
 
-      // File left as-is (best effort bail-out)
       expect(fs.readFileSync(settingsPath, 'utf8')).toBe('{ broken');
     });
   });
