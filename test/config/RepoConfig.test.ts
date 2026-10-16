@@ -114,6 +114,10 @@ describe('readRepoConfig', () => {
       expect(result.problems[0]).toContain('"focusMode" is a per-user setting');
       expect(result.problems[0]).toContain('your own VS Code settings');
     });
+
+    it('keeps the session tab layout per-user too — it is how you like your editor, not the repo', () => {
+      expect(read({ sessionTabs: 'single' }).problems[0]).toContain('"sessionTabs" is a per-user setting');
+    });
   });
 
   describe('types', () => {
@@ -253,7 +257,7 @@ describe('renderRepoConfig', () => {
 
   it('leaves the per-user settings out', () => {
     const parsed = JSON.parse(renderRepoConfig(effective)) as Record<string, unknown>;
-    for (const key of ['defaultProvider', 'claudeCommand', 'focusMode', 'notifyOnAttention']) {
+    for (const key of ['defaultProvider', 'claudeCommand', 'focusMode', 'notifyOnAttention', 'sessionTabs']) {
       expect(parsed[key]).toBeUndefined();
     }
   });

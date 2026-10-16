@@ -46,6 +46,8 @@ function makeStub(): ISessionManager {
     killSession: vi.fn().mockResolvedValue(undefined),
     detachClients: vi.fn().mockResolvedValue(undefined),
     listWindows: vi.fn().mockResolvedValue([]),
+    listSessions: vi.fn().mockResolvedValue([]),
+    listClients: vi.fn().mockResolvedValue([]),
     hasChildProcess: vi.fn().mockResolvedValue(false),
     processCommandLine: vi.fn().mockRejectedValue(new Error('no ps in unit tests')),
   };
@@ -691,15 +693,16 @@ describe('viewer lifecycle', () => {
     expect(mgr.getWorktreeIdForTerminalName('some other tab')).toBeUndefined();
   });
 
-  it('viewer terminal uses /bin/sh -c tmux attach in the Editor area (no exec $SHELL fallback)', async () => {
+  it('viewer terminal runs tmux attach directly, no shell, in the Editor area (no exec $SHELL fallback)', async () => {
     const { mgr } = create();
     const viewer = await mgr.getOrCreateViewer(wt) as unknown as MockTerminal;
     expect(viewer.creationOptions).toEqual({
       name: 'feat/login',
       cwd: wt.path,
       location: TerminalLocation.Editor,
-      shellPath: '/bin/sh',
-      shellArgs: ['-c', `tmux attach -t "${SESSION}"`],
+      shellPath: 'tmux',
+      // Exact target: a bare name would also match a view session by prefix.
+      shellArgs: ['attach-session', '-t', `=${SESSION}`],
     });
     expect(JSON.stringify(viewer.creationOptions)).not.toContain('exec $SHELL');
   });
@@ -747,7 +750,7 @@ describe('viewer lifecycle', () => {
     const mgr = new AgentSessionManager(makeFactory(), new FakeMemento() as unknown as vscode.Memento, stub, () => false);
     const viewer = await mgr.getOrCreateViewer(wt) as unknown as MockTerminal;
     expect(viewer.creationOptions.cwd).toBeUndefined();
-    expect(viewer.creationOptions.shellArgs).toEqual(['-c', `tmux attach -t "${SESSION}"`]);
+    expect(viewer.creationOptions.shellArgs).toEqual(['attach-session', '-t', `=${SESSION}`]);
   });
 
   it('uses fs.existsSync by default (no injected pathExists) — falls back for a missing dir', async () => {

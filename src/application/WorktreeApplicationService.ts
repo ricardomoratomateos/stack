@@ -510,7 +510,11 @@ export class WorktreeApplicationService implements DiffPanelHost {
     focusSession: async (msg) => {
       await this.switchToWorktree(msg.worktreeId);
       const wt = this.findWorktree(msg.worktreeId);
-      if (wt) this.deps.agentManager.focusWindow(wt, msg.index).catch(() => {});
+      if (!wt) return;
+      const focused = msg.toSide
+        ? this.deps.agentManager.focusWindow(wt, msg.index, { beside: true })
+        : this.deps.agentManager.focusWindow(wt, msg.index);
+      focused.catch(() => {});
     },
     killSession: async (msg) => {
       const sessions = this.deps.agentManager.getSessions(msg.worktreeId);
@@ -580,8 +584,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * Route externally-dropped files (a macOS screenshot thumbnail dropped on an
    * agent viewer) to that worktree's agent: reveal its viewer and paste the
    * quoted paths unsent, so the user can add prompt text before hitting Enter.
+   * `windowIndex` is the session whose tab took the drop, when it was one:
+   * with a tab per session, "the worktree's agent" is not specific enough.
    */
-  async attachDroppedFiles(paths: string[], targetId?: string): Promise<void> {
+  async attachDroppedFiles(paths: string[], targetId?: string, windowIndex?: number): Promise<void> {
     if (paths.length === 0) return;
     const worktrees = this.worktreesInWindow();
     // An explicit target is the worktree whose viewer the image was dropped on;
@@ -600,10 +606,36 @@ export class WorktreeApplicationService implements DiffPanelHost {
       return;
     }
     await this.switchToWorktree(wt.id);
-    const viewer = await this.deps.agentManager.getOrCreateViewer(wt).catch(() => undefined);
-    viewer?.show();
     // Single-quoted, like a native terminal file-drop — paths contain spaces.
-    await this.deps.agentManager.pasteToActiveWindow(wt.id, paths.map((p) => `'${p}' `).join(''));
+    const text = paths.map((p) => `'${p}' `).join('');
+    if (windowIndex === undefined) {
+      const viewer = await this.deps.agentManager.getOrCreateViewer(wt).catch(() => undefined);
+      viewer?.show();
+      await this.deps.agentManager.pasteToActiveWindow(wt.id, text);
+      return;
+    }
+    await this.deps.agentManager.focusWindow(wt, windowIndex).catch(() => {});
+    await this.deps.agentManager.pasteToActiveWindow(wt.id, text, windowIndex);
+  }
+
+  /**
+   * "Foreman: Open Session to the Side": the session given, else the one whose
+   * terminal is focused, else the active worktree's session in front — opened
+   * (or moved) beside the active editor group, so two sessions sit side by side.
+   */
+  async openSessionToSide(target?: { worktreeId: string; index?: number }): Promise<void> {
+    const active = this.deps.host.activeTerminal();
+    const fromTerminal = active ? this.deps.agentManager.getTargetForTerminal(active as never) : undefined;
+    const worktreeId = target?.worktreeId ?? fromTerminal?.worktreeId ?? this.currentWorktreeId;
+    const wt = worktreeId ? this.findWorktree(worktreeId) : undefined;
+    const index = target
+      ? target.index ?? this.deps.agentManager.focusedSession(target.worktreeId)
+      : fromTerminal?.windowIndex ?? (wt ? this.deps.agentManager.focusedSession(wt.id) : undefined);
+    if (!wt || index === undefined) {
+      this.deps.notify.showWarning('Foreman: open a session first, then move it to the side.');
+      return;
+    }
+    await this.deps.agentManager.focusWindow(wt, index, { beside: true });
   }
 
   // ── Worktree switch orchestration ──────────────────────────────────────────
@@ -691,16 +723,15 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   handleActiveTerminalChange(terminal: unknown): void {
     if (!terminal) return;
-    for (const wt of this.worktreesInWindow()) {
-      if (this.deps.agentManager.getViewer(wt.id) === terminal) {
-        if (this.currentWorktreeId !== wt.id) {
-          this.setActiveWorktreeId(wt.id);
-          this.ui.pushWebview();
-          this.refreshDecorations();
-          this.syncSearchScoping();
-        }
-        break;
-      }
+    // Any of the worktree's terminals — with a tab per session there are
+    // several, and focusing any one of them is being in that worktree.
+    const owner = this.deps.agentManager.getWorktreeIdForTerminal(terminal as never);
+    const wt = owner ? this.worktreesInWindow().find((w) => w.id === owner) : undefined;
+    if (wt && this.currentWorktreeId !== wt.id) {
+      this.setActiveWorktreeId(wt.id);
+      this.ui.pushWebview();
+      this.refreshDecorations();
+      this.syncSearchScoping();
     }
   }
 
@@ -1470,13 +1501,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const worktrees = this.worktreesInWindow();
     if (!worktrees.length) return;
     const active = this.deps.host.activeTerminal();
-    let idx = -1;
-    for (let i = 0; i < worktrees.length; i++) {
-      if (this.deps.agentManager.getViewer(worktrees[i].id) === active) {
-        idx = i;
-        break;
-      }
-    }
+    const owner = active ? this.deps.agentManager.getWorktreeIdForTerminal(active as never) : undefined;
+    const idx = worktrees.findIndex((w) => w.id === owner);
     const n = worktrees.length;
     const nextIdx = (((idx + direction) % n) + n) % n;
     this.deps.agentManager.getViewer(worktrees[nextIdx].id)?.show();

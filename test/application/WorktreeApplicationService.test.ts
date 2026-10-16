@@ -97,6 +97,10 @@ interface HarnessOpts {
   forgetResult?: boolean;
   /** exit code host.runScript resolves (default 0) */
   scriptExitCode?: number | null;
+  /** window index each worktree's viewer terminal shows, as a session tab */
+  terminalWindow?: Record<string, number>;
+  /** what agentManager.focusedSession answers per worktree */
+  focusedSessions?: Record<string, number>;
 }
 
 function makeHarness(o: HarnessOpts = {}) {
@@ -150,6 +154,13 @@ function makeHarness(o: HarnessOpts = {}) {
     pasteToActiveWindow: vi.fn(async (id: string, text: string) => { calls.push(`claude.pasteToActiveWindow:${id}:${text}`); }),
     setSessionOrder: vi.fn((id: string, order: number[]) => { calls.push(`claude.setSessionOrder:${id}:${order.join(',')}`); }),
     getViewer: vi.fn((id: string) => viewers.get(id)),
+    // Ownership the way the real manager answers it: any of the worktree's terminals.
+    getWorktreeIdForTerminal: vi.fn((t: unknown) => [...viewers].find(([, v]) => v === t)?.[0]),
+    getTargetForTerminal: vi.fn((t: unknown) => {
+      const id = [...viewers].find(([, v]) => v === t)?.[0];
+      return id ? { worktreeId: id, windowIndex: o.terminalWindow?.[id] } : undefined;
+    }),
+    focusedSession: vi.fn((id: string) => o.focusedSessions?.[id]),
     getState: vi.fn(() => 'idle'),
     getAgentCount: vi.fn(() => 2),
     getShellCount: vi.fn(() => 1),
@@ -489,6 +500,63 @@ describe('handleMessage focusSession', () => {
     const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
     await h.service.handleMessage({ type: 'focusSession', worktreeId: 'nope', kind: 'agent', index: 0 });
     expect(h.claude.focusWindow).not.toHaveBeenCalled();
+  });
+
+  it('opens the session beside the active editor group when the row asks for it (toSide)', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({ worktrees: [a], persistedActiveId: 'a' });
+    await h.service.handleMessage({ type: 'focusSession', worktreeId: 'a', kind: 'shell', index: 2, toSide: true });
+    await flushMicrotasks();
+    expect(h.claude.focusWindow).toHaveBeenCalledWith(a, 2, { beside: true });
+  });
+});
+
+describe('openSessionToSide', () => {
+  const a = () => makeWorktree({ id: 'a' });
+  const b = () => makeWorktree({ id: 'b', path: '/repo/zer/feat-b', branch: 'feat/b' });
+
+  it('moves the session given, beside', async () => {
+    const h = makeHarness({ worktrees: [a(), b()] });
+    await h.service.openSessionToSide({ worktreeId: 'b', index: 4 });
+    expect(h.claude.focusWindow).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }), 4, { beside: true });
+  });
+
+  it('given only a worktree, takes the session in front there', async () => {
+    const h = makeHarness({ worktrees: [a(), b()], focusedSessions: { b: 7 } });
+    await h.service.openSessionToSide({ worktreeId: 'b' });
+    expect(h.claude.focusWindow).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }), 7, { beside: true });
+  });
+
+  it('given nothing, takes the session of the focused terminal', async () => {
+    const h = makeHarness({ worktrees: [a(), b()], viewerIds: ['b'], terminalWindow: { b: 3 }, persistedActiveId: 'a' });
+    h.setActiveTerminal(h.viewers.get('b'));
+    await h.service.openSessionToSide();
+    expect(h.claude.focusWindow).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }), 3, { beside: true });
+  });
+
+  it('a focused single-mode viewer (no session of its own) falls back to the session in front of its worktree', async () => {
+    const h = makeHarness({ worktrees: [a(), b()], viewerIds: ['b'], focusedSessions: { b: 5 } });
+    h.setActiveTerminal(h.viewers.get('b'));
+    await h.service.openSessionToSide();
+    expect(h.claude.focusWindow).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }), 5, { beside: true });
+  });
+
+  it('with no Foreman terminal focused, uses the active worktree', async () => {
+    const h = makeHarness({ worktrees: [a(), b()], persistedActiveId: 'b', focusedSessions: { b: 2 } });
+    await h.service.loadWorktreesForRepo('/repo');
+    h.setActiveTerminal({ name: 'some zsh' });
+    await h.service.openSessionToSide();
+    expect(h.claude.focusWindow).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }), 2, { beside: true });
+  });
+
+  it('says so when there is no session to move', async () => {
+    const h = makeHarness({ worktrees: [a()] });
+    await h.service.openSessionToSide();
+    await h.service.openSessionToSide({ worktreeId: 'nope', index: 1 });
+    await h.service.openSessionToSide({ worktreeId: 'a' });
+    expect(h.claude.focusWindow).not.toHaveBeenCalled();
+    expect(h.notify.showWarning).toHaveBeenCalledTimes(3);
+    expect(h.notify.showWarning).toHaveBeenCalledWith('Foreman: open a session first, then move it to the side.');
   });
 });
 
@@ -3537,6 +3605,24 @@ describe('attachDroppedFiles targeting', () => {
 
     await h.service.attachDroppedFiles(['/tmp/shot.png'], 'b');
     expect(h.claude.pasteToActiveWindow).toHaveBeenCalledWith('b', expect.stringContaining('/tmp/shot.png'));
+  });
+
+  it('a drop on a session tab goes to THAT session: its tab is shown and the paste aimed at its window', async () => {
+    const a = makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/feat-a' });
+    const h = makeHarness({ worktrees: [a], workspaceFolders: ['/repo'], terminalIds: ['a'] });
+    await h.service.loadWorktreesForRepo('/repo');
+
+    await h.service.attachDroppedFiles(['/tmp/shot.png'], 'a', 4);
+    expect(h.claude.focusWindow).toHaveBeenCalledWith(a, 4);
+    expect(h.claude.pasteToActiveWindow).toHaveBeenCalledWith('a', "'/tmp/shot.png' ", 4);
+  });
+
+  it('still pastes when the session tab could not be shown', async () => {
+    const a = makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/feat-a' });
+    const h = makeHarness({ worktrees: [a], workspaceFolders: ['/repo'], terminalIds: ['a'] });
+    h.claude.focusWindow.mockRejectedValue(new Error('gone'));
+    await h.service.attachDroppedFiles(['/tmp/shot.png'], 'a', 4);
+    expect(h.claude.pasteToActiveWindow).toHaveBeenCalledWith('a', "'/tmp/shot.png' ", 4);
   });
 });
 

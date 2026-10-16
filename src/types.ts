@@ -136,6 +136,12 @@ export interface ForemanConfig {
    * VSCode keeps the tab order intact.
    */
   focusMode: boolean;
+  /**
+   * How sessions reach the editor: a terminal tab per session (`perSession`,
+   * draggable into groups side by side), or one terminal per worktree that
+   * switches between them (`single`, the behaviour before tabs).
+   */
+  sessionTabs: 'perSession' | 'single';
   /** Per-worktree docker orchestration (compose files + auto-generated ports). */
   docker: DockerConfig;
   debugBasePort: number;

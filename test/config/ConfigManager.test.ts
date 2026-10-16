@@ -60,6 +60,7 @@ describe('ConfigManager', () => {
       notifyOnAttention: true,
       scopeSearchToActiveWorktree: true,
       focusMode: false,
+      sessionTabs: 'perSession',
       docker: {
         composeFile: 'docker-compose.yml',
         overrideFile: 'docker-compose.worktree.yml',
@@ -90,6 +91,7 @@ describe('ConfigManager', () => {
       notifyOnAttention: false,
       scopeSearchToActiveWorktree: false,
       focusMode: true,
+      sessionTabs: 'single',
       docker: {
         composeFile: 'compose.yaml',
         overrideFile: 'compose.wt.yaml',
@@ -108,6 +110,11 @@ describe('ConfigManager', () => {
     withSettings(overrides);
 
     expect(new ConfigManager().get()).toEqual(overrides);
+  });
+
+  it('reads anything but "single" as perSession — a typo must not cost the user their tabs', () => {
+    withSettings({ sessionTabs: 'per-session' });
+    expect(new ConfigManager().get().sessionTabs).toBe('perSession');
   });
 
   it('mixes user overrides with defaults for unset keys', () => {

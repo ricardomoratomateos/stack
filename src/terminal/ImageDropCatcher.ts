@@ -1,10 +1,14 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { isImagePath, pickTerminalLabel } from './imageDrop';
+import type { TerminalTarget } from '../session/SessionTerminals';
 
 export interface ImageDropDeps {
-  /** Worktree whose viewer terminal carries this name, if any. */
-  worktreeIdForTerminalName(name: string): string | undefined;
+  /**
+   * The worktree — and, for a session tab, the session — whose terminal
+   * carries this name, if any.
+   */
+  targetForTerminalName(name: string): TerminalTarget | undefined;
   hasTerminals(worktreeId: string): boolean;
   labelFor(worktreeId: string): string | undefined;
   /** Fallback when the drop landed in a group with no agent viewer in it. */
@@ -14,7 +18,8 @@ export interface ImageDropDeps {
    * Synchronous on purpose: see handle().
    */
   isScreenshotLike(file: string): boolean;
-  attach(worktreeId: string, paths: string[]): Promise<void>;
+  /** Hand the files to the target: its session when it names one, else the worktree's session in front. */
+  attach(target: TerminalTarget, paths: string[]): Promise<void>;
   /** Tell the user what happened, with a way to get the image back as a tab. */
   notify(message: string, reopen: () => void): void;
 }
@@ -26,8 +31,9 @@ export interface ImageDropDeps {
  * is claimed by VS Code's editor drop target: the image opens as a tab in that
  * group instead of the terminal inserting its path. There is no API to
  * intercept the drop — but the tab that opens carries everything: its group is
- * the group the user dropped onto, and the viewer sitting in that group says
- * which worktree. So this closes the tab and pastes the path into that agent.
+ * the group the user dropped onto, and the terminal sitting in that group says
+ * which worktree, and with a tab per session which session. So this closes the
+ * tab and pastes the path into that agent.
  *
  * Nothing happens unless a worktree with an agent session can take the file,
  * so a window with no agents running keeps VS Code's normal behaviour.
@@ -85,15 +91,16 @@ export class ImageDropCatcher implements vscode.Disposable {
       .filter((t) => t.input instanceof vscode.TabInputTerminal)
       .map((t) => t.label);
     const label = pickTerminalLabel(labels, this.lastActiveTerminalByGroup.get(tab.group.viewColumn));
-    const target = (label && this.deps.worktreeIdForTerminalName(label)) || this.deps.activeWorktreeId();
-    if (!target || !this.deps.hasTerminals(target)) return;
+    const fallback = this.deps.activeWorktreeId();
+    const target = (label && this.deps.targetForTerminalName(label)) || (fallback ? { worktreeId: fallback } : undefined);
+    if (!target || !this.deps.hasTerminals(target.worktreeId)) return;
     if (!this.deps.isScreenshotLike(uri.fsPath)) return;
 
     void vscode.window.tabGroups.close(tab, true);
     void this.deps
       .attach(target, [uri.fsPath])
       .then(() => this.deps.notify(
-        `Foreman: attached ${path.basename(uri.fsPath)} to ${this.deps.labelFor(target) ?? 'the agent'}`,
+        `Foreman: attached ${path.basename(uri.fsPath)} to ${this.deps.labelFor(target.worktreeId) ?? 'the agent'}`,
         () => this.reopen(uri),
       ))
       .catch((err) => console.warn('[foreman] image drop failed', err));

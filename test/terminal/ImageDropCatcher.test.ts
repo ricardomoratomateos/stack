@@ -16,7 +16,10 @@ const image = (file: string, active = true) => ({ label: file.split('/').pop()!,
 
 function makeDeps(over: Partial<ImageDropDeps> = {}): ImageDropDeps {
   return {
-    worktreeIdForTerminalName: vi.fn((name) => ({ 'claude: develop': 'wt-dev', 'claude: feat/x': 'wt-x' } as Record<string, string>)[name]),
+    targetForTerminalName: vi.fn((name) => {
+      const id = ({ 'claude: develop': 'wt-dev', 'claude: feat/x': 'wt-x', 'feat/x · shell': 'wt-x' } as Record<string, string>)[name];
+      return id ? { worktreeId: id, ...(name.includes(' · ') ? { windowIndex: 3 } : {}) } : undefined;
+    }),
     hasTerminals: vi.fn(() => true),
     labelFor: vi.fn((id) => ({ 'wt-dev': 'develop', 'wt-x': 'feat/x' } as Record<string, string>)[id]),
     activeWorktreeId: vi.fn(() => 'wt-dev'),
@@ -53,7 +56,7 @@ describe('ImageDropCatcher', () => {
     await h.open([g], [g.tabs[1]]);
 
     expect(window.tabGroups.close).toHaveBeenCalledWith(g.tabs[1], true);
-    expect(deps.attach).toHaveBeenCalledWith('wt-x', ['/Users/me/Desktop/shot.png']);
+    expect(deps.attach).toHaveBeenCalledWith({ worktreeId: 'wt-x' }, ['/Users/me/Desktop/shot.png']);
     expect(deps.notify).toHaveBeenCalledWith(expect.stringContaining('shot.png to feat/x'), expect.any(Function));
   });
 
@@ -64,7 +67,16 @@ describe('ImageDropCatcher', () => {
     const h = install(deps, [before]);
     const after = group(1, [terminal('claude: develop'), terminal('claude: feat/x'), image('/tmp/s.png')]);
     await h.open([after], [after.tabs[2]]);
-    expect(deps.attach).toHaveBeenCalledWith('wt-x', ['/tmp/s.png']);
+    expect(deps.attach).toHaveBeenCalledWith({ worktreeId: 'wt-x' }, ['/tmp/s.png']);
+  });
+
+  it('hands a drop on a session tab to THAT session, not just its worktree', async () => {
+    const deps = makeDeps();
+    const before = group(1, [terminal('claude: feat/x'), terminal('feat/x · shell', true)]);
+    const h = install(deps, [before]);
+    const after = group(1, [terminal('claude: feat/x'), terminal('feat/x · shell'), image('/tmp/s.png')]);
+    await h.open([after], [after.tabs[2]]);
+    expect(deps.attach).toHaveBeenCalledWith({ worktreeId: 'wt-x', windowIndex: 3 }, ['/tmp/s.png']);
   });
 
   it('falls back to the active worktree when the group has no agent viewer', async () => {
@@ -72,7 +84,16 @@ describe('ImageDropCatcher', () => {
     const h = install(deps);
     const g = group(1, [{ label: 'README.md', input: new TabInputText(Uri.file('/repo/README.md')) }, image('/tmp/s.png')]);
     await h.open([g], [g.tabs[1]]);
-    expect(deps.attach).toHaveBeenCalledWith('wt-dev', ['/tmp/s.png']);
+    expect(deps.attach).toHaveBeenCalledWith({ worktreeId: 'wt-dev' }, ['/tmp/s.png']);
+  });
+
+  it('leaves the tab alone when no terminal in the group is an agent\'s and no worktree is active', async () => {
+    const deps = makeDeps({ activeWorktreeId: vi.fn(() => undefined) });
+    const h = install(deps);
+    const g = group(1, [terminal('some zsh'), image('/tmp/s.png')]);
+    await h.open([g], [g.tabs[1]]);
+    expect(window.tabGroups.close).not.toHaveBeenCalled();
+    expect(deps.attach).not.toHaveBeenCalled();
   });
 
   it('leaves the tab alone when nobody can take the file (no agent sessions)', async () => {
@@ -166,7 +187,7 @@ describe('ImageDropCatcher', () => {
     ]);
     await h.open([g], [g.tabs[1]]);
 
-    expect(deps.attach).toHaveBeenCalledWith('wt-x', ['/Users/me/Desktop/shot.png']);
+    expect(deps.attach).toHaveBeenCalledWith({ worktreeId: 'wt-x' }, ['/Users/me/Desktop/shot.png']);
   });
 
   it('ignores a tab that is not backed by a file at all', async () => {
@@ -184,7 +205,7 @@ describe('ImageDropCatcher', () => {
     // out the listener and silently stop catching every later drop.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const deps = makeDeps({
-      worktreeIdForTerminalName: vi.fn(() => { throw new Error('boom'); }),
+      targetForTerminalName: vi.fn(() => { throw new Error('boom'); }),
     });
     const h = install(deps);
     const g = group(2, [terminal('claude: feat/x'), image('/Users/me/Desktop/shot.png')]);

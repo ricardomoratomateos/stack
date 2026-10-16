@@ -27,7 +27,7 @@ export const REPO_CONFIG_VERSION = 1;
  * until they were handed a paste of somebody else's config.
  *
  * Deliberately absent: defaultProvider, the per-agent commands, notifyOnAttention,
- * focusMode, scopeSearchToActiveWorktree. Which agent you reach for and where
+ * focusMode, scopeSearchToActiveWorktree, sessionTabs. Which agent you reach for and where
  * its binary lives are properties of your machine, and a cloned repository has
  * no business overriding them.
  */
@@ -147,6 +147,7 @@ const USER_SCOPED = new Set([
   'notifyOnAttention',
   'focusMode',
   'scopeSearchToActiveWorktree',
+  'sessionTabs',
 ]);
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {

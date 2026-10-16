@@ -134,6 +134,9 @@ export class ConfigManager {
       notifyOnAttention: cfg.get<boolean>('notifyOnAttention', true),
       scopeSearchToActiveWorktree: cfg.get<boolean>('scopeSearchToActiveWorktree', true),
       focusMode: cfg.get<boolean>('focusMode', false),
+      // Anything but the legacy value is the default: a typo in settings.json
+      // should not silently cost the user their tabs.
+      sessionTabs: cfg.get<string>('sessionTabs', 'perSession') === 'single' ? 'single' : 'perSession',
       // Object settings get no deep merge from VSCode and none from the repo
       // file either, so all three layers are folded key by key. A repo naming
       // only its compose file must not reset basePort to the default.

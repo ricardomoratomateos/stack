@@ -264,7 +264,12 @@ export async function activate(ctx: vscode.ExtensionContext) {
     shared: new PortReservationFile(ctx.globalStorageUri.fsPath),
   });
   const providerFactory = new ProviderFactory(config, ctx.globalStorageUri.fsPath);
-  const agentManager = new AgentSessionManager(providerFactory, ctx.globalState);
+  // The tab layout is read live, so flipping foreman.sessionTabs applies to
+  // the next terminal opened; the rest are the manager's own defaults.
+  const agentManager = new AgentSessionManager(
+    providerFactory, ctx.globalState, undefined, undefined, undefined, undefined,
+    () => config.get().sessionTabs,
+  );
   const dockerMonitor = new DockerMonitor();
   const gitWatcher = new GitWatcher();
   const git = new GitCliAdapter();
@@ -506,7 +511,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   let shotsDir: string | undefined;
   void screenshotDir().then((dir) => { shotsDir = dir; });
   ctx.subscriptions.push(new ImageDropCatcher({
-    worktreeIdForTerminalName: (name) => agentManager.getWorktreeIdForTerminalName(name),
+    targetForTerminalName: (name) => agentManager.getTargetForTerminalName(name),
     hasTerminals: (id) => agentManager.hasTerminals(id),
     labelFor: (id) => { const wt = manager.list().find((w) => w.id === id); return wt ? wt.alias ?? wt.branch : undefined; },
     activeWorktreeId: () => service.activeWorktreeId(),
@@ -515,7 +520,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       try { mtimeMs = fs.statSync(file).mtimeMs; } catch { return false; }
       return looksLikeScreenshot({ file, mtimeMs, nowMs: Date.now(), screenshotDir: shotsDir });
     },
-    attach: (id, paths) => service.attachDroppedFiles(paths, id),
+    attach: (target, paths) => service.attachDroppedFiles(paths, target.worktreeId, target.windowIndex),
     notify: (message, reopen) => {
       void vscode.window.showInformationMessage(message, 'Open instead').then((pick) => { if (pick === 'Open instead') reopen(); });
     },
@@ -619,10 +624,15 @@ export async function activate(ctx: vscode.ExtensionContext) {
     vscode.commands.registerCommand('foreman.focusNextWorktree', () => service.focusNextWorktree()),
     vscode.commands.registerCommand('foreman.focusPrevWorktree', () => service.focusPrevWorktree()),
     vscode.commands.registerCommand('foreman.focusSession', (terminal: vscode.Terminal | undefined) => terminal?.show()),
+    vscode.commands.registerCommand('foreman.openSessionToSide', (target?: { worktreeId: string; index?: number }) =>
+      service.openSessionToSide(target),
+    ),
     vscode.commands.registerCommand('foreman.attachLatestScreenshot', async () => {
       const term = vscode.window.activeTerminal;
-      const worktreeId = term ? agentManager.getWorktreeIdForTerminal(term) : undefined;
-      if (!worktreeId) {
+      // The session of the focused tab, not just its worktree: with a tab per
+      // session, the worktree's other agent may be the one in front of tmux.
+      const target = term ? agentManager.getTargetForTerminal(term) : undefined;
+      if (!target) {
         vscode.window.showWarningMessage('Foreman: focus an agent terminal first, then attach the screenshot.');
         return;
       }
@@ -633,7 +643,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       }
       // Paste the path single-quoted (as a terminal file-drop does), unsent, so
       // the agent picks up the image and you can still add prompt text.
-      await agentManager.pasteToActiveWindow(worktreeId, `'${shot}' `);
+      await agentManager.pasteToActiveWindow(target.worktreeId, `'${shot}' `, target.windowIndex);
     }),
   );
 

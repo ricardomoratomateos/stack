@@ -127,6 +127,8 @@ export interface MockTerminal {
   dispose: ReturnType<typeof vi.fn>;
   sendText: ReturnType<typeof vi.fn>;
   creationOptions: Record<string, unknown>;
+  /** The terminal's process, as VS Code reports it; undefined unless a test sets one. */
+  processId: Thenable<number | undefined> | undefined;
 }
 export function makeTerminal(options: Record<string, unknown> = {}): MockTerminal {
   const t: MockTerminal = {
@@ -136,6 +138,7 @@ export function makeTerminal(options: Record<string, unknown> = {}): MockTermina
     dispose: vi.fn(),
     sendText: vi.fn(),
     creationOptions: options,
+    processId: undefined,
   };
   t.dispose.mockImplementation(() => { t.exitStatus = { code: 0 }; });
   return t;
@@ -147,7 +150,7 @@ export const window = {
   activeTerminal: undefined as MockTerminal | undefined,
   activeTextEditor: undefined as { document: { uri: Uri } } | undefined,
   tabGroups: {
-    all: [] as Array<{ tabs: Array<{ input: unknown }> }>,
+    all: [] as Array<{ tabs: Array<{ input: unknown; label?: string }>; viewColumn?: number }>,
     close: vi.fn().mockResolvedValue(true),
     onDidChangeTabs: vi.fn(() => ({ dispose: vi.fn() })),
   },
@@ -166,6 +169,7 @@ export const window = {
     task({ report: vi.fn() })),
   onDidChangeActiveTerminal: vi.fn(() => ({ dispose: vi.fn() })),
   onDidCloseTerminal: vi.fn(() => ({ dispose: vi.fn() })),
+  onDidOpenTerminal: vi.fn(() => ({ dispose: vi.fn() })),
   onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: vi.fn() })),
   registerFileDecorationProvider: vi.fn(() => ({ dispose: vi.fn() })),
   registerWebviewViewProvider: vi.fn(() => ({ dispose: vi.fn() })),

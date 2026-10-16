@@ -127,7 +127,8 @@ export type WebMessage =
   | { type: 'showProviderInstall'; provider: ProviderId }
   | { type: 'openTerminal'; worktreeId: string }
   | { type: 'focusTerminal'; worktreeId: string }
-  | { type: 'focusSession'; worktreeId: string; kind: 'agent' | 'shell'; index: number }
+  /** `toSide`: open (or move) the session's tab beside the active editor group. */
+  | { type: 'focusSession'; worktreeId: string; kind: 'agent' | 'shell'; index: number; toSide?: boolean }
   | { type: 'killSession'; worktreeId: string; index: number }
   | { type: 'reorderSessions'; worktreeId: string; orderedIndexes: number[] }
   | { type: 'reorderWorktrees'; orderedIds: string[] }

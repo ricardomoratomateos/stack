@@ -108,6 +108,11 @@
         "title": "Foreman: Focus Session"
       },
       {
+        "command": "foreman.openSessionToSide",
+        "title": "Foreman: Open Session to the Side",
+        "icon": "$(split-horizontal)"
+      },
+      {
         "command": "foreman.focusNextWorktree",
         "title": "Foreman: Focus Next Worktree"
       },
@@ -220,6 +225,19 @@
           "type": "boolean",
           "default": false,
           "description": "Clean-slate switching: when you switch worktree, close the other worktrees' editor tabs and agent terminals so only the active one is on screen. Off (default) makes switching an instant reveal with no flicker."
+        },
+        "foreman.sessionTabs": {
+          "type": "string",
+          "enum": [
+            "perSession",
+            "single"
+          ],
+          "enumDescriptions": [
+            "Every session (agent or shell) gets its own terminal tab, so several can be open at once: drag them into editor groups side by side and resize them like any editor.",
+            "One terminal per worktree; picking a session switches what that terminal shows (tmux windows, with tmux's status bar)."
+          ],
+          "default": "perSession",
+          "description": "How a worktree's sessions open in the editor: a tab per session, or one terminal per worktree. Applies to terminals opened after the change."
         },
         "foreman.scopeSearchToActiveWorktree": {
           "type": "boolean",
