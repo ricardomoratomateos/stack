@@ -63,6 +63,7 @@ For the heavier setup — Docker per worktree, a debugger port per worktree, set
 | `foreman.opencodeCommand` | `opencode` | Command to launch opencode |
 | `foreman.notifyOnAttention` | `true` | Native OS notification when an agent finishes or asks for permission while VS Code is backgrounded (the sidebar badge always shows) |
 | `foreman.scopeSearchToActiveWorktree` | `true` | Hide non-active worktree folders from search and Quick Open |
+| `foreman.sessionTabs` | `perSession` | `perSession`: every session opens in its own terminal tab, so an agent and a shell can sit side by side (see [Sessions side by side](#sessions-side-by-side)). `single`: one terminal per worktree that switches between them, as before |
 | `foreman.focusMode` | `false` | Clean-slate switching: close the other worktrees' editor tabs and agent terminals so only the active worktree is on screen (see [Switching worktrees](#switching-worktrees)) |
 | `foreman.setupScript` / `foreman.teardownScript` | `""` | Script run on worktree create / delete (e.g. `.foreman/setup.sh`) |
 | `foreman.docker` | — | Per-worktree compose file + auto-generated ports (opt-in; see below) |
@@ -74,6 +75,12 @@ For the heavier setup — Docker per worktree, a debugger port per worktree, set
 Three are supported: **Claude Code**, **Codex CLI** and **opencode**. Each worktree card carries a split button — the big half launches your primary agent (`foreman.defaultProvider`), the chevron opens the rest. Agents whose command isn't on your `PATH` are shown dimmed; clicking one offers the install command instead of launching it.
 
 Any session can be renamed — hover its row and hit the pencil. The shell you started redis in becomes "redis". The name is Foreman's own; the tmux window keeps the name that says what is running in it, because that is what identifies an agent when the window reloads. Clearing the name restores the derived one.
+
+### Sessions side by side
+
+Each session — agent or shell — opens in a terminal tab of its own, titled `<worktree> · <session>`. They are ordinary editor tabs: drag one into another editor group to have Claude and a shell open at once, drag the divider to resize, reorder them; VS Code keeps the layout. Clicking a session in the sidebar brings its tab forward (or reopens it), **Foreman: Open Session to the Side** moves the focused one beside the active group, and killing a session closes its tab. Closing a tab only hides the session — it keeps running in tmux, and clicking its row brings it back.
+
+Under the hood each tab attaches to a small tmux session of its own that holds just that window, which is what lets two tabs of one worktree show different sessions instead of mirroring each other. These carry the worktree's session name plus `__w<N>`; they disappear with their tab and are swept up on reload. Set `"foreman.sessionTabs": "single"` for the previous layout: one terminal per worktree, switching between sessions with tmux's status bar.
 
 Shell sessions carry a subtitle too, in the same slot the agents use for their live task: whatever the shell is running right now — `npm`, `vim`, `psql`, `docker`. A shell sitting at its prompt says nothing rather than repeating its own name. It needs no shell configuration; the reading comes from tmux itself.
 
@@ -98,7 +105,7 @@ Clicking a worktree in the sidebar switches to it. There are two behaviours, tra
 
 **Reveal (default).** Switching brings the worktree's agent terminal to the front and re-applies search scoping and explorer dimming. Nothing is closed or recreated, so switching is instant and flicker-free, and VS Code keeps your editor tabs exactly where you left them. No file is opened for you — that kept the terminal and the editor fighting over the foreground. The cost: tabs and agent terminals from the worktrees you've visited stay open.
 
-**Focus mode** (`"foreman.focusMode": true`). Switching gives you a clean slate: the other worktrees' editor tabs are closed and their agent terminals detached, so only the active worktree is on screen. Each worktree's open files are remembered and reopened, in order, when you come back to it. The cost: visible churn on every switch, since tabs and a terminal really are torn down and rebuilt. Unsaved work is saved first, because tabs are about to close.
+**Focus mode** (`"foreman.focusMode": true`). Switching gives you a clean slate: the other worktrees' editor tabs are closed and their agent terminals detached, so only the active worktree is on screen. Session tabs come back in the editor groups they were in. Each worktree's open files are remembered and reopened, in order, when you come back to it. The cost: visible churn on every switch, since tabs and a terminal really are torn down and rebuilt. Unsaved work is saved first, because tabs are about to close.
 
 > Neither mode ever interrupts an agent: agents run in tmux, so detaching a terminal leaves them working. Only deleting a worktree or killing a session explicitly stops one.
 

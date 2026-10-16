@@ -6,7 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **A terminal tab per session.** An agent and a shell of the same worktree no longer take turns in one terminal: each session opens in its own tab (`<worktree> · <session>`), which you can drag into another editor group, resize and reorder like any editor. Clicking a session's row brings its tab forward, **Foreman: Open Session to the Side** moves the focused one beside the active group, killing a session closes its tab, and a dropped screenshot or `Cmd+Alt+V` goes to the session whose tab it landed in. `"foreman.sessionTabs": "single"` keeps the one-terminal-per-worktree layout.
+
 ### Fixed
+
+- After a reload, a worktree could take over another's terminal when its name was a prefix of the other's (`feat` and `feat-login`). Terminals are now matched by the tmux session they are attached to.
 
 - **A syntax error in `~/.claude/settings.json` or `~/.codex/hooks.json` no longer costs you the file.** Foreman used to "start fresh" and write back only its own hooks; it now leaves the file untouched and says where the error is. Writes are atomic, follow symlinks, keep the file's permissions, and the first change keeps your original as `<file>.foreman-backup`.
 - **Several VS Code windows at once.** Each agent now reports to the window showing its worktree, instead of every event going to whichever window opened last. Closing a window no longer removes the hooks from under the others, and agents keep reporting across a window reload — opencode included.
