@@ -178,11 +178,6 @@
           "command": "stack.newTask",
           "when": "view == stack-sidebar",
           "group": "navigation@2"
-        },
-        {
-          "command": "stack.switchSidebarStyle",
-          "when": "view == stack-sidebar && !stack.tmuxMissing",
-          "group": "1_appearance"
         }
       ],
       "view/item/context": []
