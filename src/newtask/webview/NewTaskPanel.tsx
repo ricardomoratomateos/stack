@@ -21,19 +21,24 @@ export function NewTaskPanel() {
   const [pickedBase, setPickedBase] = useState<string | null>(null);
   const [pickedProvider, setPickedProvider] = useState<ProviderId | null>(null);
   const [manualBranch, setManualBranch] = useState<string | null>(null);
+  const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
   const busyRef = useRef(false);
   const errorId = useId();
 
   const base = pickedBase ?? init.baseBranch;
   const provider = pickedProvider ?? init.defaultProvider;
   const installed = init.installedProviders.includes(provider);
-  const branch = resolveBranch(manualBranch, description);
-  const generated = resolveBranch(null, description).name;
-  const dirty = description.trim().length > 0;
+  // The task's name is the worktree's name in the sidebar, and the branch is
+  // cut from it; without one, both fall back to the description.
+  const nameSource = title.trim() || description;
+  const branch = resolveBranch(manualBranch, nameSource);
+  const generated = resolveBranch(null, nameSource).name;
+  const dirty = title.trim().length > 0 || description.trim().length > 0;
   const canSubmit = !!branch.name && !branch.error && installed && !busy;
 
   useAutoGrow(textRef, description);
@@ -57,7 +62,7 @@ export function NewTaskPanel() {
     window.addEventListener('message', onMessage);
     window.addEventListener('focus', onFocus);
     send({ type: 'ready' });
-    textRef.current?.focus();
+    titleRef.current?.focus();
     return () => {
       window.removeEventListener('message', onMessage);
       window.removeEventListener('focus', onFocus);
@@ -73,11 +78,12 @@ export function NewTaskPanel() {
     send({
       type: 'create',
       branch: branch.name,
+      title: title.trim() || undefined,
       description: description.trim() || undefined,
       baseBranch: base || undefined,
       provider,
     });
-  }, [canSubmit, branch.name, description, base, provider]);
+  }, [canSubmit, branch.name, title, description, base, provider]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -113,7 +119,26 @@ export function NewTaskPanel() {
   return (
     <div className={`nt nt-${init.sidebarStyle}`}>
       <main className="nt-col">
-        <h1 className="nt-title">New task</h1>
+        <h1 className="nt-title">
+          <input
+            ref={titleRef}
+            className="nt-title-input"
+            value={title}
+            readOnly={busy}
+            placeholder="New task"
+            aria-label="Task name — shown as the worktree's name in the sidebar"
+            title="Name the task. It becomes the worktree's name, and the branch is generated from it."
+            spellCheck={false}
+            onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter moves on to the description; ⌘↵ still submits (window handler).
+              if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                textRef.current?.focus();
+              }
+            }}
+          />
+        </h1>
         <p className="nt-sub">One task, one branch, one worktree, one agent.</p>
 
         <div className="nt-card">

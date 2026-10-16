@@ -83,6 +83,14 @@ body.vscode-high-contrast .nt, body.vscode-high-contrast-light .nt {
 .nt-col { max-width: 720px; margin: 0 auto; padding: clamp(28px, 11vh, 112px) 24px 48px; }
 @media (max-width: 520px) { .nt-col { padding-left: 14px; padding-right: 14px; } }
 .nt-title { font-size: 22px; font-weight: 600; letter-spacing: -.012em; line-height: 1.25; color: var(--nt-fg); }
+.nt-title-input {
+  display: block; width: 100%; margin: 0 0 0 -6px; padding: 2px 6px;
+  border: 1px solid transparent; border-radius: var(--nt-chip-radius); outline: none;
+  background: transparent; color: inherit; font: inherit; letter-spacing: inherit;
+}
+.nt-title-input::placeholder { color: var(--nt-fg); opacity: .55; }
+.nt-title-input:hover { border-color: var(--nt-border, var(--nt-hover)); }
+.nt-title-input:focus { border-color: var(--nt-ring); }
 .nt-sub { margin-top: 6px; color: var(--nt-dim); font-size: 13px; line-height: 1.5; }
 
 /* ── the composer card ── */
