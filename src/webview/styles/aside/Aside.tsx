@@ -6,7 +6,7 @@ import { Details, DiffStat } from '../../components/Details';
 import { LaunchSplit } from '../../components/LaunchSplit';
 import { ActionBar } from '../../components/ActionBar';
 import { visualFor } from '../../components/providers';
-import { AskBox, ForgetActions } from '../../components/RowParts';
+import { ForgetActions } from '../../components/RowParts';
 import { SessionList } from '../../components/SessionList';
 import { EmptyState, HealthStrip, LoadingState, NothingHere } from '../../components/Status';
 import type { LayoutProps } from '../types';
@@ -141,7 +141,6 @@ function Row({ d, selected, now, state, select, drag }: {
       </button>
 
       {wt.dockerError && !selected && <div className="fm-row-error as-indent" title={wt.dockerError}>stack: {wt.dockerError}</div>}
-      {d.group === 'needs' && <AskBox d={d} select={pick} />}
       {d.group === 'missing' && <ForgetActions d={d} />}
 
       {selected && d.group !== 'missing' && (
