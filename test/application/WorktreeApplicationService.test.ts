@@ -5,6 +5,7 @@ import {
   WorktreeApplicationService,
   ACTIVE_WORKTREE_KEY,
   WORKTREE_ORDER_KEY,
+  TEARDOWN_TIMEOUT_MS,
   type IWorkspaceHost,
 } from '../../src/application/WorktreeApplicationService';
 import { VsCodeNotifyAdapter } from '../../src/adapters/VsCodeNotifyAdapter';
@@ -81,6 +82,12 @@ interface HarnessOpts {
   useRealInstalledProviders?: boolean;
   /** branches returned by git.listBranches */
   branches?: string[];
+  /** ids reconcile reports as missing (directory gone) */
+  missingIds?: string[];
+  /** what manager.forget resolves to (false: the worktree turned out to be back) */
+  forgetResult?: boolean;
+  /** exit code host.runScript resolves (default 0) */
+  scriptExitCode?: number | null;
 }
 
 function makeHarness(o: HarnessOpts = {}) {
@@ -154,8 +161,11 @@ function makeHarness(o: HarnessOpts = {}) {
     }),
     closeOtherTabs: vi.fn(async (id: string) => { calls.push(`tab.closeOtherTabs:${id}`); }),
     restoreTabs: vi.fn((id: string) => { calls.push(`tab.restoreTabs:${id}`); return Promise.resolve(); }),
+    // Kept out of `calls`, like syncDecorations: bookkeeping, where the
+    // call-order assertions are about what the user sees happen.
+    prune: vi.fn(),
   };
-  const breakpointManager = { activate: vi.fn() };
+  const breakpointManager = { activate: vi.fn(), prune: vi.fn() };
 
   const folders = [...(o.workspaceFolders ?? ['/repo'])];
   const folderNames = new Map<string, string>(o.workspaceFolderNames ? Object.entries(o.workspaceFolderNames) : []);
@@ -182,10 +192,16 @@ function makeHarness(o: HarnessOpts = {}) {
         cwd: opts.cwd,
         show: vi.fn(() => { calls.push(`terminal.show:${opts.name}`); }),
         sendText: vi.fn((txt: string) => { calls.push(`terminal.sendText:${txt}`); }),
+        exitStatus: undefined as unknown,
+        dispose: vi.fn(() => { calls.push(`terminal.dispose:${opts.name}`); }),
       };
       terminalsCreated.push(t);
       calls.push(`host.createTerminal:${opts.name}:${opts.cwd}`);
       return t;
+    }),
+    runScript: vi.fn(async (run: { label: string; script: string; cwd: string; env: Record<string, string>; timeoutMs: number }) => {
+      calls.push(`host.runScript:${run.label}:${run.script}:${run.cwd}`);
+      return o.scriptExitCode === undefined ? 0 : o.scriptExitCode;
     }),
     showInputBox: vi.fn(async (): Promise<string | undefined> => undefined),
     showQuickPick: vi.fn(async (): Promise<string | undefined> => undefined),
@@ -225,10 +241,11 @@ function makeHarness(o: HarnessOpts = {}) {
     list: vi.fn(() => worktrees),
     reconcile: vi.fn(async (root: string) => {
       calls.push(`manager.reconcile:${root}`);
-      return { adopted: [], removed: [], current: worktrees };
+      return { adopted: [], missing: worktrees.filter((w) => (o.missingIds ?? []).includes(w.id)), current: worktrees };
     }),
     create: vi.fn(),
     delete: vi.fn(async (id: string, db: boolean) => { calls.push(`manager.delete:${id}:${db}`); }),
+    forget: vi.fn(async (id: string) => { calls.push(`manager.forget:${id}`); return o.forgetResult ?? true; }),
     // Ports are free by default; tests that care override this.
     ensureFreePorts: vi.fn(async (wt: Worktree) => ({ worktree: wt })),
   };
@@ -1746,11 +1763,15 @@ describe('deleteWorktree', () => {
 
     await h.service.deleteWorktree(a);
 
-    expect(h.calls).toContain(`host.createTerminal:Teardown: feat/a:${a.path}`);
+    // Headless and awaited now, not typed into a terminal.
+    expect(h.host.createTerminal).not.toHaveBeenCalled();
+    const teardownAt = h.calls.indexOf(`host.runScript:Teardown: feat/a:/scripts/teardown.sh:${a.path}`);
     const downAt = h.calls.findIndex((c) => c.startsWith('docker.runCompose:feat-a') && c.includes(' down'));
     const deleteAt = h.calls.indexOf('manager.delete:a:false');
+    expect(teardownAt).toBeGreaterThanOrEqual(0);
     expect(downAt).toBeGreaterThanOrEqual(0);
-    // The stack must be down BEFORE the worktree directory goes away.
+    // The script, then the stack, must be done BEFORE the directory goes away.
+    expect(teardownAt).toBeLessThan(downAt);
     expect(downAt).toBeLessThan(deleteAt);
     expect(h.claude.killWorktreeSession).toHaveBeenCalledWith('a');
   });
@@ -3132,5 +3153,404 @@ describe('attachDroppedFiles targeting', () => {
 
     await h.service.attachDroppedFiles(['/tmp/shot.png'], 'b');
     expect(h.claude.pasteToActiveWindow).toHaveBeenCalledWith('b', expect.stringContaining('/tmp/shot.png'));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Leaks: what a load starts, a later load stops
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('loadWorktreesForRepo stops what it no longer shows', () => {
+  const main = () => makeWorktree({ id: 'm', branch: 'main', path: '/repo', isMain: true });
+  const b = () => makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+
+  it('stops watching and polling a worktree that left the set since the last load', async () => {
+    const h = makeHarness({ worktrees: [main(), b()] });
+    await h.service.loadWorktreesForRepo('/repo');
+    h.calls.length = 0;
+
+    h.worktrees.splice(1, 1); // forgotten from another window, say
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.calls).toEqual(expect.arrayContaining([
+      'gitWatcher.unwatch:/repo/zer/feat-b',
+      'docker.stopPolling:feat-b',
+      'pr.stopPolling:b',
+    ]));
+    expect(h.calls).not.toContain('gitWatcher.unwatch:/repo');
+  });
+
+  it('stops nothing on a reload that changed nothing', async () => {
+    const h = makeHarness({ worktrees: [main(), b()] });
+    await h.service.loadWorktreesForRepo('/repo');
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(h.gitWatcher.unwatch).not.toHaveBeenCalled();
+    expect(h.dockerMonitor.stopPolling).not.toHaveBeenCalled();
+    expect(h.prMonitor.stopPolling).not.toHaveBeenCalled();
+  });
+
+  it('stops the previous repository\'s worktrees when the window moves to another', async () => {
+    const other = makeWorktree({ id: 'o', branch: 'main', path: '/other', repoRoot: '/other', isMain: true });
+    const h = makeHarness({ worktrees: [main(), other], workspaceFolders: ['/repo'] });
+    await h.service.loadWorktreesForRepo('/repo');
+    h.calls.length = 0;
+
+    await h.service.loadWorktreesForRepo('/other');
+
+    expect(h.calls).toContain('gitWatcher.unwatch:/repo');
+    expect(h.calls).toContain('pr.stopPolling:m');
+    expect(h.calls).toContain('gitWatcher.watch:/other');
+  });
+
+  it('re-keys a worktree whose path changed instead of leaving the old watcher behind', async () => {
+    const h = makeHarness({ worktrees: [b()] });
+    await h.service.loadWorktreesForRepo('/repo');
+    h.calls.length = 0;
+
+    h.worktrees[0] = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b2' });
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.calls.indexOf('gitWatcher.unwatch:/repo/zer/feat-b'))
+      .toBeLessThan(h.calls.indexOf('gitWatcher.watch:/repo/zer/feat-b2'));
+    expect(h.calls).toContain('docker.stopPolling:feat-b');
+  });
+
+  it('keeps a compose project polled while another worktree still uses it', async () => {
+    // composeProject is the directory name, so two worktrees can share one.
+    const x = makeWorktree({ id: 'x', branch: 'x', path: '/repo/zer/same' });
+    const y = makeWorktree({ id: 'y', branch: 'y', path: '/repo/other/same' });
+    const h = makeHarness({ worktrees: [x, y] });
+    await h.service.loadWorktreesForRepo('/repo');
+
+    h.worktrees.splice(1, 1);
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.calls).toContain('gitWatcher.unwatch:/repo/other/same');
+    expect(h.dockerMonitor.stopPolling).not.toHaveBeenCalled();
+  });
+
+  it('a worktree created in this session is stopped by a later load that no longer has it', async () => {
+    const created = b();
+    const h = makeHarness({ worktrees: [main()] });
+    h.manager.create.mockImplementation(async () => { h.worktrees.push(created); return created; });
+    await h.service.createWorktree({ branch: 'feat/b' });
+    h.worktrees.splice(1, 1);
+    h.calls.length = 0;
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.calls).toContain('pr.stopPolling:b');
+  });
+});
+
+describe('worktree state pruning', () => {
+  it('prunes tab and breakpoint stashes against the whole store on load', async () => {
+    const mine = makeWorktree({ id: 'a' });
+    const elsewhere = makeWorktree({ id: 'z', path: '/other/zer/z', repoRoot: '/other' });
+    const h = makeHarness({ worktrees: [mine, elsewhere] });
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    // Another repository's worktree is alive — just not shown in this window.
+    expect(h.tabManager.prune).toHaveBeenCalledWith(new Set(['a', 'z']));
+    expect(h.breakpointManager.prune).toHaveBeenCalledWith(new Set(['a', 'z']));
+  });
+
+  it('never prunes against an empty store', async () => {
+    const h = makeHarness({ worktrees: [] });
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(h.tabManager.prune).not.toHaveBeenCalled();
+    expect(h.breakpointManager.prune).not.toHaveBeenCalled();
+  });
+
+  it('prunes again once a delete has gone through', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const keep = makeWorktree({ id: 'k', path: '/repo/zer/keep' });
+    const h = makeHarness({ worktrees: [a, keep], confirmResult: 'Delete' });
+    h.manager.delete.mockImplementation(async (id: string) => {
+      h.worktrees.splice(h.worktrees.findIndex((w) => w.id === id), 1);
+    });
+
+    await h.service.deleteWorktree(a);
+
+    expect(h.tabManager.prune).toHaveBeenLastCalledWith(new Set(['k']));
+  });
+
+  it('does not prune when git refused the delete', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({ worktrees: [a], confirmResult: 'Delete' });
+    h.manager.delete.mockRejectedValue(new Error('locked'));
+
+    await h.service.deleteWorktree(a);
+
+    expect(h.tabManager.prune).not.toHaveBeenCalled();
+  });
+});
+
+describe('script terminals are reused, not piled up', () => {
+  const setup = { setupScript: '/scripts/setup.sh' };
+
+  it('re-running init reuses the worktree\'s Init terminal', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({ worktrees: [a], config: setup });
+    await h.service.initWorktree(a);
+    await h.service.initWorktree(a);
+    expect(h.host.createTerminal).toHaveBeenCalledOnce();
+    expect(h.terminalsCreated[0].sendText).toHaveBeenCalledTimes(2);
+  });
+
+  it('opens a new one when the user closed the old', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({ worktrees: [a], config: setup });
+    await h.service.initWorktree(a);
+    (h.terminalsCreated[0] as { exitStatus?: unknown }).exitStatus = { code: 0 };
+    await h.service.initWorktree(a);
+    expect(h.host.createTerminal).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps one terminal per purpose and per worktree', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const docker = { composeFile: 'docker-compose.yml', overrideFile: '', ports: ['HTTP_PORT'], basePort: 20000, portStride: 100 };
+    const h = makeHarness({ worktrees: [a, b], config: { ...setup, docker } });
+    await h.service.initWorktree(a);
+    await h.service.initWorktree(b);
+    await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'a' });
+    await flushMicrotasks();
+    await h.service.handleMessage({ type: 'dockerUp', worktreeId: 'a' });
+    await flushMicrotasks();
+    expect(h.host.createTerminal.mock.calls.map(([o]) => o.name)).toEqual([
+      'Init: feat/a', 'Init: feat/b', 'Docker: feat/a',
+    ]);
+  });
+
+  it('closes a deleted worktree\'s script terminals, and only those', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+    const h = makeHarness({ worktrees: [a, b], config: setup, confirmResult: 'Delete' });
+    await h.service.initWorktree(a);
+    await h.service.initWorktree(b);
+
+    await h.service.deleteWorktree(a);
+
+    expect(h.terminalsCreated[0].dispose).toHaveBeenCalledOnce();
+    expect(h.terminalsCreated[1].dispose).not.toHaveBeenCalled();
+    // b's is still registered: its next init reuses it.
+    await h.service.initWorktree(b);
+    expect(h.host.createTerminal).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('teardown is awaited before the worktree is removed', () => {
+  const teardown = { teardownScript: '.foreman/teardown.sh' };
+
+  it('does not run git worktree remove until the script has finished', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({ worktrees: [a], confirmResult: 'Delete', config: teardown, existingPaths: [a.path] });
+    let finish!: (code: number) => void;
+    h.host.runScript.mockImplementation(() => new Promise<number>((r) => { finish = r; }));
+
+    const deleting = h.service.deleteWorktree(a);
+    await flushMicrotasks();
+    expect(h.manager.delete).not.toHaveBeenCalled();
+
+    finish(0);
+    await deleting;
+    expect(h.manager.delete).toHaveBeenCalledWith('a', false);
+  });
+
+  it('hands the script the resolved path, the worktree cwd and the FOREMAN_* env, with a time limit', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const script = nodePath.join(a.path, '.foreman/teardown.sh');
+    const h = makeHarness({ worktrees: [a], confirmResult: 'Delete', config: teardown, existingPaths: [a.path, script] });
+
+    await h.service.deleteWorktree(a);
+
+    expect(h.host.runScript).toHaveBeenCalledWith({
+      label: 'Teardown: feat/a',
+      script,
+      cwd: a.path,
+      env: {
+        FOREMAN_REPO_ROOT: '/repo',
+        FOREMAN_WORKTREE_PATH: a.path,
+        FOREMAN_BRANCH: 'feat/a',
+        FOREMAN_COMPOSE_PROJECT: 'feat-a',
+      },
+      timeoutMs: TEARDOWN_TIMEOUT_MS,
+    });
+  });
+
+  it('warns about a failed script and still deletes', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({
+      worktrees: [a], confirmResult: 'Delete', config: teardown, existingPaths: [a.path], scriptExitCode: 3,
+    });
+    await h.service.deleteWorktree(a);
+    expect(h.notify.showWarning).toHaveBeenCalledWith(expect.stringContaining('exited with code 3'));
+    expect(h.manager.delete).toHaveBeenCalled();
+  });
+
+  it('says so when the script never finished', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({
+      worktrees: [a], confirmResult: 'Delete', config: teardown, existingPaths: [a.path], scriptExitCode: null,
+    });
+    await h.service.deleteWorktree(a);
+    expect(h.notify.showWarning).toHaveBeenCalledWith(expect.stringContaining('did not finish'));
+    expect(h.manager.delete).toHaveBeenCalled();
+  });
+});
+
+describe('missing worktrees', () => {
+  const main = () => makeWorktree({ id: 'm', branch: 'main', path: '/repo', isMain: true });
+  const gone = () => makeWorktree({ id: 'g', branch: 'feat/g', path: '/repo/zer/feat-g' });
+
+  it('keeps a missing worktree on its card, flagged, and out of everything else', async () => {
+    const h = makeHarness({ worktrees: [main(), gone()], missingIds: ['g'] });
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.calls.filter((c) => c.includes('feat-g') || c.endsWith(':g'))).toEqual([]);
+    const cards = h.service.buildState().worktrees;
+    expect(cards.map((c) => c.id)).toEqual(['m', 'g']);
+    expect(cards.find((c) => c.id === 'g')).toMatchObject({ missing: true });
+    expect(cards.find((c) => c.id === 'm')).not.toHaveProperty('missing');
+  });
+
+  it('stops monitoring a worktree that goes missing after it was loaded', async () => {
+    const missingIds: string[] = [];
+    const h = makeHarness({ worktrees: [main(), gone()], missingIds });
+    await h.service.loadWorktreesForRepo('/repo');
+    missingIds.push('g');
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.calls).toEqual(expect.arrayContaining(['gitWatcher.unwatch:/repo/zer/feat-g', 'pr.stopPolling:g']));
+  });
+
+  it('clears the flag and monitors it again once it is back', async () => {
+    const missingIds = ['g'];
+    const h = makeHarness({ worktrees: [main(), gone()], missingIds });
+    await h.service.loadWorktreesForRepo('/repo');
+    missingIds.length = 0;
+
+    await h.service.loadWorktreesForRepo('/repo');
+
+    expect(h.service.buildState().worktrees.find((c) => c.id === 'g')).not.toHaveProperty('missing');
+    expect(h.calls).toContain('gitWatcher.watch:/repo/zer/feat-g');
+  });
+
+  it('does not re-watch a missing worktree on a drift refresh', async () => {
+    const h = makeHarness({
+      worktrees: [main(), gone()], missingIds: ['g'], config: { defaultBaseBranch: 'main' }, branches: ['main'],
+    });
+    await h.service.loadWorktreesForRepo('/repo');
+    h.calls.length = 0;
+    await h.service.refreshDrift('g');
+    expect(h.calls).toEqual([]);
+  });
+
+  describe('forgetWorktree', () => {
+    it('forgets a missing worktree: store entry, monitors, session, folder, stashes', async () => {
+      // Outside the repo root, so the load's stale-folder sweep leaves its
+      // folder for forget to take back.
+      const g = makeWorktree({ id: 'g', branch: 'feat/g', path: '/elsewhere/feat-g' });
+      const h = makeHarness({ worktrees: [main(), g], missingIds: ['g'], workspaceFolders: ['/repo', g.path] });
+      await h.service.loadWorktreesForRepo('/repo');
+      h.manager.forget.mockImplementation(async (id: string) => {
+        h.calls.push(`manager.forget:${id}`);
+        h.worktrees.splice(h.worktrees.findIndex((w) => w.id === id), 1);
+        return true;
+      });
+      h.calls.length = 0;
+
+      await h.service.handleMessage({ type: 'forgetWorktree', worktreeId: 'g' });
+
+      expect(h.calls).toEqual(expect.arrayContaining([
+        'manager.forget:g',
+        'pr.stopPolling:g',
+        'claude.killWorktreeSession:g',
+        'ui.pushWebview',
+      ]));
+      expect(h.host.workspaceFolderPaths()).toEqual(['/repo']);
+      expect(h.tabManager.prune).toHaveBeenLastCalledWith(new Set(['m']));
+      // Nothing that could touch the disk or git's own records.
+      expect(h.manager.delete).not.toHaveBeenCalled();
+    });
+
+    it('ignores a worktree that is not flagged missing', async () => {
+      const h = makeHarness({ worktrees: [main(), gone()] });
+      await h.service.loadWorktreesForRepo('/repo');
+      await h.service.handleMessage({ type: 'forgetWorktree', worktreeId: 'g' });
+      expect(h.manager.forget).not.toHaveBeenCalled();
+    });
+
+    it('ignores an unknown worktree', async () => {
+      const h = makeHarness({ worktrees: [main()] });
+      await h.service.handleMessage({ type: 'forgetWorktree', worktreeId: 'nope' });
+      expect(h.manager.forget).not.toHaveBeenCalled();
+    });
+
+    it('keeps a worktree that came back, unflags it and monitors it again', async () => {
+      const h = makeHarness({ worktrees: [main(), gone()], missingIds: ['g'], forgetResult: false });
+      await h.service.loadWorktreesForRepo('/repo');
+      h.calls.length = 0;
+
+      await h.service.forgetWorktree('g');
+
+      expect(h.notify.showWarning).toHaveBeenCalledWith(expect.stringContaining('no longer looks gone'));
+      expect(h.calls).toContain('gitWatcher.watch:/repo/zer/feat-g');
+      expect(h.claude.killWorktreeSession).not.toHaveBeenCalled();
+      expect(h.service.buildState().worktrees.find((c) => c.id === 'g')).not.toHaveProperty('missing');
+    });
+
+    it('closes the forgotten worktree\'s script terminals', async () => {
+      const g = gone();
+      const h = makeHarness({ worktrees: [main(), g], missingIds: ['g'], config: { setupScript: '/s.sh' } });
+      await h.service.initWorktree(g);
+      await h.service.loadWorktreesForRepo('/repo');
+
+      await h.service.forgetWorktree('g');
+
+      expect(h.terminalsCreated[0].dispose).toHaveBeenCalled();
+    });
+  });
+});
+
+describe('the drift base is resolved once, not once per worktree', () => {
+  const many = () => [
+    makeWorktree({ id: 'a', branch: 'feat/a', path: '/repo/zer/a' }),
+    makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/b' }),
+    makeWorktree({ id: 'c', branch: 'feat/c', path: '/repo/zer/c' }),
+  ];
+
+  it('asks git once for a whole load', async () => {
+    const h = makeHarness({ worktrees: many(), config: { defaultBaseBranch: 'develop' }, branches: ['develop'] });
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(h.git.branchExists).toHaveBeenCalledOnce();
+    expect(h.calls).toContain('gitWatcher.watch:/repo/zer/c:develop');
+  });
+
+  it('asks again once the answer is a minute old', async () => {
+    vi.useFakeTimers();
+    const h = makeHarness({ worktrees: many(), config: { defaultBaseBranch: 'develop' }, branches: ['develop'] });
+    await h.service.loadWorktreesForRepo('/repo');
+    vi.advanceTimersByTime(61_000);
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(h.git.branchExists).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks again when the setting changes', async () => {
+    const h = makeHarness({ worktrees: many(), config: { defaultBaseBranch: 'develop' }, branches: ['develop', 'main'] });
+    await h.service.loadWorktreesForRepo('/repo');
+    h.cfg.defaultBaseBranch = 'main';
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(h.calls).toContain('gitWatcher.watch:/repo/zer/a:main');
+  });
+
+  it('an explicit drift refresh resolves afresh', async () => {
+    const h = makeHarness({ worktrees: many(), config: { defaultBaseBranch: 'develop' }, branches: ['develop'] });
+    await h.service.loadWorktreesForRepo('/repo');
+    await h.service.refreshDrift('a');
+    expect(h.git.branchExists).toHaveBeenCalledTimes(2);
   });
 });
