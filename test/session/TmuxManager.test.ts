@@ -452,6 +452,26 @@ describe('TmuxManager (integration)', () => {
     }
   });
 
+  it.runIf(hasTmux)('paste delivers the text verbatim and leaves it unsent until pressEnter', async () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-paste-it-'));
+    const out = path.join(base, 'line');
+    try {
+      const idx = await tmux.newWindow(SES, 'pastewin', base);
+      await tmux.respawnWindow(SES, idx, `read line; printf %s "$line" > '${out}'; exec sleep 30`);
+      await tmux.paste(`${SES}:${idx}`, 'review `const x = $(id)`');
+      await new Promise((r) => setTimeout(r, 300));
+      expect(fs.existsSync(out)).toBe(false); // pasted, not submitted
+
+      await tmux.pressEnter(`${SES}:${idx}`);
+      for (let i = 0; i < 40 && !fs.existsSync(out); i++) await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(fs.readFileSync(out, 'utf8')).toBe('review `const x = $(id)`');
+      await tmux.killWindow(SES, idx);
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
   it.runIf(hasTmux)('two launches creating the same session at once both succeed', async () => {
     const name = `foreman-race-${process.pid}`;
     try {
