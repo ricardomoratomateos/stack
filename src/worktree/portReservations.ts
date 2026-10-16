@@ -149,12 +149,20 @@ export class PortReservationFile implements SharedPortReservations {
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code !== 'EEXIST') return undefined;
       }
+      // lstat, not stat: a dangling symlink at the lock path makes open('wx')
+      // say EEXIST while stat says ENOENT — and "released meanwhile, retry at
+      // once" then spun forever, never reaching the deadline below. lstat sees
+      // the link itself, so a stale one ages out and is removed like a file.
       try {
-        if (Date.now() - fs.statSync(this.lock).mtimeMs > STALE_LOCK_MS) {
+        if (Date.now() - fs.lstatSync(this.lock).mtimeMs > STALE_LOCK_MS) {
           fs.rmSync(this.lock, { force: true });
           continue;
         }
-      } catch { /* released meanwhile: retry at once */ continue; }
+      } catch {
+        // Released meanwhile: retry at once — but never past the deadline.
+        if (Date.now() > deadline) return undefined;
+        continue;
+      }
       if (Date.now() > deadline) return undefined;
       await new Promise((r) => setTimeout(r, 5 + Math.random() * 10));
     }

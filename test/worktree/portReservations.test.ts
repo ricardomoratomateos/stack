@@ -183,12 +183,34 @@ describe('PortReservationFile', () => {
 
     it('retries at once when the lock is released between seeing it and looking at it', async () => {
       fs.writeFileSync(lock(), '');
-      vi.mocked(fs.statSync).mockImplementationOnce(() => {
+      vi.mocked(fs.lstatSync).mockImplementationOnce(() => {
         fs.unlinkSync(lock());
         throw fsError('ENOENT');
       });
       expect(await windowWith(1).tryReserve(9899)).toBe(true);
       expect(await windowWith(2).tryReserve(9899)).toBe(false);
+    });
+
+    it('ages out a stale dangling symlink at the lock path instead of spinning on it', async () => {
+      fs.symlinkSync(path.join(storage, 'nowhere'), lock());
+      const old = new Date(Date.now() - 60_000);
+      fs.lutimesSync(lock(), old, old);
+      expect(await windowWith(1).tryReserve(9899)).toBe(true);
+      expect(await windowWith(2).tryReserve(9899)).toBe(false);
+    });
+
+    it('gives up at the deadline when the lock can never be inspected', async () => {
+      fs.writeFileSync(lock(), '');
+      vi.mocked(fs.lstatSync).mockImplementation(() => { throw fsError('ENOENT'); });
+      let t = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockImplementation(() => (t += 1_000));
+      try {
+        // Falls back to this window's own reservations rather than hanging.
+        expect(await windowWith(1).tryReserve(9899)).toBe(true);
+      } finally {
+        clock.mockRestore();
+        vi.mocked(fs.lstatSync).mockRestore();
+      }
     });
   });
 });
