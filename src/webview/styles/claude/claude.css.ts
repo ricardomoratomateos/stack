@@ -74,7 +74,7 @@ body.vscode-high-contrast .fm-claude, body.vscode-high-contrast-light .fm-claude
 .cl-row[data-selected] { background: color-mix(in srgb, var(--fm-accent) 8%, transparent); border-color: color-mix(in srgb, var(--fm-accent) 35%, transparent); }
 .cl-row-main {
   width: 100%; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 10px; align-items: start;
-  padding: 9px 10px; border: 0; border-radius: 10px; background: transparent; text-align: left;
+  padding: 12px 12px 11px; border: 0; border-radius: 10px; background: transparent; text-align: left;
 }
 .cl-row:not([data-selected]) .cl-row-main:hover { background: var(--fm-hover); }
 .cl-glyph { height: 18px; display: flex; align-items: center; justify-content: center; }
@@ -84,7 +84,7 @@ body.vscode-high-contrast .fm-claude, body.vscode-high-contrast-light .fm-claude
 .cl-glyph-review circle, .cl-glyph-review path { stroke: var(--fm-ok); }
 .cl-glyph-idle circle { stroke: var(--fm-idle); }
 .cl-glyph-working { font-size: 16px; line-height: 1; color: var(--fm-accent); }
-.cl-body { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.cl-body { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .cl-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .cl-name-text { font-weight: 500; color: var(--fm-text); }
 .cl-row[data-group='idle'] .cl-name-text, .cl-row[data-group='missing'] .cl-name-text { color: var(--fm-text-dim); }
