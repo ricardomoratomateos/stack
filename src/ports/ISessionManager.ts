@@ -23,10 +23,12 @@ export interface ISessionManager {
   sendKeys(target: string, keys: string): Promise<void>;
   /**
    * Paste multi-line text into a window as a single bracketed-paste block (no
-   * per-line Enter), then submit once. Used to hand a review prompt to a live
-   * agent without each newline triggering a submit.
+   * per-line Enter), left unsent. Submitting is a separate pressEnter, because
+   * the receiving agent needs a beat to take the paste in first.
    */
-  paste(target: string, text: string, submit?: boolean): Promise<void>;
+  paste(target: string, text: string): Promise<void>;
+  /** Send a single Enter keypress to a window (submits whatever its input holds). */
+  pressEnter(target: string): Promise<void>;
   /** Replace the window's process with a command run directly (nothing typed or echoed in the pane). */
   respawnWindow(session: string, windowIndex: number, command: string): Promise<void>;
   selectWindow(session: string, windowIndex: number): Promise<void>;

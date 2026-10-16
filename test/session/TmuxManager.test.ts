@@ -162,13 +162,20 @@ describe('command construction', () => {
     expect(calls).toEqual(['tmux select-window -t "s1:4"']);
   });
 
-  it('paste loads a temp-file buffer, bracketed-pastes it, then submits with Enter', async () => {
+  it('paste loads a temp-file buffer and bracketed-pastes it, leaving it unsent', async () => {
+    // Submitting is AgentSessionManager's job now: an Enter sent the moment
+    // paste-buffer returns lands while the agent is still taking the paste in.
     const calls = captureExec(() => ({}));
     await tmux.paste('s1:2', 'line one\nline two');
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(2);
     expect(calls[0]).toMatch(/^tmux load-buffer -b "foreman-paste-\d+-\d+-[0-9a-f]+" ".*foreman-paste-[^/]+\/paste\.txt"$/);
     expect(calls[1]).toMatch(/^tmux paste-buffer -d -p -b "foreman-paste-\d+-\d+-[0-9a-f]+" -t "s1:2"$/);
-    expect(calls[2]).toBe('tmux send-keys -t "s1:2" Enter');
+  });
+
+  it('pressEnter sends a single Enter key to the target', async () => {
+    const calls = captureExec(() => ({}));
+    await tmux.pressEnter('s1:2');
+    expect(calls).toEqual(['tmux send-keys -t "s1:2" Enter']);
   });
 
   it('gives every paste its own buffer and file, so concurrent pastes cannot swap or delete each other\'s text', async () => {
@@ -184,7 +191,7 @@ describe('command construction', () => {
       if (paste) pasted.push({ buffer: paste[1], target: paste[2] });
       return {};
     });
-    await Promise.all([tmux.paste('s1:1', 'for agent one', false), tmux.paste('s2:1', 'for agent two', false)]);
+    await Promise.all([tmux.paste('s1:1', 'for agent one'), tmux.paste('s2:1', 'for agent two')]);
 
     expect(loaded.size).toBe(2);
     expect(pasted).toHaveLength(2);
@@ -202,7 +209,6 @@ describe('command construction', () => {
     });
     await expect(tmux.paste('s1:9', 'x')).rejects.toThrow("can't find pane");
     expect(calls[2]).toMatch(/^tmux delete-buffer -b "foreman-paste-/);
-    expect(calls).not.toContain('tmux send-keys -t "s1:9" Enter');
     expect(file).not.toBe('');
     expect(fs.existsSync(file)).toBe(false);
     expect(fs.existsSync(path.dirname(file))).toBe(false);

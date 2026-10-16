@@ -7,6 +7,7 @@ import { ProviderFactory } from '../../src/providers/ProviderFactory';
 import type { ConfigSource } from '../../src/providers/claude/ClaudeProvider';
 import type { ISessionManager } from '../../src/ports/ISessionManager';
 import type { AgentSessionState, Worktree } from '../../src/types';
+import type { ProviderId } from '../../src/ports/IAgentProvider';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,7 @@ function makeStub(): ISessionManager {
     newWindow: vi.fn().mockResolvedValue(1),
     sendKeys: vi.fn().mockResolvedValue(undefined),
     paste: vi.fn().mockResolvedValue(undefined),
+    pressEnter: vi.fn().mockResolvedValue(undefined),
     respawnWindow: vi.fn().mockResolvedValue(undefined),
     selectWindow: vi.fn().mockResolvedValue(undefined),
     killWindow: vi.fn().mockResolvedValue(undefined),
@@ -67,9 +69,24 @@ function create(claudeCommand = 'claude', memento: vscode.Memento = new FakeMeme
 }
 
 /** Seed the private windows map directly (state combinations unreachable via public API). */
-function seed(mgr: AgentSessionManager, worktreeId: string, entries: Array<[number, { kind: 'agent' | 'shell'; provider?: 'claude'; state: AgentSessionState; name: string }]>) {
+function seed(mgr: AgentSessionManager, worktreeId: string, entries: Array<[number, { kind: 'agent' | 'shell'; provider?: ProviderId; state: AgentSessionState; name: string; hookSeen?: boolean; title?: string }]>) {
   const map = (mgr as unknown as { windowMap(id: string): Map<number, unknown> }).windowMap(worktreeId);
   for (const [idx, meta] of entries) map.set(idx, meta);
+}
+
+/** The prompt was pasted into `target` and Enter was pressed there afterwards. */
+function expectSubmitted(stub: ISessionManager, target: string, text: string) {
+  expect(stub.paste).toHaveBeenCalledWith(target, text);
+  expect(stub.pressEnter).toHaveBeenCalledWith(target);
+  const pasted = (stub.paste as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+  const entered = (stub.pressEnter as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+  expect(pasted).toBeLessThan(entered);
+}
+
+/** The prompt was pasted into `target` and left there: no Enter at all. */
+function expectUnsent(stub: ISessionManager, target: string, text: string) {
+  expect(stub.paste).toHaveBeenCalledWith(target, text);
+  expect(stub.pressEnter).not.toHaveBeenCalled();
 }
 
 beforeEach(() => {
@@ -383,7 +400,7 @@ describe('launch command line', () => {
       { index: 1, name: 'claude', command: 'node' },
     ]);
     await mgr.launch(wt, { prompt: 'fix ${user.id}' });
-    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'fix ${user.id}', true);
+    expectSubmitted(stub, `${SESSION}:1`, 'fix ${user.id}');
   });
 
   it('shows the viewer before waiting on the agent, so its boot is watched rather than waited out', async () => {
@@ -405,7 +422,7 @@ describe('launch command line', () => {
       .mockResolvedValue([{ index: 1, name: 'claude', command: 'node' }]);
     await mgr.launch(wt, { prompt: 'go' });
     expect(listWindows.mock.calls.length).toBeGreaterThan(1);
-    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+    expectSubmitted(stub, `${SESSION}:1`, 'go');
   });
 
   it('sees the agent through the shell that launched it: command stays a shell, but the pane has a child', async () => {
@@ -420,7 +437,7 @@ describe('launch command line', () => {
       .mockResolvedValue(true);
     await mgr.launch(wt, { prompt: 'go' });
     expect(stub.hasChildProcess).toHaveBeenCalledWith(4242);
-    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+    expectSubmitted(stub, `${SESSION}:1`, 'go');
   });
 
   it('treats a failing child lookup as "not yet"', async () => {
@@ -430,7 +447,7 @@ describe('launch command line', () => {
     ]);
     (stub.hasChildProcess as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no pgrep'));
     await mgr.launch(wt, { prompt: 'go' });
-    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', false);
+    expectUnsent(stub, `${SESSION}:1`, 'go');
   });
 
   it('leaves the prompt unsent when the agent never takes the pane', async () => {
@@ -441,14 +458,14 @@ describe('launch command line', () => {
       { index: 1, name: 'claude', command: 'zsh' },
     ]);
     await mgr.launch(wt, { prompt: 'rm -rf everything' });
-    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'rm -rf everything', false);
+    expectUnsent(stub, `${SESSION}:1`, 'rm -rf everything');
   });
 
   it('tolerates tmux failing while it waits for the agent', async () => {
     const { mgr, stub } = create();
     (stub.listWindows as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no server'));
     await mgr.launch(wt, { prompt: 'go' });
-    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', false);
+    expectUnsent(stub, `${SESSION}:1`, 'go');
   });
 
   it('waits on a real timer when no sleep is injected', async () => {
@@ -462,24 +479,32 @@ describe('launch command line', () => {
       makeFactory(), new FakeMemento() as unknown as vscode.Memento, stub, () => true, 'Test-Host.local',
     );
 
+    // The agent confirms the submit the way Claude Code does: UserPromptSubmit → 'active'.
+    (stub.pressEnter as ReturnType<typeof vi.fn>).mockImplementation(async () => mgr.updateState('wt-1', 'active', 1));
+
     const started = Date.now();
     const launched = mgr.launch(wt, { prompt: 'go' });
     // The hook wait is real-timed too (6 s cap): release it once the process poll has slept.
     await new Promise((r) => setTimeout(r, 200));
     mgr.updateState('wt-1', 'waiting', 1);
     await launched;
-    expect(Date.now() - started).toBeGreaterThanOrEqual(100);
-    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+    // Process poll, then the input-ready and paste settle delays, all real.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(200 + 500 + 250 - 20);
+    expectSubmitted(stub, `${SESSION}:1`, 'go');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
   });
 
   describe('waiting for the agent to listen', () => {
-    /** Process detection succeeds at once; every sleep hangs, so only a hook can release the paste. */
+    /**
+     * Process detection succeeds at once; the hook wait's cap never elapses, so
+     * only a hook can release the paste. Every other sleep is instant.
+     */
     function createHung() {
       const stub = makeStub();
       (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 1, name: 'claude', command: 'node', pid: 7 }]);
       const mgr = new AgentSessionManager(
         makeFactory(), new FakeMemento() as unknown as vscode.Memento, stub, () => true, 'Test-Host.local',
-        () => new Promise<void>(() => {}),
+        (ms) => (ms === 6_000 ? new Promise<void>(() => {}) : Promise.resolve()),
       );
       return { mgr, stub };
     }
@@ -492,7 +517,7 @@ describe('launch command line', () => {
       expect(stub.paste).not.toHaveBeenCalled();
       mgr.updateState('wt-1', 'waiting', 1);
       await launched;
-      expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+      expectSubmitted(stub, `${SESSION}:1`, 'go');
     });
 
     it('a hook without a window index releases every waiter of that worktree, and no other', async () => {
@@ -519,14 +544,14 @@ describe('launch command line', () => {
         return [{ index: 1, name: 'claude', command: 'node', pid: 7 }];
       });
       await mgr.launch(wt, { prompt: 'go' }); // would hang here if it waited
-      expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+      expectSubmitted(stub, `${SESSION}:1`, 'go');
     });
 
     it('pastes anyway once the cap passes — hooks the user never trusted do not fire', async () => {
       const { mgr, stub } = create(); // instant sleep: the cap elapses at once
       (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 1, name: 'claude', command: 'node', pid: 7 }]);
       await mgr.launch(wt, { prompt: 'go' });
-      expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'go', true);
+      expectSubmitted(stub, `${SESSION}:1`, 'go');
     });
   });
 
@@ -560,7 +585,7 @@ describe('launch command line', () => {
       1,
       'FOREMAN_WINDOW_INDEX="1" FOREMAN_WORKSPACE_ID="wt-1" my-claude; exec "${SHELL:-/bin/sh}"',
     );
-    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:1`, 'hello', true);
+    expectSubmitted(stub, `${SESSION}:1`, 'hello');
   });
 });
 
@@ -936,7 +961,136 @@ describe('sendPromptToAgent', () => {
   it('pasteToActiveWindow pastes to the session (active pane) without submitting', async () => {
     const { mgr, stub } = create();
     await mgr.pasteToActiveWindow('wt-1', "'/x/shot.png' ");
-    expect(stub.paste).toHaveBeenCalledWith(SESSION, "'/x/shot.png' ", false);
+    expectUnsent(stub, SESSION, "'/x/shot.png' ");
+  });
+});
+
+// ── submitting a prompt (settle, Enter, confirmation) ────────────────────────
+
+describe('submitting a prompt', () => {
+  /** A manager whose sleeps are instant but recorded, interleaved with the tmux calls. */
+  function createRecorded() {
+    const log: string[] = [];
+    const stub = makeStub();
+    (stub.paste as ReturnType<typeof vi.fn>).mockImplementation(async () => { log.push('paste'); });
+    (stub.pressEnter as ReturnType<typeof vi.fn>).mockImplementation(async () => { log.push('enter'); });
+    const mgr = new AgentSessionManager(
+      makeFactory(), new FakeMemento() as unknown as vscode.Memento, stub, () => true, 'Test-Host.local',
+      async (ms) => { log.push(`sleep ${ms}`); },
+    );
+    return { mgr, stub, log };
+  }
+  /** A claude window at its prompt whose hooks have been reaching us. */
+  const listening = { kind: 'agent' as const, provider: 'claude' as const, state: 'waiting' as const, name: 'claude', hookSeen: true };
+  /** The agent confirms the Nth Enter (1-based) the way Claude Code does: UserPromptSubmit → 'active'. */
+  function confirmOn(stub: ISessionManager, mgr: AgentSessionManager, nth: number, windowIndex: number | undefined = 3) {
+    let presses = 0;
+    (stub.pressEnter as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      if (++presses === nth) mgr.updateState('wt-1', 'active', windowIndex);
+    });
+  }
+
+  it('lets the paste settle before pressing Enter — an Enter during the paste is swallowed', async () => {
+    const { mgr, log } = createRecorded();
+    seed(mgr, 'wt-1', [[3, { ...listening, hookSeen: false }]]);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(log).toEqual(['paste', 'sleep 250', 'enter']);
+  });
+
+  it('stops at the first Enter the agent confirms', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, listening]]);
+    confirmOn(stub, mgr, 1);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it('presses Enter again when no confirmation comes, at most twice more', async () => {
+    const { mgr, log } = createRecorded();
+    seed(mgr, 'wt-1', [[3, listening]]);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    // Each wait is armed before its Enter, so a confirmation cannot slip in between.
+    expect(log).toEqual(['paste', 'sleep 250', 'sleep 2000', 'enter', 'sleep 2000', 'enter', 'sleep 2000', 'enter']);
+  });
+
+  it('a retry that gets confirmed ends the retries', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, listening]]);
+    confirmOn(stub, mgr, 2);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(2);
+  });
+
+  it('takes a permission request as confirmation too — the agent is working on it', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, listening]]);
+    (stub.pressEnter as ReturnType<typeof vi.fn>).mockImplementation(async () => mgr.updateState('wt-1', 'permission', 3));
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts a confirmation from an agent that sends no window index', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, listening]]);
+    confirmOn(stub, mgr, 1, undefined);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores another window's events", async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, listening], [4, { ...listening, state: 'active' }]]);
+    confirmOn(stub, mgr, 1, 4);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(3);
+  });
+
+  it('presses once when no hook from this window has arrived — silence then proves nothing', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, { ...listening, hookSeen: false }]]);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it('presses once for opencode, which has no submit hook to confirm with', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, { ...listening, provider: 'opencode', name: 'opencode' }]]);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it('never presses again into a window asking for permission — an Enter there is a "yes"', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, { ...listening, state: 'permission' }]]);
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops pressing once the window is gone', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [[3, listening]]);
+    (stub.pressEnter as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      (mgr as unknown as { windows: Map<string, Map<number, unknown>> }).windows.get('wt-1')!.delete(3);
+    });
+    await mgr.sendPromptToAgent(wt, 'review this');
+    expect(stub.pressEnter).toHaveBeenCalledTimes(1);
+  });
+
+  it('a launch waits for the input box after SessionStart, then settles the paste, then submits', async () => {
+    const { mgr, stub, log } = createRecorded();
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 1, name: 'claude', command: 'node', pid: 7 }]);
+    // SessionStart arrives while the process is being detected.
+    let started = false;
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      if (!started) { started = true; mgr.updateState('wt-1', 'waiting', 1); }
+      return [{ index: 1, name: 'claude', command: 'node', pid: 7 }];
+    });
+    (stub.pressEnter as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      log.push('enter');
+      mgr.updateState('wt-1', 'active', 1);
+    });
+    await mgr.launch(wt, { prompt: 'go' });
+    expect(log).toEqual(['sleep 500', 'paste', 'sleep 250', 'sleep 2000', 'enter']);
   });
 });
 

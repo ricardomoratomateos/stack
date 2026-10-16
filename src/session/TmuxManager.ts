@@ -89,7 +89,16 @@ export class TmuxManager implements ISessionManager {
     await this.run(`tmux send-keys -t "${target}" '${escaped}' Enter`);
   }
 
-  async paste(target: string, text: string, submit = true): Promise<void> {
+  /**
+   * Leaves the text unsent. Submitting used to happen here, with an Enter sent
+   * the instant paste-buffer returned — which is before the receiving app has
+   * processed the paste: Claude Code takes a large bracketed paste in
+   * asynchronously (it becomes "[Pasted text #1 +N lines]"), and an Enter that
+   * arrives meanwhile is absorbed, so the prompt sat in the input unsent.
+   * AgentSessionManager now owns submitting, with a settle delay and an
+   * acknowledgement; pressEnter is the primitive it uses.
+   */
+  async paste(target: string, text: string): Promise<void> {
     // Route the text through a tmux buffer loaded from a temp file: this avoids
     // shell-escaping a large multi-line payload, and paste-buffer -p wraps it in
     // bracketed-paste markers so the receiving app (e.g. Claude Code) treats the
@@ -118,12 +127,13 @@ export class TmuxManager implements ISessionManager {
         await this.run(`tmux delete-buffer -b "${bufferName}"`).catch(() => {});
         throw e;
       }
-      // Submit once, after the paste has landed — unless the caller wants to
-      // leave the text unsent (e.g. an image path the user still adds a prompt to).
-      if (submit) await this.run(`tmux send-keys -t "${target}" Enter`);
     } finally {
       await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
     }
+  }
+
+  async pressEnter(target: string): Promise<void> {
+    await this.run(`tmux send-keys -t "${target}" Enter`);
   }
 
   async respawnWindow(session: string, windowIndex: number, command: string): Promise<void> {

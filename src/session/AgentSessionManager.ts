@@ -323,6 +323,34 @@ export class AgentSessionManager {
   /** Launches waiting on a window's first hook event, keyed `worktreeId:windowIndex`. */
   private readyWaiters = new Map<string, () => void>();
 
+  /**
+   * SessionStart is sent from the agent's startup, not from its input box:
+   * Claude Code fires it while the TUI is still coming up. A beat after it,
+   * the box is there to paste into.
+   */
+  private static readonly INPUT_READY_SETTLE_MS = 500;
+  /**
+   * Between pasting and pressing Enter. The agent takes a bracketed paste in
+   * asynchronously — Claude Code folds a large one into "[Pasted text #1 +N
+   * lines]" — and an Enter that lands meanwhile is absorbed into the paste
+   * instead of submitting it. A constant, not something measured: the retry
+   * below is what covers a paste that takes longer.
+   */
+  private static readonly PASTE_SETTLE_MS = 250;
+  /** How long to wait for the agent to confirm a submit before pressing Enter again. */
+  private static readonly SUBMIT_ACK_TIMEOUT_MS = 2_000;
+  /** Enters pressed after the first one, at most, when no confirmation comes. */
+  private static readonly SUBMIT_RETRIES = 2;
+  /**
+   * Providers whose hook fires on submit: UserPromptSubmit, which HookServer
+   * maps to 'active' (see ClaudeHookInstaller / CodexHookInstaller). opencode's
+   * plugin has no submit event — only a reply to a permission — so it cannot
+   * acknowledge one.
+   */
+  private static readonly SUBMIT_ACK_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>(['claude', 'codex']);
+  /** Prompt submissions waiting on their window's next hook event, keyed `worktreeId:windowIndex`. */
+  private submitWaiters = new Map<string, Set<(state: AgentSessionState) => void>>();
+
   private aggregateState(worktreeId: string): AgentSessionState {
     const states = [...(this.windows.get(worktreeId) ?? new Map()).values()]
       .filter(w => w.kind === 'agent')
@@ -419,6 +447,14 @@ export class AgentSessionManager {
     const viewer = await this.getOrCreateViewer(worktree);
     viewer.show();
 
+    // The session row goes up with the terminal, not after the prompt: getting
+    // a prompt in can take the agent's whole boot plus a few seconds of
+    // waiting for it to confirm the submit, and the card should not lag that.
+    this.persistState(worktree.id);
+    this.stateChangeEmitter.fire({ worktreeId: worktree.id, state: 'waiting' });
+    this.syncShellPolling();
+    this.terminalsChangeEmitter.fire();
+
     // The prompt is pasted, never passed as an argument. See buildCommand: the
     // launch line goes through `sh -c`, which eats `${...}` and backticks — and
     // the review panel wraps every quoted code line in backticks, so sending
@@ -434,15 +470,12 @@ export class AgentSessionManager {
       // paste come on a beat later, and until then a paste sits in the tty's
       // line buffer — a multi-line prompt would submit line by line. The
       // agent's own first hook (SessionStart, which every provider emits) is
-      // the "listening now" signal.
-      if (started) await this.waitForHook(worktree.id, windowIndex);
-      await this.tmux.paste(`${sessionName}:${windowIndex}`, opts.prompt, started);
+      // the "listening now" signal — nearly: see INPUT_READY_SETTLE_MS.
+      if (started && (await this.waitForHook(worktree.id, windowIndex))) {
+        await this.sleep(AgentSessionManager.INPUT_READY_SETTLE_MS);
+      }
+      await this.submitPrompt(worktree.id, windowIndex, opts.prompt, started);
     }
-
-    this.persistState(worktree.id);
-    this.stateChangeEmitter.fire({ worktreeId: worktree.id, state: 'waiting' });
-    this.syncShellPolling();
-    this.terminalsChangeEmitter.fire();
     return viewer;
   }
 
@@ -492,6 +525,79 @@ export class AgentSessionManager {
   }
 
   /**
+   * Paste a prompt into an agent window and, when `submit`, make sure it is
+   * actually sent — the one path every prompt takes, from a launch or from
+   * the review panel.
+   *
+   * Pressing Enter the instant the paste returned often lost the submit:
+   * the agent was still taking the paste in and swallowed the
+   * keypress. So: paste, let it settle, press Enter, and then — where the
+   * agent can say so — wait for it to confirm. Claude Code and Codex fire
+   * UserPromptSubmit on a submit, which arrives here as 'active' for this
+   * window; no confirmation within SUBMIT_ACK_TIMEOUT_MS means the Enter went
+   * nowhere, and it is pressed again, at most SUBMIT_RETRIES times.
+   *
+   * Retrying is only safe when silence means "not submitted", so it needs
+   * evidence that this window's hooks reach us (one has already arrived), a
+   * provider that has a submit hook, and an agent sitting at its prompt. An
+   * Enter is not harmless in general: into a permission dialog it is a "yes".
+   * Without all three the Enter is pressed once, after the same settle delay —
+   * which is the part of the fix that does not depend on hooks at all.
+   */
+  private async submitPrompt(worktreeId: string, windowIndex: number, text: string, submit: boolean): Promise<void> {
+    const target = `${TmuxManager.sessionName(worktreeId)}:${windowIndex}`;
+    await this.tmux.paste(target, text);
+    if (!submit) return;
+    await this.sleep(AgentSessionManager.PASTE_SETTLE_MS);
+
+    if (!this.canConfirmSubmit(worktreeId, windowIndex)) {
+      await this.tmux.pressEnter(target);
+      return;
+    }
+    for (let attempt = 0; attempt <= AgentSessionManager.SUBMIT_RETRIES; attempt++) {
+      // Armed before the keypress, so an acknowledgement cannot slip in between.
+      const confirmed = this.waitForSubmit(worktreeId, windowIndex);
+      await this.tmux.pressEnter(target);
+      if (await confirmed) return;
+      // Killed while we waited: there is nothing left to press Enter in.
+      if (!this.windows.get(worktreeId)?.has(windowIndex)) return;
+    }
+    console.warn(`[foreman] no submit confirmation from ${target} after ${AgentSessionManager.SUBMIT_RETRIES + 1} Enters`);
+  }
+
+  private canConfirmSubmit(worktreeId: string, windowIndex: number): boolean {
+    const meta = this.windows.get(worktreeId)?.get(windowIndex);
+    return meta?.kind === 'agent'
+      && meta.hookSeen === true
+      && meta.provider !== undefined
+      && AgentSessionManager.SUBMIT_ACK_PROVIDERS.has(meta.provider)
+      && (meta.state === 'waiting' || meta.state === 'idle');
+  }
+
+  /**
+   * True once the window reports it took a prompt: 'active' (UserPromptSubmit,
+   * or a tool already running), 'permission' (it is working and asking), or
+   * 'terminated' (gone — stop pressing). False after SUBMIT_ACK_TIMEOUT_MS.
+   */
+  private waitForSubmit(worktreeId: string, windowIndex: number): Promise<boolean> {
+    const key = `${worktreeId}:${windowIndex}`;
+    const waiters = this.submitWaiters.get(key) ?? new Set();
+    this.submitWaiters.set(key, waiters);
+    let waiter!: (state: AgentSessionState) => void;
+    const seen = new Promise<boolean>((resolve) => {
+      waiter = (state) => {
+        if (state === 'active' || state === 'permission' || state === 'terminated') resolve(true);
+      };
+      waiters.add(waiter);
+    });
+    const capped = this.sleep(AgentSessionManager.SUBMIT_ACK_TIMEOUT_MS).then(() => false);
+    return Promise.race([seen, capped]).finally(() => {
+      waiters.delete(waiter);
+      if (waiters.size === 0) this.submitWaiters.delete(key);
+    });
+  }
+
+  /**
    * Paste a prompt into a worktree's live agent window and bring it to the front.
    * Picks a window that is ready for input (waiting/idle/permission) when one
    * exists, else the first agent window. Returns false if the worktree has no
@@ -508,7 +614,7 @@ export class AgentSessionManager {
 
     const sessionName = TmuxManager.sessionName(worktree.id);
     await this.tmux.selectWindow(sessionName, windowIndex);
-    await this.tmux.paste(`${sessionName}:${windowIndex}`, prompt);
+    await this.submitPrompt(worktree.id, windowIndex, prompt, true);
 
     const viewer = await this.getOrCreateViewer(worktree).catch(() => undefined);
     viewer?.show();
@@ -548,7 +654,7 @@ export class AgentSessionManager {
 
   /** Paste text (e.g. a screenshot path) into the worktree's active pane, unsent. */
   async pasteToActiveWindow(worktreeId: string, text: string): Promise<void> {
-    await this.tmux.paste(TmuxManager.sessionName(worktreeId), text, false);
+    await this.tmux.paste(TmuxManager.sessionName(worktreeId), text);
   }
 
   getState(worktreeId: string): AgentSessionState {
@@ -571,6 +677,7 @@ export class AgentSessionManager {
       // renders with a neutral mark rather than guessing.
       map.set(windowIndex, meta.kind === 'agent' ? { ...meta, state, hookSeen: true } : { ...meta, kind: 'agent', state, hookSeen: true });
       this.readyWaiters.get(`${workspaceId}:${windowIndex}`)?.();
+      for (const waiter of this.submitWaiters.get(`${workspaceId}:${windowIndex}`) ?? []) waiter(state);
     } else {
       // Agents launched before FOREMAN_WINDOW_INDEX existed: no way to know the
       // source window — apply to all agent windows (pre-per-session behavior).
@@ -579,6 +686,9 @@ export class AgentSessionManager {
       }
       for (const [key, release] of this.readyWaiters) {
         if (key.startsWith(`${workspaceId}:`)) release();
+      }
+      for (const [key, waiters] of this.submitWaiters) {
+        if (key.startsWith(`${workspaceId}:`)) for (const waiter of waiters) waiter(state);
       }
     }
     this.persistState(workspaceId);
