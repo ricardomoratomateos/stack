@@ -118,7 +118,10 @@ body.vscode-high-contrast .fm .fm-split-solid .fm-split-chev, body.vscode-high-c
   padding: 5px 4px; border: 0; border-radius: var(--fm-radius-sm); background: transparent; text-align: left;
 }
 .fm-sess-main:hover { background: var(--fm-hover); }
-.fm-sess-mark { display: flex; align-items: center; justify-content: center; }
+.fm-sess-mark { position: relative; display: flex; align-items: center; justify-content: center; }
+.fm-sess-shell { font-size: 13px; color: var(--fm-text-dim); }
+/* The state, as a badge on the agent mark's corner, cut out of the row's background. */
+.fm-sess-mark .fm-sess-dot { position: absolute; right: -2px; bottom: -2px; width: 6px; height: 6px; box-shadow: 0 0 0 1.5px var(--fm-surface, var(--vscode-sideBar-background)); }
 .fm-sess-prompt { font-family: var(--fm-mono); font-size: 11px; color: var(--fm-text-dim); }
 .fm-sess-text { min-width: 0; display: flex; gap: 6px; align-items: baseline; }
 .fm-sess-name { flex: none; max-width: 60%; font-size: 12px; color: var(--fm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
