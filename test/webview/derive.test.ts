@@ -101,9 +101,9 @@ describe('formatAge', () => {
 describe('describe', () => {
   it('says what a worktree is up to, per group', () => {
     const ask = wt({ sessions: [session('permission', { attention: 'Bash: ls' })] });
-    expect(describeWt(ask).line).toBe('Wants to run a command');
+    expect(describeWt(ask).line).toBe('$ ls');
     expect(describeWt(ask).attention).toEqual({ command: 'ls' });
-    expect(describeWt(wt({ sessions: [session('permission', { attention: 'needs ok' })] })).line).toBe('Needs your answer');
+    expect(describeWt(wt({ sessions: [session('permission', { attention: 'needs ok' })] })).line).toBe('needs ok');
     expect(describeWt(wt({ sessions: [session('permission', { title: 'Fix it' })] })).line).toBe('Fix it');
     expect(describeWt(wt({ sessions: [session('permission')] })).line).toBe('Wants your attention');
     expect(describeWt(wt({ sessions: [session('active', { title: 'Editing a.ts' })] })).line).toBe('Editing a.ts');

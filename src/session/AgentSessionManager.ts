@@ -597,8 +597,8 @@ export class AgentSessionManager {
     return viewer;
   }
 
-  launchWithPrompt(worktree: Worktree, prompt: string): Promise<vscode.Terminal> {
-    return this.launch(worktree, { prompt });
+  launchWithPrompt(worktree: Worktree, prompt: string, provider?: ProviderId): Promise<vscode.Terminal> {
+    return this.launch(worktree, { prompt, provider });
   }
 
   /**

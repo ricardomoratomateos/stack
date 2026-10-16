@@ -447,8 +447,13 @@ export async function activate(ctx: vscode.ExtensionContext) {
   const diffPanelManager = new DiffPanelManager(ctx.extensionUri, service, () => config.get().sidebarStyle);
 
   const newTaskPanel = new NewTaskPanelManager(ctx.extensionUri, {
-    branchOptions: () => service.newTaskBranchOptions(),
-    createWorktree: (opts) => service.createWorktree(opts),
+    init: () => service.newTaskInit(),
+    sidebarStyle: () => config.get().sidebarStyle,
+    // The panel shows a failure inline, next to the text it must not lose, so
+    // the service's toast would only say it a second time.
+    createWorktree: (opts) => service.createWorktree({ ...opts, silent: true }),
+    showProviderInstall: (provider) => service.showProviderInstall(provider),
+    confirmDiscard: () => service.confirmDiscardNewTask(),
   });
   ctx.subscriptions.push(newTaskPanel);
 
@@ -677,6 +682,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
   const resyncDocker = () => {
     service.syncDockerPolling();
     webviewProvider.push();
+    // An open settings panel follows what changed under it — the sidebar style
+    // picked from the command, the file edited by hand. It keeps whatever the
+    // person is in the middle of editing (see reconcile in settings/draft.ts).
+    settingsPanel.refresh();
   };
   ctx.subscriptions.push(
     repoConfigWatcher,
@@ -684,7 +693,11 @@ export async function activate(ctx: vscode.ExtensionContext) {
     repoConfigWatcher.onDidCreate(resyncDocker),
     repoConfigWatcher.onDidDelete(resyncDocker),
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('stack')) resyncDocker();
+      if (e.affectsConfiguration('stack')) {
+        resyncDocker();
+        // The panel wears the sidebar style's accent and lists the installed agents.
+        newTaskPanel.refresh();
+      }
       if (e.affectsConfiguration('stack.sidebarStyle')) diffPanelManager.refreshStyle();
     }),
   );

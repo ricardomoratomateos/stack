@@ -168,7 +168,7 @@ export type WebMessage =
   | { type: 'openDiff'; worktreeId: string }
   /** The empty-state "New agent" button opens the full-screen panel. */
   | { type: 'openNewTask' }
-  | { type: 'createWorktree'; branch: string; title?: string; description?: string; baseBranch?: string }
+  | { type: 'createWorktree'; branch: string; title?: string; description?: string; baseBranch?: string; provider?: ProviderId }
   | { type: 'listBranches' }
   | { type: 'selectWorktree'; worktreeId: string }
   /** The explicit answer to a `missing` worktree: drop its entry (nothing on disk is touched). */
