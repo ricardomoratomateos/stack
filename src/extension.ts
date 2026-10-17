@@ -61,6 +61,7 @@ import { ManagerTools } from './mcp/ManagerTools';
 import { BRIDGE_FILE } from './mcp/protocol';
 import { bridgeCommand, installBridge, type BridgeCommand } from './mcp/workerMcp';
 import { claudeBinary, disableManager, enableManager, execRun, managerEnabled } from './mcp/registration';
+import { installClaudeAssets, removeClaudeAssets } from './mcp/claudeAssets';
 
 /**
  * Surfaces a broken `.stack/config.json` with a way to go fix it.
@@ -536,6 +537,11 @@ export async function activate(ctx: vscode.ExtensionContext) {
   };
   const relativeToRepo = (root: string | undefined, abs: string) =>
     root && abs.startsWith(root + path.sep) ? path.relative(root, abs) : abs;
+  const CLAUDE_DIR = path.join(os.homedir(), '.claude');
+  // With the manager on, keep the skill and commands in step with this version.
+  if (managerEnabled((f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : undefined), path.join(os.homedir(), '.claude.json'))) {
+    try { installClaudeAssets(CLAUDE_DIR); } catch { /* best effort */ }
+  }
   const settingsPanel = new SettingsPanelManager(ctx.extensionUri, {
     snapshot: () => {
       const root = repoRootOf();
@@ -849,10 +855,23 @@ export async function activate(ctx: vscode.ExtensionContext) {
         return;
       }
       const result = await enableManager(execRun, claudeBinary(config.get().claudeCommand), bridge);
-      void (result.ok ? vscode.window.showInformationMessage(result.message) : vscode.window.showErrorMessage(result.message));
+      if (!result.ok) {
+        void vscode.window.showErrorMessage(result.message);
+        return;
+      }
+      // The skill and the /stack commands, so the tools are reachable in plain words.
+      let extra = ' Try /stack, /stack-task AS-1234 or /stack-next — or just ask "¿cómo van mis agentes?".';
+      try {
+        const { skipped } = installClaudeAssets(CLAUDE_DIR);
+        if (skipped.length) extra += ` (Kept your own ${skipped.join(', ')}.)`;
+      } catch (e) {
+        scriptOutput.appendLine(`[stack] could not install the Claude skill/commands: ${String(e)}`);
+      }
+      void vscode.window.showInformationMessage(result.message + extra);
     }),
     vscode.commands.registerCommand('stack.disableManagerMcp', async () => {
       const result = await disableManager(execRun, claudeBinary(config.get().claudeCommand));
+      try { removeClaudeAssets(CLAUDE_DIR); } catch { /* best effort: nothing of ours left to remove */ }
       void (result.ok ? vscode.window.showInformationMessage(result.message) : vscode.window.showWarningMessage(result.message));
     }),
     vscode.commands.registerCommand('stack.openSessionToSide', (target?: { worktreeId: string; index?: number }) =>

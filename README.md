@@ -107,7 +107,7 @@ The hooks are global — one entry in `~/.claude/settings.json` serves every VS 
 
 Stack ships an MCP server, so one agent can run the others. The intended setup: the official Claude Code panel in VS Code as the *manager*, with your company's Jira / Slack / Linear MCP servers, and Stack's tools to turn tickets into tasks, follow them, and answer their questions.
 
-**Enable it:** switch on **Stack tools in Claude Code** in Stack settings › General (or run **Stack: Enable Manager (MCP)**). It registers the server with Claude Code at user scope (`claude mcp add --scope user stack -- node <globalStorage>/stack-mcp.js`, replacing an earlier `stack` entry). Start a new Claude Code session and the `stack_*` tools are there. **Stack: Disable Manager (MCP)** removes it. Where VS Code supports it, Copilot's agent mode sees the same server under *Stack*.
+**Enable it:** switch on **Stack tools in Claude Code** in Stack settings › General (or run **Stack: Enable Manager (MCP)**). It also installs a `stack-manager` skill and three slash commands into `~/.claude` — `/stack` (how are my agents), `/stack-task <ticket or idea>`, `/stack-next` — so you can just ask in plain words; switching it off removes them (only files Stack wrote, never your own). It registers the server with Claude Code at user scope (`claude mcp add --scope user stack -- node <globalStorage>/stack-mcp.js`, replacing an earlier `stack` entry). Start a new Claude Code session and the `stack_*` tools are there. **Stack: Disable Manager (MCP)** removes it. Where VS Code supports it, Copilot's agent mode sees the same server under *Stack*.
 
 Then ask, for example:
 

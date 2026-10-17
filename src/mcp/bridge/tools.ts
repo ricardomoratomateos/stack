@@ -31,7 +31,9 @@ export const TOOLS: ToolDef[] = [
     title: 'Stack: status',
     description:
       'Every task (git worktree) in the Stack window: id, name, branch, base, group (needs = an agent is asking you, review = done and ready for review, working, idle, missing), '
-      + 'its sessions with state and any pending question, diff (+added −removed), PR with CI, ports, linked ticket and review summary. Pass task_id for one task.',
+      + 'its sessions with state and any pending question, diff (+added −removed), PR with CI, ports, linked ticket and review summary. Pass task_id for one task. '
+      + 'Use it whenever the user asks how their agents or tasks are doing, who needs them, what is ready to review, or what an agent is working on '
+      + '("¿cómo van mis agentes?", "¿alguno me necesita?", "qué hay para revisar", "how are my agents doing").',
     inputSchema: { task_id: taskId.optional(), repo },
     annotations: { readOnlyHint: true, openWorldHint: false },
     timeoutMs: quick,
@@ -43,7 +45,9 @@ export const TOOLS: ToolDef[] = [
       'Create a task: a new branch and git worktree with a coding agent started in it on `prompt`. '
       + 'With `ticket`, the branch defaults to <KEY>-<slug of title>, the ticket shows on the task in VS Code, and its content (title, url, description) is handed to the worker as reference data below your prompt. '
       + 'Idempotent per ticket: a task for the same ticket key (stored, or a branch starting with the key) is returned as "existing" instead of creating another. '
-      + 'Returns task_id; follow up with stack_wait / stack_status.',
+      + 'Returns task_id; follow up with stack_wait / stack_status. '
+      + 'Use it when the user wants something worked on in parallel — "crea una tarea para AS-1234", "monta una tarea con este hilo de Slack", "que un agente arregle X", "start a task from this ticket". '
+      + 'Read the ticket or thread first with whatever tool has it (Jira, Linear, Slack MCP) and pass it as `ticket`.',
     inputSchema: {
       title: z.string().describe('Short name for the task, shown in the sidebar.'),
       prompt: z.string().describe('What the worker agent should do. Self-contained: it has not seen this conversation.'),
@@ -68,7 +72,8 @@ export const TOOLS: ToolDef[] = [
     description:
       'Type a message into a task\'s running agent and submit it, the way a person would at its prompt. '
       + 'If the agent is showing a permission prompt, this answers that prompt (Enter accepts the highlighted option). '
-      + 'Answers delivered, or refused with the reason when the task has no live agent.',
+      + 'Answers delivered, or refused with the reason when the task has no live agent. '
+      + 'Use it to relay feedback or context to an agent: "dile al agente de payments que añada tests", "pásale este hilo", "tell the login task to use the new API".',
     inputSchema: { task_id: taskId, message: z.string().describe('The message.'), session, repo },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     timeoutMs: () => 60_000,
@@ -76,7 +81,8 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'stack_read_agent',
     title: 'Stack: read agent',
-    description: `The last lines of a task's agent terminal (plain text): what it is doing or asking right now. lines ≤ ${MAX_READ_LINES}, default 80.`,
+    description: `The last lines of a task's agent terminal (plain text): what it is doing or asking right now. lines ≤ ${MAX_READ_LINES}, default 80. `
+      + 'Use it when the user asks what exactly an agent is doing, what it is asking, or why it is stuck ("¿qué está haciendo el de X?", "¿qué me pregunta?").',
     inputSchema: {
       task_id: taskId,
       session,
@@ -91,7 +97,8 @@ export const TOOLS: ToolDef[] = [
     title: 'Stack: wait',
     description:
       'Block until one of the tasks\' agents goes idle (finished its turn), needs input (permission or question), or the timeout passes — whichever comes first. '
-      + `Returns which task and what happened (idle, needs_input, failed, timeout). Returns at once if one already matches. timeout_s ≤ ${MAX_WAIT_SECONDS}; call again to keep waiting.`,
+      + `Returns which task and what happened (idle, needs_input, failed, timeout). Returns at once if one already matches. timeout_s ≤ ${MAX_WAIT_SECONDS}; call again to keep waiting. `
+      + 'Use it after creating tasks, or when the user says "avísame cuando acabe" / "let me know when it is done".',
     inputSchema: {
       task_ids: z.array(z.string()).min(1).describe('Tasks to watch.'),
       until: z.enum(['idle', 'needs_input', 'any']).optional().describe('What to wait for. Default any.'),
@@ -124,7 +131,8 @@ export const TOOLS: ToolDef[] = [
 
 /** What the bridge tells an MCP client about itself. */
 export const INSTRUCTIONS =
-  'Stack runs coding agents in parallel git worktrees ("tasks") inside VS Code. '
+  'Stack runs coding agents in parallel git worktrees ("tasks") inside VS Code. The user does not name these tools — map plain requests '
+  + '("¿cómo van mis agentes?", "crea una tarea para AS-1234", "dile al de X que…") to them, and answer in the user\'s language. '
   + 'Typical manager loop: read the ticket elsewhere (Jira, Linear…), stack_create_task with the ticket, stack_wait on the task ids, '
   + 'then stack_status / stack_read_agent to see where they are and stack_send_to_agent to answer questions or give feedback. '
   + 'Workers inside a task: stack_env for ports, logs and test commands; stack_request_review when done.';
