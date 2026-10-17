@@ -9,7 +9,7 @@ Stack turns VS Code into a control panel for delegated work: spin up a git workt
 
 > **Stack was called Foreman.** Coming from Foreman? See [Upgrading from Foreman](#upgrading-from-foreman) — your settings, worktrees and running agents come along.
 
-![Stack: a worktree per task, an agent in each, and a sidebar that says who needs you](assets/demo.gif)
+![Stack: a task per worktree, agents in parallel, the code in VS Code, review with comments, and a manager agent that turns tickets into tasks](assets/demo.gif)
 
 ## Why
 
