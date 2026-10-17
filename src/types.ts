@@ -49,6 +49,12 @@ export interface GitStatus {
   ahead: number;
   behind: number;
   /**
+   * The branch has an upstream to be ahead or behind of. Only ever present,
+   * and then true: without one, ahead/behind are 0 and mean nothing — every
+   * commit on the branch is local.
+   */
+  upstream?: true;
+  /**
    * Against the branch this worktree was cut from: "should I rebase?".
    *
    * A different question from ahead/behind, and the one that actually goes

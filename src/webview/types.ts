@@ -16,6 +16,8 @@ export interface GitStatus {
   /** Against the branch's own upstream: "have I pushed?". */
   ahead: number;
   behind: number;
+  /** The branch has an upstream; without one ahead/behind are 0 and mean nothing. */
+  upstream?: true;
   /** Against the branch this worktree was cut from: "should I rebase?". */
   base?: BaseDrift;
   /** Lines added/removed since the branch left its base; see src/types.ts. */

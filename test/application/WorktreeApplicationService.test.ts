@@ -2087,7 +2087,9 @@ describe('deleteWorktree', () => {
     const a = makeWorktree({ id: 'a' });
     const h = makeHarness({ worktrees: [a], confirmResult: undefined });
     await h.service.deleteWorktree(undefined);
-    expect(h.notify.confirm).toHaveBeenCalledWith('Delete worktree "feat/a"?', undefined, 'Delete', 'Delete + branch');
+    expect(h.notify.confirm).toHaveBeenCalledWith(
+      'Delete worktree "feat/a"?', 'No uncommitted changes and no unpushed commits.', 'Delete', 'Delete + branch',
+    );
   });
 
   it('refuses to delete a truly-main worktree', async () => {
@@ -2345,7 +2347,8 @@ describe('deleteWorktree', () => {
     h.dockerMonitor.runCompose.mockReturnValue(new Promise((r) => { release = () => r(COMPOSE_OK); }));
 
     const done = h.service.deleteWorktree(a);
-    await Promise.resolve();
+    // Past the status refresh and the confirm, onto the compose down.
+    await flushMicrotasks();
 
     expect(h.service.buildState().worktrees[0].deleting).toBe(true);
     release();
@@ -2364,7 +2367,8 @@ describe('deleteWorktree', () => {
     h.dockerMonitor.runCompose.mockReturnValue(new Promise((r) => { release = () => r(COMPOSE_OK); }));
 
     const done = h.service.deleteWorktree(a);
-    await Promise.resolve();
+    // Past the status refresh and the confirm, onto the compose down.
+    await flushMicrotasks();
 
     await h.service.handleMessage({ type: 'launchAgent', worktreeId: 'a' });
     await h.service.handleMessage({ type: 'openTerminal', worktreeId: 'a' });
@@ -2386,7 +2390,8 @@ describe('deleteWorktree', () => {
     h.dockerMonitor.runCompose.mockReturnValue(new Promise((r) => { release = () => r(COMPOSE_OK); }));
 
     const done = h.service.deleteWorktree(a);
-    await Promise.resolve();
+    // Past the status refresh and the confirm, onto the compose down.
+    await flushMicrotasks();
 
     await h.service.deleteWorktree(a); // ignored — already deleting
     expect(h.notify.confirm).toHaveBeenCalledTimes(1);
@@ -2726,7 +2731,7 @@ describe('VsCodeNotifyAdapter', () => {
     expect(res).toBe('Kill');
   });
 
-  it('confirm passes undefined detail through (delete flow has no detail)', async () => {
+  it('confirm passes an undefined detail through', async () => {
     window.showWarningMessage.mockResolvedValue(undefined);
     const res = await new VsCodeNotifyAdapter().confirm('Delete worktree "x"?', undefined, 'Delete', 'Delete + branch');
     expect(window.showWarningMessage).toHaveBeenCalledWith(
@@ -3666,6 +3671,93 @@ describe('setup runs headless, and the agent waits for it', () => {
       await flushMicrotasks();
       expect(h.claude.launch).toHaveBeenCalledWith(created, undefined);
     });
+  });
+});
+
+describe('the delete confirm says what would be lost', () => {
+  const a = makeWorktree({ id: 'a' });
+  const clean = { hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 };
+  function harness(status: Record<string, unknown>, pr?: Record<string, unknown>, confirmResult?: string) {
+    const h = makeHarness({ worktrees: [a], confirmResult, existingPaths: [a.path] });
+    h.gitWatcher.getStatus.mockReturnValue({ ...clean, ...status } as never);
+    if (pr) h.prMonitor.getStatus.mockReturnValue({ url: 'https://x', ...pr } as never);
+    return h;
+  }
+  const asked = (h: ReturnType<typeof makeHarness>) => h.notify.confirm.mock.calls[0] as unknown as [string, string, ...string[]];
+
+  it('reads the status fresh before asking', async () => {
+    const h = harness({});
+    await h.service.deleteWorktree(a);
+    expect(h.calls.slice(0, 2)).toEqual([`gitWatcher.refreshNow:${a.path}`, 'notify.confirm:Delete worktree "feat/a"?']);
+  });
+
+  it('lists uncommitted work, unpushed commits, commits beyond the base and the PR, and counts what the branch option discards', async () => {
+    const h = harness(
+      { hasChanges: true, staged: 1, unstaged: 2, untracked: 3, ahead: 2, upstream: true, base: { ref: 'origin/develop', ahead: 5, behind: 0 } },
+      { number: 12, state: 'OPEN' },
+      'Delete + branch (discards 2 commits)',
+    );
+    await h.service.deleteWorktree(a);
+    const [, detail, ...choices] = asked(h);
+    expect(detail).toBe([
+      'Uncommitted changes (1 staged, 2 unstaged, 3 untracked) are lost with the worktree.',
+      '2 commits not pushed.',
+      '5 commits not in origin/develop.',
+      'PR #12 is open.',
+      'Deleting the branch too discards those 2 commits; "Delete" keeps it.',
+    ].join('\n'));
+    expect(choices).toEqual(['Delete', 'Delete + branch (discards 2 commits)']);
+    expect(h.calls).toContain('manager.delete:a:true');
+  });
+
+  it('counts every commit beyond the base when the branch was never pushed', async () => {
+    const h = harness({ base: { ref: 'develop', ahead: 1, behind: 4 } }, { number: 3, state: 'OPEN', isDraft: true }, 'Delete');
+    await h.service.deleteWorktree(a);
+    const [, detail, ...choices] = asked(h);
+    expect(detail).toBe([
+      '1 commit not in develop, and the branch was never pushed.',
+      'PR #3 is a draft.',
+      'Deleting the branch too discards that commit; "Delete" keeps it.',
+    ].join('\n'));
+    expect(choices).toEqual(['Delete', 'Delete + branch (discards 1 commit)']);
+    expect(h.calls).toContain('manager.delete:a:false');
+  });
+
+  it('offers "Clean up" — worktree and branch — for a merged PR with nothing left behind', async () => {
+    // GitHub deleted the remote branch on merge, so there is no upstream; the
+    // squash merge left the branch "ahead" of its base, and that is no loss.
+    const h = harness({ base: { ref: 'develop', ahead: 4, behind: 9 } }, { number: 8, state: 'MERGED' }, 'Clean up');
+    await h.service.deleteWorktree(a);
+    const [, detail, ...choices] = asked(h);
+    expect(choices).toEqual(['Clean up', 'Delete, keep branch']);
+    expect(detail).toBe([
+      '4 commits not in develop, and the branch was never pushed.',
+      'PR #8 is merged.',
+      'Nothing here is uncommitted or unpushed: clean up removes the worktree and its branch.',
+    ].join('\n'));
+    expect(h.calls).toContain('manager.delete:a:true');
+  });
+
+  it('keeps the branch when asked to, after a merge', async () => {
+    const h = harness({ upstream: true }, { number: 8, state: 'MERGED' }, 'Delete, keep branch');
+    await h.service.deleteWorktree(a);
+    expect(h.calls).toContain('manager.delete:a:false');
+  });
+
+  it('does not offer "Clean up" over uncommitted work or unpushed commits, merged or not', async () => {
+    const dirty = harness({ hasChanges: true, untracked: 1 }, { number: 8, state: 'MERGED' });
+    await dirty.service.deleteWorktree(a);
+    expect(asked(dirty).slice(2)).toEqual(['Delete', 'Delete + branch']);
+    expect(asked(dirty)[1]).toContain('Uncommitted changes (1 untracked)');
+
+    const staged = harness({ hasChanges: true, staged: 1 }, { number: 8, state: 'MERGED' });
+    await staged.service.deleteWorktree(a);
+    expect(asked(staged)[1]).toContain('Uncommitted changes (1 staged)');
+
+    const unpushed = harness({ upstream: true, ahead: 1 }, { number: 8, state: 'CLOSED' });
+    await unpushed.service.deleteWorktree(a);
+    expect(asked(unpushed)[1]).toContain('1 commit not pushed.\nPR #8 is closed.');
+    expect(asked(unpushed).slice(2)).toEqual(['Delete', 'Delete + branch (discards 1 commit)']);
   });
 });
 

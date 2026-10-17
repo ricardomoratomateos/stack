@@ -223,7 +223,8 @@ describe('fetchStatus (real git repos)', () => {
     git(repo, 'branch up');
     git(repo, 'branch --set-upstream-to=up main');
     git(repo, 'commit --allow-empty -m ahead-1');
-    expect(await fetchStatus(repo)).toMatchObject({ ahead: 1, behind: 0 });
+    // `upstream` says the numbers mean something: without one they are 0 by default.
+    expect(await fetchStatus(repo)).toMatchObject({ ahead: 1, behind: 0, upstream: true });
 
     git(repo, 'branch -f up HEAD');
     git(repo, 'reset --hard HEAD~1');

@@ -158,12 +158,14 @@ export async function fetchStatus(worktreePath: string, baseBranch?: string): Pr
 
     let ahead = 0;
     let behind = 0;
+    let upstream = false;
     try {
       const { stdout: revOutput } = await execAsync(
         'git rev-list --left-right --count HEAD...@{upstream}',
         { cwd: worktreePath },
       );
       ({ ahead, behind } = parseAheadBehind(revOutput));
+      upstream = true;
     } catch {
       // no upstream or detached HEAD
     }
@@ -173,7 +175,12 @@ export async function fetchStatus(worktreePath: string, baseBranch?: string): Pr
     // Only worth a process when there is something to count.
     const lines = hasChanges || (base?.ahead ?? 0) > 0 ? await diffLines(worktreePath, base) : undefined;
 
-    return { hasChanges, staged, unstaged, untracked, ahead, behind, base, ...(lines ? { lines } : {}) };
+    return {
+      hasChanges, staged, unstaged, untracked, ahead, behind,
+      ...(upstream ? { upstream: true as const } : {}),
+      base,
+      ...(lines ? { lines } : {}),
+    };
   } catch {
     return DEFAULT_STATUS;
   }
