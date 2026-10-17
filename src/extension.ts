@@ -607,8 +607,9 @@ export async function activate(ctx: vscode.ExtensionContext) {
     },
   }));
 
-  // "The agent needs you": sidebar badge always; native OS notification only
-  // when VSCode is in the background (inside the window the badge suffices).
+  // "The agent needs you": sidebar badge always; native OS notification, and
+  // the chime that comes with it, only when VSCode is in the background
+  // (inside the window the badge suffices).
   const osaNotify = new OsaNotifyAdapter();
   const attention = new AttentionNotifier({
     onStateChange: agentManager.onStateChange,

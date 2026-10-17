@@ -1,6 +1,4 @@
 import * as http from 'node:http';
-import { exec } from 'node:child_process';
-import * as os from 'node:os';
 import { AgentSessionState } from '../types';
 
 /** Structural interface satisfied by AgentSessionManager. */
@@ -77,11 +75,7 @@ export class HookServer {
   private port = 0;
   private listeners = new Set<(e: HookEvent) => void>();
 
-  constructor(
-    private agentManager: AgentStateUpdater,
-    private platform: NodeJS.Platform = os.platform(),
-    private soundExec: (cmd: string) => void = (cmd) => { exec(cmd); },
-  ) {
+  constructor(private agentManager: AgentStateUpdater) {
     this.server = http.createServer((req, res) => {
       // Always set on a request a server received; only client-side messages lack it.
       const url = new URL(req.url!, 'http://localhost');
@@ -120,8 +114,8 @@ export class HookServer {
     // Malformed: nothing to act on, and nothing anyone else could do with it.
     if (!e) return 200;
     // Unattributed — an agent running outside any Stack session, still
-    // reaching the hook because it is global. Not ours to paint, sound or
-    // notify about; answered 200 so the hook does not keep looking.
+    // reaching the hook because it is global. Not ours to paint or notify
+    // about; answered 200 so the hook does not keep looking.
     if (!e.workspaceId) return 200;
     if (this.agentManager.hasTerminals && !this.agentManager.hasTerminals(e.workspaceId)) return NOT_MINE;
 
@@ -129,9 +123,10 @@ export class HookServer {
       if (e.windowIndex !== undefined) this.agentManager.updateState(e.workspaceId, e.state, e.windowIndex);
       else this.agentManager.updateState(e.workspaceId, e.state);
     }
-    if (e.event === 'Stop' && this.platform === 'darwin') {
-      this.soundExec('afplay /System/Library/Sounds/Glass.aiff');
-    }
+    // No sound here. A chime on every Stop rang for agents the user was
+    // watching finish, and with stack.notifyOnAttention off; it now comes with
+    // the native notification, from the one place that decides whether the
+    // user needs telling (AttentionNotifier).
     for (const listener of this.listeners) listener(e);
     return 200;
   }

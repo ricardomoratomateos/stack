@@ -61,7 +61,7 @@ For the heavier setup — Docker per worktree, a debugger port per worktree, set
 | `stack.claudeCommand` | `claude` | Command to launch Claude Code |
 | `stack.codexCommand` | `codex` | Command to launch Codex CLI |
 | `stack.opencodeCommand` | `opencode` | Command to launch opencode |
-| `stack.notifyOnAttention` | `true` | Native OS notification when an agent finishes or asks for permission while VS Code is backgrounded (the sidebar badge always shows) |
+| `stack.notifyOnAttention` | `true` | Native OS notification, with a chime on macOS, when an agent finishes or asks for permission while VS Code is backgrounded (the sidebar badge always shows) |
 | `stack.scopeSearchToActiveWorktree` | `true` | Hide non-active worktree folders from search and Quick Open |
 | `stack.sessionTabs` | `perSession` | `perSession`: every session opens in its own terminal tab, so an agent and a shell can sit side by side (see [Sessions side by side](#sessions-side-by-side)). `single`: one terminal per worktree that switches between them, as before |
 | `stack.focusMode` | `false` | Clean-slate switching: close the other worktrees' editor tabs and agent terminals so only the active worktree is on screen (see [Switching worktrees](#switching-worktrees)) |

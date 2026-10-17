@@ -7,17 +7,15 @@ import { HookServer, parseHook, type HookEvent } from '../../src/server/HookServ
 describe('POST /hook (v2: X-Stack-* headers)', () => {
   let server: HookServer | undefined;
   const updateState = vi.fn();
-  const soundExec = vi.fn();
 
   afterEach(() => {
     server?.dispose();
     server = undefined;
     updateState.mockReset();
-    soundExec.mockReset();
   });
 
-  async function start(hasTerminals?: (id: string) => boolean, platform: NodeJS.Platform = 'linux'): Promise<string> {
-    server = new HookServer(hasTerminals ? { updateState, hasTerminals } : { updateState }, platform, soundExec);
+  async function start(hasTerminals?: (id: string) => boolean): Promise<string> {
+    server = new HookServer(hasTerminals ? { updateState, hasTerminals } : { updateState });
     return server.start();
   }
 
@@ -134,26 +132,23 @@ describe('POST /hook (v2: X-Stack-* headers)', () => {
   it('answers 404 for a worktree this window does not track, touching nothing', async () => {
     // The hook takes 404 as "try your next endpoint": a stale route whose port
     // another window now holds must not swallow the event.
-    const url = await start((id) => id === 'mine', 'darwin');
+    const url = await start((id) => id === 'mine');
     const status = await post(url, { 'X-Stack-Event': 'Stop', 'X-Stack-Workspace': 'theirs' }, '{}');
     expect(status).toBe(404);
     expect(updateState).not.toHaveBeenCalled();
-    expect(soundExec).not.toHaveBeenCalled();
 
     expect(await post(url, { 'X-Stack-Event': 'Stop', 'X-Stack-Workspace': 'mine' }, '{}')).toBe(200);
     expect(updateState).toHaveBeenCalledWith('mine', 'waiting');
-    expect(soundExec).toHaveBeenCalledTimes(1);
   });
 
   it('answers 200 to an unattributed event, and does nothing with it', async () => {
     // Every Claude session on the machine runs the global hook, including ones
-    // started in a plain terminal. No state, no sound, no notification.
-    const url = await start(() => true, 'darwin');
+    // started in a plain terminal. No state, no notification.
+    const url = await start(() => true);
     const listener = vi.fn();
     server!.onHookEvent(listener);
     expect(await post(url, { 'X-Stack-Event': 'Stop' }, claudePayload)).toBe(200);
     expect(updateState).not.toHaveBeenCalled();
-    expect(soundExec).not.toHaveBeenCalled();
     expect(listener).not.toHaveBeenCalled();
   });
 });

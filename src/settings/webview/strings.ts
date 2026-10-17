@@ -126,7 +126,7 @@ export const STR = {
   // Notifications
   notifyCard: 'Attention',
   notify: 'Notify when an agent needs you',
-  notifyHint: 'A native notification when an agent is waiting on you and VS Code is in the background.',
+  notifyHint: 'A native notification, and a chime on macOS, when an agent is waiting on you and VS Code is in the background.',
 } as const;
 
 export const SECTION_META: Record<SectionId, { label: string; icon: string; title: string; description: string }> = {

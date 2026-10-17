@@ -40,6 +40,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Two windows creating a worktree at the same moment being given the same port slot.
 - **A repository that versions `.vscode/` keeps a clean worktree.** Creating a worktree overwrote its checked-out `launch.json` and `settings.json`, so it started dirty — in the review diff, the `+N −M`, and the agent's next commit. Stack now only writes the files the checkout does not have, never re-points a versioned `launch.json` at a new port, and leaves a versioned `settings.json` out of search scoping (VS Code keeps per-folder settings nowhere else, so that folder stays searchable). The generated `settings.json` only excludes `node_modules` when there is a `package.json` and `vendor`/intelephense when there is a `composer.json`; with neither, none is written.
 - **The PR badge tells the truth.** A merged or closed PR used to vanish from the sidebar (only open PRs were asked for); it now shows as merged or closed. The badge opens the PR on GitHub, carries a dot for its checks (green passed, red failed, amber running), says "draft" for a draft and marks requested changes. An open PR is checked every minute, anything else every five.
+- **The Glass chime only rings when it has something to say.** It played on every agent stop — including the agent you were watching finish, and with `stack.notifyOnAttention` off. It now comes with the native notification and nowhere else: when that setting is on, VS Code is in the background, and the stop is news.
 
 ## [0.1.0] — 2026-08-30
 

@@ -49,10 +49,8 @@ describe('EVENT_TO_STATE', () => {
 describe('POST /hook', () => {
   let server: HookServer | undefined;
   const updateState = vi.fn();
-  const soundExec = vi.fn();
-
-  async function startServer(platform: NodeJS.Platform = 'linux'): Promise<string> {
-    server = new HookServer({ updateState }, platform, soundExec);
+  async function startServer(): Promise<string> {
+    server = new HookServer({ updateState });
     return server.start();
   }
 
@@ -60,7 +58,6 @@ describe('POST /hook', () => {
     server?.dispose();
     server = undefined;
     updateState.mockReset();
-    soundExec.mockReset();
   });
 
   it('maps SessionStart → waiting', async () => {
@@ -163,7 +160,6 @@ describe('POST /hook', () => {
     const res = await request(url, { body: '{not json!!' });
     expect(res.status).toBe(200);
     expect(updateState).not.toHaveBeenCalled();
-    expect(soundExec).not.toHaveBeenCalled();
   });
 
   it('returns 404 on other routes/methods', async () => {
@@ -177,35 +173,14 @@ describe('POST /hook', () => {
     expect(updateState).not.toHaveBeenCalled();
   });
 
-  it('plays Glass.aiff on Stop on darwin', async () => {
-    const url = await startServer('darwin');
-    await postHook(url, { event: 'Stop', workspaceId: 'ws1' });
-    expect(soundExec).toHaveBeenCalledTimes(1);
-    expect(soundExec).toHaveBeenCalledWith('afplay /System/Library/Sounds/Glass.aiff');
-  });
-
-  it('plays no sound for an unattributed event (an agent outside Stack)', async () => {
+  it('ignores an unattributed event (an agent outside Stack)', async () => {
     // The hook is global, so every Claude session on the machine reaches some
     // window — including ones the user started in a plain terminal. Their
     // Stop is none of Stack's business.
-    const url = await startServer('darwin');
+    const url = await startServer();
     await postHook(url, { event: 'Stop' });
     await postHook(url, { event: 'Stop', workspaceId: '' });
     expect(updateState).not.toHaveBeenCalled();
-    expect(soundExec).not.toHaveBeenCalled();
-  });
-
-  it('does NOT play the sound on Stop on linux', async () => {
-    const url = await startServer('linux');
-    await postHook(url, { event: 'Stop', workspaceId: 'ws1' });
-    expect(soundExec).not.toHaveBeenCalled();
-    expect(updateState).toHaveBeenCalledWith('ws1', 'waiting');
-  });
-
-  it('does NOT play the sound on darwin for non-Stop events', async () => {
-    const url = await startServer('darwin');
-    await postHook(url, { event: 'SessionStart', workspaceId: 'ws1' });
-    expect(soundExec).not.toHaveBeenCalled();
   });
 
   it('start() resolves with a http://127.0.0.1:<port> base URL', async () => {

@@ -11,7 +11,7 @@ describe('OsaNotifyAdapter default run', () => {
   it('spawns osascript via execFile when no runner is injected', () => {
     new OsaNotifyAdapter('darwin').notify('hello');
 
-    expect(execFile).toHaveBeenCalledTimes(1);
+    expect(execFile).toHaveBeenCalledTimes(2); // the banner, then the chime
     const [cmd, args, callback] = vi.mocked(execFile).mock.calls[0] as unknown as [
       string,
       string[],
