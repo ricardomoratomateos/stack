@@ -538,9 +538,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
   const relativeToRepo = (root: string | undefined, abs: string) =>
     root && abs.startsWith(root + path.sep) ? path.relative(root, abs) : abs;
   const CLAUDE_DIR = path.join(os.homedir(), '.claude');
+  const CLAUDE_ASSETS = path.join(ctx.extensionPath, 'resources', 'claude');
   // With the manager on, keep the skill and commands in step with this version.
   if (managerEnabled((f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : undefined), path.join(os.homedir(), '.claude.json'))) {
-    try { installClaudeAssets(CLAUDE_DIR); } catch { /* best effort */ }
+    try { installClaudeAssets(CLAUDE_DIR, CLAUDE_ASSETS); } catch { /* best effort */ }
   }
   const settingsPanel = new SettingsPanelManager(ctx.extensionUri, {
     snapshot: () => {
@@ -862,7 +863,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       // The skill and the /stack commands, so the tools are reachable in plain words.
       let extra = ' Try /stack, /stack-task AS-1234 or /stack-next — or just ask "¿cómo van mis agentes?".';
       try {
-        const { skipped } = installClaudeAssets(CLAUDE_DIR);
+        const { skipped } = installClaudeAssets(CLAUDE_DIR, CLAUDE_ASSETS);
         if (skipped.length) extra += ` (Kept your own ${skipped.join(', ')}.)`;
       } catch (e) {
         scriptOutput.appendLine(`[stack] could not install the Claude skill/commands: ${String(e)}`);

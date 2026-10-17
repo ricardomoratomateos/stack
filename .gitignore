@@ -3,3 +3,6 @@ dist/
 *.vsix
 .DS_Store
 coverage/
+
+# Notes Claude Code subagents keep while working on this repo — theirs, not the project's.
+.claude/agent-memory/

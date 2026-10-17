@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { MARKER, claudeAssets, installClaudeAssets, removeClaudeAssets } from '../../src/mcp/claudeAssets';
+import { ASSET_FILES, MARKER, claudeAssets, installClaudeAssets, removeClaudeAssets } from '../../src/mcp/claudeAssets';
+
+// The real shipped files, as the extension reads them from resources/claude.
+const SRC = path.join(__dirname, '../../resources/claude');
 
 describe('claudeAssets', () => {
   let dir: string;
@@ -12,7 +15,8 @@ describe('claudeAssets', () => {
   const read = (rel: string) => fs.readFileSync(path.join(dir, rel), 'utf8');
 
   it('ships a skill and the /stack, /stack-task, /stack-next commands, all marked as Stack\'s', () => {
-    const assets = claudeAssets();
+    const assets = claudeAssets(SRC);
+    expect(Object.keys(assets)).toEqual([...ASSET_FILES]);
     expect(Object.keys(assets).sort()).toEqual([
       'commands/stack-next.md', 'commands/stack-task.md', 'commands/stack.md', 'skills/stack-manager/SKILL.md',
     ]);
@@ -22,22 +26,22 @@ describe('claudeAssets', () => {
   });
 
   it('installs everything into an empty ~/.claude, and refreshes its own files later', () => {
-    expect(installClaudeAssets(dir)).toEqual({ skipped: [] });
+    expect(installClaudeAssets(dir, SRC)).toEqual({ skipped: [] });
     expect(read('commands/stack.md')).toContain('stack_status');
     fs.writeFileSync(path.join(dir, 'commands/stack.md'), `old ${MARKER}`);
-    installClaudeAssets(dir);
-    expect(read('commands/stack.md')).toBe(claudeAssets()['commands/stack.md']);
+    installClaudeAssets(dir, SRC);
+    expect(read('commands/stack.md')).toBe(claudeAssets(SRC)['commands/stack.md']);
   });
 
   it('never overwrites a file of the user\'s with the same name', () => {
     fs.mkdirSync(path.join(dir, 'commands'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'commands/stack.md'), 'mine');
-    expect(installClaudeAssets(dir)).toEqual({ skipped: ['commands/stack.md'] });
+    expect(installClaudeAssets(dir, SRC)).toEqual({ skipped: ['commands/stack.md'] });
     expect(read('commands/stack.md')).toBe('mine');
   });
 
   it('removes only what it installed, and the skill folder once it is empty', () => {
-    installClaudeAssets(dir);
+    installClaudeAssets(dir, SRC);
     fs.writeFileSync(path.join(dir, 'commands/stack-next.md'), 'mine now');
     removeClaudeAssets(dir);
     expect(fs.existsSync(path.join(dir, 'commands/stack.md'))).toBe(false);
@@ -46,7 +50,7 @@ describe('claudeAssets', () => {
   });
 
   it('keeps the skill folder when the user put something else in it, and copes with nothing there', () => {
-    installClaudeAssets(dir);
+    installClaudeAssets(dir, SRC);
     fs.writeFileSync(path.join(dir, 'skills/stack-manager/notes.md'), 'x');
     removeClaudeAssets(dir);
     expect(fs.existsSync(path.join(dir, 'skills/stack-manager/notes.md'))).toBe(true);
