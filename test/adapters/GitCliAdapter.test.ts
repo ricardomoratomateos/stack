@@ -322,6 +322,22 @@ describe('GitCliAdapter (integration, real temp git repo)', () => {
     });
   });
 
+  describe('isTracked', () => {
+    it('is true for a committed file and false for an untracked or absent one', () => {
+      fs.writeFileSync(path.join(repo, 'untracked-it.txt'), 'x\n');
+      expect(adapter.isTracked(repo, 'README.md')).toBe(true);
+      expect(adapter.isTracked(repo, 'untracked-it.txt')).toBe(false);
+      expect(adapter.isTracked(repo, '.vscode/settings.json')).toBe(false);
+      fs.rmSync(path.join(repo, 'untracked-it.txt'));
+    });
+
+    it('is false outside a git repo', () => {
+      const notARepo = path.join(tmp, 'not-a-repo-tracked');
+      fs.mkdirSync(notARepo, { recursive: true });
+      expect(adapter.isTracked(notARepo, 'README.md')).toBe(false);
+    });
+  });
+
   describe('diff', () => {
     it('working: shows tracked modifications vs HEAD', async () => {
       const wtPath = path.join(tmp, 'wt-diff-working');

@@ -38,6 +38,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Search and Quick Open finding nothing, and the whole explorer dimmed, after selecting a worktree in another window or deleting the selected one. The selection is now per window.
 - Saved tabs and stashed breakpoints of one window being overwritten by another.
 - Two windows creating a worktree at the same moment being given the same port slot.
+- **A repository that versions `.vscode/` keeps a clean worktree.** Creating a worktree overwrote its checked-out `launch.json` and `settings.json`, so it started dirty — in the review diff, the `+N −M`, and the agent's next commit. Stack now only writes the files the checkout does not have, never re-points a versioned `launch.json` at a new port, and leaves a versioned `settings.json` out of search scoping (VS Code keeps per-folder settings nowhere else, so that folder stays searchable). The generated `settings.json` only excludes `node_modules` when there is a `package.json` and `vendor`/intelephense when there is a `composer.json`; with neither, none is written.
 
 ## [0.1.0] — 2026-08-30
 

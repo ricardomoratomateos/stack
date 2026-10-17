@@ -73,6 +73,11 @@ export interface IGitPort {
    * the caller can say why nothing changed.
    */
   fetchBranch(cwd: string, remote: string, branch: string): Promise<void>;
+  /**
+   * Whether git tracks `file` (relative to `cwd`) — `git ls-files --error-unmatch`.
+   * False when it does not, and when git could not answer.
+   */
+  isTracked(cwd: string, file: string): boolean;
 }
 
 export type DiffBase = 'working' | 'branch';

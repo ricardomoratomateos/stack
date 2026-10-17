@@ -231,6 +231,15 @@ export class GitCliAdapter implements IGitPort {
     return gitSync(['branch', '--show-current'], cwd).trim();
   }
 
+  isTracked(cwd: string, file: string): boolean {
+    try {
+      gitSync(['ls-files', '--error-unmatch', '--', file], cwd);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** First candidate that resolves to a real ref (local or origin/), else undefined. */
   private resolveMainBranch(cwd: string, candidates: string[]): string | undefined {
     for (const name of candidates) {

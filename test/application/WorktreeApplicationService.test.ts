@@ -101,6 +101,8 @@ interface HarnessOpts {
   terminalWindow?: Record<string, number>;
   /** what agentManager.focusedSession answers per worktree */
   focusedSessions?: Record<string, number>;
+  /** folders whose .vscode/settings.json git tracks */
+  trackedSettings?: string[];
 }
 
 function makeHarness(o: HarnessOpts = {}) {
@@ -311,6 +313,7 @@ function makeHarness(o: HarnessOpts = {}) {
       calls.push(`git.fetchBranch:${cwd}:${remote}/${branch}`);
       if (o.fetchFails) throw new Error('no such remote');
     }),
+    isTracked: vi.fn((cwd: string, _file: string) => (o.trackedSettings ?? []).includes(cwd)),
   };
   const globalState = {
     get: vi.fn(<T,>(k: string): T | undefined => {
@@ -1747,6 +1750,26 @@ describe('search scoping', () => {
     const h = makeHarness({ worktrees: [main(), wtB()], persistedActiveId: 'b' });
     await h.service.handleAddedWorkspaceFolders([]);
     expect(excludeCalls(h)).toEqual(['/repo:{"**":true}', '/repo/zer/feat-b:clear']);
+  });
+
+  it('never writes into a settings.json the repository versions', async () => {
+    // The only home a folder-scoped setting has is that file; writing it made
+    // the checkout dirty — in git status, the review diff, the agent's commit.
+    const h = makeHarness({ worktrees: [main(), wtB(), wtC()], workspaceFolders: ['/repo'], trackedSettings: ['/repo', '/repo/zer/feat-c'] });
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(excludeCalls(h)).toEqual(['/repo/zer/feat-b:{"**":true}']);
+    expect(h.git.isTracked).toHaveBeenCalledWith('/repo', '.vscode/settings.json');
+  });
+
+  it('asks git once a minute per folder, not on every switch', async () => {
+    vi.useFakeTimers();
+    const h = makeHarness({ worktrees: [main(), wtB()], persistedActiveId: 'm', viewerIds: ['b'] });
+    await h.service.switchToWorktree('b');
+    await h.service.switchToWorktree('m');
+    expect(h.git.isTracked).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(61_000);
+    await h.service.switchToWorktree('b');
+    expect(h.git.isTracked).toHaveBeenCalledTimes(4);
   });
 
   it('swallows a folder-setting write failure', async () => {

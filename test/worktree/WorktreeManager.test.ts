@@ -8,7 +8,6 @@ import { IGitPort, GitWorktreeEntry } from '../../src/ports/IGitPort';
 import { IFileSystem } from '../../src/ports/IFileSystem';
 import { IWorktreeRepository } from '../../src/ports/IWorktreeRepository';
 import { Worktree, DebugTemplate, StackConfig } from '../../src/types';
-import { WORKTREE_SETTINGS_EXCLUSIONS } from '../../src/constants';
 import type { PortAllocator } from '../../src/worktree/portAllocator';
 import type { ConfigManager } from '../../src/config/ConfigManager';
 import type { AgentSessionManager } from '../../src/session/AgentSessionManager';
@@ -83,6 +82,7 @@ function makeGitStub(entries: GitWorktreeEntry[] = []): IGitPort & {
   branchExists: ReturnType<typeof vi.fn>;
   remoteBranch: ReturnType<typeof vi.fn>;
   currentBranch: ReturnType<typeof vi.fn>;
+  isTracked: ReturnType<typeof vi.fn>;
 } {
   return {
     listWorktrees: vi.fn(() => entries),
@@ -97,6 +97,8 @@ function makeGitStub(entries: GitWorktreeEntry[] = []): IGitPort & {
     remoteBranch: vi.fn(() => undefined),
     currentBranch: vi.fn(() => 'main'),
     listBranches: vi.fn(() => []),
+    // Nothing is versioned unless a test says so.
+    isTracked: vi.fn(() => false),
   };
 }
 
@@ -358,13 +360,40 @@ describe('create', () => {
   });
 
   it('generates launch.json and settings.json', async () => {
+    fsStub.files.set(path.join(REPO, 'zer', 'feat-x', 'composer.json'), '{}');
     const wt = await mgr().create('feat/x', REPO);
     const launchPath = path.join(wt.path, '.vscode/launch.json');
     const settingsPath = path.join(wt.path, '.vscode/settings.json');
     expect(fsStub.files.has(launchPath)).toBe(true);
     expect(fsStub.files.has(settingsPath)).toBe(true);
     expect(fsStub.dirs.has(path.dirname(launchPath))).toBe(true);
-    expect(JSON.parse(fsStub.files.get(settingsPath)!)).toEqual(WORKTREE_SETTINGS_EXCLUSIONS);
+    expect(JSON.parse(fsStub.files.get(settingsPath)!)).toEqual({
+      'files.watcherExclude': { '**/vendor/**': true, '**/var/cache/**': true },
+      'files.exclude': { '**/vendor': true },
+      'intelephense.files.exclude': ['**/vendor/**', '**/var/cache/**'],
+    });
+  });
+
+  it('never overwrites the .vscode files the checkout already carries', async () => {
+    // A repository that versions .vscode/: git worktree add checks both out,
+    // and overwriting them dirtied the tree before the agent did anything.
+    const launch = path.join(REPO, 'zer', 'feat-x', '.vscode/launch.json');
+    const settings = path.join(REPO, 'zer', 'feat-x', '.vscode/settings.json');
+    git.createWorktree.mockImplementation((wtPath: string) => {
+      fsStub.dirs.add(wtPath);
+      fsStub.files.set(launch, 'team launch');
+      fsStub.files.set(settings, 'team settings');
+      fsStub.files.set(path.join(wtPath, 'package.json'), '{}');
+    });
+    await mgr().create('feat/x', REPO);
+    expect(fsStub.files.get(launch)).toBe('team launch');
+    expect(fsStub.files.get(settings)).toBe('team settings');
+  });
+
+  it('writes no settings.json when no ecosystem it knows needs excluding', async () => {
+    const wt = await mgr().create('feat/x', REPO);
+    expect(fsStub.files.has(path.join(wt.path, '.vscode/settings.json'))).toBe(false);
+    expect(fsStub.files.has(path.join(wt.path, '.vscode/launch.json'))).toBe(true);
   });
 
   it('persists to repository (worktree + port registry keyed by path)', async () => {
@@ -556,6 +585,7 @@ describe('reconcile', () => {
     const fsStub = makeFsStub();
     // launch.json already present for the linked worktree → only settings.json generated
     fsStub.files.set(path.join(LINKED.path, '.vscode/launch.json'), 'preexisting');
+    fsStub.files.set(path.join(LINKED.path, 'package.json'), '{}');
     const store = makeStoreStub();
     const git = makeGitStub([MAIN, LINKED]);
     const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, fsStub);
@@ -570,6 +600,7 @@ describe('reconcile', () => {
 
   it('generates both .vscode files on adoption when neither exists', async () => {
     const fsStub = makeFsStub();
+    fsStub.files.set(path.join(LINKED.path, 'package.json'), '{}');
     const store = makeStoreStub();
     const git = makeGitStub([MAIN, LINKED]);
     const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, fsStub);
@@ -881,6 +912,22 @@ describe('ensureFreePorts', () => {
     const written = JSON.parse(fsStub.files.get(path.join(wt.path, '.vscode/launch.json'))!);
     // A stale launch.json would leave the debugger listening on the dead port.
     expect(written.configurations[0].port).toBe(9903);
+  });
+
+  it('leaves a launch.json the repository versions alone', async () => {
+    const wt = makeWorktree({ debugPort: 9901 });
+    const fsStub = makeFsStub();
+    const launch = path.join(wt.path, '.vscode/launch.json');
+    fsStub.files.set(launch, 'team launch');
+    const git = makeGitStub();
+    git.isTracked.mockImplementation((cwd: string, file: string) => cwd === wt.path && file === '.vscode/launch.json');
+    const { stub } = makeReallocatingAllocatorStub({ 9901: 8083 }, 9903);
+    const mgr = new WorktreeManager(makeStoreStub([wt]), stub, makeConfigStub(), undefined, git, fsStub);
+
+    const result = await mgr.ensureFreePorts(wt);
+
+    expect(result.worktree.debugPort).toBe(9903);
+    expect(fsStub.files.get(launch)).toBe('team launch');
   });
 
   it('does not touch the main worktree, whose port 0 means "no stack of its own"', async () => {

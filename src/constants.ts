@@ -21,20 +21,3 @@ export const MAIN_BRANCH_CANDIDATES = ['main', 'master', 'develop'];
 
 export const LAUNCH_JSON_PATH = '.vscode/launch.json';
 export const SETTINGS_JSON_PATH = '.vscode/settings.json';
-
-export const WORKTREE_SETTINGS_EXCLUSIONS = {
-  'files.watcherExclude': {
-    '**/node_modules/**': true,
-    '**/vendor/**': true,
-    '**/var/cache/**': true,
-  },
-  'files.exclude': {
-    '**/node_modules': true,
-    '**/vendor': true,
-  },
-  'intelephense.files.exclude': [
-    '**/node_modules/**',
-    '**/vendor/**',
-    '**/var/cache/**',
-  ],
-};

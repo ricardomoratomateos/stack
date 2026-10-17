@@ -22,7 +22,7 @@ import { buildCommentPrompt } from '../diff/commentPrompt';
 import { displayLabel, truncateLabel } from '../worktree/displayLabel';
 import { findRepoRoot } from '../worktree/findRepoRoot';
 import { canonicalPath, worktreesInRepo } from '../worktree/worktreesInRepo';
-import { MAIN_BRANCH_CANDIDATES } from '../constants';
+import { MAIN_BRANCH_CANDIDATES, SETTINGS_JSON_PATH } from '../constants';
 import { attentionQueue, groupOf, nextInQueue, type WorktreeGroup } from '../webview/derive';
 import { envPrefix, shellQuote } from '../shell/shellQuote';
 import type { NewTaskInit } from '../newtask/types';
@@ -184,6 +184,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
   private scriptTerminals = new Map<string, HostTerminal>();
   /** resolveBaseBranch for drift, which is display-only — see driftBaseFor. */
   private driftBaseCache = new Map<string, { base: string; at: number }>();
+  /** Whether each folder's .vscode/settings.json is versioned — see syncSearchScoping. */
+  private trackedSettingsCache = new Map<string, { tracked: boolean; at: number }>();
 
   private readonly stacks: DockerStacks;
 
@@ -1075,9 +1077,30 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const activeId = this.effectiveActiveId(worktrees);
     for (const wt of worktrees) {
       if (this.missing.has(wt.id)) continue; // no folder to scope
+      // A folder-scoped setting has exactly one home: the folder's own
+      // .vscode/settings.json. VS Code offers no other — a .code-workspace
+      // cannot carry per-folder settings, and a workspace-level
+      // search.exclude is matched relative to EVERY folder, so it cannot name
+      // one. When the repository versions that file, writing into it is a
+      // modified file in git status, in the review diff, and in the agent's
+      // next `git add -A`; that folder then simply stays searchable.
+      if (this.settingsTracked(wt.path)) continue;
       const exclude = enabled && activeId !== undefined && wt.id !== activeId ? { '**': true } : undefined;
       void this.deps.host.updateFolderSetting(wt.path, 'search.exclude', exclude).catch(() => {});
     }
+  }
+
+  /**
+   * Whether git tracks a folder's .vscode/settings.json, remembered for a
+   * minute: scoping is re-applied on every switch, and this is a git process
+   * per worktree for an answer that only a checkout changes.
+   */
+  private settingsTracked(folder: string): boolean {
+    const hit = this.trackedSettingsCache.get(folder);
+    if (hit && Date.now() - hit.at < DRIFT_BASE_TTL_MS) return hit.tracked;
+    const tracked = this.deps.git.isTracked(folder, SETTINGS_JSON_PATH);
+    this.trackedSettingsCache.set(folder, { tracked, at: Date.now() });
+    return tracked;
   }
 
   async loadWorktreesForRepo(repoRoot: string): Promise<void> {

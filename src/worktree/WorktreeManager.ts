@@ -11,7 +11,8 @@ import { IFileSystem } from '../ports/IFileSystem';
 import { IWorktreeRepository } from '../ports/IWorktreeRepository';
 import { GitCliAdapter } from '../adapters/GitCliAdapter';
 import { NodeFileSystem } from '../adapters/NodeFileSystem';
-import { LAUNCH_JSON_PATH, SETTINGS_JSON_PATH, WORKTREE_SETTINGS_EXCLUSIONS } from '../constants';
+import { LAUNCH_JSON_PATH, SETTINGS_JSON_PATH } from '../constants';
+import { worktreeSettings } from './worktreeSettings';
 
 export class WorktreeManager {
   constructor(
@@ -97,12 +98,7 @@ export class WorktreeManager {
         isMain,
       };
 
-      if (!isMain && !this.fs.exists(path.join(wt.path, LAUNCH_JSON_PATH))) {
-        this.generateLaunchJson(worktree);
-      }
-      if (!isMain && !this.fs.exists(path.join(wt.path, SETTINGS_JSON_PATH))) {
-        this.generateSettingsJson(worktree);
-      }
+      if (!isMain) this.writeMissingConfig(worktree);
 
       await this.store.add(worktree);
       adopted.push(worktree);
@@ -193,8 +189,12 @@ export class WorktreeManager {
         baseBranch: baseBranch || undefined,
       };
 
-      this.generateLaunchJson(worktree);
-      this.generateSettingsJson(worktree);
+      // Only what the checkout does not already carry. A repository that
+      // versions its .vscode/ used to have both files overwritten right after
+      // `git worktree add`: a dirty tree before the agent had typed a thing,
+      // counted in the review diff and the +N −M, and one `git add -A` away
+      // from being committed by the agent.
+      this.writeMissingConfig(worktree);
       await this.store.add(worktree);
 
       return worktree;
@@ -222,8 +222,7 @@ export class WorktreeManager {
 
     // The worktree may have been created outside Stack — only add our config
     // files if they're missing, never clobber existing ones.
-    if (!this.fs.exists(path.join(worktreePath, LAUNCH_JSON_PATH))) this.generateLaunchJson(worktree);
-    if (!this.fs.exists(path.join(worktreePath, SETTINGS_JSON_PATH))) this.generateSettingsJson(worktree);
+    this.writeMissingConfig(worktree);
 
     await this.store.add(worktree);
     return worktree;
@@ -256,7 +255,10 @@ export class WorktreeManager {
     const debugPort = await this.portAllocator.allocate();
     const updated: Worktree = { ...worktree, debugPort };
     await this.store.patch(worktree.id, { debugPort });
-    this.generateLaunchJson(updated);
+    // A launch.json the repository versions is the team's, not ours to point
+    // at this worktree's port: rewriting it dirtied the tree. Debugging then
+    // needs the port set by hand, which beats a commit nobody meant to make.
+    if (!this.git.isTracked(worktree.path, LAUNCH_JSON_PATH)) this.generateLaunchJson(updated);
     return { worktree: updated, movedFrom: busyPort };
   }
 
@@ -305,6 +307,12 @@ export class WorktreeManager {
     return path.isAbsolute(dir) ? dir : path.join(repoRoot, dir);
   }
 
+  /** Stack's launch.json and settings.json, for whichever of the two the worktree does not have. */
+  private writeMissingConfig(worktree: Worktree): void {
+    if (!this.fs.exists(path.join(worktree.path, LAUNCH_JSON_PATH))) this.generateLaunchJson(worktree);
+    if (!this.fs.exists(path.join(worktree.path, SETTINGS_JSON_PATH))) this.generateSettingsJson(worktree);
+  }
+
   private generateLaunchJson(worktree: Worktree): void {
     const template = this.config.get().debugTemplate;
     if (!template.name) template.name = `Stack: Debug (${worktree.branch})`;
@@ -323,9 +331,11 @@ export class WorktreeManager {
   }
 
   private generateSettingsJson(worktree: Worktree): void {
+    const settings = worktreeSettings((relative) => this.fs.exists(path.join(worktree.path, relative)));
+    if (!settings) return;
     const settingsPath = path.join(worktree.path, SETTINGS_JSON_PATH);
     this.fs.mkdir(path.dirname(settingsPath));
-    this.fs.writeFile(settingsPath, JSON.stringify(WORKTREE_SETTINGS_EXCLUSIONS, null, 4));
+    this.fs.writeFile(settingsPath, JSON.stringify(settings, null, 4));
   }
 
 }
