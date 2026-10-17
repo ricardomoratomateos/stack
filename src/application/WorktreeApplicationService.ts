@@ -117,6 +117,18 @@ export interface UiBridge {
   openNewTask(): void;
 }
 
+/**
+ * The repository's named workspace (workspace/namedWorkspace.ts): where the
+ * first workspace-folder edit of a single-folder window goes instead of
+ * turning the window into "Untitled (Workspace)".
+ */
+export interface WorkspaceNamingPort {
+  /** A plain folder window, which the next folder edit would make an untitled workspace. */
+  isSingleFolder(): boolean;
+  /** Write the named workspace with these folders and open it. False: it could not; do it the old way. */
+  open(repoRoot: string, folders: Array<{ path: string; name: string }>): Promise<boolean>;
+}
+
 interface GlobalStateLike {
   get<T>(key: string): T | undefined;
   update(key: string, value: unknown): unknown;
@@ -148,6 +160,8 @@ export interface WorktreeAppDeps {
    * one, output goes to the console and failures to a plain error toast.
    */
   dockerOutput?: DockerOutput;
+  /** Without one, the first worktree folder makes an untitled workspace, as VS Code does by default. */
+  workspaceNaming?: WorkspaceNamingPort;
 }
 
 const NO_UI: UiBridge = { pushWebview() {}, syncDecorations() {}, openDiffPanel() {}, openNewTask() {} };
@@ -201,6 +215,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
   private monitored = new Map<string, Worktree>();
   /** Script terminals, one per worktree and purpose, reused instead of piling up ptys. */
   private scriptTerminals = new Map<string, HostTerminal>();
+  /** A switch to the named workspace on its way; see openNamedWorkspace. */
+  private namingInFlight?: Promise<void>;
   /** resolveBaseBranch for drift, which is display-only — see driftBaseFor. */
   private driftBaseCache = new Map<string, { base: string; at: number }>();
   /**
@@ -1311,7 +1327,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const existing = this.deps.host.workspaceFolderPaths();
     const toAdd = mine.filter((wt) => !existing.some((p) => p === wt.path));
     if (toAdd.length > 0) {
-      this.deps.host.addWorkspaceFolders(...toAdd.map((wt) => ({ path: wt.path, name: displayLabel(wt) })));
+      this.addFolders(repoRoot, toAdd.map((wt) => ({ path: wt.path, name: displayLabel(wt) })));
     } else {
       // With an add in flight the relabel waits for the folders-changed event
       // (two workspace mutations back to back is unsupported); with nothing
@@ -1464,8 +1480,56 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const label = displayLabel(main);
     const idx = folderPaths.findIndex((p) => canonicalPath(p) === normalizedRoot);
     if (idx !== -1 && this.deps.host.workspaceFolderName(main.path) !== label) {
-      this.deps.host.renameWorkspaceFolder(idx, { path: main.path, name: label });
+      const rename = () => this.deps.host.renameWorkspaceFolder(idx, { path: main.path, name: label });
+      if (!this.openNamedWorkspace(root, [], rename)) rename();
     }
+  }
+
+  /** Add workspace folders — through the named workspace when this is what makes the window one. */
+  private addFolders(root: string, folders: Array<{ path: string; name: string }>): void {
+    const add = () => this.deps.host.addWorkspaceFolders(...folders);
+    if (!this.openNamedWorkspace(root, folders, add)) add();
+  }
+
+  /**
+   * The folder edit that turns a single-folder window into a workspace — the
+   * main folder's relabel, brought forward to the first activation, or the
+   * first worktree folder — opens the repository's named workspace instead,
+   * with every folder the edit would have produced. Leaving the single folder
+   * already cost a restart (VS Code restarts the extension host to enter the
+   * untitled workspace); opening the file is that one restart instead, not a
+   * second — the window reloads once, and agents re-attach from tmux.
+   *
+   * True when the named workspace has taken the edit over: the caller skips
+   * its own. Should the file not be written or opened, `fallback` — the edit
+   * as it always was — runs then. One switch at a time: an edit arriving while
+   * one is on its way is in the folders the next window loads anyway.
+   */
+  private openNamedWorkspace(root: string, adding: Array<{ path: string; name: string }>, fallback: () => void): boolean {
+    const naming = this.deps.workspaceNaming;
+    if (!naming?.isSingleFolder()) return false;
+    if (this.namingInFlight) return true;
+    this.namingInFlight = naming
+      .open(root, [...this.foldersNow(root), ...adding])
+      .then((opened) => { if (!opened) fallback(); })
+      .catch((e: unknown) => {
+        console.error('[stack] opening the named workspace failed:', e);
+        fallback();
+      })
+      .finally(() => { this.namingInFlight = undefined; });
+    return true;
+  }
+
+  /** The window's folders as they read now, the main checkout under its branch label. */
+  private foldersNow(root: string): Array<{ path: string; name: string }> {
+    const normalizedRoot = canonicalPath(root);
+    const main = worktreesInRepo(this.deps.manager.list(), root).find((wt) => canonicalPath(wt.path) === normalizedRoot);
+    return this.deps.host.workspaceFolderPaths().map((p) => ({
+      path: p,
+      name: main && canonicalPath(p) === normalizedRoot
+        ? displayLabel(main)
+        : this.deps.host.workspaceFolderName(p) ?? path.basename(p),
+    }));
   }
 
   // ── Create ─────────────────────────────────────────────────────────────────
@@ -1549,7 +1613,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
         // Best-effort wiring: the worktree exists and its setup is already
         // running, so a failure here must not fail the whole creation.
         try {
-          this.deps.host.addWorkspaceFolders({ path: wt.path, name: displayLabel(wt) });
+          this.addFolders(root, [{ path: wt.path, name: displayLabel(wt) }]);
           this.startMonitoring(wt);
         } catch (e) {
           console.error('[stack] post-create wiring failed (worktree and setup are unaffected):', e);

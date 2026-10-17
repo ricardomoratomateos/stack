@@ -54,6 +54,8 @@ import { worktreesInRepo } from './worktree/worktreesInRepo';
 import { migrateLegacySettings, vscodeSettingsHost, type MigratedSetting } from './migration/legacySettings';
 import { migrateLegacyState } from './migration/legacyState';
 import { LEGACY_EXTENSION_ID } from './migration/legacyStorage';
+import { NamedWorkspace, restoreStashedState, vscodeNamedWorkspaceHost } from './workspace/namedWorkspace';
+import { NodeFileSystem } from './adapters/NodeFileSystem';
 
 /**
  * Surfaces a broken `.stack/config.json` with a way to go fix it.
@@ -275,6 +277,11 @@ class VsCodeWorkspaceHost implements IWorkspaceHost {
 }
 
 export async function activate(ctx: vscode.ExtensionContext) {
+  // First of all: a window that has just switched to its named workspace
+  // starts with an empty workspaceState (it is keyed by workspace), so what
+  // the window it came from had is put back before anything reads it.
+  await restoreStashedState(vscode.workspace.workspaceFile, ctx.globalState, ctx.workspaceState)
+    .catch((e: unknown) => { console.error('[stack] restoring the previous workspace state failed:', e); });
   // Before anything reads them: what Foreman — this extension's old name —
   // left in settings and in this extension's mementos moves to Stack's names.
   // Never fatal; the worst case is starting from defaults, as a new install.
@@ -399,6 +406,16 @@ export async function activate(ctx: vscode.ExtensionContext) {
   const scriptOutput = vscode.window.createOutputChannel('Stack');
   ctx.subscriptions.push(scriptOutput);
 
+  // The window is named after the project ("aside (Workspace)") rather than
+  // "Untitled (Workspace)": see workspace/namedWorkspace.ts.
+  const namedWorkspace = new NamedWorkspace({
+    storageDir: ctx.globalStorageUri.fsPath,
+    fs: new NodeFileSystem(),
+    host: vscodeNamedWorkspaceHost(scriptOutput),
+    globalState: ctx.globalState,
+    workspaceState: ctx.workspaceState,
+  });
+
   // Point the hooks of this window's worktrees at this window's server. Done
   // now, so agents still running from before a reload reach the new port on
   // their very next event; again once the worktrees are loaded; and whenever
@@ -445,6 +462,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     prMonitor,
     globalState: ctx.globalState,
     workspaceState: ctx.workspaceState,
+    workspaceNaming: namedWorkspace,
   });
 
   const diffPanelManager = new DiffPanelManager(ctx.extensionUri, service, () => config.get().sidebarStyle);
@@ -719,6 +737,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       vscode.commands.executeCommand('workbench.action.openWalkthrough', `${EXTENSION_ID}#stack.gettingStarted`, false),
     ),
     vscode.commands.registerCommand('stack.createRepoConfig', () => createRepoConfig(config, repoRootOf())),
+    vscode.commands.registerCommand('stack.nameWorkspace', () => namedWorkspace.nameNow(repoRootOf())),
     vscode.commands.registerCommand('stack.deleteWorktree', (item) => service.deleteWorktree(item?.worktree)),
     vscode.commands.registerCommand('stack.renameWorktree', (item) => service.renameWorktree(item?.worktree)),
     vscode.commands.registerCommand('stack.initWorktree', (item) => service.initWorktree(item?.worktree)),
@@ -817,6 +836,12 @@ export async function activate(ctx: vscode.ExtensionContext) {
       await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(path.join(root, LEGACY_REPO_CONFIG_RELATIVE)));
     }
   })();
+
+  // A window that is already "Untitled (Workspace)" — made before Stack named
+  // them — is offered its name once per repository.
+  void namedWorkspace.offer(repoRootOf()).catch((e: unknown) => {
+    console.error('[stack] offering to name the workspace failed:', e);
+  });
 
   void (async () => {
     const root = repoRootOf();

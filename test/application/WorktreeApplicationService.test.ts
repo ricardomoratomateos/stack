@@ -10,6 +10,7 @@ import {
   TEARDOWN_TIMEOUT_MS,
   SETUP_TIMEOUT_MS,
   type IWorkspaceHost,
+  type WorkspaceNamingPort,
 } from '../../src/application/WorktreeApplicationService';
 import { VsCodeNotifyAdapter } from '../../src/adapters/VsCodeNotifyAdapter';
 import { window, ProgressLocation, resetVscodeMock } from '../__mocks__/vscode';
@@ -107,6 +108,8 @@ interface HarnessOpts {
   trackedSettings?: string[];
   /** what workspaceState holds under GROUP_SINCE_KEY, as a previous session left it */
   savedSince?: Record<string, { group: string; at: number }>;
+  /** the named-workspace port; omitted, folders are edited the way VS Code does by default */
+  workspaceNaming?: WorkspaceNamingPort;
 }
 
 function makeHarness(o: HarnessOpts = {}) {
@@ -364,6 +367,7 @@ function makeHarness(o: HarnessOpts = {}) {
     workspaceState,
     installedProviders: o.useRealInstalledProviders ? undefined : () => o.installedProviders ?? [],
     dockerOutput: o.dockerOutput,
+    workspaceNaming: o.workspaceNaming,
   });
   if (o.withUi !== false) service.setUi(ui);
 
@@ -4652,5 +4656,142 @@ describe('focusNextAttention', () => {
     await h.service.focusNextAttention();
     expect(h.notify.showInfo).toHaveBeenCalledWith('Stack: nothing is waiting on you.');
     expect(h.claude.getOrCreateViewer).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The named workspace: a single-folder window becomes "<repo> (Workspace)"
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('named workspace instead of "Untitled (Workspace)"', () => {
+  const main = () => makeWorktree({ id: 'm', path: '/repo', branch: 'develop', isMain: true });
+  const wtB = () => makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
+
+  function naming(opts: { single?: boolean; open?: () => Promise<boolean> } = {}) {
+    return {
+      isSingleFolder: vi.fn(() => opts.single ?? true),
+      open: vi.fn(opts.open ?? (async () => true)),
+    };
+  }
+
+  it('the first worktree folders of a single-folder window open the named workspace, main relabelled first', async () => {
+    const n = naming();
+    const h = makeHarness({ worktrees: [main(), wtB()], workspaceNaming: n, workspaceFolderNames: { '/repo': 'repo' } });
+    await h.service.loadWorktreesForRepo('/repo');
+    await flushMicrotasks();
+    expect(n.open).toHaveBeenCalledWith('/repo', [
+      { path: '/repo', name: 'develop' },
+      { path: '/repo/zer/feat-b', name: 'feat/b' },
+    ]);
+    expect(h.host.addWorkspaceFolders).not.toHaveBeenCalled();
+    // Everything else still happens: the agents re-attach after the switch's restart.
+    expect(h.claude.reconnect).toHaveBeenCalled();
+  });
+
+  it('the forced relabel of a lone main folder opens it too, instead of renaming in place', async () => {
+    const n = naming();
+    const h = makeHarness({ worktrees: [main()], workspaceNaming: n, workspaceFolderNames: { '/repo': 'repo' } });
+    await h.service.loadWorktreesForRepo('/repo');
+    await flushMicrotasks();
+    expect(n.open).toHaveBeenCalledWith('/repo', [{ path: '/repo', name: 'develop' }]);
+    expect(h.host.renameWorkspaceFolder).not.toHaveBeenCalled();
+  });
+
+  it('nothing to change, nothing opened', async () => {
+    const n = naming();
+    const h = makeHarness({ worktrees: [main()], workspaceNaming: n, workspaceFolderNames: { '/repo': 'develop' } });
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(n.open).not.toHaveBeenCalled();
+  });
+
+  it('falls back to today\'s edit when the file could not be written', async () => {
+    const n = naming({ open: async () => false });
+    const h = makeHarness({ worktrees: [main(), wtB()], workspaceNaming: n });
+    await h.service.loadWorktreesForRepo('/repo');
+    await flushMicrotasks();
+    expect(h.host.addWorkspaceFolders).toHaveBeenCalledWith({ path: '/repo/zer/feat-b', name: 'feat/b' });
+  });
+
+  it('falls back on a relabel too', async () => {
+    const n = naming({ open: async () => false });
+    const h = makeHarness({ worktrees: [main()], workspaceNaming: n, workspaceFolderNames: { '/repo': 'repo' } });
+    h.service.syncMainFolderLabel();
+    await flushMicrotasks();
+    expect(h.host.renameWorkspaceFolder).toHaveBeenCalledWith(0, { path: '/repo', name: 'develop' });
+  });
+
+  it('falls back, and says why, when opening throws', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const n = naming({ open: async () => { throw new Error('boom'); } });
+    const h = makeHarness({ worktrees: [main(), wtB()], workspaceNaming: n });
+    await h.service.loadWorktreesForRepo('/repo');
+    await flushMicrotasks();
+    expect(h.host.addWorkspaceFolders).toHaveBeenCalledOnce();
+    expect(error).toHaveBeenCalledWith('[stack] opening the named workspace failed:', expect.any(Error));
+    error.mockRestore();
+  });
+
+  it('one switch at a time: an edit while one is on its way is left to the next window', async () => {
+    let finish!: (ok: boolean) => void;
+    const n = naming({ open: () => new Promise<boolean>((r) => { finish = r; }) });
+    const h = makeHarness({ worktrees: [main()], workspaceNaming: n, workspaceFolderNames: { '/repo': 'repo' } });
+    h.service.syncMainFolderLabel();
+    h.service.syncMainFolderLabel();
+    expect(n.open).toHaveBeenCalledOnce();
+    finish(true);
+    await flushMicrotasks();
+    // Settled (say the user cancelled VS Code's save prompt): the next edit tries again.
+    h.service.syncMainFolderLabel();
+    expect(n.open).toHaveBeenCalledTimes(2);
+    expect(h.host.renameWorkspaceFolder).not.toHaveBeenCalled();
+  });
+
+  it('a window that is already a workspace edits its folders as before', async () => {
+    const n = naming({ single: false });
+    const h = makeHarness({ worktrees: [main(), wtB()], workspaceNaming: n });
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(n.open).not.toHaveBeenCalled();
+    expect(h.host.addWorkspaceFolders).toHaveBeenCalledOnce();
+  });
+
+  it('keeps folders it does not manage, under their names — or their directory name', async () => {
+    const n = naming();
+    const h = makeHarness({
+      worktrees: [main(), wtB()],
+      workspaceNaming: n,
+      workspaceFolders: ['/repo', '/notes', '/scratch'],
+      workspaceFolderNames: { '/notes': 'My notes' },
+    });
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(n.open).toHaveBeenCalledWith('/repo', [
+      { path: '/repo', name: 'develop' },
+      { path: '/notes', name: 'My notes' },
+      { path: '/scratch', name: 'scratch' },
+      { path: '/repo/zer/feat-b', name: 'feat/b' },
+    ]);
+  });
+
+  it('without a main checkout in the store, the repo folder keeps its own name', async () => {
+    const n = naming();
+    const h = makeHarness({ worktrees: [wtB()], workspaceNaming: n, workspaceFolderNames: { '/repo': 'repo' } });
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(n.open).toHaveBeenCalledWith('/repo', [
+      { path: '/repo', name: 'repo' },
+      { path: '/repo/zer/feat-b', name: 'feat/b' },
+    ]);
+  });
+
+  it('a worktree created in a single-folder window opens the named workspace with it', async () => {
+    vi.useFakeTimers();
+    const n = naming();
+    const created = makeWorktree({ id: 'new', branch: 'feat/x', path: '/repo/zer/feat-x' });
+    const h = makeHarness({ worktrees: [main()], workspaceNaming: n, workspaceFolderNames: { '/repo': 'develop' } });
+    h.manager.create.mockImplementation(async () => created);
+    await h.service.createWorktree({ branch: 'feat/x' });
+    expect(n.open).toHaveBeenCalledWith('/repo', [
+      { path: '/repo', name: 'develop' },
+      { path: '/repo/zer/feat-x', name: 'feat/x' },
+    ]);
+    expect(h.host.addWorkspaceFolders).not.toHaveBeenCalled();
   });
 });
