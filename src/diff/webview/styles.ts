@@ -334,8 +334,10 @@ body.vscode-high-contrast .rv-del > .rv-code::before, body.vscode-high-contrast-
   border-radius: 9px; background: var(--rv-surface); box-shadow: inset 0 0 0 1px var(--rv-line-strong); overflow: hidden;
   transition: box-shadow .12s;
 }
-.rv-card.is-editing { box-shadow: inset 0 0 0 1px var(--rv-accent-text), 0 0 0 3px var(--rv-accent-soft); }
-.rv-card:not(.is-editing) { box-shadow: inset 3px 0 0 var(--rv-accent), inset 0 0 0 1px var(--rv-line-strong); }
+/* Editing: the card stays neutral — the accent is the input's alone, and only
+   while it has focus. Two accent outlines (card + input) read as noise. */
+.rv-card.is-editing { box-shadow: inset 0 0 0 1px var(--rv-line-strong); }
+.rv-card:not(.is-editing) { box-shadow: inset 2px 0 0 var(--rv-accent), inset 0 0 0 1px var(--rv-line); }
 .rv-card-head { display: flex; align-items: center; gap: 8px; padding: 6px 6px 0 10px; min-height: 30px; }
 .rv-card-loc { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font: 11.5px var(--rv-mono); color: var(--rv-dim); }
 .rv-card-loc .codicon { color: var(--rv-accent-text); flex: none; }
@@ -352,7 +354,7 @@ body.vscode-high-contrast .rv-del > .rv-code::before, body.vscode-high-contrast-
   color: var(--vscode-input-foreground, var(--rv-fg)); background: var(--vscode-input-background, var(--rv-bg));
   box-shadow: inset 0 0 0 1px var(--rv-line-strong); transition: box-shadow .12s;
 }
-.rv-input:focus { box-shadow: inset 0 0 0 1px var(--rv-accent-text); }
+.rv-input:focus { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rv-accent-text) 50%, var(--rv-line-strong)); }
 .rv-input::placeholder { color: var(--rv-dim); opacity: .85; }
 .rv-card-foot { display: flex; align-items: center; gap: 8px; padding: 8px 10px 10px; }
 .rv-hint { font-size: 11.5px; color: var(--rv-dim); display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
