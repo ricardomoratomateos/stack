@@ -10,13 +10,13 @@
     "color": "#0a0a0a",
     "theme": "dark"
   },
-  "homepage": "https://github.com/ricardomoratomateos/foreman#readme",
+  "homepage": "https://github.com/ricardomoratomateos/stack#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ricardomoratomateos/foreman.git"
+    "url": "https://github.com/ricardomoratomateos/stack.git"
   },
   "bugs": {
-    "url": "https://github.com/ricardomoratomateos/foreman/issues"
+    "url": "https://github.com/ricardomoratomateos/stack/issues"
   },
   "engines": {
     "vscode": "^1.85.0"

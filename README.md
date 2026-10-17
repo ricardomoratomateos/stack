@@ -1,6 +1,6 @@
 # Stack
 
-[![CI](https://github.com/ricardomoratomateos/foreman/actions/workflows/ci.yml/badge.svg)](https://github.com/ricardomoratomateos/foreman/actions/workflows/ci.yml)
+[![CI](https://github.com/ricardomoratomateos/stack/actions/workflows/ci.yml/badge.svg)](https://github.com/ricardomoratomateos/stack/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
 **Run multiple AI coding agents in parallel — each in its own git worktree, its own tmux session, its own environment — without the mess.**
