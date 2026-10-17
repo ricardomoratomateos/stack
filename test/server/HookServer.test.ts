@@ -31,7 +31,7 @@ function postHook(baseUrl: string, payload: unknown): Promise<Response> {
 }
 
 describe('EVENT_TO_STATE', () => {
-  it('maps exactly the 8 documented events', () => {
+  it('maps exactly the 7 events whose meaning is fixed', () => {
     expect(EVENT_TO_STATE).toEqual({
       SessionStart: 'waiting',
       UserPromptSubmit: 'active',
@@ -40,8 +40,7 @@ describe('EVENT_TO_STATE', () => {
       Stop: 'waiting',
       SessionEnd: 'terminated',
       PermissionRequest: 'permission',
-      // An agent's generic "the agent wants you" signal.
-      Notification: 'permission',
+      // Notification depends on what it says: see notificationState.
     });
   });
 });

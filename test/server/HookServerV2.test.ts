@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as http from 'node:http';
-import { HookServer, parseHook, type HookEvent } from '../../src/server/HookServer';
+import { HookServer, notificationState, parseHook, type HookEvent } from '../../src/server/HookServer';
 
 // ── v2 wire format: Stack's ids in headers, the agent's payload as the body ──
 
@@ -206,5 +206,57 @@ describe('parseHook', () => {
   it('is undefined without an event', () => {
     expect(parseHook({ 'x-stack-hook': '2' }, new URLSearchParams(), '{}')).toBeUndefined();
     expect(parseHook({}, new URLSearchParams(), undefined)).toBeUndefined();
+  });
+});
+
+describe('notificationState', () => {
+  it('reads notification_type when the agent sends it', () => {
+    expect(notificationState({ notification_type: 'permission_prompt', message: 'whatever' })).toBe('permission');
+    expect(notificationState({ notification_type: 'elicitation_dialog' })).toBe('permission');
+    // The finished agent idling at its prompt: ready, not asking.
+    expect(notificationState({ notification_type: 'idle_prompt', message: 'Claude needs your permission' })).toBe('waiting');
+    expect(notificationState({ notification_type: 'auth_success' })).toBeUndefined();
+    expect(notificationState({ notification_type: 'something_new' })).toBeUndefined();
+  });
+
+  it('falls back to the message text', () => {
+    expect(notificationState({ message: 'Claude needs your permission to use Bash' })).toBe('permission');
+    expect(notificationState({ message: 'Claude is waiting for your input' })).toBe('waiting');
+    expect(notificationState({ message: 'Something else entirely' })).toBeUndefined();
+    expect(notificationState({})).toBeUndefined();
+  });
+});
+
+describe('POST /hook: Notification', () => {
+  let server: HookServer | undefined;
+  const updateState = vi.fn();
+  afterEach(() => { server?.dispose(); server = undefined; updateState.mockReset(); });
+
+  async function notify(body: Record<string, unknown>): Promise<void> {
+    server = new HookServer({ updateState });
+    const url = await server.start();
+    await new Promise<void>((resolve, reject) => {
+      const req = http.request(`${url}/hook`, {
+        method: 'POST',
+        headers: { 'X-Stack-Hook': '2', 'X-Stack-Event': 'Notification', 'X-Stack-Workspace': 'ws1', 'X-Stack-Window': '1' },
+      }, (res) => { res.resume(); res.on('end', () => resolve()); });
+      req.on('error', reject);
+      req.end(JSON.stringify({ hook_event_name: 'Notification', ...body }));
+    });
+  }
+
+  it('keeps a finished agent ready for review when it idles at the prompt', async () => {
+    await notify({ notification_type: 'idle_prompt', message: 'Claude is waiting for your input' });
+    expect(updateState).toHaveBeenCalledWith('ws1', 'waiting', 1);
+  });
+
+  it('turns a permission prompt into "needs you"', async () => {
+    await notify({ notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' });
+    expect(updateState).toHaveBeenCalledWith('ws1', 'permission', 1);
+  });
+
+  it('changes nothing for a notification that is neither', async () => {
+    await notify({ notification_type: 'auth_success', message: 'Signed in' });
+    expect(updateState).not.toHaveBeenCalled();
   });
 });

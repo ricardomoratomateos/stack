@@ -19,10 +19,34 @@ export const EVENT_TO_STATE: Record<string, AgentSessionState> = {
   Stop:            'waiting',
   SessionEnd:      'terminated',
   PermissionRequest: 'permission',
-  // Notification is an agent's generic "the agent wants you" signal, which is
-  // what the attention badge exists to surface.
-  Notification:      'permission',
+  // Notification is not here: it means different things — see notificationState.
 };
+
+/**
+ * What a Notification says about the agent.
+ *
+ * Claude Code sends one for a permission prompt ("Claude needs your
+ * permission to use Bash") and another after a minute of idling at the prompt
+ * ("Claude is waiting for your input"). Both used to map to `permission`, so
+ * an agent that had finished, and was ready for review, jumped to "needs you"
+ * a minute later with nothing to answer.
+ *
+ * `notification_type` decides when the agent sends it: permission_prompt and
+ * elicitation_dialog (a question it waits on) need you; idle_prompt is the
+ * finished agent idling, i.e. waiting; anything else (auth_success, types not
+ * invented yet) is no state at all. Older agents send only the message, which
+ * is read the same way; one that is neither changes nothing.
+ */
+export function notificationState(payload: Record<string, unknown>): AgentSessionState | undefined {
+  const type = str(payload['notification_type']);
+  if (type !== undefined) {
+    if (type === 'permission_prompt' || type === 'elicitation_dialog') return 'permission';
+    return type === 'idle_prompt' ? 'waiting' : undefined;
+  }
+  const message = str(payload['message']) ?? '';
+  if (/waiting for your input/i.test(message)) return 'waiting';
+  return /\bpermission\b/i.test(message) ? 'permission' : undefined;
+}
 
 /**
  * One hook event, as received — for consumers that want more than the state.
@@ -202,7 +226,7 @@ export function parseHook(
 
   return {
     event,
-    state: EVENT_TO_STATE[event],
+    state: event === 'Notification' ? notificationState(payload) : EVENT_TO_STATE[event],
     workspaceId,
     windowIndex: Number.isInteger(index) && index >= 0 ? index : undefined,
     agent: v2 ? header('agent') : undefined,
