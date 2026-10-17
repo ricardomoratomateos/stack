@@ -142,6 +142,10 @@
       {
         "command": "stack.gettingStarted",
         "title": "Stack: Getting Started"
+      },
+      {
+        "command": "stack.nameWorkspace",
+        "title": "Stack: Name This Workspace"
       }
     ],
     "keybindings": [
