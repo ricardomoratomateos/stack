@@ -224,6 +224,9 @@ class VsCodeWorkspaceHost implements IWorkspaceHost {
     this.scriptOutput.show(true);
     return runScript(run, this.scriptOutput);
   }
+  showScriptOutput(): void {
+    this.scriptOutput.show();
+  }
   showInputBox(options: { prompt: string; value?: string; placeHolder?: string }): Promise<string | undefined> {
     return Promise.resolve(vscode.window.showInputBox(options));
   }
@@ -391,8 +394,8 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // window that does not manage it, into state its own window then restores.
   const worktreesHere = () => worktreesInRepo(manager.list(), repoRootOf());
 
-  // Teardown scripts run headless so a delete can wait for them; this is where
-  // their output goes instead of a terminal.
+  // Setup and teardown scripts run headless so the agent launch and a delete
+  // can wait for them; this is where their output goes instead of a terminal.
   const scriptOutput = vscode.window.createOutputChannel('Stack');
   ctx.subscriptions.push(scriptOutput);
 
@@ -469,7 +472,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // the panel reports exactly what the extension would), the personal half
   // through VS Code's own settings at global scope.
   const REPO_KEYS: RepoScopedKey[] = [
-    'worktreesDirectory', 'defaultBaseBranch', 'setupScript', 'teardownScript', 'docker', 'debugBasePort', 'debugTemplate',
+    'worktreesDirectory', 'defaultBaseBranch', 'setupScript', 'setupInTerminal', 'teardownScript', 'docker', 'debugBasePort', 'debugTemplate',
   ];
   const detectIo: DetectIo = {
     readdir: (dir) => fs.readdirSync(dir),

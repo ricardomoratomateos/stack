@@ -66,6 +66,7 @@ For the heavier setup — Docker per worktree, a debugger port per worktree, set
 | `stack.sessionTabs` | `perSession` | `perSession`: every session opens in its own terminal tab, so an agent and a shell can sit side by side (see [Sessions side by side](#sessions-side-by-side)). `single`: one terminal per worktree that switches between them, as before |
 | `stack.focusMode` | `false` | Clean-slate switching: close the other worktrees' editor tabs and agent terminals so only the active worktree is on screen (see [Switching worktrees](#switching-worktrees)) |
 | `stack.setupScript` / `stack.teardownScript` | `""` | Script run on worktree create / delete (e.g. `.stack/setup.sh`) |
+| `stack.setupInTerminal` | `false` | Run the setup script in a terminal you can type into, without holding the agent back — for scripts that ask questions |
 | `stack.docker` | — | Per-worktree compose file + auto-generated ports (opt-in; see below) |
 | `stack.debugBasePort` | `9898` | First debug port; each worktree takes the next free slot above it |
 | `stack.debugTemplate` | node attach | `launch.json` template generated per worktree (`{{PORT}}`, `{{WORKTREE_PATH}}`); any debugger, see [Debugging](#per-worktree-debugging) |
@@ -120,6 +121,8 @@ The base is recorded when the worktree is created, so a worktree cut from `relea
 ## Per-repo configuration
 
 For heavier setups (dedicated Docker stack, dependency prep, debug), point the `stack.setupScript` / `stack.teardownScript` and `stack.docker` settings at your own script and compose files — **anywhere in the repo**, wherever you like to keep them.
+
+The setup script runs in the background, its output in the **Stack** output channel, and the new worktree's agent starts once it has finished — so the agent never wakes up without its `vendor/`, `node_modules/` or `.env`. The worktree's row reads "Preparing… 1:42" meanwhile; if the script fails the row says so, with buttons to show the log, retry, or launch the agent anyway. **Init worktree** re-runs it the same way. A script that asks questions needs `stack.setupInTerminal`, which runs it in a terminal as before and starts the agent straight away.
 
 When it runs your setup script, Stack exports `STACK_REPO_ROOT`, `STACK_WORKTREE_PATH`, `STACK_BRANCH`, `STACK_COMPOSE_PROJECT` (also under their Foreman-era names, `FOREMAN_*`, which are deprecated) and the worktree's auto-generated ports, and the matching debug port is wired into the generated `launch.json`. With Docker configured it also exports `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE`, so a plain `docker compose up -d` in the script starts the very stack the card shows and deleting the worktree stops it (add `--project-directory "$STACK_WORKTREE_PATH"` when the compose file lives in the main repo). Relative paths resolve against the worktree first, then the main repo.
 
@@ -190,7 +193,7 @@ Run **Stack: Create Repo Config File** from the command palette to generate it f
 
 **Precedence** is *your explicit setting* → *the repo file* → *the shipped default*. So the repo file gives everyone a sane starting point, and anyone who deliberately sets a value in their own `settings.json` keeps it. Only an explicitly-set value counts; a key you never touched doesn't shadow the repo's.
 
-**Which keys it accepts:** `worktreesDirectory`, `defaultBaseBranch`, `setupScript`, `teardownScript`, `docker`, `debugBasePort`, `debugTemplate`. Every key is optional, and `docker` merges key by key — naming just your compose file won't reset `basePort`.
+**Which keys it accepts:** `worktreesDirectory`, `defaultBaseBranch`, `setupScript`, `setupInTerminal`, `teardownScript`, `docker`, `debugBasePort`, `debugTemplate`. Every key is optional, and `docker` merges key by key — naming just your compose file won't reset `basePort`.
 
 **Which it doesn't:** `defaultProvider`, the per-agent commands, `notifyOnAttention`, `focusMode`, `scopeSearchToActiveWorktree`. Which agent you reach for and where its binary lives are properties of your machine, and a repository you cloned has no business overriding them. Put one in the file and Stack tells you so rather than quietly ignoring it.
 

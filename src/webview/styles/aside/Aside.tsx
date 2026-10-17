@@ -6,7 +6,7 @@ import { Details, DiffStat } from '../../components/Details';
 import { LaunchSplit } from '../../components/LaunchSplit';
 import { ActionBar } from '../../components/ActionBar';
 import { visualFor } from '../../components/providers';
-import { ForgetActions } from '../../components/RowParts';
+import { ForgetActions, RowLine, SetupActions } from '../../components/RowParts';
 import { SessionList } from '../../components/SessionList';
 import { EmptyState, HealthStrip, LoadingState, NothingHere } from '../../components/Status';
 import type { LayoutProps } from '../types';
@@ -131,7 +131,7 @@ function Row({ d, selected, now, state, select, drag }: {
         <span className="as-body">
           <span className="as-name fm-ellipsis" title={wt.branch}>{d.name}</span>
           <span className="as-line fm-ellipsis">
-            {d.agent && <span className="as-provider">{visualFor(d.provider).label}</span>} {d.line}
+            {d.agent && <span className="as-provider">{visualFor(d.provider).label}</span>} <RowLine d={d} />
           </span>
         </span>
         <span className="as-meta">
@@ -142,6 +142,7 @@ function Row({ d, selected, now, state, select, drag }: {
 
       {wt.dockerError && !selected && <div className="fm-row-error as-indent" title={wt.dockerError}>stack: {wt.dockerError}</div>}
       {d.group === 'missing' && <ForgetActions d={d} />}
+      {wt.setup && !wt.deleting && <SetupActions d={d} />}
 
       {selected && d.group !== 'missing' && (
         <div className="as-expand">

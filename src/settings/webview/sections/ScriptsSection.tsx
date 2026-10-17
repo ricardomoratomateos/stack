@@ -1,10 +1,10 @@
 import React from 'react';
 import type { FileField } from '../../types';
 import { STR } from '../strings';
-import { Card, Field, FileInput } from '../ui';
+import { Card, Field, FileInput, SwitchRow } from '../ui';
 import { RepoGate, RepoNotices, type Ctx } from './context';
 
-export const SCRIPT_KEYS = ['setupScript', 'teardownScript'];
+export const SCRIPT_KEYS = ['setupScript', 'setupInTerminal', 'teardownScript'];
 const ENV = ['STACK_REPO_ROOT', 'STACK_WORKTREE_PATH', 'STACK_BRANCH', 'STACK_COMPOSE_PROJECT', 'COMPOSE_PROJECT_NAME', 'COMPOSE_FILE'];
 
 function ScriptCard({ ctx, kind }: { ctx: Ctx; kind: 'setup' | 'teardown' }) {
@@ -20,6 +20,12 @@ function ScriptCard({ ctx, kind }: { ctx: Ctx; kind: 'setup' | 'teardown' }) {
           />
         )}
       </Field>
+      {kind === 'setup' && (
+        <SwitchRow
+          label={STR.setupInTerminal} hint={STR.setupInTerminalHint}
+          checked={ctx.draft.project.setupInTerminal} onChange={(v) => ctx.patch({ setupInTerminal: v })}
+        />
+      )}
     </Card>
   );
 }

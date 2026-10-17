@@ -56,6 +56,7 @@ export type RepoScopedKey =
   | 'worktreesDirectory'
   | 'defaultBaseBranch'
   | 'setupScript'
+  | 'setupInTerminal'
   | 'teardownScript'
   | 'docker'
   | 'debugBasePort'
@@ -85,6 +86,12 @@ type Validator = (raw: unknown, problems: string[], key: string) => unknown;
 const asString: Validator = (raw, problems, key) => {
   if (typeof raw === 'string') return raw;
   problems.push(`"${key}" must be a string, got ${describe(raw)}`);
+  return undefined;
+};
+
+const asBoolean: Validator = (raw, problems, key) => {
+  if (typeof raw === 'boolean') return raw;
+  problems.push(`"${key}" must be true or false, got ${describe(raw)}`);
   return undefined;
 };
 
@@ -155,6 +162,7 @@ const validators: Record<RepoScopedKey, Validator> = {
   worktreesDirectory: asString,
   defaultBaseBranch: asString,
   setupScript: asString,
+  setupInTerminal: asBoolean,
   teardownScript: asString,
   docker: asDocker,
   debugBasePort: asPositiveInt,
@@ -254,6 +262,7 @@ export function renderRepoConfig(effective: StackConfig): string {
     worktreesDirectory: effective.worktreesDirectory,
     defaultBaseBranch: effective.defaultBaseBranch,
     setupScript: effective.setupScript,
+    setupInTerminal: effective.setupInTerminal,
     teardownScript: effective.teardownScript,
     docker: effective.docker,
     debugBasePort: effective.debugBasePort,

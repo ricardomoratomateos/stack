@@ -117,7 +117,7 @@ export const SECTION_FIELDS: Record<SectionId, { project: (keyof ProjectValues)[
   general: { project: [], user: ['defaultProvider', 'claudeCommand', 'codexCommand', 'opencodeCommand'] },
   appearance: { project: [], user: ['sidebarStyle', 'sessionTabs'] },
   worktrees: { project: ['worktreesDirectory', 'defaultBaseBranch'], user: ['focusMode', 'scopeSearchToActiveWorktree'] },
-  scripts: { project: ['setupScript', 'teardownScript'], user: [] },
+  scripts: { project: ['setupScript', 'setupInTerminal', 'teardownScript'], user: [] },
   docker: { project: ['docker'], user: [] },
   debugging: { project: ['debugBasePort', 'debugTemplate'], user: [] },
   notifications: { project: [], user: ['notifyOnAttention'] },

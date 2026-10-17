@@ -7,6 +7,7 @@ import {
   ACTIVE_WORKTREE_KEY,
   WORKTREE_ORDER_KEY,
   TEARDOWN_TIMEOUT_MS,
+  SETUP_TIMEOUT_MS,
   type IWorkspaceHost,
 } from '../../src/application/WorktreeApplicationService';
 import { VsCodeNotifyAdapter } from '../../src/adapters/VsCodeNotifyAdapter';
@@ -225,6 +226,7 @@ function makeHarness(o: HarnessOpts = {}) {
       calls.push(`host.runScript:${run.label}:${run.script}:${run.cwd}`);
       return o.scriptExitCode === undefined ? 0 : o.scriptExitCode;
     }),
+    showScriptOutput: vi.fn(() => { calls.push('host.showScriptOutput'); }),
     showInputBox: vi.fn(async (): Promise<string | undefined> => undefined),
     showQuickPick: vi.fn(async (): Promise<string | undefined> => undefined),
     updateFolderSetting: vi.fn(async (folderPath: string, section: string, value: unknown) => {
@@ -1917,7 +1919,7 @@ describe('createWorktree', () => {
 
   it('runs the setup script in a visible terminal when configured', async () => {
     vi.useFakeTimers();
-    const { h } = createHarness({ config: { setupScript: '/scripts/setup.sh' } });
+    const { h } = createHarness({ config: { setupScript: '/scripts/setup.sh', setupInTerminal: true } });
     await h.service.createWorktree({ branch: 'feat/x' });
     expect(h.calls).toContain('report:Running setup script...');
     expect(h.calls).toContain('host.createTerminal:Init: feat/x:/repo/zer/feat-x');
@@ -1938,7 +1940,7 @@ describe('createWorktree', () => {
 
   it('starts the setup script BEFORE the workspace/monitor wiring', async () => {
     vi.useFakeTimers();
-    const { h } = createHarness({ config: { setupScript: '/scripts/setup.sh' } });
+    const { h } = createHarness({ config: { setupScript: '/scripts/setup.sh', setupInTerminal: true } });
     await h.service.createWorktree({ branch: 'feat/x' });
     const setupIdx = h.calls.indexOf('host.createTerminal:Init: feat/x:/repo/zer/feat-x');
     const wiringIdx = h.calls.findIndex((c) => c.startsWith('host.addWorkspaceFolders'));
@@ -1954,7 +1956,7 @@ describe('createWorktree', () => {
     ['prMonitor.startPolling', (h: ReturnType<typeof createHarness>['h']) => h.prMonitor.startPolling],
   ])('still runs the setup script when %s throws (worktree must not be left bare)', async (_name, pick) => {
     vi.useFakeTimers();
-    const { h } = createHarness({ config: { setupScript: '/scripts/setup.sh' } });
+    const { h } = createHarness({ config: { setupScript: '/scripts/setup.sh', setupInTerminal: true } });
     pick(h).mockImplementation(() => { throw new Error('boom'); });
     await h.service.createWorktree({ branch: 'feat/x' });
     expect(h.calls).toContain('host.createTerminal:Init: feat/x:/repo/zer/feat-x');
@@ -2476,7 +2478,7 @@ describe('initWorktree', () => {
   it('targets the ACTIVE worktree when invoked with no argument (command palette)', async () => {
     const a = makeWorktree({ id: 'a' });
     const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
-    const h = makeHarness({ worktrees: [a, b], config: { setupScript: '/scripts/setup.sh' } });
+    const h = makeHarness({ worktrees: [a, b], config: { setupScript: '/scripts/setup.sh', setupInTerminal: true } });
     await h.service.switchToWorktree('b');
     await h.service.initWorktree(undefined);
     // Not 'a', which is merely first in the store — that would run a heavy setup
@@ -2486,7 +2488,7 @@ describe('initWorktree', () => {
 
   it('falls back to the first worktree when nothing is active yet', async () => {
     const a = makeWorktree({ id: 'a' });
-    const h = makeHarness({ worktrees: [a], config: { setupScript: '/scripts/setup.sh' } });
+    const h = makeHarness({ worktrees: [a], config: { setupScript: '/scripts/setup.sh', setupInTerminal: true } });
     await h.service.initWorktree(undefined);
     expect(h.calls).toContain('host.createTerminal:Init: feat/a:/repo/zer/feat-a');
   });
@@ -2501,7 +2503,7 @@ describe('initWorktree', () => {
 
   it('re-runs the setup script in a visible terminal (no completion echo)', async () => {
     const a = makeWorktree({ id: 'a', alias: 'My task' });
-    const h = makeHarness({ worktrees: [a], config: { setupScript: '/scripts/setup.sh' } });
+    const h = makeHarness({ worktrees: [a], config: { setupScript: '/scripts/setup.sh', setupInTerminal: true } });
     await h.service.initWorktree(a);
     expect(h.calls).toEqual([
       'host.createTerminal:Init: My task:/repo/zer/feat-a',
@@ -2516,7 +2518,7 @@ describe('initWorktree', () => {
     const h = makeHarness({
       worktrees: [a],
       config: {
-        setupScript: '.stack/setup.sh',
+        setupScript: '.stack/setup.sh', setupInTerminal: true,
         docker: { composeFile: '.stack/docker-compose.worktree.yml', overrideFile: '', ports: ['WORKTREE_PORT'], basePort: 8081, portStride: 1 },
       },
       existingPaths: ['/repo/zer/feat-b/.stack/setup.sh'],
@@ -2529,7 +2531,7 @@ describe('initWorktree', () => {
 
   it('uses an absolute setup script path as-is when it exists', async () => {
     const a = makeWorktree({ id: 'a' });
-    const h = makeHarness({ worktrees: [a], config: { setupScript: '/abs/setup.sh' }, existingPaths: ['/abs/setup.sh'] });
+    const h = makeHarness({ worktrees: [a], config: { setupScript: '/abs/setup.sh', setupInTerminal: true }, existingPaths: ['/abs/setup.sh'] });
     await h.service.initWorktree(a);
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
       `${scriptEnv('/repo/zer/feat-a', 'feat/a')} bash /abs/setup.sh`,
@@ -2538,7 +2540,7 @@ describe('initWorktree', () => {
 
   it('falls back to the repo root for a relative setup script the branch does not carry', async () => {
     const a = makeWorktree({ id: 'a' });
-    const h = makeHarness({ worktrees: [a], config: { setupScript: 'scripts/setup.sh' } }); // present in neither
+    const h = makeHarness({ worktrees: [a], config: { setupScript: 'scripts/setup.sh', setupInTerminal: true } }); // present in neither
     await h.service.initWorktree(a);
     expect(h.terminalsCreated[0].sendText).toHaveBeenCalledWith(
       `${scriptEnv('/repo/zer/feat-a', 'feat/a')} bash /repo/scripts/setup.sh`,
@@ -2554,7 +2556,7 @@ describe('initWorktree', () => {
       branch: 'feat/$(touch /tmp/pwned)',
       path: "/repo/zer/it's-`id`",
     });
-    const h = makeHarness({ worktrees: [a], config: { setupScript: '/s.sh' } });
+    const h = makeHarness({ worktrees: [a], config: { setupScript: '/s.sh', setupInTerminal: true } });
     await h.service.initWorktree(a);
     const typed = h.terminalsCreated[0].sendText.mock.calls[0][0] as string;
     expect(typed).toContain("STACK_BRANCH='feat/$(touch /tmp/pwned)'");
@@ -2564,7 +2566,7 @@ describe('initWorktree', () => {
 
   it('falls back to the first store entry', async () => {
     const a = makeWorktree({ id: 'a' });
-    const h = makeHarness({ worktrees: [a], config: { setupScript: '/s.sh' } });
+    const h = makeHarness({ worktrees: [a], config: { setupScript: '/s.sh', setupInTerminal: true } });
     await h.service.initWorktree(undefined);
     expect(h.host.createTerminal).toHaveBeenCalledWith({ name: 'Init: feat/a', cwd: a.path });
   });
@@ -2917,7 +2919,7 @@ describe('port re-check before setup / compose up', () => {
 
   it('a re-init also spares the stack\'s own ports, from a fresh listing', async () => {
     const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b', debugPort: 9901 });
-    const h = makeHarness({ worktrees: [b], config: { ...dockerCfg, setupScript: '/s.sh' } });
+    const h = makeHarness({ worktrees: [b], config: { ...dockerCfg, setupScript: '/s.sh', setupInTerminal: true } });
     h.dockerMonitor.getContainers.mockImplementation((p: string) =>
       p === composeProject(b) ? [{ name: 'web', state: 'running', ports: [8083] }] : []);
 
@@ -2952,7 +2954,7 @@ describe('port re-check before setup / compose up', () => {
 
   it('re-runs setup with the reassigned ports, so the .env it writes matches the stack', async () => {
     const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b', debugPort: 9901 });
-    const h = makeHarness({ worktrees: [b], config: { ...dockerCfg, setupScript: '/s.sh' } });
+    const h = makeHarness({ worktrees: [b], config: { ...dockerCfg, setupScript: '/s.sh', setupInTerminal: true } });
     reassignTo(h, 9903, 8083);
 
     await h.service.initWorktree(b);
@@ -3469,6 +3471,204 @@ describe('base-branch drift', () => {
 // Naming a session
 // ─────────────────────────────────────────────────────────────────────────────
 
+describe('setup runs headless, and the agent waits for it', () => {
+  const root = '/repo';
+  const SETUP = { setupScript: '/scripts/setup.sh' };
+
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>((res) => { resolve = res; });
+    return { promise, resolve };
+  }
+
+  /** A create whose setup script finishes when the test says so. */
+  function pending(o: HarnessOpts = {}) {
+    const created = makeWorktree({ id: 'new', branch: 'feat/x', path: '/repo/zer/feat-x' });
+    const h = makeHarness({ workspaceFolders: [root], gitDirs: ['/repo/.git'], worktrees: [created], config: SETUP, ...o });
+    h.manager.create.mockResolvedValue(created);
+    const runs: Array<{ resolve: (code: number | null) => void }> = [];
+    h.host.runScript.mockImplementation(async (run: { label: string }) => {
+      h.calls.push(`host.runScript:${run.label}`);
+      const d = deferred<number | null>();
+      runs.push(d);
+      return d.promise;
+    });
+    const setupOf = () => h.service.buildState().worktrees.find((w) => w.id === 'new')?.setup;
+    return { h, created, runs, setupOf };
+  }
+
+  it('runs the script headless with the worktree\'s env and a generous timeout — no terminal', async () => {
+    vi.useFakeTimers();
+    const { h, runs } = pending();
+    await h.service.createWorktree({ branch: 'feat/x' });
+    expect(h.host.runScript).toHaveBeenCalledWith(expect.objectContaining({
+      label: 'Setup: feat/x',
+      script: '/scripts/setup.sh',
+      cwd: '/repo/zer/feat-x',
+      timeoutMs: SETUP_TIMEOUT_MS,
+      env: expect.objectContaining({ STACK_WORKTREE_PATH: '/repo/zer/feat-x', STACK_BRANCH: 'feat/x' }),
+    }));
+    expect(h.host.createTerminal).not.toHaveBeenCalled();
+    // Started before the workspace wiring, as the terminal run was.
+    expect(h.calls.indexOf('host.runScript:Setup: feat/x')).toBeLessThan(h.calls.findIndex((c) => c.startsWith('host.addWorkspaceFolders')));
+    runs[0].resolve(0);
+  });
+
+  it('holds the agent until the script succeeds, showing the run on the row meanwhile', async () => {
+    vi.useFakeTimers({ now: 1_000 });
+    const { h, created, runs, setupOf } = pending();
+    await h.service.createWorktree({ branch: 'feat/x', description: 'do it' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(h.claude.launchWithPrompt).not.toHaveBeenCalled();
+    expect(setupOf()).toEqual({ state: 'running', startedAt: 1_000, held: true });
+
+    runs[0].resolve(0);
+    await flushMicrotasks();
+    expect(h.claude.launchWithPrompt).toHaveBeenCalledWith(created, 'do it', undefined);
+    expect(setupOf()).toBeUndefined();
+  });
+
+  it('keeps the agent held after a failure, says so, and shows the failure on the row', async () => {
+    vi.useFakeTimers({ now: 1_000 });
+    const { h, runs, setupOf } = pending();
+    await h.service.createWorktree({ branch: 'feat/x' });
+    runs[0].resolve(2);
+    await flushMicrotasks();
+    expect(h.claude.launch).not.toHaveBeenCalled();
+    expect(setupOf()).toEqual({ state: 'failed', startedAt: 1_000, error: 'exited with code 2', held: true });
+    expect(h.notify.showWarning).toHaveBeenCalledWith('Setup for "feat/x" exited with code 2 — its agent has not been started. See the Stack output.');
+  });
+
+  it('reads a script that was stopped or timed out as not finished', async () => {
+    vi.useFakeTimers();
+    const { h, runs, setupOf } = pending();
+    await h.service.createWorktree({ branch: 'feat/x' });
+    runs[0].resolve(null);
+    await flushMicrotasks();
+    expect(setupOf()?.error).toBe('did not finish');
+  });
+
+  it('"Launch anyway" starts the held agent and clears the failure', async () => {
+    vi.useFakeTimers();
+    const { h, created, runs, setupOf } = pending();
+    await h.service.createWorktree({ branch: 'feat/x', provider: 'codex' });
+    runs[0].resolve(1);
+    await flushMicrotasks();
+    await h.service.handleMessage({ type: 'setupAction', worktreeId: 'new', action: 'launch' });
+    expect(h.claude.launch).toHaveBeenCalledWith(created, { provider: 'codex' });
+    expect(setupOf()).toBeUndefined();
+  });
+
+  it('"Retry" runs the script again and releases the agent when it succeeds', async () => {
+    vi.useFakeTimers();
+    const { h, created, runs, setupOf } = pending();
+    await h.service.createWorktree({ branch: 'feat/x' });
+    runs[0].resolve(1);
+    await flushMicrotasks();
+    const retried = h.service.setupAction('new', 'retry');
+    await flushMicrotasks();
+    expect(runs).toHaveLength(2);
+    expect(setupOf()?.state).toBe('running');
+    runs[1].resolve(0);
+    await retried;
+    expect(h.claude.launch).toHaveBeenCalledWith(created, undefined);
+    expect(setupOf()).toBeUndefined();
+  });
+
+  it('"Retry" with no script configured any more says so', async () => {
+    vi.useFakeTimers();
+    const { h, runs } = pending();
+    await h.service.createWorktree({ branch: 'feat/x' });
+    runs[0].resolve(1);
+    await flushMicrotasks();
+    h.cfg.setupScript = '';
+    await h.service.setupAction('new', 'retry');
+    expect(h.notify.showError).toHaveBeenCalledWith('No setup script configured. Set "stack.setupScript" in settings.');
+    expect(runs).toHaveLength(1);
+  });
+
+  it('"Dismiss" clears the failure without starting anything', async () => {
+    vi.useFakeTimers();
+    const { h, runs, setupOf } = pending();
+    await h.service.createWorktree({ branch: 'feat/x' });
+    runs[0].resolve(1);
+    await flushMicrotasks();
+    await h.service.setupAction('new', 'dismiss');
+    expect(setupOf()).toBeUndefined();
+    expect(h.claude.launch).not.toHaveBeenCalled();
+  });
+
+  it('"Show log" brings up the output; the failure-only actions do nothing while it runs', async () => {
+    vi.useFakeTimers();
+    const { h, runs, setupOf } = pending();
+    await h.service.createWorktree({ branch: 'feat/x' });
+    await h.service.setupAction('new', 'log');
+    expect(h.calls).toContain('host.showScriptOutput');
+    await h.service.setupAction('new', 'launch');
+    await h.service.setupAction('nope', 'retry');
+    expect(h.claude.launch).not.toHaveBeenCalled();
+    expect(setupOf()?.state).toBe('running');
+    runs[0].resolve(0);
+  });
+
+  it('never starts an agent in a worktree deleted while its setup ran', async () => {
+    vi.useFakeTimers();
+    const { h, runs, setupOf } = pending({ confirmResult: 'Delete', existingPaths: [] });
+    await h.service.createWorktree({ branch: 'feat/x' });
+    await h.service.deleteWorktree(h.worktrees[0]);
+    runs[0].resolve(0);
+    await flushMicrotasks();
+    expect(h.claude.launch).not.toHaveBeenCalled();
+    expect(setupOf()).toBeUndefined();
+    expect(h.notify.showWarning).not.toHaveBeenCalled();
+  });
+
+  describe('Init worktree', () => {
+    it('re-runs the setup the same way, headless and on the row', async () => {
+      vi.useFakeTimers();
+      const { h, runs, setupOf, created } = pending();
+      await h.service.initWorktree(created);
+      expect(h.host.runScript).toHaveBeenCalledWith(expect.objectContaining({ label: 'Setup: feat/x', timeoutMs: SETUP_TIMEOUT_MS }));
+      expect(setupOf()).toMatchObject({ state: 'running' });
+      expect(setupOf()?.held).toBeUndefined();
+      runs[0].resolve(0);
+      await flushMicrotasks();
+      expect(setupOf()).toBeUndefined();
+      expect(h.claude.launch).not.toHaveBeenCalled();
+    });
+
+    it('warns of a failure without speaking of an agent when none was waiting', async () => {
+      vi.useFakeTimers();
+      const { h, runs, created } = pending();
+      await h.service.initWorktree(created);
+      runs[0].resolve(3);
+      await flushMicrotasks();
+      expect(h.notify.showWarning).toHaveBeenCalledWith('Setup for "feat/x" exited with code 3. See the Stack output.');
+    });
+
+    it('does not start a second run over one still going', async () => {
+      vi.useFakeTimers();
+      const { h, runs, created } = pending();
+      await h.service.initWorktree(created);
+      await h.service.initWorktree(created);
+      expect(runs).toHaveLength(1);
+      expect(h.notify.showInfo).toHaveBeenCalledWith('Setup for "feat/x" is already running.');
+    });
+
+    it('releases the agent a failed first setup was holding, once it succeeds', async () => {
+      vi.useFakeTimers();
+      const { h, runs, created } = pending();
+      await h.service.createWorktree({ branch: 'feat/x' });
+      runs[0].resolve(1);
+      await flushMicrotasks();
+      await h.service.initWorktree(created);
+      runs[1].resolve(0);
+      await flushMicrotasks();
+      expect(h.claude.launch).toHaveBeenCalledWith(created, undefined);
+    });
+  });
+});
+
 describe('openPr', () => {
   it('opens the URL gh reported for the worktree\'s PR', async () => {
     const h = makeHarness({ worktrees: [makeWorktree()] });
@@ -3947,7 +4147,7 @@ describe('worktree state pruning', () => {
 });
 
 describe('script terminals are reused, not piled up', () => {
-  const setup = { setupScript: '/scripts/setup.sh' };
+  const setup = { setupScript: '/scripts/setup.sh', setupInTerminal: true };
 
   it('re-running init reuses the worktree\'s Init terminal', async () => {
     const a = makeWorktree({ id: 'a' });
@@ -4165,7 +4365,7 @@ describe('missing worktrees', () => {
 
     it('closes the forgotten worktree\'s script terminals', async () => {
       const g = gone();
-      const h = makeHarness({ worktrees: [main(), g], missingIds: ['g'], config: { setupScript: '/s.sh' } });
+      const h = makeHarness({ worktrees: [main(), g], missingIds: ['g'], config: { setupScript: '/s.sh', setupInTerminal: true } });
       await h.service.initWorktree(g);
       await h.service.loadWorktreesForRepo('/repo');
 

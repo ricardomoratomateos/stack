@@ -41,6 +41,13 @@ export const WORKTREE_ORDER_KEY = 'stack.worktreeOrder';
  * can see must not leave the card locked as "deleting" forever.
  */
 export const TEARDOWN_TIMEOUT_MS = 10 * 60 * 1000;
+/**
+ * How long a headless setup script may run. A cold `composer install` plus
+ * `npm ci` plus a database seed is minutes on a good day, so this is generous;
+ * the bound is only there so a script blocked on input nobody can give does
+ * not hold the agent back forever.
+ */
+export const SETUP_TIMEOUT_MS = 30 * 60 * 1000;
 /** How long a resolved drift base is trusted; see driftBaseFor. */
 const DRIFT_BASE_TTL_MS = 60 * 1000;
 
@@ -81,6 +88,8 @@ export interface IWorkspaceHost {
    * the exit code — null when it was killed or timed out — and never rejects.
    */
   runScript(run: HostScriptRun): Promise<number | null>;
+  /** Bring the output channel runScript writes to into view. */
+  showScriptOutput(): void;
   showInputBox(options: { prompt: string; value?: string; placeHolder?: string }): Promise<string | undefined>;
   showQuickPick(items: string[], options: { placeHolder: string }): Promise<string | undefined>;
   /** Set (or clear with undefined) a folder-scoped setting, e.g. 'search.exclude'. */
@@ -184,6 +193,15 @@ export class WorktreeApplicationService implements DiffPanelHost {
   private scriptTerminals = new Map<string, HostTerminal>();
   /** resolveBaseBranch for drift, which is display-only — see driftBaseFor. */
   private driftBaseCache = new Map<string, { base: string; at: number }>();
+  /**
+   * Headless setup runs, by worktree id: running, or failed and waiting for
+   * the user. The entry is also the run's identity — a result that comes back
+   * after a retry, or after the worktree was deleted, finds a different entry
+   * (or none) and is dropped.
+   */
+  private setups = new Map<string, { state: 'running' | 'failed'; startedAt: number; error?: string }>();
+  /** The agent each worktree's setup is holding back; started when it succeeds. */
+  private heldLaunches = new Map<string, () => void>();
   /** Whether each folder's .vscode/settings.json is versioned — see syncSearchScoping. */
   private trackedSettingsCache = new Map<string, { tracked: boolean; at: number }>();
 
@@ -399,6 +417,89 @@ export class WorktreeApplicationService implements DiffPanelHost {
   }
 
   /**
+   * Run the setup script headless and wait for it, its output in the Stack
+   * output channel. Resolves whether it succeeded — and false as well when the
+   * run was superseded (retried, or its worktree deleted) before it ended.
+   *
+   * It used to be typed into a terminal and the agent launched 300 ms later,
+   * so in a PHP or Node repository the agent woke up with no vendor/, no
+   * node_modules/ and no .env, and its first moves failed or, worse, went
+   * ahead and installed things itself. The row shows the run and its
+   * elapsed time meanwhile, and a failure stays on it with its way out.
+   */
+  private async runSetup(wt: Worktree, script: string): Promise<boolean> {
+    const run = { state: 'running' as const, startedAt: Date.now() };
+    this.setups.set(wt.id, run);
+    this.ui.pushWebview();
+    const { resolved, env } = this.scriptInvocation(wt, script);
+    const code = await this.deps.host.runScript({
+      label: `Setup: ${displayLabel(wt)}`,
+      script: resolved,
+      cwd: wt.path,
+      env,
+      timeoutMs: SETUP_TIMEOUT_MS,
+    });
+    if (this.setups.get(wt.id) !== run) return false;
+    if (code === 0) {
+      this.setups.delete(wt.id);
+      this.ui.pushWebview();
+      return true;
+    }
+    const error = code === null ? 'did not finish' : `exited with code ${code}`;
+    this.setups.set(wt.id, { state: 'failed', startedAt: run.startedAt, error });
+    this.deps.notify.showWarning(
+      `Setup for "${displayLabel(wt)}" ${error}${this.heldLaunches.has(wt.id) ? ' — its agent has not been started' : ''}. See the Stack output.`,
+    );
+    this.ui.pushWebview();
+    return false;
+  }
+
+  /** Start the agent a setup was holding back, if there is one. */
+  private releaseHeldLaunch(worktreeId: string): void {
+    const launch = this.heldLaunches.get(worktreeId);
+    this.heldLaunches.delete(worktreeId);
+    launch?.();
+  }
+
+  /** A worktree's setup is no longer anyone's business: it was deleted or forgotten. */
+  private dropSetup(worktreeId: string): void {
+    this.setups.delete(worktreeId);
+    this.heldLaunches.delete(worktreeId);
+  }
+
+  /** The row's view of a setup run, spread into its WorktreeItem (nothing when there is none). */
+  private setupItem(worktreeId: string): Pick<WorktreeItem, 'setup'> {
+    const run = this.setups.get(worktreeId);
+    if (!run) return {};
+    return { setup: { ...run, ...(this.heldLaunches.has(worktreeId) ? { held: true } : {}) } };
+  }
+
+  /** The setup row's buttons. */
+  async setupAction(worktreeId: string, action: 'log' | 'retry' | 'launch' | 'dismiss'): Promise<void> {
+    if (action === 'log') {
+      this.deps.host.showScriptOutput();
+      return;
+    }
+    const run = this.setups.get(worktreeId);
+    const wt = this.findWorktree(worktreeId);
+    // Only a failure has these; a click that raced the run finishing does nothing.
+    if (!wt || run?.state !== 'failed') return;
+    if (action === 'retry') {
+      const script = this.deps.config.get().setupScript;
+      if (!script) {
+        this.deps.notify.showError('No setup script configured. Set "stack.setupScript" in settings.');
+        return;
+      }
+      if (await this.runSetup(wt, script)) this.releaseHeldLaunch(wt.id);
+      return;
+    }
+    this.setups.delete(worktreeId);
+    // 'launch' starts what was held; 'dismiss' just clears the failure.
+    if (action === 'launch') this.releaseHeldLaunch(worktreeId);
+    this.ui.pushWebview();
+  }
+
+  /**
    * Resolve a repo-relative file, preferring the worktree's own copy (when its
    * branch carries `.stack/`) and falling back to the main repo — where
    * `.stack/` lives when the branch predates it. Returns undefined if neither
@@ -537,6 +638,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     deleteWorktree: (msg) => this.deleteWorktree(this.findWorktree(msg.worktreeId)),
     renameWorktree: (msg) => this.renameWorktree(this.findWorktree(msg.worktreeId)),
     initWorktree: (msg) => this.initWorktree(this.findWorktree(msg.worktreeId)),
+    setupAction: (msg) => this.setupAction(msg.worktreeId, msg.action),
     openDiff: (msg) => this.ui.openDiffPanel(msg.worktreeId),
     openNewTask: () => this.ui.openNewTask(),
     createWorktree: async (msg) => {
@@ -903,6 +1005,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       dockerError: this.stacks.status(wt).error,
       ports: this.portsFor(wt),
       pr: this.deps.prMonitor.getStatus(wt.id) ?? null,
+      ...this.setupItem(wt.id),
     }));
     this.stampSince(items);
     const activeWorktreeId = worktrees.find((wt) => wt.id === this.currentWorktreeId)?.id;
@@ -1262,6 +1365,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     if (forgot) {
       this.stopMonitoring(wt);
       this.disposeScriptTerminals(wt.id);
+      this.dropSetup(wt.id);
       await this.deps.agentManager.killWorktreeSession(wt.id);
       const folderIdx = this.deps.host.workspaceFolderPaths().findIndex((p) => p === wt.path);
       if (folderIdx !== -1) this.deps.host.removeWorkspaceFolder(folderIdx);
@@ -1370,8 +1474,11 @@ export class WorktreeApplicationService implements DiffPanelHost {
     // HEAD. Resolve the configured default for that path too, so both entry
     // points branch off the same place.
     const baseBranch = opts?.baseBranch || this.resolveBaseBranch(root) || undefined;
+    const { setupScript, setupInTerminal } = this.deps.config.get();
 
     let createdWt: Worktree | undefined;
+    // Set when the setup runs headless: the agent waits for it.
+    let setupDone: Promise<boolean> | undefined;
     try {
       createdWt = await this.deps.notify.withProgress(`Creating worktree "${branch}"`, async (report) => {
         report('Running git worktree add...');
@@ -1383,11 +1490,12 @@ export class WorktreeApplicationService implements DiffPanelHost {
         // The setup script goes FIRST. It is the slow, essential part (deps, .env,
         // containers — minutes of work), and it used to sit behind the UI wiring
         // below: any throw in there left a worktree checked out on disk with no
-        // environment at all and nothing but a toast to show for it.
-        const setupScript = this.deps.config.get().setupScript;
+        // environment at all and nothing but a toast to show for it. Started,
+        // not awaited: the row tracks it from here (see runSetup).
         if (setupScript) {
           report('Running setup script...');
-          this.runScriptTerminal(wt, setupScript, 'Init', 'Setup complete');
+          if (setupInTerminal) this.runScriptTerminal(wt, setupScript, 'Init', 'Setup complete');
+          else setupDone = this.runSetup(wt, setupScript);
         }
 
         report('Adding to workspace...');
@@ -1420,15 +1528,26 @@ export class WorktreeApplicationService implements DiffPanelHost {
       await this.switchToWorktree(wt.id);
       const description = opts?.description;
       const provider = opts?.provider;
-      setTimeout(() => {
-        // Nothing awaits this timer, so a failure must be reported here or it
+      const launch = () => {
+        // Nothing awaits this, so a failure must be reported here or it
         // vanishes as an unhandled rejection — the worktree then simply never
         // got its agent, with nothing on screen to say why.
         const launched = description
           ? this.deps.agentManager.launchWithPrompt(wt, description, provider)
           : this.deps.agentManager.launch(wt, provider ? { provider } : undefined);
         launched.catch((e) => this.deps.notify.showError(`Failed to launch agent: ${String(e)}`));
-      }, 300);
+      };
+      if (setupDone) {
+        // Held until the environment exists. A failed setup keeps holding it,
+        // for "Retry" or "Launch anyway" on the row.
+        this.heldLaunches.set(wt.id, launch);
+        this.ui.pushWebview();
+        void setupDone.then((ok) => { if (ok) this.releaseHeldLaunch(wt.id); });
+      } else {
+        // A terminal setup (or none): the old pace, which leaves VS Code a
+        // moment to settle the folder update before a new terminal opens.
+        setTimeout(launch, 300);
+      }
     }
     return { ok: true };
   }
@@ -1515,6 +1634,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
       await this.deps.agentManager.killWorktreeSession(wt.id);
       this.disposeScriptTerminals(wt.id);
+      // A setup still running must not start an agent in a deleted worktree.
+      this.dropSetup(wt.id);
       const folderIdx = this.deps.host.workspaceFolderPaths().findIndex((p) => p === wt.path);
       if (folderIdx !== -1) this.deps.host.removeWorkspaceFolder(folderIdx);
       try {
@@ -1562,12 +1683,20 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   // ── Command helpers (item?.worktree ?? store[0] fallback) ──────────────────
 
+  /**
+   * Re-run the setup script — the same way a new worktree runs it: headless
+   * and tracked on the row, or in a terminal with stack.setupInTerminal.
+   */
   async initWorktree(worktree?: Worktree): Promise<void> {
     const wt = this.resolveWorktree(worktree);
     if (!wt) return;
-    const setupScript = this.deps.config.get().setupScript;
+    const { setupScript, setupInTerminal } = this.deps.config.get();
     if (!setupScript) {
       this.deps.notify.showError('No setup script configured. Set "stack.setupScript" in settings.');
+      return;
+    }
+    if (!setupInTerminal && this.setups.get(wt.id)?.state === 'running') {
+      this.deps.notify.showInfo(`Setup for "${displayLabel(wt)}" is already running.`);
       return;
     }
     // A re-init can happen long after the slot was allocated — re-check before
@@ -1578,7 +1707,14 @@ export class WorktreeApplicationService implements DiffPanelHost {
       await this.stacks.refresh();
       own = this.stacks.ownPorts(wt);
     }
-    this.runScriptTerminal(await this.ensurePortsFree(wt, own), setupScript, 'Init');
+    const ready = await this.ensurePortsFree(wt, own);
+    if (setupInTerminal) {
+      this.runScriptTerminal(ready, setupScript, 'Init');
+      return;
+    }
+    // Not awaited: the command returns, the row shows the run. A success
+    // releases an agent a failed first setup was still holding.
+    void this.runSetup(ready, setupScript).then((ok) => { if (ok) this.releaseHeldLaunch(ready.id); });
   }
 
   openTerminal(worktree?: Worktree): void {

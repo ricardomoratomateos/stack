@@ -69,7 +69,9 @@ export const STR = {
 
   // Scripts
   setup: 'After creating a worktree',
-  setupHint: 'Install dependencies, copy .env, boot services.',
+  setupHint: 'Install dependencies, copy .env, boot services. The agent starts once it has finished.',
+  setupInTerminal: 'Run in a terminal',
+  setupInTerminalHint: 'For a script that asks questions: it runs where you can type, and the agent starts without waiting for it.',
   teardown: 'Before deleting a worktree',
   teardownHint: 'Stop what setup started, free what it reserved.',
   choose: 'Choose…',

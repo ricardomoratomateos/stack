@@ -138,6 +138,12 @@ export interface StackConfig {
    */
   defaultBaseBranch: string;
   setupScript: string;
+  /**
+   * Run the setup script in a terminal you can see and type into, as it was
+   * before, instead of headless and awaited. For scripts that ask questions;
+   * the agent then starts without waiting for it.
+   */
+  setupInTerminal: boolean;
   teardownScript: string;
   /** Agent launched when no explicit provider is requested. */
   defaultProvider: ProviderId;

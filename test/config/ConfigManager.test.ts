@@ -52,6 +52,7 @@ describe('ConfigManager', () => {
       worktreesDirectory: '.worktrees',
       defaultBaseBranch: 'develop',
       setupScript: '',
+      setupInTerminal: false,
       teardownScript: '',
       defaultProvider: 'claude',
       claudeCommand: 'claude',
@@ -91,6 +92,7 @@ describe('ConfigManager', () => {
       worktreesDirectory: '/abs/worktrees',
       defaultBaseBranch: 'main',
       setupScript: '/scripts/setup.sh',
+      setupInTerminal: true,
       teardownScript: '/scripts/teardown.sh',
       defaultProvider: 'opencode',
       claudeCommand: 'claude --dangerously-skip-permissions',
@@ -321,6 +323,7 @@ describe('ConfigManager', () => {
         worktreesDirectory: '.worktrees',
         defaultBaseBranch: 'trunk',
         setupScript: '',
+        setupInTerminal: false,
         teardownScript: '',
         docker: {
           composeFile: 'compose.yaml',

@@ -6,7 +6,7 @@ import type { FileField, ProjectValues, SettingsSnapshot, UserValues } from '../
 import { STR } from '../strings';
 import { Banner, Button, Icon } from '../ui';
 
-const REPO_KEYS = ['worktreesDirectory', 'defaultBaseBranch', 'setupScript', 'teardownScript', 'docker', 'debugBasePort', 'debugTemplate'];
+const REPO_KEYS = ['worktreesDirectory', 'defaultBaseBranch', 'setupScript', 'setupInTerminal', 'teardownScript', 'docker', 'debugBasePort', 'debugTemplate'];
 
 /** What every section reads and edits: the snapshot, both drafts, and the ways to change them. */
 export interface Ctx {

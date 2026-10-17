@@ -5,7 +5,7 @@ import { DiffStat, PrBadge, Details } from '../../components/Details';
 import { LaunchSplit } from '../../components/LaunchSplit';
 import { ActionBar } from '../../components/ActionBar';
 import { visualFor } from '../../components/providers';
-import { openAsking } from '../../components/RowParts';
+import { RowLine, SetupActions, openAsking } from '../../components/RowParts';
 import { SessionList } from '../../components/SessionList';
 import { EmptyState, HealthStrip, LoadingState, NothingHere } from '../../components/Status';
 import type { LayoutProps } from '../types';
@@ -144,7 +144,7 @@ function Card({ d, selected, now, state, select, drag }: {
         </span>
         <span className="ms-card-line">
           <span className="ms-provider">{d.agent ? visualFor(d.provider).label : wt.isMain ? 'main' : '—'}</span>
-          <span className="fm-ellipsis">{d.line}</span>
+          <span className="fm-ellipsis"><RowLine d={d} /></span>
         </span>
         {showMeta && (
           <span className="ms-meta">
@@ -157,6 +157,8 @@ function Card({ d, selected, now, state, select, drag }: {
       </button>
 
       {wt.dockerError && !selected && <div className="fm-row-error ms-pad" title={wt.dockerError}>Stack: {wt.dockerError}</div>}
+
+      {wt.setup && !wt.deleting && <SetupActions d={d} />}
 
       {d.group === 'missing' && (
         <div className="ms-actions">

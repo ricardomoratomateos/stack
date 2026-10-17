@@ -78,6 +78,7 @@ describe('readRepoConfig', () => {
       worktreesDirectory: '../wt',
       defaultBaseBranch: 'trunk',
       setupScript: '.stack/setup.sh',
+      setupInTerminal: true,
       teardownScript: '.stack/teardown.sh',
       docker: {
         composeFile: 'compose.yaml',
@@ -96,6 +97,7 @@ describe('readRepoConfig', () => {
       worktreesDirectory: '../wt',
       defaultBaseBranch: 'trunk',
       setupScript: '.stack/setup.sh',
+      setupInTerminal: true,
       teardownScript: '.stack/teardown.sh',
       docker: {
         composeFile: 'compose.yaml',
@@ -160,6 +162,11 @@ describe('readRepoConfig', () => {
       expect(read({ setupScript: null }).problems[0]).toContain('got null');
       expect(read({ setupScript: [] }).problems[0]).toContain('got an array');
       expect(read({ setupScript: {} }).problems[0]).toContain('got object');
+    });
+
+    it('rejects anything but a boolean for a switch', () => {
+      expect(read({ setupInTerminal: 'yes' }).problems[0]).toBe('"setupInTerminal" must be true or false, got string');
+      expect(read({ setupInTerminal: false }).values).toEqual({ setupInTerminal: false });
     });
 
     it('rejects ports outside 1..65535 and non-integers', () => {
@@ -256,6 +263,7 @@ describe('renderRepoConfig', () => {
     worktreesDirectory: '../wt',
     defaultBaseBranch: 'trunk',
     setupScript: '.stack/setup.sh',
+    setupInTerminal: false,
     teardownScript: '.stack/teardown.sh',
     defaultProvider: 'codex',
     claudeCommand: 'claude',
@@ -282,6 +290,7 @@ describe('renderRepoConfig', () => {
       worktreesDirectory: '../wt',
       defaultBaseBranch: 'trunk',
       setupScript: '.stack/setup.sh',
+      setupInTerminal: false,
       teardownScript: '.stack/teardown.sh',
       docker: effective.docker,
       debugBasePort: 9001,

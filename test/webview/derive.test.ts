@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  attentionOf, attentionQueue, countByGroup, describe as describeWt, describeAll, describeStack, formatAge,
+  attentionOf, attentionQueue, countByGroup, describe as describeWt, describeAll, describeStack, formatAge, formatElapsed,
   groupOf, nextInQueue, parseAttention, primaryAgent, sessionToOpen,
 } from '../../src/webview/derive';
 import type { AgentState, SessionItem, WorktreeItem } from '../../src/webview/types';
@@ -164,6 +164,14 @@ describe('describe', () => {
     expect(describeWt(wt({ pr: { number: 5, state: 'OPEN', reviewDecision: 'APPROVED' } })).pr?.changesRequested).toBe(false);
   });
 
+  it('says the setup is running, or that it failed and why, before anything the agent says', () => {
+    const agent = [session('waiting', { title: 'Ready' })];
+    expect(describeWt(wt({ sessions: agent, setup: { state: 'running', startedAt: 1 } })).line).toBe('Preparing…');
+    expect(describeWt(wt({ setup: { state: 'failed', startedAt: 1, error: 'exited with code 2' } })).line).toBe('Setup failed · exited with code 2');
+    expect(describeWt(wt({ setup: { state: 'failed', startedAt: 1 } })).line).toBe('Setup failed · see the log');
+    expect(describeWt(wt({ deleting: true, setup: { state: 'running', startedAt: 1 } })).line).toBe('Deleting…');
+  });
+
   it('describes every worktree of a state, passing docker availability along', () => {
     const all = describeAll({ worktrees: [wt(), wt({ id: 'b' })], dockerUnavailable: 'daemon down' });
     expect(all.map((d) => d.wt.id)).toEqual(['a', 'b']);
@@ -226,5 +234,14 @@ describe('countByGroup', () => {
   it('tallies every group, empty ones as zero', () => {
     const counts = countByGroup(describeAll({ worktrees: [wt(), wt({ id: 'b', missing: true }), wt({ id: 'c' })] }));
     expect(counts).toEqual({ needs: 0, review: 0, working: 0, idle: 2, missing: 1 });
+  });
+});
+
+describe('formatElapsed', () => {
+  it('reads as a clock: minutes and seconds, hours once there are any', () => {
+    expect(formatElapsed(7_000)).toBe('0:07');
+    expect(formatElapsed(102_400)).toBe('1:42');
+    expect(formatElapsed(3_723_000)).toBe('1:02:03');
+    expect(formatElapsed(-5)).toBe('0:00');
   });
 });

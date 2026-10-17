@@ -45,6 +45,7 @@ const PROJECT_DEFAULTS: Pick<StackConfig, RepoScopedKey> = {
   worktreesDirectory: '.worktrees',
   defaultBaseBranch: 'develop',
   setupScript: '',
+  setupInTerminal: false,
   teardownScript: '',
   docker: DOCKER_DEFAULTS,
   debugBasePort: 9898,
@@ -131,6 +132,7 @@ export class ConfigManager {
       worktreesDirectory: this.pick(cfg, repo, 'worktreesDirectory', PROJECT_DEFAULTS.worktreesDirectory),
       defaultBaseBranch: this.pick(cfg, repo, 'defaultBaseBranch', PROJECT_DEFAULTS.defaultBaseBranch),
       setupScript: this.pick(cfg, repo, 'setupScript', PROJECT_DEFAULTS.setupScript),
+      setupInTerminal: this.pick(cfg, repo, 'setupInTerminal', PROJECT_DEFAULTS.setupInTerminal),
       teardownScript: this.pick(cfg, repo, 'teardownScript', PROJECT_DEFAULTS.teardownScript),
       defaultProvider: cfg.get<ProviderId>('defaultProvider', 'claude'),
       claudeCommand: cfg.get<string>('claudeCommand', 'claude'),
@@ -169,6 +171,7 @@ export class ConfigManager {
       worktreesDirectory: repo.worktreesDirectory ?? PROJECT_DEFAULTS.worktreesDirectory,
       defaultBaseBranch: repo.defaultBaseBranch ?? PROJECT_DEFAULTS.defaultBaseBranch,
       setupScript: repo.setupScript ?? PROJECT_DEFAULTS.setupScript,
+      setupInTerminal: repo.setupInTerminal ?? PROJECT_DEFAULTS.setupInTerminal,
       teardownScript: repo.teardownScript ?? PROJECT_DEFAULTS.teardownScript,
       // Key by key, as in get(): a file naming only its compose file keeps the
       // default ports and stride rather than losing them.

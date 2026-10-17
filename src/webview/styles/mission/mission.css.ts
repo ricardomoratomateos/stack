@@ -119,6 +119,7 @@ body.vscode-high-contrast .fm-mission, body.vscode-high-contrast-light .fm-missi
 .ms-v[data-tone='bad'] { color: var(--fm-bad); }
 .ms-v[data-tone='muted'] { color: var(--fm-text-dim); }
 .ms-pad { margin: 0 12px 8px; }
+.ms-card .fm-row-actions { margin: 0 12px 10px; }
 .ms-expand { padding: 0 12px 10px; display: flex; flex-direction: column; gap: 10px; }
 .ms-actions { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px; padding: 0 12px 10px; }
 .ms-expand .ms-actions { padding: 0; }

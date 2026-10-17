@@ -35,6 +35,7 @@ export const SETTING_KEYS = [
   'worktreesDirectory',
   'defaultBaseBranch',
   'setupScript',
+  'setupInTerminal',
   'teardownScript',
   'defaultProvider',
   'claudeCommand',

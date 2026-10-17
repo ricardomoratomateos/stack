@@ -200,6 +200,11 @@
           "default": "",
           "description": "Script to run after creating a worktree Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
         },
+        "stack.setupInTerminal": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run the setup script in a visible terminal you can type into, and start the agent without waiting for it — for setup scripts that ask questions. Off (default): it runs in the background, its output in the Stack output channel, and the agent starts once it has finished. Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+        },
         "stack.teardownScript": {
           "type": "string",
           "default": "",

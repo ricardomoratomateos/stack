@@ -217,6 +217,7 @@ button.fm-port:hover { background: var(--fm-hover); border-color: var(--fm-accen
 .fm-pr-ci[data-ci='fail'] { background: var(--fm-bad); }
 .fm-pr-ci[data-ci='pending'] { background: var(--fm-warn); }
 .fm-pr-mark { font-size: 11px; color: var(--fm-warn); }
+.fm-elapsed { font-family: var(--fm-mono); font-variant-numeric: tabular-nums; color: var(--fm-text-dim); }
 .fm-row-error {
   font-size: 11px; color: var(--fm-bad); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }

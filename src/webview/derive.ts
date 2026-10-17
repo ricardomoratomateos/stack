@@ -116,11 +116,25 @@ export function formatAge(since: number | undefined, now: number): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
+/** A running clock: "0:07", "1:42", "1:02:03". */
+export function formatElapsed(ms: number): string {
+  const total = Math.floor(Math.max(0, ms) / 1000);
+  const s = String(total % 60).padStart(2, '0');
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600);
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+}
+
 /** The label a worktree goes by. */
 export const nameOf = (wt: WorktreeItem): string => wt.alias ?? wt.branch;
 
 function lineFor(wt: WorktreeItem, group: WorktreeGroup, agent: SessionItem | undefined): string {
   if (wt.deleting) return 'Deleting…';
+  // The setup comes first: until it is done the worktree is not ready for
+  // anything else, and the agent is waiting on it (the elapsed time is drawn
+  // beside this, ticking — see RowLine).
+  if (wt.setup?.state === 'running') return 'Preparing…';
+  if (wt.setup?.state === 'failed') return `Setup failed · ${wt.setup.error ?? 'see the log'}`;
   const title = agent?.title;
   switch (group) {
     case 'missing':

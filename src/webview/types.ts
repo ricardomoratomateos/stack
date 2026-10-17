@@ -120,6 +120,18 @@ export interface WorktreeItem {
   /** Ports this worktree owns — empty unless `stack.docker.ports` is set. */
   ports: PortMapping[];
   pr?: PrStatus | null;
+  /** The setup script, while it runs headless or after it failed; absent once it succeeded. */
+  setup?: SetupItem;
+}
+
+export interface SetupItem {
+  state: 'running' | 'failed';
+  /** Epoch ms the (latest) run started. */
+  startedAt: number;
+  /** Why it failed, in a few words: "exited with code 2". */
+  error?: string;
+  /** An agent is waiting for it, and starts when it succeeds (or on "Launch anyway"). */
+  held?: boolean;
 }
 
 export interface StackState {
@@ -174,6 +186,8 @@ export type WebMessage =
   | { type: 'deleteWorktree'; worktreeId: string }
   | { type: 'renameWorktree'; worktreeId: string }
   | { type: 'initWorktree'; worktreeId: string }
+  /** The setup row's buttons: its output, run it again, start the held agent regardless, or drop a failure. */
+  | { type: 'setupAction'; worktreeId: string; action: 'log' | 'retry' | 'launch' | 'dismiss' }
   | { type: 'openDiff'; worktreeId: string }
   /** The empty-state "New agent" button opens the full-screen panel. */
   | { type: 'openNewTask' }
