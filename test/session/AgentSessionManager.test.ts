@@ -51,6 +51,7 @@ function makeStub(): ISessionManager {
     listClients: vi.fn().mockResolvedValue([]),
     hasChildProcess: vi.fn().mockResolvedValue(false),
     processCommandLine: vi.fn().mockRejectedValue(new Error('no ps in unit tests')),
+    capturePane: vi.fn().mockResolvedValue('pane text'),
   };
 }
 
@@ -1091,6 +1092,20 @@ describe('sendPromptToAgent', () => {
     expect(await mgr.sendPromptToAgent(wt, 'review this')).toBe(true);
     expect(stub.selectWindow).toHaveBeenCalledWith(SESSION, 3);
     expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:3`, 'review this');
+  });
+
+  it('sends to the one session it is aimed at, and refuses one that is not a live agent', async () => {
+    const { mgr, stub } = create();
+    seed(mgr, 'wt-1', [
+      [1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
+      [2, { kind: 'agent', provider: 'codex', state: 'active', name: 'codex' }],
+      [3, { kind: 'shell', state: 'idle', name: 'shell' }],
+    ]);
+    live(stub, 1, 2);
+    expect(await mgr.sendPromptToAgent(wt, 'x', 2)).toBe(true);
+    expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:2`, 'x');
+    expect(await mgr.sendPromptToAgent(wt, 'y', 3)).toBe(false);
+    expect(stub.paste).not.toHaveBeenCalledWith(`${SESSION}:3`, 'y');
   });
 
   it('prefers a ready (waiting/idle/permission) window over a busy one', async () => {
@@ -2261,3 +2276,13 @@ describe('session aliases', () => {
   });
 });
 
+
+// ── capturePane ─────────────────────────────────────────────────────────────
+
+describe('capturePane', () => {
+  it('reads one session\'s pane through tmux', async () => {
+    const { mgr, stub } = create();
+    expect(await mgr.capturePane('wt-1', 4, 50)).toBe('pane text');
+    expect(stub.capturePane).toHaveBeenCalledWith(`${SESSION}:4`, 50);
+  });
+});

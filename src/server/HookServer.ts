@@ -1,5 +1,7 @@
 import * as http from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { AgentSessionState } from '../types';
+import type { ApiRequest, ApiResponse } from '../mcp/protocol';
 
 /** Structural interface satisfied by AgentSessionManager. */
 export interface AgentStateUpdater {
@@ -94,15 +96,60 @@ const MAX_BODY_BYTES = 1024 * 1024;
  */
 const NOT_MINE = 404;
 
+/**
+ * The window API the Stack MCP bridge calls: `POST /api/<tool>`.
+ *
+ * `handle` answers every call with an ApiResponse — a failed tool is a result
+ * the agent should read, not an HTTP error.
+ */
+export interface ApiEndpoint {
+  /** Expected in `Authorization: Bearer <token>`. */
+  token: string;
+  handle(tool: string, request: ApiRequest): Promise<ApiResponse>;
+}
+
+/**
+ * Why an /api request is refused (the HTTP status), or undefined to let it in.
+ *
+ * Only a local process holding the window's token gets through. A browser
+ * page cannot be one: it always sends an Origin on a cross-origin POST, and a
+ * DNS-rebinding page that reaches 127.0.0.1 under its own name carries that
+ * name in Host — the bridge connects to the literal address, so anything else
+ * is not the bridge. The token is checked last and in constant time.
+ *
+ * /hook gets none of this: notify.sh would have to send a token, and changing
+ * that script costs every Codex user a re-trust (see JsonHookInstaller).
+ */
+export function apiRejection(headers: http.IncomingHttpHeaders, port: number, token: string): number | undefined {
+  if (headers.origin !== undefined) return 403;
+  if (headers.host !== `127.0.0.1:${port}`) return 403;
+  const auth = headers.authorization ?? '';
+  const given = Buffer.from(auth.startsWith('Bearer ') ? auth.slice(7) : '');
+  const expected = Buffer.from(token);
+  if (!token || given.length !== expected.length || !timingSafeEqual(given, expected)) return 401;
+  return undefined;
+}
+
+function sendJson(res: http.ServerResponse, status: number, body: ApiResponse): void {
+  const text = JSON.stringify(body);
+  res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(text) });
+  res.end(text);
+}
+
 export class HookServer {
   private server: http.Server;
   private port = 0;
   private listeners = new Set<(e: HookEvent) => void>();
+  private api?: ApiEndpoint;
 
   constructor(private agentManager: AgentStateUpdater) {
     this.server = http.createServer((req, res) => {
       // Always set on a request a server received; only client-side messages lack it.
       const url = new URL(req.url!, 'http://localhost');
+      if (url.pathname.startsWith('/api/')) {
+        this.serveApi(req, res, url.pathname.slice('/api/'.length));
+        return;
+      }
       if (req.method !== 'POST' || url.pathname !== '/hook') {
         res.writeHead(404);
         res.end();
@@ -125,6 +172,49 @@ export class HookServer {
         res.writeHead(status);
         res.end();
       });
+    });
+  }
+
+  /** The port this window listens on; 0 until start() resolves. */
+  get listeningPort(): number {
+    return this.port;
+  }
+
+  /** Serve the MCP bridge's window API (see ApiEndpoint); undefined turns it off. */
+  setApi(api: ApiEndpoint | undefined): void {
+    this.api = api;
+  }
+
+  private serveApi(req: http.IncomingMessage, res: http.ServerResponse, tool: string): void {
+    const api = this.api;
+    const refuse = (status: number, error: string) => {
+      req.resume();
+      sendJson(res, status, { ok: false, error });
+    };
+    if (!api) return refuse(404, 'The Stack window API is off.');
+    const rejected = apiRejection(req.headers, this.port, api.token);
+    if (rejected) return refuse(rejected, rejected === 401 ? 'Bad or missing token.' : 'Requests from browsers or other hosts are not accepted.');
+    if (req.method !== 'POST') return refuse(405, 'POST only.');
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size <= MAX_BODY_BYTES) chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (size > MAX_BODY_BYTES) return sendJson(res, 413, { ok: false, error: 'Request too large.' });
+      let body: unknown;
+      try {
+        body = size === 0 ? {} : JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      } catch {
+        return sendJson(res, 400, { ok: false, error: 'The body is not JSON.' });
+      }
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        return sendJson(res, 400, { ok: false, error: 'The body must be a JSON object.' });
+      }
+      api.handle(tool, body as ApiRequest)
+        .catch((e: unknown): ApiResponse => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
+        .then((answer) => sendJson(res, 200, answer));
     });
   }
 

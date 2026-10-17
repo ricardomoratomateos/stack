@@ -72,16 +72,33 @@ const newTaskPanelConfig = {
   jsx: 'automatic',
 };
 
+// The Stack MCP bridge: a standalone Node program (no vscode), copied into
+// globalStorage at activation and run by Claude Code / Codex as an MCP server.
+// node18 so whatever `node` the user has can run it; no sourcemap, since it
+// ships as one file that is copied by content.
+const bridgeConfig = {
+  entryPoints: ['src/mcp/bridge/main.ts'],
+  bundle: true,
+  outfile: 'dist/stack-mcp.js',
+  format: 'cjs',
+  platform: 'node',
+  target: 'node18',
+  sourcemap: false,
+  minify: !isWatch,
+  define: { 'process.env.STACK_MCP_VERSION': JSON.stringify(require('./package.json').version) },
+};
+
 async function build() {
   if (isWatch) {
-    const [extCtx, webCtx, diffCtx, newTaskCtx, settingsCtx] = await Promise.all([
+    const [extCtx, webCtx, diffCtx, newTaskCtx, settingsCtx, bridgeCtx] = await Promise.all([
       esbuild.context(extensionConfig),
       esbuild.context(webviewConfig),
       esbuild.context(diffPanelConfig),
       esbuild.context(newTaskPanelConfig),
       esbuild.context(settingsPanelConfig),
+      esbuild.context(bridgeConfig),
     ]);
-    await Promise.all([extCtx.watch(), webCtx.watch(), diffCtx.watch(), newTaskCtx.watch(), settingsCtx.watch()]);
+    await Promise.all([extCtx.watch(), webCtx.watch(), diffCtx.watch(), newTaskCtx.watch(), settingsCtx.watch(), bridgeCtx.watch()]);
     copyCodeicons();
     console.log('Watching for changes...');
   } else {
@@ -91,6 +108,7 @@ async function build() {
       esbuild.build(diffPanelConfig),
       esbuild.build(newTaskPanelConfig),
       esbuild.build(settingsPanelConfig),
+      esbuild.build(bridgeConfig),
     ]);
     copyCodeicons();
     console.log('Build complete.');

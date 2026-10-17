@@ -1,5 +1,5 @@
 import * as path from 'node:path';
-import type { StackConfig, Worktree } from '../types';
+import type { StackConfig, Worktree, WorktreeTicket } from '../types';
 import type { StackState, WorktreeItem, WebMessage, PortMapping } from '../webview/types';
 import type { WorktreeManager } from '../worktree/WorktreeManager';
 import type { AgentSessionManager } from '../session/AgentSessionManager';
@@ -12,7 +12,7 @@ import type { PrMonitor } from '../pr/PrMonitor';
 import type { IWorktreeRepository } from '../ports/IWorktreeRepository';
 import { PROVIDER_IDS, PROVIDER_INSTALL, type ProviderId } from '../ports/IAgentProvider';
 import { installedProviders } from '../providers/commandLookup';
-import { composeProject, computeDockerPorts, dockerConfigured, portBlockFor } from '../docker/dockerCompose';
+import { composeArgv, composeProject, computeDockerPorts, dockerConfigured, portBlockFor } from '../docker/dockerCompose';
 import { DockerStacks, type DockerOutput } from '../docker/DockerStacks';
 import type { IGitPort, DiffBase } from '../ports/IGitPort';
 import type { INotifyPort } from '../ports/INotifyPort';
@@ -26,6 +26,28 @@ import { MAIN_BRANCH_CANDIDATES, SETTINGS_JSON_PATH } from '../constants';
 import { attentionQueue, groupOf, nextInQueue, type WorktreeGroup } from '../webview/derive';
 import { envPrefix, shellQuote } from '../shell/shellQuote';
 import type { NewTaskInit } from '../newtask/types';
+import { detectTestCommand } from '../mcp/testCommand';
+
+/** How the agent of a newly created worktree got going; see createWorktree's `started`. */
+export type StartOutcome = 'launched' | 'failed' | 'setup-failed';
+
+/** Everything a worker needs to know about its own worktree (stack_env). */
+export interface TaskEnv {
+  task_id: string;
+  name: string;
+  path: string;
+  branch: string;
+  base?: string;
+  repo_root: string;
+  /** By env var name: the port, and a URL for the ones a browser can open. */
+  ports: Record<string, { port: number; url?: string }>;
+  /** Present when the repository has a Docker stack configured. */
+  compose?: { project: string; files: string[]; logs: string; ps: string };
+  setup_script?: string;
+  teardown_script?: string;
+  /** What runs the tests here, when the repository says (package.json, composer.json, Makefile). */
+  test_command?: string;
+}
 
 /**
  * The selected worktree, in workspaceState: it is a property of a WINDOW.
@@ -684,6 +706,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     renameSession: (msg) => void this.renameSession(msg.worktreeId, msg.index),
     openPort: (msg) => void this.openPort(msg.port),
     openPr: (msg) => void this.openPr(msg.worktreeId),
+    openTicket: (msg) => void this.openTicket(msg.worktreeId),
     refreshDrift: (msg) => void this.refreshDrift(msg.worktreeId),
     selectWorktree: (msg) => this.switchToWorktree(msg.worktreeId),
     forgetWorktree: (msg) => this.forgetWorktree(msg.worktreeId),
@@ -985,6 +1008,83 @@ export class WorktreeApplicationService implements DiffPanelHost {
     if (url && /^https:\/\//.test(url)) await this.deps.host.openExternal(url);
   }
 
+  /** Opens the worktree's ticket — the stored link, and only an https one. */
+  async openTicket(worktreeId: string): Promise<void> {
+    const url = this.findWorktree(worktreeId)?.ticket?.url;
+    if (url && /^https:\/\//.test(url)) await this.deps.host.openExternal(url);
+  }
+
+  // ── Manager agent (MCP) ────────────────────────────────────────────────────
+
+  /** The worktrees this window shows, in the store's shape. */
+  windowWorktrees(): Worktree[] {
+    return this.worktreesInWindow();
+  }
+
+  /**
+   * The agent says it is done: the summary becomes the row's line, the
+   * worktree moves to "Ready for review", and the Review panel opens. False
+   * when the worktree is not one of this window's.
+   */
+  async requestReview(worktreeId: string, summary: string): Promise<boolean> {
+    const wt = this.worktreesInWindow().find((w) => w.id === worktreeId);
+    if (!wt) return false;
+    await this.deps.store.patch(wt.id, { review: { summary: summary.trim(), at: Date.now() } });
+    this.ui.pushWebview();
+    this.ui.openDiffPanel(wt.id);
+    return true;
+  }
+
+  /**
+   * A review request belongs to the turn that made it: the next prompt the
+   * agent takes — typed, sent from the Review panel or by the manager — is
+   * new work, and the row goes back to following the agent.
+   */
+  async clearReview(worktreeId: string): Promise<void> {
+    if (!this.findWorktree(worktreeId)?.review) return;
+    await this.deps.store.patch(worktreeId, { review: undefined });
+    this.ui.pushWebview();
+  }
+
+  /** stack_env: the worktree's paths, ports, compose stack and scripts. Undefined when it is not this window's. */
+  taskEnv(worktreeId: string): TaskEnv | undefined {
+    const wt = this.worktreesInWindow().find((w) => w.id === worktreeId);
+    if (!wt) return undefined;
+    const config = this.deps.config.get();
+    const ports: TaskEnv['ports'] = {};
+    for (const p of this.portsFor(wt)) {
+      ports[p.name] = p.openable ? { port: p.port, url: `http://localhost:${p.port}` } : { port: p.port };
+    }
+    const script = (file: string) => (file ? this.scriptInvocation(wt, file).resolved : undefined);
+    const env: TaskEnv = {
+      task_id: wt.id,
+      name: displayLabel(wt),
+      path: wt.path,
+      branch: wt.branch,
+      ...(this.driftBaseFor(wt) ? { base: this.driftBaseFor(wt) } : {}),
+      repo_root: wt.repoRoot,
+      ports,
+    };
+    if (dockerConfigured(config)) {
+      const { files } = this.stacks.files(wt);
+      const project = this.stacks.project(wt);
+      const docker = (sub: string[]) => ['docker', ...composeArgv(wt, files, sub, project)].map(shellQuote).join(' ');
+      env.compose = {
+        project,
+        files: [files.base, ...(files.override ? [files.override] : [])],
+        logs: docker(['logs', '--tail', '200', '-f']),
+        ps: docker(['ps', '-a']),
+      };
+    }
+    const setup = script(config.setupScript);
+    if (setup) env.setup_script = setup;
+    const teardown = script(config.teardownScript);
+    if (teardown) env.teardown_script = teardown;
+    const test = detectTestCommand(wt.path);
+    if (test) env.test_command = test;
+    return env;
+  }
+
   /**
    * The ports this worktree actually owns, for display on its card.
    *
@@ -1034,6 +1134,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
       ports: this.portsFor(wt),
       pr: this.deps.prMonitor.getStatus(wt.id) ?? null,
       ...this.setupItem(wt.id),
+      ...(wt.ticket ? { ticket: wt.ticket } : {}),
+      ...(wt.review ? { review: wt.review } : {}),
     }));
     this.stampSince(items);
     const activeWorktreeId = worktrees.find((wt) => wt.id === this.currentWorktreeId)?.id;
@@ -1568,7 +1670,21 @@ export class WorktreeApplicationService implements DiffPanelHost {
     /** Agent to start in the new worktree; the configured default when omitted. */
     provider?: ProviderId;
     silent?: boolean;
-  }): Promise<{ ok: boolean; error?: string }> {
+    /** The tracker ticket it is for, kept on the worktree (a chip on its row). */
+    ticket?: WorktreeTicket;
+    /**
+     * Select the new worktree, as clicking its card would. On by default; the
+     * MCP manager turns it off, so tasks it creates in the background do not
+     * pull the user away from the one they are in.
+     */
+    select?: boolean;
+  }): Promise<{
+    ok: boolean;
+    error?: string;
+    worktree?: Worktree;
+    /** Settles once the agent is launched (prompt submitted), could not be, or its setup failed. */
+    started?: Promise<StartOutcome>;
+  }> {
     const fail = (error: string) => {
       if (!opts?.silent) this.deps.notify.showError(error);
       return { ok: false, error };
@@ -1594,9 +1710,15 @@ export class WorktreeApplicationService implements DiffPanelHost {
       createdWt = await this.deps.notify.withProgress(`Creating worktree "${branch}"`, async (report) => {
         report('Running git worktree add...');
         // Title → worktree alias; description stays as Claude's initial prompt.
-        const wt = await this.deps.manager.create(
+        const created = await this.deps.manager.create(
           branch, root, opts?.title?.trim() || undefined, baseBranch,
         );
+        let wt = created;
+        if (opts?.ticket) {
+          // On the entry first, so the very first push already shows the chip.
+          await this.deps.store.patch(created.id, { ticket: opts.ticket });
+          wt = { ...created, ticket: opts.ticket };
+        }
 
         // The setup script goes FIRST. It is the slow, essential part (deps, .env,
         // containers — minutes of work), and it used to sit behind the UI wiring
@@ -1630,37 +1752,47 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
     // Launch Claude after the progress notification closes so VSCode has settled
     // the workspace-folder update before we open a new terminal.
-    if (createdWt) {
-      const wt = createdWt;
-      // The new worktree is what the user is about to work in: select its card,
-      // scope search and breakpoints to it, and in focus mode clear the rest —
-      // exactly what clicking the card would do. Its viewer does not exist yet,
-      // so this reveals nothing; launch() below brings the terminal up.
-      await this.switchToWorktree(wt.id);
-      const description = opts?.description;
-      const provider = opts?.provider;
-      const launch = () => {
-        // Nothing awaits this, so a failure must be reported here or it
-        // vanishes as an unhandled rejection — the worktree then simply never
-        // got its agent, with nothing on screen to say why.
-        const launched = description
-          ? this.deps.agentManager.launchWithPrompt(wt, description, provider)
-          : this.deps.agentManager.launch(wt, provider ? { provider } : undefined);
-        launched.catch((e) => this.deps.notify.showError(`Failed to launch agent: ${String(e)}`));
-      };
-      if (setupDone) {
-        // Held until the environment exists. A failed setup keeps holding it,
-        // for "Retry" or "Launch anyway" on the row.
-        this.heldLaunches.set(wt.id, launch);
-        this.ui.pushWebview();
-        void setupDone.then((ok) => { if (ok) this.releaseHeldLaunch(wt.id); });
-      } else {
-        // A terminal setup (or none): the old pace, which leaves VS Code a
-        // moment to settle the folder update before a new terminal opens.
-        setTimeout(launch, 300);
-      }
+    if (!createdWt) return { ok: true };
+    const wt = createdWt;
+    // The new worktree is what the user is about to work in: select its card,
+    // scope search and breakpoints to it, and in focus mode clear the rest —
+    // exactly what clicking the card would do. Its viewer does not exist yet,
+    // so this reveals nothing; launch() below brings the terminal up.
+    if (opts?.select !== false) await this.switchToWorktree(wt.id);
+    const description = opts?.description;
+    const provider = opts?.provider;
+    let settle!: (outcome: StartOutcome) => void;
+    const started = new Promise<StartOutcome>((resolve) => { settle = resolve; });
+    const launch = () => {
+      // Nothing awaits this, so a failure must be reported here or it
+      // vanishes as an unhandled rejection — the worktree then simply never
+      // got its agent, with nothing on screen to say why.
+      const launched = description
+        ? this.deps.agentManager.launchWithPrompt(wt, description, provider)
+        : this.deps.agentManager.launch(wt, provider ? { provider } : undefined);
+      launched.then(
+        () => settle('launched'),
+        (e) => {
+          this.deps.notify.showError(`Failed to launch agent: ${String(e)}`);
+          settle('failed');
+        },
+      );
+    };
+    if (setupDone) {
+      // Held until the environment exists. A failed setup keeps holding it,
+      // for "Retry" or "Launch anyway" on the row.
+      this.heldLaunches.set(wt.id, launch);
+      this.ui.pushWebview();
+      void setupDone.then((ok) => {
+        if (ok) this.releaseHeldLaunch(wt.id);
+        else settle('setup-failed');
+      });
+    } else {
+      // A terminal setup (or none): the old pace, which leaves VS Code a
+      // moment to settle the folder update before a new terminal opens.
+      setTimeout(launch, 300);
     }
-    return { ok: true };
+    return { ok: true, worktree: wt, started };
   }
 
   // ── Delete ─────────────────────────────────────────────────────────────────

@@ -26,6 +26,7 @@ Working on several things at once with AI agents gets messy fast: branches colli
 - **Per-worktree debugging** *(optional)* — each worktree gets its own `launch.json` on a unique debug port, wired to its container, so you can step-debug several worktrees at once without ports colliding. Any debugger VS Code supports — Node by default, PHP, Python, Go, whatever your stack runs.
 - **Per-worktree Docker** *(optional)* — start/stop a dedicated compose stack per worktree with auto-generated, collision-free ports.
 - **Per-worktree setup/teardown** *(optional)* — run a repo-local script when a worktree is created or removed (install deps, copy env, boot services).
+- **Manager agent (MCP)** *(optional)* — let a Claude Code session (the VS Code panel included) create Stack tasks from your tickets, watch them and talk to their agents. See [Manager agent (MCP)](#manager-agent-mcp).
 
 ## Requirements
 
@@ -101,6 +102,35 @@ Stack registers a notify hook with each agent so the sidebar can show live state
 
 The hooks are global — one entry in `~/.claude/settings.json` serves every VS Code window — but each agent reports to the window showing its worktree, so several windows can run side by side, and an agent keeps reporting across a window reload. With no Stack window open the hook does nothing and exits at once. Stack never rewrites an agent config it cannot parse: it leaves the file alone and says so, and the first time it changes one it keeps the original as `<file>.stack-backup`.
 
+
+## Manager agent (MCP)
+
+Stack ships an MCP server, so one agent can run the others. The intended setup: the official Claude Code panel in VS Code as the *manager*, with your company's Jira / Slack / Linear MCP servers, and Stack's tools to turn tickets into tasks, follow them, and answer their questions.
+
+**Enable it:** run **Stack: Enable Manager (MCP)**. It registers the server with Claude Code at user scope (`claude mcp add --scope user stack -- node <globalStorage>/stack-mcp.js`, replacing an earlier `stack` entry). Start a new Claude Code session and the `stack_*` tools are there. **Stack: Disable Manager (MCP)** removes it. Where VS Code supports it, Copilot's agent mode sees the same server under *Stack*.
+
+Then ask, for example:
+
+- *"Lee AS-1234 en Jira y crea una tarea en Stack para ella."*
+- *"Create Stack tasks for every ticket assigned to me in the current sprint, one per ticket, with Claude."*
+- *"Wait until any of those tasks needs me or finishes, then tell me what it asked."*
+- *"Tell the AS-1234 agent to add a test for the empty cart, and post a summary in #payments when it asks for review."*
+
+| Tool | What it does |
+|---|---|
+| `stack_status` | Every task: id, name, branch, base, group (needs you / review / working / idle / missing), sessions with state and pending question, diff `+N −M`, PR and CI, ports, ticket |
+| `stack_create_task` | New branch + worktree + agent on a prompt. With a `ticket`, the branch is `<KEY>-<slug>`, the ticket shows as a chip beside the task's name, and its text reaches the worker fenced as reference data. Idempotent per ticket key |
+| `stack_send_to_agent` | Types a message into a task's running agent and submits it (the same path the Review panel uses); refused when no agent is running. On a permission prompt, this answers it |
+| `stack_read_agent` | The last lines (≤ 200) of an agent's terminal |
+| `stack_wait` | Blocks until a task goes idle, needs input, or the timeout (≤ 110 s) passes — event-driven, from the agents' own hooks |
+| `stack_env` | For workers: worktree path, branch, ports with URLs, the compose project and a ready `docker compose … logs` command, setup/teardown scripts, test command |
+| `stack_request_review` | For workers: marks the task ready for review with a one-line summary (shown as its row's line) and opens its Review panel |
+
+**Workers get it too.** Every Claude Code or Codex agent Stack starts is given the same server for its own task (`--mcp-config` / `-c mcp_servers.stack.*`, your own MCP servers untouched), and its first prompt asks it to call `stack_request_review` when done. opencode is started without it.
+
+**How it finds the window.** The server is a small Node script Stack keeps at a fixed path in its storage. Each VS Code window running Stack writes `windows/<pid>.json` (mode 0600) beside it with its port and a per-window token; on every call the server picks the window whose repository contains the `repo` argument, the task, or the agent's working directory (the most specific folder wins, then the most recently focused window), and calls it on `127.0.0.1` with that token. A window that reloads gets a new port and token and the next call simply finds it. Nothing matching is an error naming the open repositories — never a guess.
+
+**Security, kept minimal on purpose.** The window API listens on `127.0.0.1` only, wants the window's token, and refuses requests that carry an `Origin` or a `Host` other than `127.0.0.1:<port>`, so web pages (DNS rebinding included) cannot reach it. Beyond that, anything running as you can drive Stack — the manager creates tasks and sends messages without asking. The hook endpoint the agents report to stays tokenless, because changing the hook script would cost every Codex user a re-trust.
 
 ## Switching worktrees
 

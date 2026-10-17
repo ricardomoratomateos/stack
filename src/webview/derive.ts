@@ -51,9 +51,10 @@ export function hasOpenPr(wt: WorktreeItem): boolean {
  * - needs you: any session is asking (`permission`).
  * - working: any session is `active`. Wins over review, because an agent still
  *   typing is not ready to be reviewed whatever the diff says.
- * - ready for review: an agent is idle or waiting AND there is work to look at
- *   (changes, commits beyond the base, or an open PR). A freshly launched agent
- *   on a clean tree is just idle.
+ * - ready for review: the agent asked for it (stack_request_review), or an
+ *   agent is idle or waiting AND there is work to look at (changes, commits
+ *   beyond the base, or an open PR). A freshly launched agent on a clean tree
+ *   is just idle.
  * - idle: everything else.
  */
 export function groupOf(wt: WorktreeItem): WorktreeGroup {
@@ -61,6 +62,8 @@ export function groupOf(wt: WorktreeItem): WorktreeGroup {
   const agents = wt.sessions.filter(isAgent);
   if (wt.agent === 'permission' || agents.some((s) => s.state === 'permission')) return 'needs';
   if (wt.agent === 'active' || agents.some((s) => s.state === 'active')) return 'working';
+  // The agent said so itself (stack_request_review): no diff needed to believe it.
+  if (wt.review) return 'review';
   const resting = agents.some((s) => s.state === 'waiting' || s.state === 'idle');
   if (resting && (hasWork(wt) || hasOpenPr(wt))) return 'review';
   return 'idle';
@@ -148,6 +151,7 @@ function lineFor(wt: WorktreeItem, group: WorktreeGroup, agent: SessionItem | un
     case 'working':
       return title ?? 'Working…';
     case 'review':
+      if (wt.review?.summary) return wt.review.summary;
       return title ? `Done · ${title}` : 'Done — ready for review';
     case 'idle':
       return agent ? (title ?? 'Waiting for a task') : 'No agent running';

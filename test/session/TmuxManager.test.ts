@@ -371,6 +371,14 @@ describe('command construction', () => {
     expect(paste).toEqual(['tmux', 'paste-buffer', '-d', '-p', '-b', load[3], '-t', 's1:2']);
   });
 
+  it('capturePane reads the pane and its scrollback as joined plain text', async () => {
+    const calls = captureExec(() => ({ stdout: 'line 1\nline 2\n' }));
+    expect(await tmux.capturePane('s1:2', 40)).toBe('line 1\nline 2');
+    expect(calls).toEqual([['tmux', 'capture-pane', '-p', '-J', '-t', 's1:2', '-S', '-40']]);
+    captureExec(() => ({}));
+    await tmux.capturePane('s1:2', 0.2);
+  });
+
   it('pressEnter sends a single Enter key to the target', async () => {
     const calls = captureExec(() => ({}));
     await tmux.pressEnter('s1:2');

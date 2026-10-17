@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { send } from '../../vscode';
 import { PRODUCT_NAME } from '../../brand';
 import { GROUP_LABEL, GROUP_SHORT, countByGroup, formatAge, type Described, type WorktreeGroup } from '../../derive';
-import { Details, DiffStat } from '../../components/Details';
+import { Details, DiffStat, TicketChip } from '../../components/Details';
 import { LaunchSplit } from '../../components/LaunchSplit';
 import { ActionBar } from '../../components/ActionBar';
 import { visualFor } from '../../components/providers';
@@ -129,7 +129,10 @@ function Row({ d, selected, now, state, select, drag }: {
       <button type="button" className="as-row-main" aria-current={selected || undefined} onClick={pick}>
         <span className="as-dot-wrap"><span className="as-dot" role="img" aria-label={GROUP_LABEL[d.group]} /></span>
         <span className="as-body">
-          <span className="as-name fm-ellipsis" title={wt.branch}>{d.name}</span>
+          <span className="fm-name-row">
+            <span className="as-name fm-ellipsis" title={wt.branch}>{d.name}</span>
+            {wt.ticket && <TicketChip worktreeId={wt.id} ticket={wt.ticket} />}
+          </span>
           <span className="as-line fm-ellipsis">
             {d.agent && <span className="as-provider">{visualFor(d.provider).label}</span>} <RowLine d={d} />
           </span>

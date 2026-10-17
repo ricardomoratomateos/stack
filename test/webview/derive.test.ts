@@ -34,6 +34,16 @@ describe('groupOf', () => {
     expect(groupOf(wt({ agent: 'active' }))).toBe('working');
   });
 
+  it('ready for review when the agent asked for it, with its summary as the line — unless it is busy again', () => {
+    const asked = wt({ sessions: [session('waiting')], review: { summary: 'Added SSO login', at: 1 } });
+    expect(groupOf(asked)).toBe('review');
+    expect(describeWt(asked).line).toBe('Added SSO login');
+    expect(groupOf(wt({ review: { summary: 's', at: 1 } }))).toBe('review');
+    expect(groupOf(wt({ sessions: [session('active')], review: { summary: 's', at: 1 } }))).toBe('working');
+    expect(groupOf(wt({ sessions: [session('permission')], review: { summary: 's', at: 1 } }))).toBe('needs');
+    expect(describeWt(wt({ sessions: [session('waiting')], git: dirty, review: { summary: '', at: 1 } })).line).toBe('Done — ready for review');
+  });
+
   it('ready for review: an agent at rest and something to look at', () => {
     expect(groupOf(wt({ sessions: [session('waiting')], git: dirty }))).toBe('review');
     expect(groupOf(wt({ sessions: [session('idle')], git: dirty }))).toBe('review');

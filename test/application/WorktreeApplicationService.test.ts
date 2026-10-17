@@ -2080,7 +2080,9 @@ describe('createWorktree', () => {
   it('resolves ok once the worktree exists', async () => {
     vi.useFakeTimers();
     const { h } = createHarness();
-    expect(await h.service.createWorktree({ branch: 'feat/x' })).toEqual({ ok: true });
+    const result = await h.service.createWorktree({ branch: 'feat/x' });
+    expect(result).toMatchObject({ ok: true, worktree: { id: 'new' } });
+    expect(result.started).toBeInstanceOf(Promise);
   });
 
   it('resolves with the reason, and still toasts it, when creation fails', async () => {
@@ -4793,5 +4795,170 @@ describe('named workspace instead of "Untitled (Workspace)"', () => {
       { path: '/repo/zer/feat-x', name: 'feat/x' },
     ]);
     expect(h.host.addWorkspaceFolders).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Manager agent (MCP): tickets, review requests, task env, create result
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('manager agent support', () => {
+  const ticket = { source: 'jira', key: 'AS-1', url: 'https://jira.example/AS-1', title: 'Fix it' };
+
+  it('carries ticket and review into the sidebar state', () => {
+    const a = makeWorktree({ id: 'a', ticket, review: { summary: 'done it', at: 5 } });
+    const b = makeWorktree({ id: 'b', path: '/repo/zer/b', branch: 'b' });
+    const h = makeHarness({ worktrees: [a, b] });
+    const [ia, ib] = h.service.buildState().worktrees;
+    expect(ia.ticket).toEqual(ticket);
+    expect(ia.review).toEqual({ summary: 'done it', at: 5 });
+    expect(ib).not.toHaveProperty('ticket');
+    expect(ib).not.toHaveProperty('review');
+  });
+
+  it('opens a ticket link, only an https one, through the openTicket message', async () => {
+    const a = makeWorktree({ id: 'a', ticket });
+    const b = makeWorktree({ id: 'b', path: '/repo/zer/b', branch: 'b', ticket: { ...ticket, url: 'javascript:alert(1)' } });
+    const c = makeWorktree({ id: 'c', path: '/repo/zer/c', branch: 'c' });
+    const h = makeHarness({ worktrees: [a, b, c] });
+    await h.service.handleMessage({ type: 'openTicket', worktreeId: 'a' });
+    await flushMicrotasks();
+    await h.service.openTicket('b');
+    await h.service.openTicket('c');
+    await h.service.openTicket('nope');
+    expect(h.host.openExternal.mock.calls).toEqual([['https://jira.example/AS-1']]);
+  });
+
+  it('lists the window\'s worktrees', () => {
+    const a = makeWorktree({ id: 'a' });
+    const other = makeWorktree({ id: 'o', repoRoot: '/elsewhere', path: '/elsewhere/x' });
+    const h = makeHarness({ worktrees: [a, other] });
+    expect(h.service.windowWorktrees().map((w) => w.id)).toEqual(['a']);
+  });
+
+  it('requestReview stores the summary, repaints and opens the Review panel', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
+    expect(await h.service.requestReview('a', '  added SSO  ')).toBe(true);
+    expect(h.store.patch).toHaveBeenCalledWith('a', { review: { summary: 'added SSO', at: 1000 } });
+    expect(h.calls).toContain('ui.openDiffPanel:a');
+    expect(h.ui.pushWebview).toHaveBeenCalled();
+    expect(await h.service.requestReview('nope', 'x')).toBe(false);
+  });
+
+  it('clearReview drops a review request, and does nothing without one', async () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a', review: { summary: 's', at: 1 } }), makeWorktree({ id: 'b', path: '/repo/zer/b' })] });
+    await h.service.clearReview('b');
+    await h.service.clearReview('nope');
+    expect(h.store.patch).not.toHaveBeenCalled();
+    await h.service.clearReview('a');
+    expect(h.store.patch).toHaveBeenCalledWith('a', { review: undefined });
+  });
+
+  describe('taskEnv', () => {
+    let dir: string;
+    beforeEach(() => { dir = nodeFs.mkdtempSync(nodePath.join(require('node:os').tmpdir(), 'stack-env-')); });
+    afterEach(() => { nodeFs.rmSync(dir, { recursive: true, force: true }); });
+
+    it('is undefined for a worktree the window does not show', () => {
+      const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
+      expect(h.service.taskEnv('nope')).toBeUndefined();
+    });
+
+    it('names path, branch and base; no ports, compose, scripts or tests when none exist', () => {
+      const h = makeHarness({ worktrees: [makeWorktree({ id: 'a', path: dir, baseBranch: 'develop' })] });
+      expect(h.service.taskEnv('a')).toEqual({
+        task_id: 'a', name: 'feat/a', path: dir, branch: 'feat/a', base: 'develop', repo_root: '/repo', ports: {},
+      });
+    });
+
+    it('adds ports with URLs, the compose commands, the scripts and the test command', () => {
+      nodeFs.writeFileSync(nodePath.join(dir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
+      const wt = makeWorktree({ id: 'a', path: dir, debugPort: 9899 });
+      const h = makeHarness({
+        worktrees: [wt],
+        existingPaths: ['/repo/docker-compose.yml', '/repo/.stack/setup.sh'],
+        config: {
+          docker: { composeFile: 'docker-compose.yml', overrideFile: '', ports: ['HTTP_PORT', 'DEBUG_PORT'], basePort: 20000, portStride: 100 },
+          setupScript: '.stack/setup.sh',
+          teardownScript: '/abs/teardown.sh',
+        },
+      });
+      const env = h.service.taskEnv('a')!;
+      expect(env.ports.DEBUG_PORT).toEqual({ port: 9899 });
+      expect(env.ports.HTTP_PORT.url).toBe(`http://localhost:${env.ports.HTTP_PORT.port}`);
+      const project = composeProject(wt);
+      expect(env.compose).toEqual({
+        project,
+        files: ['/repo/docker-compose.yml'],
+        logs: `docker compose -p ${project} --project-directory ${dir} -f /repo/docker-compose.yml logs --tail 200 -f`,
+        ps: `docker compose -p ${project} --project-directory ${dir} -f /repo/docker-compose.yml ps -a`,
+      });
+      expect(env.setup_script).toBe('/repo/.stack/setup.sh');
+      expect(env.teardown_script).toBe('/abs/teardown.sh');
+      expect(env.test_command).toBe('npm test');
+      expect(env).not.toHaveProperty('base');
+    });
+
+    it('lists the override file too when there is one', () => {
+      const wt = makeWorktree({ id: 'a', path: dir });
+      const h = makeHarness({
+        worktrees: [wt],
+        existingPaths: ['/repo/docker-compose.yml', `${dir}/docker-compose.worktree.yml`],
+        config: { docker: { composeFile: 'docker-compose.yml', overrideFile: 'docker-compose.worktree.yml', ports: ['HTTP_PORT'], basePort: 20000, portStride: 100 } },
+      });
+      expect(h.service.taskEnv('a')!.compose!.files).toEqual(['/repo/docker-compose.yml', `${dir}/docker-compose.worktree.yml`]);
+    });
+  });
+
+  describe('createWorktree for the manager', () => {
+    const root = '/repo';
+    function createHarness(o: HarnessOpts = {}) {
+      const created = makeWorktree({ id: 'new', branch: 'AS-1-x', path: '/repo/zer/AS-1-x' });
+      const h = makeHarness({ workspaceFolders: [root], gitDirs: ['/repo/.git'], ...o });
+      h.manager.create.mockImplementation(async () => created);
+      return { h, created };
+    }
+
+    it('stores the ticket on the new worktree and returns it with the ticket', async () => {
+      vi.useFakeTimers();
+      const { h } = createHarness();
+      const result = await h.service.createWorktree({ branch: 'AS-1-x', ticket });
+      expect(h.store.patch).toHaveBeenCalledWith('new', { ticket });
+      expect(result.worktree).toMatchObject({ id: 'new', ticket });
+    });
+
+    it('does not select the new worktree when asked not to', async () => {
+      vi.useFakeTimers();
+      const { h } = createHarness({ worktrees: [makeWorktree({ id: 'new', branch: 'AS-1-x', path: '/repo/zer/AS-1-x' })] });
+      await h.service.createWorktree({ branch: 'AS-1-x', select: false });
+      expect(h.workspaceState.update).not.toHaveBeenCalledWith(ACTIVE_WORKTREE_KEY, 'new');
+      await h.service.createWorktree({ branch: 'AS-1-x' });
+      expect(h.workspaceState.update).toHaveBeenCalledWith(ACTIVE_WORKTREE_KEY, 'new');
+    });
+
+    it('started settles "launched" once the agent launch resolves, "failed" when it rejects', async () => {
+      vi.useFakeTimers();
+      const { h } = createHarness();
+      const ok = await h.service.createWorktree({ branch: 'AS-1-x', description: 'go' });
+      await vi.advanceTimersByTimeAsync(300);
+      await expect(ok.started).resolves.toBe('launched');
+
+      h.claude.launch.mockRejectedValueOnce(new Error('no tmux'));
+      const bad = await h.service.createWorktree({ branch: 'AS-1-x' });
+      await vi.advanceTimersByTimeAsync(300);
+      await expect(bad.started).resolves.toBe('failed');
+    });
+
+    it('started settles "setup-failed" when the headless setup fails, "launched" when it succeeds', async () => {
+      const { h } = createHarness({ config: { setupScript: '/s.sh' }, scriptExitCode: 3 });
+      const failed = await h.service.createWorktree({ branch: 'AS-1-x' });
+      await expect(failed.started).resolves.toBe('setup-failed');
+
+      const { h: h2 } = createHarness({ config: { setupScript: '/s.sh' } });
+      const fine = await h2.service.createWorktree({ branch: 'AS-1-x' });
+      await expect(fine.started).resolves.toBe('launched');
+    });
   });
 });

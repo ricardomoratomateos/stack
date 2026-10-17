@@ -56,6 +56,11 @@ import { migrateLegacyState } from './migration/legacyState';
 import { LEGACY_EXTENSION_ID } from './migration/legacyStorage';
 import { NamedWorkspace, restoreStashedState, vscodeNamedWorkspaceHost } from './workspace/namedWorkspace';
 import { NodeFileSystem } from './adapters/NodeFileSystem';
+import { WindowRegistry } from './mcp/WindowRegistry';
+import { ManagerTools } from './mcp/ManagerTools';
+import { BRIDGE_FILE } from './mcp/protocol';
+import { bridgeCommand, installBridge, type BridgeCommand } from './mcp/workerMcp';
+import { claudeBinary, disableManager, enableManager, execRun } from './mcp/registration';
 
 /**
  * Surfaces a broken `.stack/config.json` with a way to go fix it.
@@ -338,7 +343,17 @@ export async function activate(ctx: vscode.ExtensionContext) {
     config: () => config.get(),
     shared: new PortReservationFile(ctx.globalStorageUri.fsPath),
   });
-  const providerFactory = new ProviderFactory(config, ctx.globalStorageUri.fsPath);
+  // The Stack MCP bridge, at a path that outlives extension updates: what
+  // "Stack: Enable Manager (MCP)" registers with Claude Code, and what every
+  // Claude/Codex worker is started with (see mcp/workerMcp.ts).
+  let bridge: BridgeCommand | undefined;
+  try {
+    const installed = installBridge(path.join(ctx.extensionPath, 'dist', BRIDGE_FILE), ctx.globalStorageUri.fsPath);
+    if (installed) bridge = bridgeCommand(installed);
+  } catch (e) {
+    console.error('[stack] installing the MCP bridge failed:', e);
+  }
+  const providerFactory = new ProviderFactory(config, ctx.globalStorageUri.fsPath, undefined, () => bridge);
   // The tab layout is read live, so flipping stack.sessionTabs applies to
   // the next terminal opened; the rest are the manager's own defaults.
   const agentManager = new AgentSessionManager(
@@ -423,8 +438,30 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // answers when the same repository is open twice. Launches claim their own
   // route as well (see HookRoutes.launchEnv).
   const hookRoutes = new HookRoutes(ctx.globalStorageUri.fsPath);
+  // This window's discovery file for the MCP bridge (mcp/WindowRegistry.ts),
+  // kept current on the same occasions as the hook routes.
+  const windowRegistry = new WindowRegistry(ctx.globalStorageUri.fsPath);
+  try { windowRegistry.sweep(); } catch { /* best effort */ }
+  // Not advertised before the API behind it is there (set below).
+  let windowApiReady = false;
+  const updateWindowRegistry = () => {
+    if (!windowApiReady) return;
+    try {
+      const root = repoRootOf();
+      const here = worktreesHere();
+      windowRegistry.update({
+        port: hookServer.listeningPort,
+        repoRoots: [...new Set([...(root ? [root] : []), ...here.map((w) => w.path)])],
+        workspaceFolders: (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
+        worktreeIds: here.map((w) => w.id),
+      });
+    } catch (e) {
+      console.error('[stack] writing the window discovery file failed:', e);
+    }
+  };
   const claimHookRoutes = () => {
     try { hookRoutes.claim(worktreesHere().map((w) => w.id), hookUrl); } catch { /* best effort */ }
+    updateWindowRegistry();
   };
   claimHookRoutes();
   ctx.subscriptions.push(agentManager.onTerminalsChange(claimHookRoutes));
@@ -667,6 +704,9 @@ export async function activate(ctx: vscode.ExtensionContext) {
     }),
     vscode.window.onDidChangeWindowState((s) => {
       if (s.focused) acknowledgeActiveTerminal();
+      if (s.focused) {
+        try { windowRegistry.focus(); } catch { /* best effort */ }
+      }
     }),
   );
 
@@ -678,16 +718,58 @@ export async function activate(ctx: vscode.ExtensionContext) {
   });
 
   // What an agent said when it asked for you, for the sidebar's "needs you" rows.
+  // A new prompt also ends a review request: the agent is working again.
   ctx.subscriptions.push(
     hookServer.onHookEvent((e) => {
       if (agentManager.noteHookEvent(e)) webviewProvider.push();
+      if (e.event === 'UserPromptSubmit' && e.workspaceId) void service.clearReview(e.workspaceId);
     }),
   );
+
+  // The window API the Stack MCP bridge calls (POST /api/<tool>, this
+  // window's token): the manager agent's way in. See mcp/ManagerTools.ts.
+  const managerTools = new ManagerTools({
+    repoRoot: repoRootOf,
+    worktrees: () => service.windowWorktrees(),
+    items: () => service.buildState().worktrees,
+    createWorktree: async (opts) => {
+      const result = await service.createWorktree(opts);
+      // Routable by its id from the next call on.
+      claimHookRoutes();
+      return result;
+    },
+    requestReview: (id, summary) => service.requestReview(id, summary),
+    clearReview: (id) => service.clearReview(id),
+    taskEnv: (id) => service.taskEnv(id),
+    sendPrompt: (wt, text, index) => agentManager.sendPromptToAgent(wt, text, index),
+    capturePane: (id, index, lines) => agentManager.capturePane(id, index, lines),
+    agentState: (id) => agentManager.getState(id),
+    onStateChange: (listener) => agentManager.onStateChange(listener),
+  });
+  hookServer.setApi({ token: windowRegistry.token, handle: (tool, request) => managerTools.handle(tool, request) });
+  windowApiReady = true;
+  updateWindowRegistry();
+  if (vscode.window.state.focused) windowRegistry.focus();
+
+  // VS Code's own agents (Copilot) see the same server, where the API exists.
+  const lm = (vscode as unknown as { lm?: Partial<typeof vscode.lm> }).lm;
+  if (bridge && typeof lm?.registerMcpServerDefinitionProvider === 'function' && typeof vscode.McpStdioServerDefinition === 'function') {
+    const { command, args } = bridge;
+    ctx.subscriptions.push(lm.registerMcpServerDefinitionProvider('stack.mcp', {
+      provideMcpServerDefinitions: () => {
+        const def = new vscode.McpStdioServerDefinition('Stack', command, args, {}, String(ctx.extension.packageJSON.version ?? ''));
+        const root = repoRootOf();
+        if (root) def.cwd = vscode.Uri.file(root);
+        return [def];
+      },
+    }));
+  }
 
   // React when the user opens a folder — load its worktrees if it's a git repo.
   ctx.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders((e) => {
       void service.handleAddedWorkspaceFolders(e.added.map((f) => f.uri.fsPath));
+      updateWindowRegistry();
       // Folders have actually registered by the time this fires, so the main
       // repo's folder can now be relabelled to its branch (the async add in
       // loadWorktreesForRepo still reads a count of 1 and can't).
@@ -756,6 +838,18 @@ export async function activate(ctx: vscode.ExtensionContext) {
       }),
     ),
     vscode.commands.registerCommand('stack.focusSession', (terminal: vscode.Terminal | undefined) => terminal?.show()),
+    vscode.commands.registerCommand('stack.enableManagerMcp', async () => {
+      if (!bridge) {
+        void vscode.window.showErrorMessage('Stack: the MCP bridge is missing from this build (dist/stack-mcp.js).');
+        return;
+      }
+      const result = await enableManager(execRun, claudeBinary(config.get().claudeCommand), bridge);
+      void (result.ok ? vscode.window.showInformationMessage(result.message) : vscode.window.showErrorMessage(result.message));
+    }),
+    vscode.commands.registerCommand('stack.disableManagerMcp', async () => {
+      const result = await disableManager(execRun, claudeBinary(config.get().claudeCommand));
+      void (result.ok ? vscode.window.showInformationMessage(result.message) : vscode.window.showWarningMessage(result.message));
+    }),
     vscode.commands.registerCommand('stack.openSessionToSide', (target?: { worktreeId: string; index?: number }) =>
       service.openSessionToSide(target),
     ),
@@ -795,6 +889,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       // every other window still open, and from the new window of a reload.
       // With no Stack listening the hook finds no endpoint and exits 0.
       try { hookRoutes.release(hookUrl); } catch { /* best effort */ }
+      windowRegistry.dispose();
     },
   });
 

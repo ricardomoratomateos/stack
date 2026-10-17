@@ -124,6 +124,18 @@ export interface WorktreeItem {
   pr?: PrStatus | null;
   /** The setup script, while it runs headless or after it failed; absent once it succeeded. */
   setup?: SetupItem;
+  /** The tracker ticket the worktree was created for: a chip beside its name. */
+  ticket?: TicketItem;
+  /** The agent asked for review with this summary: the row's line, and the review group. */
+  review?: { summary: string; at: number };
+}
+
+export interface TicketItem {
+  source: string;
+  key: string;
+  /** Opened by the host, never handed to the browser from here. */
+  url?: string;
+  title?: string;
 }
 
 export interface SetupItem {
@@ -182,6 +194,8 @@ export type WebMessage =
   | { type: 'openPort'; port: number }
   /** Open the worktree's pull request in the browser. The URL is looked up on the host side. */
   | { type: 'openPr'; worktreeId: string }
+  /** Open the worktree's ticket in the browser; the URL is looked up on the host side too. */
+  | { type: 'openTicket'; worktreeId: string }
   | { type: 'refreshDrift'; worktreeId: string }
   | { type: 'dockerUp'; worktreeId: string }
   | { type: 'dockerDown'; worktreeId: string }

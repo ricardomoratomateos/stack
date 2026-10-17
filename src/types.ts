@@ -98,6 +98,23 @@ export interface Worktree {
    * carry no record of it — those fall back to the configured base.
    */
   baseBranch?: string;
+  /** The tracker ticket this worktree is for, when it was created from one (the MCP manager). */
+  ticket?: WorktreeTicket;
+  /**
+   * The agent said it is done and asked for review (stack_request_review).
+   * Shown as the row's line and puts it in "Ready for review"; cleared by the
+   * next prompt the agent receives.
+   */
+  review?: { summary: string; at: number };
+}
+
+/** A tracker ticket, small enough to show as a chip beside the worktree's name. */
+export interface WorktreeTicket {
+  /** "jira", "linear", "github"… */
+  source: string;
+  key: string;
+  url?: string;
+  title?: string;
 }
 
 export interface WorktreeState {

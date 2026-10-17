@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { send } from '../vscode';
 import type { Described, DescribedPr } from '../derive';
-import type { DockerContainer } from '../types';
+import type { DockerContainer, TicketItem } from '../types';
 import { stackRunning } from './ActionBar';
 
 /** The gist of a container for one line: its service (or a trimmed name) and what it is doing. */
@@ -189,6 +189,21 @@ export function PrBadge({ worktreeId, pr, inCard }: { worktreeId: string; pr: De
   return inCard
     ? <span {...attrs}>{body}</span>
     : <button type="button" {...attrs} aria-label={title}>{body}</button>;
+}
+
+/**
+ * The tracker ticket a worktree was created for, as a small chip beside its
+ * name — "AS-1234" — that opens the ticket. A span, not a button: every
+ * layout draws the name inside the row's own button.
+ */
+export function TicketChip({ worktreeId, ticket }: { worktreeId: string; ticket: TicketItem }) {
+  const title = `${ticket.key}${ticket.title ? ` — ${ticket.title}` : ''} (${ticket.source})${ticket.url ? ' — open' : ''}`;
+  const open = (e: React.MouseEvent) => {
+    if (!ticket.url) return;
+    e.stopPropagation();
+    send({ type: 'openTicket', worktreeId });
+  };
+  return <span className="fm-ticket" data-link={ticket.url ? '' : undefined} title={title} onClick={open}>{ticket.key}</span>;
 }
 
 /** "+40 −9", or "~4 files" when git could not count lines. */

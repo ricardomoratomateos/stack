@@ -53,6 +53,16 @@ export function isCommandAvailable(
   return dirs.some((dir) => isExecutable(path.join(dir, binary)));
 }
 
+/**
+ * The absolute path of a binary found on PATH, or undefined. For writing a
+ * command into a config another program runs later, possibly with a PATH
+ * other than ours (Claude Code started from the Dock).
+ */
+export function resolveOnPath(binary: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const dirs = (env.PATH ?? '').split(path.delimiter).filter(Boolean);
+  return dirs.map((dir) => path.join(dir, binary)).find(isExecutable);
+}
+
 function isExecutable(candidate: string): boolean {
   try {
     // X_OK rather than existsSync: a non-executable file with the right name

@@ -39,6 +39,11 @@ export interface ISessionManager {
    * the receiving agent needs a beat to take the paste in first.
    */
   paste(target: string, text: string): Promise<void>;
+  /**
+   * The last `lines` lines of a window's visible pane and scrollback, as text
+   * (no escape sequences; wrapped lines joined).
+   */
+  capturePane(target: string, lines: number): Promise<string>;
   /** Send a single Enter keypress to a window (submits whatever its input holds). */
   pressEnter(target: string): Promise<void>;
   /** Replace the window's process with a command run directly (nothing typed or echoed in the pane). */

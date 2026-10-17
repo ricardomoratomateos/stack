@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { IAgentProvider, PROVIDER_IDS, ProviderId } from '../ports/IAgentProvider';
-import { ClaudeProvider, ConfigSource } from './claude/ClaudeProvider';
+import { ClaudeProvider, ConfigSource, type WorkerMcpSource } from './claude/ClaudeProvider';
 import { ClaudeHookInstaller } from './claude/ClaudeHookInstaller';
 import { CodexProvider } from './codex/CodexProvider';
 import { CodexHookInstaller } from './codex/CodexHookInstaller';
@@ -17,6 +17,8 @@ export class ProviderFactory {
     private config: ConfigSource,
     private storagePath: string,
     private homeDir: string = os.homedir(),
+    /** The Stack MCP bridge for workers (Claude, Codex); opencode is started without it. */
+    private workerMcp: WorkerMcpSource = () => undefined,
   ) {}
 
   create(id: ProviderId): IAgentProvider {
@@ -43,11 +45,13 @@ export class ProviderFactory {
         return new ClaudeProvider(
           this.config,
           new ClaudeHookInstaller(this.storagePath, path.join(this.homeDir, CLAUDE_SETTINGS_PATH)),
+          this.workerMcp,
         );
       case 'codex':
         return new CodexProvider(
           this.config,
           new CodexHookInstaller(this.storagePath, path.join(this.homeDir, CODEX_HOOKS_PATH)),
+          this.workerMcp,
         );
       case 'opencode':
         return new OpenCodeProvider(

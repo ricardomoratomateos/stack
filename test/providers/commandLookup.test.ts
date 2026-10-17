@@ -106,3 +106,13 @@ describe('installedProviders', () => {
     expect(installedProviders(config(), env)).toEqual(['claude', 'codex', 'opencode']);
   });
 });
+
+describe('resolveOnPath', () => {
+  it('returns the absolute path of an executable on PATH, undefined otherwise', async () => {
+    const { resolveOnPath } = await import('../../src/providers/commandLookup');
+    const node = put('node');
+    expect(resolveOnPath('node', env)).toBe(node);
+    expect(resolveOnPath('nope', env)).toBeUndefined();
+    expect(resolveOnPath('node', {})).toBeUndefined();
+  });
+});

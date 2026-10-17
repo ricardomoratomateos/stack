@@ -64,6 +64,29 @@ describe('ProviderFactory', () => {
     expect(factory.create('claude')).toBeInstanceOf(ClaudeProvider);
   });
 
+  describe('with the Stack MCP bridge installed', () => {
+    const bridge = { command: '/usr/bin/node', args: ['/store/stack-mcp.js'] };
+    const factory = () => new ProviderFactory(makeConfig(), storageDir, homeDir, () => bridge);
+
+    it("Claude workers get the bridge for their own task through --mcp-config, keeping the user's servers", () => {
+      const command = factory().create('claude').buildCommand('wt-1');
+      const json = JSON.stringify({ mcpServers: { stack: { type: 'stdio', command: '/usr/bin/node', args: ['/store/stack-mcp.js'], env: { STACK_TASK_ID: 'wt-1' } } } });
+      expect(command).toBe(`STACK_WORKSPACE_ID="wt-1" FOREMAN_WORKSPACE_ID="wt-1" claude --mcp-config '${json}'`);
+      expect(command).not.toContain('--strict-mcp-config');
+    });
+
+    it('Codex workers get it as -c mcp_servers.stack.* overrides', () => {
+      expect(factory().create('codex').buildCommand('wt-1')).toBe(
+        'STACK_WORKSPACE_ID="wt-1" FOREMAN_WORKSPACE_ID="wt-1" codex '
+        + `-c 'mcp_servers.stack.command="/usr/bin/node"' -c 'mcp_servers.stack.args=["/store/stack-mcp.js"]' -c 'mcp_servers.stack.env={STACK_TASK_ID="wt-1"}'`,
+      );
+    });
+
+    it('opencode is started without it', () => {
+      expect(factory().create('opencode').buildCommand('wt-1')).toBe('STACK_WORKSPACE_ID="wt-1" FOREMAN_WORKSPACE_ID="wt-1" opencode');
+    });
+  });
+
   describe('ClaudeProvider', () => {
     it('buildCommand prefixes STACK_WORKSPACE_ID and uses the configured command', () => {
       const provider = makeFactory(makeConfig({ claudeCommand: 'my-claude' })).create('claude');

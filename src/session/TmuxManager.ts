@@ -302,6 +302,15 @@ export class TmuxManager implements ISessionManager {
     }
   }
 
+  /**
+   * -J joins lines tmux wrapped at the pane width, so a long line reads as the
+   * agent printed it; without -e there are no colour escapes to strip. -S
+   * reaches back into the scrollback, where the end of a long answer lives.
+   */
+  async capturePane(target: string, lines: number): Promise<string> {
+    return this.tmux('capture-pane', '-p', '-J', '-t', target, '-S', `-${Math.max(1, Math.floor(lines))}`);
+  }
+
   async pressEnter(target: string): Promise<void> {
     await this.tmux('send-keys', '-t', target, 'Enter');
   }

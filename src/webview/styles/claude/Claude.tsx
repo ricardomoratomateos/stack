@@ -1,7 +1,7 @@
 import React from 'react';
 import { send } from '../../vscode';
 import { GROUP_LABEL, formatAge, type Described, type WorktreeGroup } from '../../derive';
-import { Details, DiffStat } from '../../components/Details';
+import { Details, DiffStat, TicketChip } from '../../components/Details';
 import { LaunchSplit } from '../../components/LaunchSplit';
 import { ActionBar } from '../../components/ActionBar';
 import { ProviderMark, visualFor } from '../../components/providers';
@@ -117,6 +117,7 @@ function Row({ d, selected, now, state, select, drag }: {
         <span className="cl-body">
           <span className="cl-name">
             <span className="cl-name-text fm-ellipsis" title={d.wt.branch}>{d.name}</span>
+            {wt.ticket && <TicketChip worktreeId={wt.id} ticket={wt.ticket} />}
             {wt.isMain && <span className="cl-tag">main</span>}
           </span>
           <span className="cl-line">

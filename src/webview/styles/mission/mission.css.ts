@@ -109,6 +109,7 @@ body.vscode-high-contrast .fm-mission, body.vscode-high-contrast-light .fm-missi
 .ms-card:not([data-selected]) .ms-card-main:hover { background: var(--fm-hover); }
 .ms-card-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .ms-name { flex: 1; min-width: 0; font-weight: 600; }
+.ms-name-row { flex: 1; }
 .ms-card-line { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--fm-text-dim); }
 .ms-provider { flex: none; font-family: var(--fm-mono); font-size: 10.5px; color: var(--fm-text-dim); border: 1px solid var(--fm-border-strong); border-radius: 3px; padding: 0 4px; }
 .ms-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; margin-top: 2px; font-family: var(--fm-mono); font-size: 11px; }

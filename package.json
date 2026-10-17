@@ -146,6 +146,20 @@
       {
         "command": "stack.nameWorkspace",
         "title": "Stack: Name This Workspace"
+      },
+      {
+        "command": "stack.enableManagerMcp",
+        "title": "Stack: Enable Manager (MCP)"
+      },
+      {
+        "command": "stack.disableManagerMcp",
+        "title": "Stack: Disable Manager (MCP)"
+      }
+    ],
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "stack.mcp",
+        "label": "Stack"
       }
     ],
     "keybindings": [
@@ -439,9 +453,11 @@
     "vitest": "^3.2.7"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@vscode/codicons": "^0.0.45",
     "diff2html": "^3.4.56",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "zod": "^4.6.7"
   }
 }

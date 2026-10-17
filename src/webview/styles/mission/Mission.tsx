@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { send } from '../../vscode';
 import { GROUP_SHORT, attentionQueue, countByGroup, formatAge, type Described, type WorktreeGroup } from '../../derive';
-import { DiffStat, PrBadge, Details } from '../../components/Details';
+import { DiffStat, PrBadge, Details, TicketChip } from '../../components/Details';
 import { LaunchSplit } from '../../components/LaunchSplit';
 import { ActionBar } from '../../components/ActionBar';
 import { visualFor } from '../../components/providers';
@@ -139,7 +139,10 @@ function Card({ d, selected, now, state, select, drag }: {
       <button type="button" className="ms-card-main" aria-current={selected || undefined} onClick={pick}>
         <span className="ms-card-top">
           <span className="ms-badge" data-group={d.group}>{BADGE[d.group]}</span>
-          <span className="ms-name fm-ellipsis" title={wt.branch}>{d.name}</span>
+          <span className="fm-name-row ms-name-row">
+            <span className="ms-name fm-ellipsis" title={wt.branch}>{d.name}</span>
+            {wt.ticket && <TicketChip worktreeId={wt.id} ticket={wt.ticket} />}
+          </span>
           <span className="ms-when">{formatAge(wt.since, now)}</span>
         </span>
         <span className="ms-card-line">

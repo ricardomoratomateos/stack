@@ -775,23 +775,26 @@ export class AgentSessionManager {
    *
    * Returns false when no agent is running — the caller then launches a
    * fresh one. Windows found dead on the way are marked terminated.
+   *
+   * `windowIndex` restricts it to that one session (the MCP manager naming
+   * which agent it is talking to); false when that one is not a live agent.
    */
-  async sendPromptToAgent(worktree: Worktree, prompt: string): Promise<boolean> {
+  async sendPromptToAgent(worktree: Worktree, prompt: string, windowIndex?: number): Promise<boolean> {
     const map = this.windows.get(worktree.id);
     if (!map) return false;
     const rank = (s: AgentSessionState) => (s === 'waiting' || s === 'idle' ? 0 : s === 'permission' ? 1 : 2);
     const candidates = [...map.entries()]
-      .filter(([, m]) => m.kind === 'agent' && m.state !== 'terminated')
+      .filter(([i, m]) => m.kind === 'agent' && m.state !== 'terminated' && (windowIndex === undefined || i === windowIndex))
       .sort(([, a], [, b]) => rank(a.state) - rank(b.state));
     if (candidates.length === 0) return false;
 
     const sessionName = TmuxManager.sessionName(worktree.id);
     const tmuxWindows = await this.tmux.listWindows(sessionName).catch((): TmuxWindow[] => []);
-    let windowIndex: number | undefined;
+    let target: number | undefined;
     let died = false;
     for (const [index] of candidates) {
       const liveness = await this.agentLiveness(tmuxWindows.find((w) => w.index === index));
-      if (liveness === 'alive') { windowIndex = index; break; }
+      if (liveness === 'alive') { target = index; break; }
       if (liveness === 'dead') died = this.markTerminated(worktree.id, index) || died;
     }
     if (died) {
@@ -799,15 +802,20 @@ export class AgentSessionManager {
       this.stateChangeEmitter.fire({ worktreeId: worktree.id, state: this.aggregateState(worktree.id) });
       this.terminalsChangeEmitter.fire();
     }
-    if (windowIndex === undefined) return false;
+    if (target === undefined) return false;
 
-    await this.tmux.selectWindow(sessionName, windowIndex);
+    await this.tmux.selectWindow(sessionName, target);
     // Shown before the submit, which may now wait seconds for the agent to
     // confirm it: the user watches the prompt go in rather than wait for it.
     // That session's own tab, in perSession mode, not whichever is in front.
-    await this.revealWindow(worktree, windowIndex).catch(() => undefined);
-    await this.submitPrompt(worktree.id, windowIndex, prompt, true);
+    await this.revealWindow(worktree, target).catch(() => undefined);
+    await this.submitPrompt(worktree.id, target, prompt, true);
     return true;
+  }
+
+  /** The last `lines` lines of one session's pane, as text; see ISessionManager.capturePane. */
+  capturePane(worktreeId: string, windowIndex: number, lines: number): Promise<string> {
+    return this.tmux.capturePane(`${TmuxManager.sessionName(worktreeId)}:${windowIndex}`, lines);
   }
 
   async openTerminal(worktree: Worktree): Promise<vscode.Terminal> {

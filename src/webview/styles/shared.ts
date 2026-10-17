@@ -217,6 +217,14 @@ button.fm-port:hover { background: var(--fm-hover); border-color: var(--fm-accen
 .fm-pr-ci[data-ci='fail'] { background: var(--fm-bad); }
 .fm-pr-ci[data-ci='pending'] { background: var(--fm-warn); }
 .fm-pr-mark { font-size: 11px; color: var(--fm-warn); }
+/* A worktree's name with its ticket chip after it; the name gives way first. */
+.fm-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.fm-name-row > .fm-ellipsis { flex: 0 1 auto; }
+.fm-ticket {
+  flex: none; padding: 0 4px; border: 1px solid var(--fm-border); border-radius: 3px;
+  font-family: var(--fm-mono); font-size: 10px; line-height: 14px; font-weight: 400; color: var(--fm-text-dim);
+}
+.fm-ticket[data-link]:hover { color: var(--fm-text); border-color: var(--fm-border-strong); text-decoration: underline; }
 .fm-elapsed { font-family: var(--fm-mono); font-variant-numeric: tabular-nums; color: var(--fm-text-dim); }
 .fm-row-error {
   font-size: 11px; color: var(--fm-bad); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
