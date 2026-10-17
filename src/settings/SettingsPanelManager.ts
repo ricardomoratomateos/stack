@@ -14,6 +14,8 @@ export interface SettingsPanelHost {
   saveUser(values: UserValues): Promise<void>;
   clearPersonalOverrides(): Promise<void>;
   openProjectFile(): Promise<void>;
+  /** Enable or disable the manager MCP registration; resolves once it is done. */
+  setManager(enabled: boolean): Promise<void>;
 }
 
 /**
@@ -90,6 +92,10 @@ export class SettingsPanelManager {
         return;
       case 'openProjectFile':
         await this.host.openProjectFile().catch(() => {});
+        return;
+      case 'setManager':
+        await this.host.setManager(msg.enabled).catch(() => {});
+        this.refresh();
         return;
     }
   }

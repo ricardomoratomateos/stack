@@ -95,6 +95,7 @@ export function useSettings() {
       createScript: (kind) => send({ type: 'createScript', kind }),
       clearOverrides: () => send({ type: 'clearPersonalOverrides' }),
       openFile: () => send({ type: 'openProjectFile' }),
+      setManager: (enabled: boolean) => send({ type: 'setManager', enabled }),
     };
   }, [snap, draft, user, model, edit]);
 

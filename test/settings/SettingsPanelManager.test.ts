@@ -24,6 +24,7 @@ function makePanel() {
 }
 
 const snapshot: SettingsSnapshot = {
+  managerEnabled: false,
   repoRoot: '/repo',
   project: {
     worktreesDirectory: '.worktrees', defaultBaseBranch: 'main', setupScript: '', teardownScript: '',
@@ -50,6 +51,7 @@ function makeHost(over: Partial<SettingsPanelHost> = {}): SettingsPanelHost {
     saveUser: vi.fn(async () => {}),
     clearPersonalOverrides: vi.fn(async () => {}),
     openProjectFile: vi.fn(async () => {}),
+    setManager: vi.fn(async () => {}),
     ...over,
   };
 }
@@ -184,6 +186,17 @@ describe('SettingsPanelManager', () => {
 
     await expect(panel.fire({ type: 'openProjectFile' })).resolves.not.toThrow();
     expect(host.openProjectFile).toHaveBeenCalled();
+  });
+
+  it('setManager switches the registration and re-reads the snapshot, even when it fails', async () => {
+    const panel = makePanel();
+    window.createWebviewPanel.mockReturnValue(panel);
+    const host = makeHost({ setManager: vi.fn(async () => { throw new Error('no claude'); }) });
+    new SettingsPanelManager(extUri, host).open();
+
+    await panel.fire({ type: 'setManager', enabled: true });
+    expect(host.setManager).toHaveBeenCalledWith(true);
+    expect(panel.posted).toContainEqual({ type: 'snapshot', snapshot });
   });
 
   it('dispose closes an open panel and is a no-op without one', () => {

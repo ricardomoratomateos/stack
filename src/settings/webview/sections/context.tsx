@@ -28,6 +28,8 @@ export interface Ctx {
   createScript(kind: 'setup' | 'teardown'): void;
   clearOverrides(): void;
   openFile(): void;
+  /** Register or remove the manager MCP with Claude Code — immediate, not part of the save bar. */
+  setManager(enabled: boolean): void;
 }
 
 /**

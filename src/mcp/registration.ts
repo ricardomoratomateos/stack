@@ -60,3 +60,20 @@ export async function disableManager(run: Run, claude: string): Promise<{ ok: bo
   }
   return { ok: false, message: `Stack: nothing to remove — ${detail(removed) || `exit code ${removed.code}`}` };
 }
+
+/**
+ * Whether Claude Code has the user-scope `stack` server — what the settings
+ * panel's switch shows. Read from ~/.claude.json rather than `claude mcp get`,
+ * which health-checks the server and takes seconds; the panel only needs to
+ * know the entry is there. Unreadable or unparsable config reads as "off".
+ */
+export function managerEnabled(readText: (file: string) => string | undefined, claudeConfigPath: string): boolean {
+  try {
+    const text = readText(claudeConfigPath);
+    if (!text) return false;
+    const servers = (JSON.parse(text) as { mcpServers?: Record<string, unknown> }).mcpServers;
+    return !!servers && Object.prototype.hasOwnProperty.call(servers, MCP_SERVER_NAME);
+  } catch {
+    return false;
+  }
+}

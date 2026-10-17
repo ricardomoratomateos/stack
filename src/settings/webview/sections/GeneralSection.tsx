@@ -4,7 +4,7 @@ import { ProviderMark } from '../../../webview/components/providers';
 import type { CommandKey } from '../../draft';
 import type { UserValues } from '../../types';
 import { STR } from '../strings';
-import { Card, Field, TextInput } from '../ui';
+import { Card, Field, SwitchRow, TextInput } from '../ui';
 import type { Ctx } from './context';
 
 export const commandKey = (id: ProviderId): CommandKey => `${id}Command` as CommandKey;
@@ -34,10 +34,16 @@ function AgentRow({ id, ctx }: { id: ProviderId; ctx: Ctx }) {
 
 export function GeneralSection({ ctx }: { ctx: Ctx }) {
   return (
-    <Card title={STR.agents} hint={STR.agentsHint} scope="me" file={ctx.file}>
-      <ul role="radiogroup" aria-label={STR.agents} style={{ display: 'contents' }}>
-        {PROVIDER_IDS.map((id) => <AgentRow key={id} id={id} ctx={ctx} />)}
-      </ul>
-    </Card>
+    <>
+      <Card title={STR.agents} hint={STR.agentsHint} scope="me" file={ctx.file}>
+        <ul role="radiogroup" aria-label={STR.agents} style={{ display: 'contents' }}>
+          {PROVIDER_IDS.map((id) => <AgentRow key={id} id={id} ctx={ctx} />)}
+        </ul>
+      </Card>
+      {/* Applies at once (it registers with Claude Code), so it is not part of the save bar. */}
+      <Card title={STR.managerCard} hint={STR.managerCardHint} scope="me" file={ctx.file}>
+        <SwitchRow label={STR.manager} hint={STR.managerHint} checked={ctx.snap.managerEnabled} onChange={(v) => ctx.setManager(v)} />
+      </Card>
+    </>
   );
 }

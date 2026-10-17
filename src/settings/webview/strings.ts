@@ -2,6 +2,10 @@ import type { SectionId } from '../draft';
 
 /** Every user-facing string, in one place, so a translation is a mechanical pass. */
 export const STR = {
+  managerCard: 'Manager agent (MCP)',
+  managerCardHint: 'Lets a Claude Code session — the VS Code panel too — see and drive Stack: read a ticket with your Jira/Slack MCPs and turn it into a task, check on agents, message them.',
+  manager: 'Stack tools in Claude Code',
+  managerHint: 'Registers the "stack" MCP server with Claude Code (user scope). Takes effect in new Claude sessions; switch off to remove it.',
   settings: 'Settings',
   loading: 'Loading settings…',
 

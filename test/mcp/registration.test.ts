@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { claudeBinary, disableManager, enableManager, execRun, type Run, type RunResult } from '../../src/mcp/registration';
+import { claudeBinary, disableManager, enableManager, execRun, managerEnabled, type Run, type RunResult } from '../../src/mcp/registration';
 
 const bridge = { command: '/usr/bin/node', args: ['/store/stack-mcp.js'] };
 const runner = (...results: RunResult[]) => {
@@ -60,5 +60,18 @@ describe('execRun', () => {
     const res = await execRun('/definitely/not/here', []);
     expect(res.code).toBeNull();
     expect(res.stderr).toMatch(/ENOENT/);
+  });
+});
+
+describe('managerEnabled', () => {
+  const read = (text: string | undefined) => () => text;
+  it('is on when ~/.claude.json has a user-scope "stack" server', () => {
+    expect(managerEnabled(read(JSON.stringify({ mcpServers: { stack: { command: 'node' } } })), '/h/.claude.json')).toBe(true);
+  });
+  it('is off without the entry, without servers, without the file, or with a file that does not parse', () => {
+    expect(managerEnabled(read(JSON.stringify({ mcpServers: { other: {} } })), 'x')).toBe(false);
+    expect(managerEnabled(read(JSON.stringify({})), 'x')).toBe(false);
+    expect(managerEnabled(read(undefined), 'x')).toBe(false);
+    expect(managerEnabled(read('{not json'), 'x')).toBe(false);
   });
 });

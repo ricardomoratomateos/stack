@@ -60,7 +60,7 @@ import { WindowRegistry } from './mcp/WindowRegistry';
 import { ManagerTools } from './mcp/ManagerTools';
 import { BRIDGE_FILE } from './mcp/protocol';
 import { bridgeCommand, installBridge, type BridgeCommand } from './mcp/workerMcp';
-import { claudeBinary, disableManager, enableManager, execRun } from './mcp/registration';
+import { claudeBinary, disableManager, enableManager, execRun, managerEnabled } from './mcp/registration';
 
 /**
  * Surfaces a broken `.stack/config.json` with a way to go fix it.
@@ -573,6 +573,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
           scopeSearchToActiveWorktree: effective.scopeSearchToActiveWorktree,
         },
         installedProviders: installedProviders(effective),
+        managerEnabled: managerEnabled((f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : undefined), path.join(os.homedir(), '.claude.json')),
         branches: root ? git.listBranches(root) : [],
         detected: root ? detect(root, detectIo) : { composeFiles: [], portVars: [] },
       };
@@ -633,6 +634,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
         await cfg.update(key, undefined, vscode.ConfigurationTarget.Workspace).then(undefined, () => {});
       }
       webviewProvider.push();
+    },
+    // The same commands as the palette, so the result reads the same (a toast).
+    setManager: async (enabled) => {
+      await vscode.commands.executeCommand(enabled ? 'stack.enableManagerMcp' : 'stack.disableManagerMcp');
     },
     openProjectFile: async () => {
       const file = config.repoConfigPath();

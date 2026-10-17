@@ -59,6 +59,8 @@ export interface SettingsSnapshot {
   personalOverrides: RepoScopedKey[];
   user: UserValues;
   installedProviders: ProviderId[];
+  /** Whether the Stack MCP server is registered with Claude Code (user scope) — the manager switch. */
+  managerEnabled: boolean;
   branches: string[];
   detected: Detection;
 }
@@ -73,7 +75,9 @@ export type SettingsMessage =
   | { type: 'saveProject'; values: ProjectValues }
   | { type: 'saveUser'; values: UserValues }
   | { type: 'clearPersonalOverrides' }
-  | { type: 'openProjectFile' };
+  | { type: 'openProjectFile' }
+  /** Register or remove the Stack MCP server with Claude Code. Takes effect at once; not part of a save. */
+  | { type: 'setManager'; enabled: boolean };
 
 /** Extension → panel. */
 export type SettingsExtMessage =
