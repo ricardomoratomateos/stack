@@ -4629,6 +4629,24 @@ describe('focusNextAttention', () => {
     expect(h.viewers.get('a')!.show).toHaveBeenCalled();
   });
 
+  it('opens the Review panel, not the terminal, for a worktree that is ready for review', async () => {
+    vi.useFakeTimers();
+    const a = makeWorktree({ id: 'a', path: '/repo/zer/a', branch: 'a' });
+    const b = makeWorktree({ id: 'b', path: '/repo/zer/b', branch: 'b' });
+    const h = makeHarness({ worktrees: [a, b], persistedActiveId: 'b', viewerIds: ['a'], terminalIds: ['a'] });
+    const finished = { ...asking, state: 'waiting' as const };
+    h.claude.getSessions.mockImplementation((id: string) => (id === 'a' ? [finished] : []));
+    h.gitWatcher.getStatus.mockImplementation((p?: string) => ({
+      hasChanges: p === '/repo/zer/a', staged: 0, unstaged: p === '/repo/zer/a' ? 2 : 0, untracked: 0, ahead: 0, behind: 0,
+    }));
+    await h.service.focusNextAttention();
+    await flushMicrotasks();
+    expect(h.service.activeWorktreeId()).toBe('a');
+    expect(h.ui.openDiffPanel).toHaveBeenCalledWith('a');
+    // The panel comes last, so it is what ends up in front.
+    expect(h.calls.at(-1)).toBe('ui.openDiffPanel:a');
+  });
+
   it('says so when nothing is waiting', async () => {
     const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
     await h.service.focusNextAttention();

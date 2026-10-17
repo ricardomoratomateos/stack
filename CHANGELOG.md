@@ -27,7 +27,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Three sidebar styles**, switchable live with `stack.sidebarStyle`, **Stack: Switch Sidebar Style** or the settings panel: `aside` (monochrome, one lime accent), `claude` (terracotta, worktrees grouped by what they need from you) and `mission` (state counters that filter, an attention queue, cards with a metadata grid). All three show the same things and offer the same actions; worktrees are grouped as needs you / ready for review / working / idle / missing, with the diff size, the age in that state, and the agent's own question when it asks for permission.
 - **A worktree whose folder is gone** now shows under "Missing" with a **Forget** button, instead of silently vanishing.
 - **Docker state on the sidebar**: the stack's start/stop is disabled while Stack is working on it, a failed start shows compose's error on the worktree, and a docker daemon that is down says so in the health strip instead of looking like an empty stack.
-- **Stack: Focus Next Worktree Needing Attention** (`Cmd+Alt+J`) walks the attention queue, longest-waiting first.
+- **Stack: Focus Next Worktree Needing Attention** (`Cmd+Alt+J`) walks the attention queue, longest-waiting first, and lands where the work is: the terminal of an agent that is asking, the Review panel of one that has finished.
 
 ### Fixed
 

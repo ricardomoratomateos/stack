@@ -1078,12 +1078,21 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * Jump to the next worktree that is waiting on you — asking, or finished and
    * unreviewed — in the order the sidebar's attention queue lists them (longest
    * waiting first), starting after the one you are on.
+   *
+   * It lands where the work is: an agent that is asking, on its terminal; one
+   * that has finished, on the Review panel — the terminal of a finished agent
+   * only says it is done, and the diff is what there is to look at.
    */
   async focusNextAttention(): Promise<void> {
     const items = this.buildState().worktrees.map((wt) => ({ wt, group: groupOf(wt) }));
     const next = nextInQueue(attentionQueue(items), this.currentWorktreeId);
     if (!next) {
       this.deps.notify.showInfo('Stack: nothing is waiting on you.');
+      return;
+    }
+    if (next.group === 'review') {
+      await this.switchToWorktree(next.wt.id);
+      this.ui.openDiffPanel(next.wt.id);
       return;
     }
     await this.handleMessage({ type: 'focusTerminal', worktreeId: next.wt.id });
