@@ -150,10 +150,18 @@ describe('describe', () => {
       { label: 'http', port: 8082, openable: true },
       { label: 'debug', port: 9902, openable: false },
     ]);
-    expect(d.pr).toEqual({ number: 41, state: 'open' });
+    expect(d.pr).toEqual({ number: 41, state: 'open', draft: false, changesRequested: false });
     expect(describeWt(wt({ pr: { number: 2, state: 'MERGED' } })).pr?.state).toBe('merged');
     expect(describeWt(wt({ pr: { number: 2, state: 'CLOSED' } })).pr?.state).toBe('closed');
     expect(describeWt(wt({ pr: null })).pr).toBeUndefined();
+  });
+
+  it('marks a draft, requested changes and the checks — the last two only while it is open', () => {
+    expect(describeWt(wt({ pr: { number: 5, state: 'OPEN', isDraft: true, reviewDecision: 'CHANGES_REQUESTED', ci: 'fail' } })).pr)
+      .toEqual({ number: 5, state: 'open', draft: true, changesRequested: true, ci: 'fail' });
+    expect(describeWt(wt({ pr: { number: 5, state: 'MERGED', isDraft: true, reviewDecision: 'CHANGES_REQUESTED', ci: 'pass' } })).pr)
+      .toEqual({ number: 5, state: 'merged', draft: false, changesRequested: false, ci: 'pass' });
+    expect(describeWt(wt({ pr: { number: 5, state: 'OPEN', reviewDecision: 'APPROVED' } })).pr?.changesRequested).toBe(false);
   });
 
   it('describes every worktree of a state, passing docker availability along', () => {

@@ -3,7 +3,19 @@ import type { SidebarStyle } from './sidebarStyle';
 
 export type AgentSessionState = 'active' | 'waiting' | 'permission' | 'idle' | 'terminated';
 
-export type PrStatus = { number: number; state: 'OPEN' | 'CLOSED' | 'MERGED'; url: string } | null;
+/** The PR's checks, summed up: any failure fails, else anything unfinished is pending. */
+export type PrCi = 'pass' | 'fail' | 'pending';
+
+export type PrStatus = {
+  number: number;
+  state: 'OPEN' | 'CLOSED' | 'MERGED';
+  url: string;
+  isDraft?: boolean;
+  /** GitHub's own verdict; absent when the repository requires no review. */
+  reviewDecision?: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED';
+  /** Absent when the PR has no checks at all. */
+  ci?: PrCi;
+} | null;
 
 /**
  * Docker's own container state, lowercased: running, exited, created, paused,

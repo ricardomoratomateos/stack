@@ -553,6 +553,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     },
     renameSession: (msg) => void this.renameSession(msg.worktreeId, msg.index),
     openPort: (msg) => void this.openPort(msg.port),
+    openPr: (msg) => void this.openPr(msg.worktreeId),
     refreshDrift: (msg) => void this.refreshDrift(msg.worktreeId),
     selectWorktree: (msg) => this.switchToWorktree(msg.worktreeId),
     forgetWorktree: (msg) => this.forgetWorktree(msg.worktreeId),
@@ -840,6 +841,18 @@ export class WorktreeApplicationService implements DiffPanelHost {
    */
   async openPort(port: number): Promise<void> {
     await this.deps.host.openExternal(`http://localhost:${port}`);
+  }
+
+  /**
+   * Opens the worktree's pull request in the browser.
+   *
+   * The webview names the worktree, not the URL: what is handed to the OS is
+   * the link gh itself reported, so nothing the webview says can open anything
+   * else. A PR not known (yet) opens nothing.
+   */
+  async openPr(worktreeId: string): Promise<void> {
+    const url = this.deps.prMonitor.getStatus(worktreeId)?.url;
+    if (url && /^https:\/\//.test(url)) await this.deps.host.openExternal(url);
   }
 
   /**

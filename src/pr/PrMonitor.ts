@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { PrStatus } from '../types';
+import type { PrCi, PrStatus } from '../types';
 import type { ExecOptions, IFileRunner } from '../ports/IProcessRunner';
 
 interface PollEntry {
@@ -10,7 +10,16 @@ interface PollEntry {
   timer: ReturnType<typeof setTimeout> | undefined;
 }
 
-const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+/**
+ * How often to ask. A PR that is open is the one whose checks and review move
+ * while you watch, and the badge is only worth its place if it keeps up; a
+ * branch with no PR, or one already merged or closed, changes rarely.
+ */
+export const OPEN_POLL_INTERVAL_MS = 60 * 1000;
+export const POLL_INTERVAL_MS = 5 * 60 * 1000;
+
+/** What `gh pr list --json` is asked for. */
+const PR_FIELDS = 'number,state,url,isDraft,reviewDecision,statusCheckRollup';
 
 // No shell: the branch is an argv entry. It used to be pasted into a
 // `gh pr list --head "<branch>"` string, where a branch named `x$(…)` — a valid
@@ -35,16 +44,67 @@ export const defaultRunner: IFileRunner = {
   },
 };
 
+interface GhPr {
+  number: number;
+  state: string;
+  url: string;
+  isDraft?: boolean;
+  reviewDecision?: string | null;
+  statusCheckRollup?: GhCheck[] | null;
+}
+
+/** One entry of statusCheckRollup: a check run (Actions) or a commit status (older CI). */
+interface GhCheck {
+  /** CheckRun: QUEUED, IN_PROGRESS, COMPLETED, WAITING, PENDING, REQUESTED. */
+  status?: string;
+  /** CheckRun, once completed: SUCCESS, FAILURE, NEUTRAL, SKIPPED, CANCELLED, TIMED_OUT, … */
+  conclusion?: string | null;
+  /** StatusContext: SUCCESS, FAILURE, ERROR, PENDING, EXPECTED. */
+  state?: string;
+}
+
+const FAILED = new Set(['FAILURE', 'ERROR', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
+const REVIEW_DECISIONS = new Set(['APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED']);
+
+/**
+ * The checks in one word. A failure anywhere is a failure — that is the one
+ * that needs a person — then anything still running is pending, and only a
+ * board with every check finished and none failed passes. Neutral and skipped
+ * count as passing, as GitHub's own merge box counts them.
+ */
+export function summarizeChecks(checks: GhCheck[] | null | undefined): PrCi | undefined {
+  if (!checks || checks.length === 0) return undefined;
+  let pending = false;
+  for (const check of checks) {
+    const outcome = check.state ?? (check.status === 'COMPLETED' ? check.conclusion ?? '' : undefined);
+    if (outcome === undefined || outcome === 'PENDING' || outcome === 'EXPECTED') pending = true;
+    else if (FAILED.has(outcome)) return 'fail';
+  }
+  return pending ? 'pending' : 'pass';
+}
+
+/**
+ * The branch's PR, from `gh pr list --state all`.
+ *
+ * Every PR ever opened from the branch comes back, so one is picked: an open
+ * one first — that is the live conversation — else the most recent, by number,
+ * which GitHub hands out in order.
+ */
 export function parsePrListOutput(stdout: string): PrStatus {
   if (!stdout.trim()) return null;
   try {
-    const prs = JSON.parse(stdout) as { number: number; state: string; url: string }[];
+    const prs = JSON.parse(stdout) as GhPr[];
     if (!prs.length) return null;
-    const pr = prs[0];
+    const pr = [...prs].sort((a, b) => Number(b.state === 'OPEN') - Number(a.state === 'OPEN') || b.number - a.number)[0];
+    const ci = summarizeChecks(pr.statusCheckRollup);
+    const review = pr.reviewDecision ?? '';
     return {
       number: pr.number,
       state: pr.state as 'OPEN' | 'CLOSED' | 'MERGED',
       url: pr.url,
+      ...(pr.isDraft ? { isDraft: true } : {}),
+      ...(REVIEW_DECISIONS.has(review) ? { reviewDecision: review as NonNullable<PrStatus>['reviewDecision'] } : {}),
+      ...(ci ? { ci } : {}),
     };
   } catch {
     return null;
@@ -95,11 +155,11 @@ export class PrMonitor {
         if (JSON.stringify(previous) !== JSON.stringify(status)) {
           entry.callback();
         }
-        entry.timer = setTimeout(poll, POLL_INTERVAL_MS);
+        entry.timer = setTimeout(poll, status?.state === 'OPEN' ? OPEN_POLL_INTERVAL_MS : POLL_INTERVAL_MS);
       });
     };
 
-    // Run immediately, then on interval
+    // Run immediately, then every minute while the PR is open, five otherwise
     poll();
   }
 
@@ -131,7 +191,9 @@ export class PrMonitor {
   private fetchPrStatus(branch: string, cwd: string): Promise<PrStatus> {
     return this.runner.execFile(
       'gh',
-      ['pr', 'list', '--head', branch, '--json', 'number,state,url'],
+      // --state all: without it gh lists open PRs only, so a merged PR did not
+      // show as merged — the badge simply vanished at the moment it mattered.
+      ['pr', 'list', '--head', branch, '--state', 'all', '--json', PR_FIELDS],
       { cwd, timeout: 15000 },
     ).then(
       (stdout) => parsePrListOutput(stdout),

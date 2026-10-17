@@ -3469,6 +3469,25 @@ describe('base-branch drift', () => {
 // Naming a session
 // ─────────────────────────────────────────────────────────────────────────────
 
+describe('openPr', () => {
+  it('opens the URL gh reported for the worktree\'s PR', async () => {
+    const h = makeHarness({ worktrees: [makeWorktree()] });
+    h.prMonitor.getStatus.mockReturnValue({ number: 7, state: 'OPEN', url: 'https://github.com/o/r/pull/7' });
+    await h.service.handleMessage({ type: 'openPr', worktreeId: 'id-a' });
+    await flushMicrotasks();
+    expect(h.prMonitor.getStatus).toHaveBeenCalledWith('id-a');
+    expect(h.calls).toContain('host.openExternal:https://github.com/o/r/pull/7');
+  });
+
+  it('opens nothing without a known PR, or for a link that is not https', async () => {
+    const h = makeHarness({ worktrees: [makeWorktree()] });
+    await h.service.openPr('id-a');
+    h.prMonitor.getStatus.mockReturnValue({ number: 7, state: 'OPEN', url: 'file:///etc/passwd' });
+    await h.service.openPr('id-a');
+    expect(h.host.openExternal).not.toHaveBeenCalled();
+  });
+});
+
 describe('renameSession', () => {
   const withSessions = (sessions: Array<Record<string, unknown>>) =>
     makeHarness({ worktrees: [makeWorktree({ id: 'a' })], sessions: sessions as never });

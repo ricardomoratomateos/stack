@@ -150,7 +150,7 @@ function Card({ d, selected, now, state, select, drag }: {
           <span className="ms-meta">
             <span><span className="ms-k">diff</span>{d.diff ? <DiffStat diff={d.diff} /> : <span className="ms-v" data-tone="muted">—</span>}</span>
             <span><span className="ms-k">base</span><span className="ms-v fm-ellipsis" data-tone={d.base.tone}>{shortBase(d)}</span></span>
-            <span><span className="ms-k">pr</span>{d.pr ? <PrBadge pr={d.pr} /> : <span className="ms-v" data-tone="muted">—</span>}</span>
+            <span><span className="ms-k">pr</span>{d.pr ? <PrBadge worktreeId={wt.id} pr={d.pr} inCard /> : <span className="ms-v" data-tone="muted">—</span>}</span>
             <span><span className="ms-k">stack</span><span className="ms-v fm-ellipsis" data-tone={d.stack.tone} title={d.stack.title}>{d.stack.text}{d.ports[0] ? ` :${d.ports[0].port}` : ''}</span></span>
           </span>
         )}

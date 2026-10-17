@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { PrMonitor, parsePrListOutput, defaultRunner } from '../../src/pr/PrMonitor';
+import { PrMonitor, parsePrListOutput, summarizeChecks, defaultRunner } from '../../src/pr/PrMonitor';
 import type { IFileRunner } from '../../src/ports/IProcessRunner';
 
 const FIVE_MIN = 5 * 60 * 1000;
+const ONE_MIN = 60 * 1000;
 
 function makeRunner(stdout = ''): IFileRunner & { execFile: ReturnType<typeof vi.fn> } {
   return { execFile: vi.fn().mockResolvedValue(stdout) };
@@ -35,19 +36,38 @@ describe('parsePrListOutput (parsePr)', () => {
       .toEqual({ number: 2, state: 'CLOSED', url: 'u2' });
   });
 
-  it('does NOT distinguish drafts — state string is passed through as-is', () => {
-    // gh is only asked for number,state,url; a draft PR reports state OPEN and
-    // any unexpected state string is cast, not validated
-    expect(parsePrListOutput('[{"number":3,"state":"DRAFT","url":"u3"}]'))
-      .toEqual({ number: 3, state: 'DRAFT', url: 'u3' });
+  it('carries the draft flag, the review decision and the checks', () => {
+    const out = JSON.stringify([{
+      number: 3, state: 'OPEN', url: 'u3', isDraft: true, reviewDecision: 'CHANGES_REQUESTED',
+      statusCheckRollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+    }]);
+    expect(parsePrListOutput(out)).toEqual({
+      number: 3, state: 'OPEN', url: 'u3', isDraft: true, reviewDecision: 'CHANGES_REQUESTED', ci: 'pass',
+    });
   });
 
-  it('takes the FIRST PR when several match the branch', () => {
+  it('leaves out a review decision GitHub does not have (null, empty) or that it does not know', () => {
+    expect(parsePrListOutput('[{"number":4,"state":"OPEN","url":"u","isDraft":false,"reviewDecision":null,"statusCheckRollup":[]}]'))
+      .toEqual({ number: 4, state: 'OPEN', url: 'u' });
+    expect(parsePrListOutput('[{"number":4,"state":"OPEN","url":"u","reviewDecision":""}]'))
+      .toEqual({ number: 4, state: 'OPEN', url: 'u' });
+    expect(parsePrListOutput('[{"number":4,"state":"OPEN","url":"u","reviewDecision":"SOMETHING_NEW"}]'))
+      .toEqual({ number: 4, state: 'OPEN', url: 'u' });
+  });
+
+  it('prefers the open PR, then the most recent one, when the branch has had several', () => {
+    // --state all returns every PR ever opened from the branch.
     const out = JSON.stringify([
-      { number: 1, state: 'OPEN', url: 'first' },
-      { number: 2, state: 'CLOSED', url: 'second' },
+      { number: 7, state: 'CLOSED', url: 'newest-closed' },
+      { number: 5, state: 'OPEN', url: 'open' },
+      { number: 2, state: 'MERGED', url: 'old' },
     ]);
-    expect(parsePrListOutput(out)).toEqual({ number: 1, state: 'OPEN', url: 'first' });
+    expect(parsePrListOutput(out)).toEqual({ number: 5, state: 'OPEN', url: 'open' });
+    const closedOnly = JSON.stringify([
+      { number: 2, state: 'CLOSED', url: 'older' },
+      { number: 9, state: 'MERGED', url: 'newest' },
+    ]);
+    expect(parsePrListOutput(closedOnly)).toEqual({ number: 9, state: 'MERGED', url: 'newest' });
   });
 
   it('returns null when there is no PR for the branch (empty array)', () => {
@@ -67,6 +87,40 @@ describe('parsePrListOutput (parsePr)', () => {
   it('returns null on parseable-but-not-a-PR-array JSON', () => {
     expect(parsePrListOutput('{}')).toBeNull();   // .length undefined
     expect(parsePrListOutput('null')).toBeNull(); // throws, caught
+  });
+});
+
+describe('summarizeChecks', () => {
+  const run = (status: string, conclusion: string | null = null) => ({ status, conclusion });
+  const ctx = (state: string) => ({ state });
+
+  it('is undefined for a PR with no checks', () => {
+    expect(summarizeChecks(undefined)).toBeUndefined();
+    expect(summarizeChecks(null)).toBeUndefined();
+    expect(summarizeChecks([])).toBeUndefined();
+  });
+
+  it('passes when every check finished without failing — neutral and skipped included', () => {
+    expect(summarizeChecks([run('COMPLETED', 'SUCCESS'), run('COMPLETED', 'NEUTRAL'), run('COMPLETED', 'SKIPPED'), ctx('SUCCESS')])).toBe('pass');
+  });
+
+  it('is pending while anything has not finished', () => {
+    expect(summarizeChecks([run('COMPLETED', 'SUCCESS'), run('IN_PROGRESS')])).toBe('pending');
+    expect(summarizeChecks([run('QUEUED')])).toBe('pending');
+    expect(summarizeChecks([ctx('PENDING')])).toBe('pending');
+    expect(summarizeChecks([ctx('EXPECTED')])).toBe('pending');
+  });
+
+  it('fails on any failure, even with others still running', () => {
+    expect(summarizeChecks([run('IN_PROGRESS'), run('COMPLETED', 'FAILURE')])).toBe('fail');
+    expect(summarizeChecks([run('COMPLETED', 'TIMED_OUT')])).toBe('fail');
+    expect(summarizeChecks([run('COMPLETED', 'CANCELLED')])).toBe('fail');
+    expect(summarizeChecks([ctx('ERROR')])).toBe('fail');
+    expect(summarizeChecks([ctx('FAILURE')])).toBe('fail');
+  });
+
+  it('reads a completed run with no conclusion as finished, not failed', () => {
+    expect(summarizeChecks([{ status: 'COMPLETED' }])).toBe('pass');
   });
 });
 
@@ -92,7 +146,7 @@ describe('PrMonitor', () => {
     // cwd — `/` when VS Code was launched from the Dock.
     expect(runner.execFile).toHaveBeenCalledWith(
       'gh',
-      ['pr', 'list', '--head', 'feat/x', '--json', 'number,state,url'],
+      ['pr', 'list', '--head', 'feat/x', '--state', 'all', '--json', 'number,state,url,isDraft,reviewDecision,statusCheckRollup'],
       { cwd: WT, timeout: 15000 },
     );
     expect(monitor.getStatus('wt1')).toEqual({
@@ -100,8 +154,23 @@ describe('PrMonitor', () => {
     });
   });
 
-  it('polls every 5 minutes via a setTimeout chain', async () => {
+  it('polls every minute while the PR is open', async () => {
     const runner = makeRunner(OPEN_PR);
+    const monitor = new PrMonitor(runner);
+
+    monitor.startPolling('feat/x', 'wt1', WT, vi.fn());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(runner.execFile).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(ONE_MIN - 1);
+    expect(runner.execFile).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(runner.execFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('polls every 5 minutes when there is no PR, or once it is merged', async () => {
+    const runner = makeRunner('[]');
     const monitor = new PrMonitor(runner);
 
     monitor.startPolling('feat/x', 'wt1', WT, vi.fn());
@@ -111,9 +180,12 @@ describe('PrMonitor', () => {
     await vi.advanceTimersByTimeAsync(FIVE_MIN - 1);
     expect(runner.execFile).toHaveBeenCalledTimes(1);
 
+    runner.execFile.mockResolvedValue('[{"number":1,"state":"MERGED","url":"u"}]');
     await vi.advanceTimersByTimeAsync(1);
     expect(runner.execFile).toHaveBeenCalledTimes(2);
 
+    await vi.advanceTimersByTimeAsync(ONE_MIN);
+    expect(runner.execFile).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(FIVE_MIN);
     expect(runner.execFile).toHaveBeenCalledTimes(3);
   });
@@ -248,7 +320,7 @@ describe('PrMonitor', () => {
     expect(oldCallback).not.toHaveBeenCalled();
     expect(runner.execFile).toHaveBeenCalledTimes(2);
 
-    await vi.advanceTimersByTimeAsync(FIVE_MIN);
+    await vi.advanceTimersByTimeAsync(ONE_MIN); // the PR is open: the next poll is a minute out
     expect(runner.execFile).toHaveBeenCalledTimes(3); // one chain, not two
     expect(runner.execFile.mock.calls[2][1]).toContain('feat/new');
 
@@ -280,15 +352,15 @@ describe('PrMonitor', () => {
     const monitor = new PrMonitor(runner);
 
     monitor.startPolling('feat/old', 'wt1', WT, vi.fn());
-    await vi.advanceTimersByTimeAsync(0); // old poll completed, its 5min timer is set
+    await vi.advanceTimersByTimeAsync(0); // old poll completed, its timer is set
 
     monitor.startPolling('feat/new', 'wt1', WT, vi.fn());
     await vi.advanceTimersByTimeAsync(0);
     expect(runner.execFile).toHaveBeenCalledTimes(2);
     expect(runner.execFile.mock.calls[1][1]).toContain('feat/new');
 
-    // only the NEW poll runs after 5min — the old timer was cleared
-    await vi.advanceTimersByTimeAsync(FIVE_MIN);
+    // only the NEW poll runs a minute later — the old timer was cleared
+    await vi.advanceTimersByTimeAsync(ONE_MIN);
     expect(runner.execFile).toHaveBeenCalledTimes(3);
     expect(runner.execFile.mock.calls[2][1]).toContain('feat/new');
   });

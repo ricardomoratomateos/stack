@@ -202,10 +202,21 @@ button.fm-port:hover { background: var(--fm-hover); border-color: var(--fm-accen
 .fm-diff[data-files] { color: var(--fm-text-dim); }
 .fm-add { color: var(--fm-add); }
 .fm-del { color: var(--fm-del); }
-.fm-pr { font-family: var(--fm-mono); font-size: 11px; color: var(--fm-text); }
+.fm-pr {
+  display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none;
+  font-family: var(--fm-mono); font-size: 11px; color: var(--fm-text); cursor: pointer;
+}
+.fm-pr:hover .fm-pr-num { text-decoration: underline; }
 .fm-pr-state { color: var(--fm-text-dim); }
 .fm-pr[data-state='open'] .fm-pr-state { color: var(--fm-ok); }
+.fm-pr[data-state='open'][data-draft] .fm-pr-state { color: var(--fm-text-dim); }
 .fm-pr[data-state='merged'] .fm-pr-state { color: var(--vscode-charts-purple, #b180d7); }
+/* The checks, as one dot: green passed, red failed, amber still running. */
+.fm-pr-ci { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--fm-idle); }
+.fm-pr-ci[data-ci='pass'] { background: var(--fm-ok); }
+.fm-pr-ci[data-ci='fail'] { background: var(--fm-bad); }
+.fm-pr-ci[data-ci='pending'] { background: var(--fm-warn); }
+.fm-pr-mark { font-size: 11px; color: var(--fm-warn); }
 .fm-row-error {
   font-size: 11px; color: var(--fm-bad); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }

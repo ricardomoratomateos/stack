@@ -155,7 +155,33 @@ export interface Described {
   stack: { text: string; tone: Tone; title: string };
   /** "http :8082" style, in the order the settings name them. */
   ports: Array<{ label: string; port: number; openable: boolean }>;
-  pr?: { number: number; state: 'open' | 'merged' | 'closed' };
+  pr?: DescribedPr;
+}
+
+export interface DescribedPr {
+  number: number;
+  state: 'open' | 'merged' | 'closed';
+  /** Open, but marked as a draft. */
+  draft: boolean;
+  /** A reviewer asked for changes and nobody has re-approved since. */
+  changesRequested: boolean;
+  /** The checks summed up; absent when the PR has none. */
+  ci?: 'pass' | 'fail' | 'pending';
+}
+
+/** The PR in the words the badge uses. */
+export function describePr(pr: WorktreeItem['pr']): DescribedPr | undefined {
+  if (!pr) return undefined;
+  const raw = pr.state.toLowerCase();
+  const state = raw === 'open' || raw === 'merged' ? raw : 'closed';
+  return {
+    number: pr.number,
+    state,
+    draft: state === 'open' && !!pr.isDraft,
+    // Only while it is open: on a merged PR it is history, not a to-do.
+    changesRequested: state === 'open' && pr.reviewDecision === 'CHANGES_REQUESTED',
+    ...(pr.ci ? { ci: pr.ci } : {}),
+  };
 }
 
 function describeDiff(wt: WorktreeItem): Described['diff'] {
@@ -194,7 +220,6 @@ export function describeStack(wt: WorktreeItem, dockerUnavailable?: string): Des
 export function describe(wt: WorktreeItem, dockerUnavailable?: string): Described {
   const group = groupOf(wt);
   const agent = primaryAgent(wt);
-  const prState = wt.pr?.state.toLowerCase();
   return {
     wt,
     group,
@@ -208,9 +233,7 @@ export function describe(wt: WorktreeItem, dockerUnavailable?: string): Describe
     stack: describeStack(wt, dockerUnavailable),
     // HTTP_PORT reads as "http", beside lowercase container names.
     ports: wt.ports.map((p) => ({ label: p.name.replace(/_PORT$/, '').toLowerCase(), port: p.port, openable: p.openable })),
-    pr: wt.pr
-      ? { number: wt.pr.number, state: prState === 'open' || prState === 'merged' ? prState : 'closed' }
-      : undefined,
+    pr: describePr(wt.pr),
   };
 }
 

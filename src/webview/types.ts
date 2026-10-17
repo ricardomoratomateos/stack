@@ -55,7 +55,14 @@ export interface PortMapping {
 
 export interface PrStatus {
   number: number;
+  /** OPEN, MERGED or CLOSED, as GitHub spells it. */
   state: string;
+  url?: string;
+  isDraft?: boolean;
+  /** APPROVED, CHANGES_REQUESTED or REVIEW_REQUIRED; absent when no review is required. */
+  reviewDecision?: string;
+  /** The checks summed up; absent when the PR has none. */
+  ci?: 'pass' | 'fail' | 'pending';
 }
 
 export interface SessionItem {
@@ -159,6 +166,8 @@ export type WebMessage =
   | { type: 'reorderWorktrees'; orderedIds: string[] }
   | { type: 'renameSession'; worktreeId: string; index: number }
   | { type: 'openPort'; port: number }
+  /** Open the worktree's pull request in the browser. The URL is looked up on the host side. */
+  | { type: 'openPr'; worktreeId: string }
   | { type: 'refreshDrift'; worktreeId: string }
   | { type: 'dockerUp'; worktreeId: string }
   | { type: 'dockerDown'; worktreeId: string }
