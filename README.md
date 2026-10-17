@@ -20,9 +20,13 @@ Working on several things at once with AI agents gets messy fast: branches colli
 - **Worktree manager in the sidebar** — create, rename, and delete git worktrees; each one is an isolated checkout you can work in independently.
 - **Agents per worktree** — launch Claude Code, Codex CLI or opencode (pluggable providers) in any worktree. Multiple agent + shell sessions per worktree, each tracked separately.
 - **Sessions survive reloads** — agents run in tmux, so they keep working across VS Code window reloads and reconnect automatically.
-- **State at a glance** — per-session status (working / waiting / needs permission / idle) with live task titles pulled from the agent, plus a sidebar badge and optional native notification when an agent needs you.
+- **State at a glance** — per-session status (working / needs you / ready for review / idle) with live task titles pulled from the agent. When an agent asks for something, its question is the row's line (`$ composer test`); `Cmd+Alt+J` jumps to the next worktree that needs you — its terminal when an agent is asking, its Review panel when one has finished. A sidebar badge and an optional native notification tell you when you're elsewhere.
+- **Three sidebar styles** — *aside* (monochrome, one lime accent), *claude* (terracotta, a prompt-style composer) and *mission* (state counters that filter, an attention queue, cards). Same worktrees and actions in each; pick one in Stack settings › Appearance. Worktrees keep the order you give them (drag to reorder) — they never jump around as agents change state.
+- **New task composer** — name the task, describe it, pick the base branch and the agent; the branch is generated from the name (`AS-1234-fix-payments`) and checked as you type. It creates the worktree, waits for the setup script, then starts the agent with your description.
+- **A tab per session** — every agent and shell gets its own terminal tab, so you can drag them side by side, split and resize like any editor; see [Sessions side by side](#sessions-side-by-side).
+- **PRs and cleanup** — the row shows the branch's PR (open, draft, merged) with a CI dot, and opens it on click. Deleting tells you first what would be lost (uncommitted files, unpushed commits); a merged, clean worktree gets a one-click **Clean up**. A worktree whose folder disappeared shows as *Missing* with a **Forget** button — Stack never deletes one on its own.
 - **Scoped to the active worktree** — text search, Quick Open, and breakpoints are automatically scoped to the worktree you're in, so parallel worktrees don't drown each other out. Editor tabs can be scoped too — see [Switching worktrees](#switching-worktrees).
-- **Diff review panel** — review a worktree's changes with per-line comments and feed them straight back to the agent, no PR round-trip needed.
+- **Diff review panel** — review a worktree's changes in your theme's diff colours, with a folder tree, a *Viewed* checkbox per file, inline or split view, wrap toggle and keyboard navigation; leave per-line comments and send them straight back to the agent, no PR round-trip needed.
 - **Per-worktree debugging** *(optional)* — each worktree gets its own `launch.json` on a unique debug port, wired to its container, so you can step-debug several worktrees at once without ports colliding. Any debugger VS Code supports — Node by default, PHP, Python, Go, whatever your stack runs.
 - **Per-worktree Docker** *(optional)* — start/stop a dedicated compose stack per worktree with auto-generated, collision-free ports.
 - **Per-worktree setup/teardown** *(optional)* — run a repo-local script when a worktree is created or removed (install deps, copy env, boot services).
@@ -41,17 +45,31 @@ Working on several things at once with AI agents gets messy fast: branches colli
 
 1. Install tmux and an agent CLI (`claude`, `codex` or `opencode`).
 2. Open a git repository in VS Code and open the **Stack** view in the activity bar.
-3. Hit **+** to create a worktree for your task.
-4. Click the agent button on the worktree card to launch your agent in it (the chevron beside it picks another).
+3. Hit **+** (or the *What should an agent build?* box) and describe the task: Stack creates the branch and worktree and starts the agent on it.
+4. More agents or a shell for the same worktree: the agent button on its card (the chevron picks another agent) and the terminal icon.
 5. Watch status in the sidebar; switch worktrees to jump between tasks — switching is instant, and search and breakpoints follow you.
 
 The **Get started with Stack** walkthrough (opens on install; later under *Help → Welcome → Walkthroughs*, or `Stack: Getting Started`) walks through the same steps inside VS Code.
 
-Each worktree joins the window as a folder, and the window is named after the project — **aside (Workspace)**, not *Untitled (Workspace)*. The `.code-workspace` file behind it lives in Stack's own storage, never in your repository; a window that is already untitled is offered the name once, or any time with **Stack: Name This Workspace**.
+Each worktree joins the window as a folder, and the window is named after the project — **aside (Workspace)**, not *Untitled (Workspace)*. The `.code-workspace` file behind it lives in the repository's `.git/stack/` — inside the folder you already trust (so the window never opens in Restricted Mode) and invisible to git; a window that is already untitled is offered the name once, or any time with **Stack: Name This Workspace**.
 
 To hand an agent a screenshot, drop the image straight onto its terminal — VS Code opens it as a tab, Stack closes that tab and attaches the file to the agent in that editor group. `Cmd+Alt+V` in the agent's terminal attaches the latest screenshot from your screenshots folder.
 
 For the heavier setup — Docker per worktree, a debugger port per worktree, setup/teardown scripts — open **Stack settings** with the gear next to **+** in the Worktrees header. It prefills what it finds in the repository (compose files, their `${HTTP_PORT}`-style ports, the language stack) and saves the project half to `.stack/config.json` so the whole team inherits it, and your own preferences to your VS Code settings.
+
+## Shortcuts and commands
+
+| Shortcut / command | What it does |
+|---|---|
+| `Cmd+Alt+J` · **Stack: Focus Next Worktree Needing Attention** | Jump to the worktree that has waited longest for you |
+| **Stack: Focus Next / Previous Worktree** | Walk the worktrees in sidebar order |
+| `Cmd+Alt+V` (in an agent's terminal) · **Stack: Attach Latest Screenshot to Agent** | Hand the agent your latest screenshot |
+| Alt-click a session row · **Stack: Open Session to the Side** | Put that session's tab beside the current editor |
+| **Stack: New Task** | The new task composer |
+| **Stack: Settings** | The settings panel (also the gear in the view header) |
+| **Stack: Name This Workspace** | Name an "Untitled (Workspace)" window after the project |
+| **Stack: Create Repo Config File** | Write your current setup to `.stack/config.json` for the team |
+| In the Review panel: `j`/`k` files, `n`/`p` hunks, `c` comment, `v` viewed, `/` filter, `⌘↵` send | |
 
 ## Settings
 
@@ -60,7 +78,7 @@ For the heavier setup — Docker per worktree, a debugger port per worktree, set
 | `stack.worktreesDirectory` | `.worktrees` | Where worktrees are created (relative to the workspace root) |
 | `stack.defaultBaseBranch` | `develop` | Branch new worktrees start from, preselected in the New Task form. When it doesn't exist, Stack uses the repo's own main line (first of `main`/`master`/`develop` it finds, local or remote), then the current branch |
 | `stack.defaultProvider` | `claude` | Primary agent: the one the big launch button starts. The chevron beside it opens the rest |
-| `stack.sidebarStyle` | `aside` | How the sidebar looks: `aside` (monochrome, one lime accent), `claude` (terracotta, worktrees grouped by state) or `mission` (state counters, attention queue, cards). Switches live; also under **Stack: Switch Sidebar Style** and in the settings panel |
+| `stack.sidebarStyle` | `aside` | How the sidebar looks: `aside` (monochrome, one lime accent), `claude` (terracotta, a prompt-style composer) or `mission` (state counters, attention queue, cards). Switches live; also under **Stack: Switch Sidebar Style** and in the settings panel |
 | `stack.claudeCommand` | `claude` | Command to launch Claude Code |
 | `stack.codexCommand` | `codex` | Command to launch Codex CLI |
 | `stack.opencodeCommand` | `opencode` | Command to launch opencode |
