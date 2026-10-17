@@ -349,6 +349,11 @@ export class GitWatcher {
     return this.statusCache.get(worktreePath) ?? DEFAULT_STATUS;
   }
 
+  /** Whether a status has been read for this path yet — getStatus's zeros are otherwise a placeholder. */
+  hasStatus(worktreePath: string): boolean {
+    return this.statusCache.has(worktreePath);
+  }
+
   dispose(): void {
     for (const watchers of this.watchers.values()) watchers.forEach((w) => w.close());
     for (const pending of this.debounceTimers.values()) clearTimeout(pending.timer);

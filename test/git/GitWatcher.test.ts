@@ -517,6 +517,15 @@ describe('lifecycle', () => {
     });
   });
 
+  it('hasStatus says whether a status has been read, so the zeros can be told from a clean tree', async () => {
+    const repo = makeFakeRepo();
+    const w = makeWatcher(vi.fn(async () => STATUS_A));
+    expect(w.hasStatus(repo)).toBe(false);
+    w.watch(repo);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(w.hasStatus(repo)).toBe(true);
+  });
+
   it('dispose() closes every watcher, cancels timers and empties the cache', async () => {
     const fetchFn = vi.fn(async () => STATUS_A);
     const repoA = makeFakeRepo();

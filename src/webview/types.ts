@@ -97,7 +97,7 @@ export interface WorktreeItem {
   /**
    * When (epoch ms) the worktree entered the state it is in now, as the
    * extension host saw it — drives the age on a row and the order of the
-   * attention queue. Counts from when this window first saw the state.
+   * attention queue. Kept across reloads (workspaceState).
    */
   since?: number;
   branch: string;

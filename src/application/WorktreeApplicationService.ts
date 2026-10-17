@@ -35,6 +35,8 @@ import type { NewTaskInit } from '../newtask/types';
  */
 export const ACTIVE_WORKTREE_KEY = 'stack.activeWorktreeId';
 export const WORKTREE_ORDER_KEY = 'stack.worktreeOrder';
+/** workspaceState: when each worktree entered its group — see groupSince. */
+export const GROUP_SINCE_KEY = 'stack.groupSince';
 /**
  * How long a teardown script may hold up a delete. Generous — a `compose down`
  * with volumes can take minutes — but finite: a script stuck on a prompt nobody
@@ -179,11 +181,19 @@ export class WorktreeApplicationService implements DiffPanelHost {
   private missing = new Set<string>();
   /**
    * When each worktree entered the group it is in, for the age on its row and
-   * the order of the attention queue. Set when this window first sees the state
-   * (a window that has just loaded does not know how long an agent has been
-   * waiting), and reset whenever the group changes.
+   * the order of the attention queue. Reset whenever the group changes, and
+   * kept in workspaceState: it used to live only here, so every reload
+   * restarted "waiting 3h" at "now" and reshuffled the queue.
+   *
+   * `restored` marks an entry read back from the last session. Until this
+   * window has its own picture — sessions reconnected, the worktree's git
+   * status read once — the group it computes is a guess (a finished agent with
+   * work to review looks idle while its status is still zeros), and a guess
+   * must not overwrite what the last window knew.
    */
-  private groupSince = new Map<string, { group: WorktreeGroup; at: number }>();
+  private groupSince = new Map<string, { group: WorktreeGroup; at: number; restored?: true }>();
+  /** The first load has reconnected this window's sessions; see groupSince. */
+  private settled = false;
   /**
    * What this window is watching and polling, by worktree id — so a reload can
    * stop what it no longer shows instead of only ever starting more.
@@ -209,6 +219,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   constructor(private readonly deps: WorktreeAppDeps) {
     this.currentWorktreeId = this.restoreActiveWorktreeId();
+    const since = deps.workspaceState.get<Record<string, { group: WorktreeGroup; at: number }>>(GROUP_SINCE_KEY) ?? {};
+    for (const [id, entry] of Object.entries(since)) this.groupSince.set(id, { ...entry, restored: true });
     this.stacks = new DockerStacks({
       monitor: deps.dockerMonitor,
       config: () => deps.config.get(),
@@ -1022,19 +1034,44 @@ export class WorktreeApplicationService implements DiffPanelHost {
     };
   }
 
-  /** Fills in `since` on every item and forgets worktrees that have left. */
+  /** Fills in `since` on every item, forgets worktrees that have left, and saves what changed. */
   private stampSince(items: WorktreeItem[]): void {
     const now = Date.now();
-    const seen = new Set<string>();
+    let changed = false;
     for (const item of items) {
       const group = groupOf(item);
       const known = this.groupSince.get(item.id);
-      const entry = known?.group === group ? known : { group, at: now };
-      this.groupSince.set(item.id, entry);
-      item.since = entry.at;
-      seen.add(item.id);
+      if (known?.group === group) {
+        item.since = known.at;
+      } else if (known?.restored && !this.knowsGroup(item)) {
+        // Provisional: shown from now, not recorded (see groupSince).
+        item.since = now;
+      } else {
+        this.groupSince.set(item.id, { group, at: now });
+        item.since = now;
+        changed = true;
+      }
     }
-    for (const id of this.groupSince.keys()) if (!seen.has(id)) this.groupSince.delete(id);
+    // A window showing nothing has nothing to say about anyone's age — a
+    // repository not found (yet) would otherwise wipe every entry.
+    if (items.length > 0) {
+      const seen = new Set(items.map((i) => i.id));
+      for (const id of this.groupSince.keys()) {
+        if (!seen.has(id)) {
+          this.groupSince.delete(id);
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      const saved = Object.fromEntries([...this.groupSince].map(([id, { group, at }]) => [id, { group, at }]));
+      void this.deps.workspaceState.update(GROUP_SINCE_KEY, saved);
+    }
+  }
+
+  /** Whether the group computed for this worktree rests on real inputs yet; see groupSince. */
+  private knowsGroup(item: WorktreeItem): boolean {
+    return this.settled && (item.missing === true || this.deps.gitWatcher.hasStatus(item.path));
   }
 
   /**
@@ -1299,6 +1336,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     // lookup each and leaves the session manager tracking windows this window
     // will never show — which the shell poller would then keep polling.
     await this.deps.agentManager.reconnect(mine);
+    this.settled = true;
     this.ui.pushWebview();
     this.refreshDecorations();
     this.syncSearchScoping();

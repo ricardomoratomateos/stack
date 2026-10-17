@@ -6,6 +6,7 @@ import {
   WorktreeApplicationService,
   ACTIVE_WORKTREE_KEY,
   WORKTREE_ORDER_KEY,
+  GROUP_SINCE_KEY,
   TEARDOWN_TIMEOUT_MS,
   SETUP_TIMEOUT_MS,
   type IWorkspaceHost,
@@ -104,6 +105,8 @@ interface HarnessOpts {
   focusedSessions?: Record<string, number>;
   /** folders whose .vscode/settings.json git tracks */
   trackedSettings?: string[];
+  /** what workspaceState holds under GROUP_SINCE_KEY, as a previous session left it */
+  savedSince?: Record<string, { group: string; at: number }>;
 }
 
 function makeHarness(o: HarnessOpts = {}) {
@@ -278,7 +281,8 @@ function makeHarness(o: HarnessOpts = {}) {
     watch: vi.fn((p: string, base?: string) => { calls.push(`gitWatcher.watch:${p}${base ? `:${base}` : ''}`); }),
     unwatch: vi.fn((p: string) => { calls.push(`gitWatcher.unwatch:${p}`); }),
     refreshNow: vi.fn(async (p: string) => { calls.push(`gitWatcher.refreshNow:${p}`); }),
-    getStatus: vi.fn(() => ({ hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 })),
+    getStatus: vi.fn((_p?: string): Record<string, unknown> => ({ hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 })),
+    hasStatus: vi.fn((_p: string) => true),
   };
   let downRan = false;
   const dockerMonitor = {
@@ -329,6 +333,7 @@ function makeHarness(o: HarnessOpts = {}) {
   const workspaceState = {
     get: vi.fn(<T,>(k: string): T | undefined => {
       if (k === ACTIVE_WORKTREE_KEY) return o.persistedActiveId as T | undefined;
+      if (k === GROUP_SINCE_KEY) return o.savedSince as T | undefined;
       return undefined;
     }),
     update: vi.fn(async (k: string, v: unknown) => { calls.push(`workspaceState.update:${k}:${v}`); }),
@@ -1410,6 +1415,21 @@ describe('buildState', () => {
       vi.useFakeTimers();
       vi.setSystemTime(1_000);
       const a = makeWorktree({ id: 'a' });
+      const b = makeWorktree({ id: 'b', path: '/repo/zer/b' });
+      const h = makeHarness({ worktrees: [a, b] });
+      h.service.buildState();
+      h.worktrees.splice(0, 1);
+      h.service.buildState();
+
+      vi.setSystemTime(9_000);
+      h.worktrees.push(a);
+      expect(h.service.buildState().worktrees.find((w) => w.id === 'a')!.since).toBe(9_000);
+    });
+
+    it('forgets nothing while the window shows no worktree at all', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(1_000);
+      const a = makeWorktree({ id: 'a' });
       const h = makeHarness({ worktrees: [a] });
       h.service.buildState();
       h.worktrees.splice(0, 1);
@@ -1417,7 +1437,72 @@ describe('buildState', () => {
 
       vi.setSystemTime(9_000);
       h.worktrees.push(a);
-      expect(h.service.buildState().worktrees[0].since).toBe(9_000);
+      expect(h.service.buildState().worktrees[0].since).toBe(1_000);
+    });
+
+    it('is saved per window, and only when it changes', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(1_000);
+      const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })] });
+      h.claude.getSessions.mockReturnValue([agent('active')]);
+      h.service.buildState();
+      h.service.buildState();
+      expect(h.workspaceState.update.mock.calls.filter(([k]) => k === GROUP_SINCE_KEY)).toEqual([
+        [GROUP_SINCE_KEY, { a: { group: 'working', at: 1_000 } }],
+      ]);
+    });
+
+    describe('across a reload', () => {
+      const saved = { a: { group: 'review', at: 1_000 } };
+      const dirty = { hasChanges: true, staged: 0, unstaged: 1, untracked: 0, ahead: 0, behind: 0 };
+
+      it('picks up the age the last window saw', () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(50_000);
+        const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], savedSince: saved });
+        h.claude.getSessions.mockReturnValue([agent('waiting')]);
+        h.gitWatcher.getStatus.mockReturnValue(dirty);
+        expect(h.service.buildState().worktrees[0].since).toBe(1_000);
+      });
+
+      it('does not let the first, half-loaded picture overwrite it', async () => {
+        // Before the sessions reconnect and git is read, a finished agent with
+        // work to review looks idle. That guess shows as "now" and is not saved.
+        vi.useFakeTimers();
+        vi.setSystemTime(50_000);
+        const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], savedSince: saved });
+        h.gitWatcher.hasStatus.mockReturnValue(false);
+        expect(h.service.buildState().worktrees[0].since).toBe(50_000);
+        await h.service.loadWorktreesForRepo('/repo');
+        // Reconnected, but git not read yet: still a guess.
+        expect(h.service.buildState().worktrees[0].since).toBe(50_000);
+
+        h.gitWatcher.hasStatus.mockReturnValue(true);
+        h.gitWatcher.getStatus.mockReturnValue(dirty);
+        h.claude.getSessions.mockReturnValue([agent('waiting')]);
+        expect(h.service.buildState().worktrees[0].since).toBe(1_000);
+        expect(h.workspaceState.update.mock.calls.some(([k]) => k === GROUP_SINCE_KEY)).toBe(false);
+      });
+
+      it('restarts once the window knows the group really changed', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(50_000);
+        const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], savedSince: saved });
+        await h.service.loadWorktreesForRepo('/repo');
+        h.claude.getSessions.mockReturnValue([agent('active')]);
+        expect(h.service.buildState().worktrees[0].since).toBe(50_000);
+        expect(h.workspaceState.update).toHaveBeenCalledWith(GROUP_SINCE_KEY, { a: { group: 'working', at: 50_000 } });
+      });
+
+      it('trusts a missing worktree\'s group without a git status', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(50_000);
+        const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' })], savedSince: saved, missingIds: ['a'] });
+        h.gitWatcher.hasStatus.mockReturnValue(false);
+        await h.service.loadWorktreesForRepo('/repo');
+        expect(h.service.buildState().worktrees[0].since).toBe(50_000);
+        expect(h.workspaceState.update).toHaveBeenCalledWith(GROUP_SINCE_KEY, { a: { group: 'missing', at: 50_000 } });
+      });
     });
   });
 
