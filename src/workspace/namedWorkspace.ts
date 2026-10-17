@@ -1,4 +1,5 @@
 import * as crypto from 'node:crypto';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { IFileSystem } from '../ports/IFileSystem';
@@ -14,10 +15,15 @@ import { canonicalPath } from '../worktree/worktreesInRepo';
  * renamed through the API. A workspace is named after its `.code-workspace`
  * file, so Stack writes one per repository and opens that instead:
  *
- *   <globalStorage>/workspaces/<sha1(repoRoot) prefix>/<repo basename>.code-workspace
+ *   <repo>/.git/stack/<repo basename>.code-workspace
  *
- * In the extension's own storage, never in the repository: git does not see
- * it and nobody commits it. Opened once, VS Code itself keeps its `folders` in
+ * Inside the repository's .git directory: git never sees it, nobody commits it,
+ * and — the reason it is not in the extension's own storage — VS Code's
+ * workspace trust covers it. Trust is checked for the workspace FILE's folder
+ * too, and a file under globalStorage opened the window in Restricted Mode,
+ * which disables every extension, Stack included. Only when the repo has no
+ * .git directory (a submodule or linked checkout, where .git is a file) does it
+ * fall back to <globalStorage>/workspaces/<sha1 prefix>/. Opened once, VS Code itself keeps its `folders` in
  * step with every later updateWorkspaceFolders.
  */
 
@@ -81,9 +87,23 @@ export function carriedSettingKeys(): string[] {
   return SETTING_KEYS.map((key) => `${SETTINGS_SECTION}.${key}`);
 }
 
+function defaultIsDirectory(p: string): boolean {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /** Where a repository's named workspace file lives. Same root, same file — always. */
-export function namedWorkspacePath(storageDir: string, repoRoot: string): string {
+export function namedWorkspacePath(
+  storageDir: string,
+  repoRoot: string,
+  isDirectory: (p: string) => boolean = defaultIsDirectory,
+): string {
   const root = canonicalPath(repoRoot);
+  const gitDir = path.join(root, '.git');
+  if (isDirectory(gitDir)) return path.join(gitDir, 'stack', `${path.basename(root)}.code-workspace`);
   const hash = crypto.createHash('sha1').update(root).digest('hex').slice(0, 12);
   return path.join(storageDir, WORKSPACES_DIR, hash, `${path.basename(root)}.code-workspace`);
 }

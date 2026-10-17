@@ -80,6 +80,15 @@ function make(o: HostOpts = {}) {
 const written = (fs: MemFs) => JSON.parse(fs.files.get(FILE)!);
 
 describe('namedWorkspacePath', () => {
+  it('lives inside the repo\'s .git directory when there is one, so workspace trust covers it', () => {
+    const isDir = (p: string) => p === `${ROOT}/.git`;
+    expect(namedWorkspacePath(STORAGE, ROOT, isDir)).toBe(`${ROOT}/.git/stack/aside.code-workspace`);
+  });
+
+  it('falls back to global storage when .git is not a directory (submodule, linked checkout)', () => {
+    expect(namedWorkspacePath(STORAGE, ROOT, () => false).startsWith(STORAGE)).toBe(true);
+  });
+
   it('is <storage>/workspaces/<12 hex of sha1(root)>/<basename>.code-workspace', () => {
     const hash = crypto.createHash('sha1').update(ROOT).digest('hex').slice(0, 12);
     expect(FILE).toBe(nodePath.join(STORAGE, 'workspaces', hash, 'aside.code-workspace'));
