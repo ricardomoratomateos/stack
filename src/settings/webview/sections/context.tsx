@@ -34,7 +34,7 @@ export interface Ctx {
 
 /**
  * What the repository file needs to say at the top of a section that writes to
- * it: that it is about to be created, that it is the legacy one, the problems
+ * it: that it is about to be created, the problems
  * it reads back with (only those about this section's keys, plus any that name
  * no key), and the personal overrides that would shadow what is saved.
  */
@@ -49,7 +49,6 @@ export function RepoNotices({ ctx, keys }: { ctx: Ctx; keys: string[] }) {
   return (
     <>
       {!snap.projectFile.present && <Banner tone="info" icon="new-file">{STR.newFile(file)}</Banner>}
-      {snap.projectFile.legacy && <Banner tone="info">{STR.legacyFile(file)}</Banner>}
       {problems.length > 0 && (
         <Banner
           tone="warn" title={STR.fileProblems(file)}

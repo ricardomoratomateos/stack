@@ -7,15 +7,8 @@ import { ClaudeHookInstaller } from '../../../src/providers/claude/ClaudeHookIns
 import { HookEntry } from '../../../src/types';
 import { ConfigFileError } from '../../../src/providers/shared/configFile';
 
-/**
- * First 16 hex chars of sha256(notify.sh). See the "is pinned" test.
- *
- * Changed deliberately with the rename to Stack (see the CHANGELOG): X-Stack-*
- * headers and STACK_* names, with the FOREMAN_* / foreman-* fallbacks written
- * in at the same time so the rename costs Codex users one re-trust, not two.
- * The script's path changed anyway (it lives under the new extension id).
- */
-const NOTIFY_SH_HASH = '3dd09d26e73c5d3c';
+/** First 16 hex chars of sha256(notify.sh). See the "is pinned" test. */
+const NOTIFY_SH_HASH = 'e7fbfeeda34f2a49';
 
 const HOOK_EVENTS = [
   'SessionStart',
@@ -80,8 +73,7 @@ describe('ClaudeHookInstaller', () => {
       makeHook().install(hookUrl);
       const content = fs.readFileSync(scriptPath, 'utf8');
       expect(content).toContain('ROUTE=$(cat "$DIR/routes/$WORKSPACE_ID" 2>/dev/null)');
-      // FOREMAN_HOOK_URL: what an agent launched before the rename to Stack carries.
-      expect(content).toContain('for URL in "$ROUTE" "${STACK_HOOK_URL:-}" "${FOREMAN_HOOK_URL:-}" "$FALLBACK"; do');
+      expect(content).toContain('for URL in "$ROUTE" "${STACK_HOOK_URL:-}" "$FALLBACK"; do');
       // A worktree id that is not a plain token never becomes a path.
       expect(content).toContain('""|*[!A-Za-z0-9_-]*) ;;');
     });
@@ -102,24 +94,15 @@ describe('ClaudeHookInstaller', () => {
       expect(hooks['Stop']?.[0]?.hooks[0]?.command).toBe(`"${scriptPath}" Stop claude`);
     });
 
-    it('reads STACK_* first, then the FOREMAN_* names from before the rename', () => {
-      makeHook().install(hookUrl);
-      const content = fs.readFileSync(scriptPath, 'utf8');
-      expect(content).toContain('WORKSPACE_ID="${STACK_WORKSPACE_ID:-${FOREMAN_WORKSPACE_ID:-}}"');
-      expect(content).toContain('WINDOW_INDEX="${STACK_WINDOW_INDEX:-${FOREMAN_WINDOW_INDEX:-}}"');
-    });
-
-    it('falls back to asking tmux when the launcher set no STACK (or FOREMAN) variables', () => {
+    it('falls back to asking tmux when the launcher set no STACK variables', () => {
       // An agent the user starts by hand has neither variable, and every event
       // it sent used to be discarded for carrying an empty workspace id.
       makeHook().install(hookUrl);
       const content = fs.readFileSync(scriptPath, 'utf8');
       expect(content).toContain("tmux display-message -p -t \"$TMUX_PANE\" '#{window_index}'");
       expect(content).toContain("tmux display-message -p -t \"$TMUX_PANE\" '#{session_name}'");
-      // Session names are "stack-<worktree id>" — "foreman-<worktree id>" for a
-      // session Foreman started — and a tab's view session adds "__w<n>".
+      // Session names are "stack-<worktree id>", and a tab's view session adds "__w<n>".
       expect(content).toContain('stack-*) WORKSPACE_ID="${SESSION#stack-}"');
-      expect(content).toContain('foreman-*) WORKSPACE_ID="${SESSION#foreman-}"');
       expect(content).toContain('WORKSPACE_ID="${WORKSPACE_ID%%__w*}"');
     });
 
@@ -244,34 +227,6 @@ describe('ClaudeHookInstaller', () => {
       ]);
     });
 
-    it("replaces Foreman's entries — the notify.sh under the old extension id — instead of adding beside them", () => {
-      // VS Code keys globalStorage on the extension id: Foreman's script sits
-      // in the sibling directory named after its id, foreman.foreman.
-      const legacy = path.join(tmpDir, 'foreman.foreman', 'notify.sh');
-      expect(makeHook().legacyScriptPath).toBe(legacy);
-      writeSettings({
-        hooks: {
-          Stop: [
-            { matcher: '', hooks: [{ type: 'command', command: `"${legacy}" Stop claude` }] },
-            { matcher: '', hooks: [{ type: 'command', command: legacy }, { type: 'command', command: 'keep-me' }] },
-          ],
-          SessionStart: [{ matcher: '', hooks: [{ type: 'command', command: `"${legacy}" SessionStart` }] }],
-        },
-      });
-
-      makeHook().install(hookUrl);
-
-      const hooks = readSettings()['hooks'] as Record<string, HookEntry[]>;
-      expect(hooks['Stop']).toEqual([
-        { matcher: '', hooks: [{ type: 'command', command: 'keep-me' }] },
-        { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Stop claude` }] },
-      ]);
-      expect(hooks['SessionStart']).toEqual([
-        { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" SessionStart claude` }] },
-      ]);
-      expect(JSON.stringify(readSettings())).not.toContain('foreman.foreman');
-    });
-
     it('handles missing settings file (creates it, including parent dirs)', () => {
       expect(fs.existsSync(settingsPath)).toBe(false);
       makeHook().install(hookUrl);
@@ -332,15 +287,6 @@ describe('ClaudeHookInstaller', () => {
       fs.writeFileSync(settingsPath, '\n');
       makeHook().install(hookUrl);
       expect(Object.keys(readSettings()['hooks'] as object)).toHaveLength(7);
-    });
-
-    it('takes no backup of its own where Foreman (its old name) already kept one', () => {
-      writeSettings({ model: 'opus' });
-      fs.writeFileSync(`${settingsPath}.foreman-backup`, 'the original, from before Foreman');
-
-      makeHook().install(hookUrl);
-      expect(fs.existsSync(`${settingsPath}.stack-backup`)).toBe(false);
-      expect(fs.readFileSync(`${settingsPath}.foreman-backup`, 'utf8')).toBe('the original, from before Foreman');
     });
 
     it('keeps a one-time backup of the settings as they were before Stack', () => {

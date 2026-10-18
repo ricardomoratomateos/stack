@@ -9,7 +9,7 @@ import {
   RepoConfigValues,
   RepoScopedKey,
   readRepoConfig,
-  repoConfigRelative,
+  REPO_CONFIG_RELATIVE,
 } from './RepoConfig';
 
 const DOCKER_DEFAULTS: DockerConfig = {
@@ -114,14 +114,10 @@ export class ConfigManager {
     return this.repoConfig().problems;
   }
 
-  /**
-   * Absolute path of the repo config in use, whether or not it exists: the
-   * legacy `.foreman/config.json` while that is the one being read, else
-   * `.stack/config.json`.
-   */
+  /** Absolute path of the repo config, whether or not it exists. */
   repoConfigPath(): string | undefined {
     const root = this.options.repoRoot?.();
-    return root ? path.join(root, repoConfigRelative(root)) : undefined;
+    return root ? path.join(root, REPO_CONFIG_RELATIVE) : undefined;
   }
 
   get(): StackConfig {
@@ -227,9 +223,7 @@ export class ConfigManager {
   private repoConfig(): RepoConfigResult {
     const root = this.options.repoRoot?.();
     if (!root) return NO_REPO_CONFIG;
-    // Resolved on every read: creating `.stack/config.json` next to a legacy
-    // `.foreman/config.json` switches files, and the key below follows.
-    const file = path.join(root, repoConfigRelative(root));
+    const file = path.join(root, REPO_CONFIG_RELATIVE);
 
     // Fields joined on a NUL, which no path can contain, so no combination of
     // path and numbers can spell another one's key. Written as an escape rather

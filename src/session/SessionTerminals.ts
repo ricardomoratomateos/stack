@@ -408,9 +408,6 @@ export class SessionTerminals implements vscode.Disposable {
       if (pid !== undefined) session = (await clients()).find((c) => c.pid === pid)?.session;
     }
     if (!session || this.targetOf(terminal)) return false;
-    // A terminal from before the rename names the `foreman-` session that
-    // reconnect() has just renamed to `stack-`, still attached.
-    session = TmuxManager.currentSessionName(session);
     const view = TmuxManager.parseViewSessionName(session);
     const worktreeId = this.known.get(view?.base ?? session);
     if (!worktreeId) return false;

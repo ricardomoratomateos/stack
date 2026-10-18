@@ -84,15 +84,13 @@ describe('notify.sh (executed)', () => {
       await new Promise<void>((resolve) => s.close(() => resolve()));
     }
     if (hasTmux) {
-      for (const name of [TMUX_SESSION, LEGACY_TMUX_SESSION, `${TMUX_SESSION}__w5`]) {
+      for (const name of [TMUX_SESSION, `${TMUX_SESSION}__w5`]) {
         try { execSync(`tmux kill-session -t "=${name}"`, { stdio: 'ignore' }); } catch { /* gone */ }
       }
     }
   });
 
   const TMUX_SESSION = `stack-notifyexec-${process.pid}`;
-  /** What Foreman, the extension's old name, called the same session. */
-  const LEGACY_TMUX_SESSION = `foreman-notifyexecl-${process.pid}`;
 
   beforeEach(() => {
     received = [];
@@ -355,58 +353,22 @@ describe('notify.sh (executed)', () => {
     expect(received[0]?.headers['x-stack-pane']).toBe(pane);
   });
 
-  it.runIf(canRun)('reports for an agent launched before the rename, which carries FOREMAN_* only', async () => {
-    const r = await run(['Stop', 'claude'], {
-      FOREMAN_WORKSPACE_ID: 'wt-old',
-      FOREMAN_WINDOW_INDEX: '4',
-      FOREMAN_HOOK_URL: urls['window']!,
-    }, '{}');
+  it.runIf(canRun)('falls through a dead STACK_HOOK_URL to the shared file', async () => {
+    const r = await run(['Stop'], { STACK_HOOK_URL: await deadUrl() }, '{}');
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1);
-    expect(received.map((p) => p.server)).toEqual(['window']);
-    expect(received[0]?.headers['x-stack-workspace']).toBe('wt-old');
-    expect(received[0]?.headers['x-stack-window']).toBe('4');
+    expect(received.map((p) => p.server)).toEqual(['fallback']);
   });
 
-  it.runIf(canRun)('prefers STACK_* over the FOREMAN_* aliases', async () => {
-    const r = await run(['Stop'], {
-      STACK_WORKSPACE_ID: 'wt-new', FOREMAN_WORKSPACE_ID: 'wt-old',
-      STACK_WINDOW_INDEX: '2', FOREMAN_WINDOW_INDEX: '9',
-      STACK_HOOK_URL: urls['window']!, FOREMAN_HOOK_URL: urls['other']!,
-    }, '{}');
-    expect(r.status, r.stderr).toBe(0);
-    await waitForPosts(1);
-    await waitForPosts(2, 200);
-    expect(received.map((p) => p.server)).toEqual(['window']);
-    expect(received[0]?.headers['x-stack-workspace']).toBe('wt-new');
-    expect(received[0]?.headers['x-stack-window']).toBe('2');
-  });
-
-  it.runIf(canRun)('falls through a dead STACK_HOOK_URL to FOREMAN_HOOK_URL before the shared file', async () => {
-    const r = await run(['Stop'], { STACK_HOOK_URL: await deadUrl(), FOREMAN_HOOK_URL: urls['other']! }, '{}');
-    expect(r.status, r.stderr).toBe(0);
-    await waitForPosts(1);
-    expect(received.map((p) => p.server)).toEqual(['other']);
-  });
-
-  it.runIf(canRun && hasTmux)('recognises a session Foreman named, and a session tab’s view session, when asking tmux', async () => {
+  it.runIf(canRun && hasTmux)('recognises a session tab’s view session when asking tmux', async () => {
     const paneOf = (session: string) => {
       execSync(`tmux new-session -d -s "${session}" -c "${os.tmpdir()}"`);
       return execSync(`tmux list-panes -t "=${session}" -F '#{pane_id}'`, { encoding: 'utf8' }).trim().split('\n')[0] ?? '';
     };
-    route(`notifyexecl-${process.pid}`, urls['window']!);
     route(`notifyexec-${process.pid}`, urls['other']!);
 
-    // foreman-<id>: a session from before the rename that nobody has adopted yet.
-    let r = await run(['Stop'], { TMUX_PANE: paneOf(LEGACY_TMUX_SESSION) });
-    expect(r.status, r.stderr).toBe(0);
-    await waitForPosts(1);
-    expect(received[0]?.headers['x-stack-workspace']).toBe(`notifyexecl-${process.pid}`);
-    expect(received[0]?.server).toBe('window');
-
     // stack-<id>__w<n>: the "__w5" is the tab's, not part of the worktree id.
-    received = [];
-    r = await run(['Stop'], { TMUX_PANE: paneOf(`${TMUX_SESSION}__w5`) });
+    const r = await run(['Stop'], { TMUX_PANE: paneOf(`${TMUX_SESSION}__w5`) });
     expect(r.status, r.stderr).toBe(0);
     await waitForPosts(1);
     expect(received[0]?.headers['x-stack-workspace']).toBe(`notifyexec-${process.pid}`);

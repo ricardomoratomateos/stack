@@ -21,20 +21,8 @@ export class TmuxManager implements ISessionManager {
   /** Every session Stack creates for a worktree is named `stack-<worktree id>`. */
   static readonly SESSION_PREFIX = 'stack-';
 
-  /**
-   * What the same sessions were called when the extension was Foreman. Agents
-   * may still be running in them, so they are adopted (adoptLegacySession),
-   * never orphaned or killed.
-   */
-  static readonly LEGACY_SESSION_PREFIX = 'foreman-';
-
   static sessionName(worktreeId: string): string {
     return TmuxManager.SESSION_PREFIX + TmuxManager.sessionId(worktreeId);
-  }
-
-  /** The name Foreman gave this worktree's session. */
-  static legacySessionName(worktreeId: string): string {
-    return TmuxManager.LEGACY_SESSION_PREFIX + TmuxManager.sessionId(worktreeId);
   }
 
   private static sessionId(worktreeId: string): string {
@@ -43,18 +31,6 @@ export class TmuxManager implements ISessionManager {
       .replace(/-{2,}/g, '-')
       .replace(/^-|-$/g, '')
       .slice(0, 50);
-  }
-
-  /**
-   * A session's name as Stack calls it: a Foreman-era name (`foreman-<id>`,
-   * `foreman-<id>__w<n>`) becomes the `stack-` one it is renamed to on
-   * adoption; any other name is returned as is. For reading back what an old
-   * terminal says it attaches to.
-   */
-  static currentSessionName(name: string): string {
-    return name.startsWith(TmuxManager.LEGACY_SESSION_PREFIX)
-      ? TmuxManager.SESSION_PREFIX + name.slice(TmuxManager.LEGACY_SESSION_PREFIX.length)
-      : name;
   }
 
   /**
@@ -83,14 +59,11 @@ export class TmuxManager implements ISessionManager {
 
   /**
    * The base session and window a view session belongs to; undefined for any
-   * other session. Only `stack-` views unless another prefix is asked for.
+   * other session.
    */
-  static parseViewSessionName(
-    name: string,
-    prefix: string = TmuxManager.SESSION_PREFIX,
-  ): { base: string; windowIndex: number } | undefined {
-    // The prefixes are letters and a dash: nothing to escape.
-    const m = new RegExp(`^(${prefix}[a-zA-Z0-9-]+)__w(\\d+)$`).exec(name);
+  static parseViewSessionName(name: string): { base: string; windowIndex: number } | undefined {
+    // The prefix is letters and a dash: nothing to escape.
+    const m = new RegExp(`^(${TmuxManager.SESSION_PREFIX}[a-zA-Z0-9-]+)__w(\\d+)$`).exec(name);
     return m ? { base: m[1], windowIndex: Number(m[2]) } : undefined;
   }
 
@@ -326,42 +299,6 @@ export class TmuxManager implements ISessionManager {
 
   async selectWindow(session: string, windowIndex: number): Promise<void> {
     await this.tmux('select-window', '-t', `${session}:${windowIndex}`);
-  }
-
-  /**
-   * Takes over the session Foreman — this extension's old name — ran a
-   * worktree's agents in: `foreman-<id>` is renamed to `stack-<id>`, with the
-   * agents in it still running, and the views of its session tabs
-   * (`foreman-<id>__w<n>`) follow it, still attached; so the sidebar finds
-   * the agents again and the hooks keep landing. A rename keeps every window,
-   * process and client; nothing is killed but a legacy view whose new name is
-   * already taken, which takes no window with it (its window is linked in the
-   * base too). True when the worktree's session is now `stack-<id>` because of
-   * this call.
-   *
-   * With both a `foreman-` and a `stack-` session for one worktree, nothing is
-   * touched: the legacy one may hold running agents, and choosing between the
-   * two is not something to do behind the user's back.
-   */
-  async adoptLegacySession(worktreeId: string): Promise<boolean> {
-    const legacy = TmuxManager.legacySessionName(worktreeId);
-    const current = TmuxManager.sessionName(worktreeId);
-    if (!(await this.hasSession(legacy)) || (await this.hasSession(current))) return false;
-    try {
-      await this.tmux('rename-session', '-t', `=${legacy}`, current);
-    } catch {
-      // Another window of the same repository renamed it first, or it went:
-      // adopted is whatever is there now.
-      return this.hasSession(current);
-    }
-    for (const s of await this.listSessions()) {
-      const view = TmuxManager.parseViewSessionName(s.name, TmuxManager.LEGACY_SESSION_PREFIX);
-      if (view?.base !== legacy) continue;
-      const renamed = TmuxManager.viewSessionName(current, view.windowIndex);
-      if (await this.hasSession(renamed)) await this.killSession(s.name);
-      else await this.tmux('rename-session', '-t', `=${s.name}`, renamed).catch(() => {});
-    }
-    return true;
   }
 
   /** Exact, like hasSession: a prefix match would kill some other session. */

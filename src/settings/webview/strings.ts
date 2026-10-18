@@ -24,7 +24,6 @@ export const STR = {
   noRepoBody: 'Open a folder that is a git repository to configure how Stack treats it. Your own settings still work.',
 
   newFile: (file: string) => `${file} does not exist yet. Saving creates it — commit it and your team gets the same setup.`,
-  legacyFile: (file: string) => `This repository’s settings are still in ${file}, where Foreman (Stack’s old name) kept them. Stack reads and saves that file until it finds a .stack/config.json — rename the .foreman folder to .stack, and the script paths that point into it, once nobody on the team runs Foreman any more.`,
   fileProblems: (file: string) => `${file} has problems`,
   fileProblemsHint: 'Fix them in the file, or save from here to overwrite it.',
   overrides: (keys: string) => `Your settings.json sets ${keys} for this repository. Those win over the file, so what you save here will not take effect for you until they go.`,

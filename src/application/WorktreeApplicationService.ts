@@ -402,16 +402,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
       STACK_BRANCH: wt.branch,
       STACK_COMPOSE_PROJECT: this.stacks.project(wt),
     };
-    const alias = (prefix: string) =>
-      Object.fromEntries(Object.entries(stack).map(([k, v]) => [k.replace(/^STACK_/, `${prefix}_`), v]));
     const env: Record<string, string> = {
       ...stack,
-      // DEPRECATED: the names from when the project was called Foreman, and
-      // before that unmess. Scripts written then still read them, and under
-      // `set -u` an unset one aborts the script on its first line. Drop once
-      // nobody has such a script.
-      ...alias('FOREMAN'),
-      ...alias('UNMESS'),
       ...this.stacks.scriptEnv(wt),
     };
     return { resolved, env };

@@ -100,66 +100,22 @@ describe('HookRoutes', () => {
     expect(routes.lookup('../escape')).toBeUndefined();
   });
 
-  describe("Foreman's storage directory (the extension's old id)", () => {
-    // globalStorage/<id>/ for both ids, side by side, as VS Code lays them out.
-    let globalStorage: string;
-    let mine: string;
-    let legacy: string;
-    beforeEach(() => {
-      globalStorage = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-gs-'));
-      mine = path.join(globalStorage, 'ricardomoratomateos.stack');
-      legacy = path.join(globalStorage, 'foreman.foreman');
-    });
-    afterEach(() => { fs.rmSync(globalStorage, { recursive: true, force: true }); });
-
-    it("keeps Foreman's routes and hook-url current, so agents it started still reach this window", () => {
-      fs.mkdirSync(legacy);
-      const routes = new HookRoutes(mine);
-      routes.claim(['wt-1'], A);
-      routes.setDefault(A);
-      const theirs = new HookRoutes(legacy, { mirrorLegacy: false });
-      expect(theirs.lookup('wt-1')).toBe(A);
-      expect(fs.readFileSync(path.join(legacy, 'hook-url'), 'utf8')).toBe(A);
-
-      // A launch claims there too, and a closing window withdraws there too.
-      routes.launchEnv('wt-2', A);
-      expect(theirs.lookup('wt-2')).toBe(A);
-      routes.release(A);
-      expect(theirs.lookup('wt-1')).toBeUndefined();
-      expect(fs.existsSync(path.join(legacy, 'hook-url'))).toBe(false);
-    });
-
-    it('never creates that directory on a machine that never ran Foreman', () => {
-      const routes = new HookRoutes(mine);
-      routes.claim(['wt-1'], A);
-      routes.setDefault(A);
-      routes.release(A);
-      expect(fs.existsSync(legacy)).toBe(false);
-    });
-
-    it('is not mirrored when asked not to', () => {
-      fs.mkdirSync(legacy);
-      new HookRoutes(mine, { mirrorLegacy: false }).claim(['wt-1'], A);
-      expect(fs.existsSync(path.join(legacy, 'routes'))).toBe(false);
-    });
-  });
-
   describe('launchEnv', () => {
     it('is just the worktree id before the server is up', () => {
-      expect(new HookRoutes(storage).launchEnv('wt-1', undefined)).toBe('STACK_WORKSPACE_ID="wt-1" FOREMAN_WORKSPACE_ID="wt-1"');
+      expect(new HookRoutes(storage).launchEnv('wt-1', undefined)).toBe('STACK_WORKSPACE_ID="wt-1"');
       expect(new HookRoutes(storage).lookup('wt-1')).toBeUndefined();
     });
 
     it('adds the URL and takes the route over from another window', () => {
       new HookRoutes(storage).claim(['wt-1'], B);
-      expect(new HookRoutes(storage).launchEnv('wt-1', A)).toBe(`STACK_HOOK_URL="${A}" FOREMAN_HOOK_URL="${A}" STACK_WORKSPACE_ID="wt-1" FOREMAN_WORKSPACE_ID="wt-1"`);
+      expect(new HookRoutes(storage).launchEnv('wt-1', A)).toBe(`STACK_HOOK_URL="${A}" STACK_WORKSPACE_ID="wt-1"`);
       expect(new HookRoutes(storage).lookup('wt-1')).toBe(A);
     });
 
     it('never fails a launch over the routing file', () => {
       // A FILE where the routes directory should be: every claim throws.
       fs.writeFileSync(path.join(storage, 'routes'), '');
-      expect(new HookRoutes(storage).launchEnv('wt-1', A)).toBe(`STACK_HOOK_URL="${A}" FOREMAN_HOOK_URL="${A}" STACK_WORKSPACE_ID="wt-1" FOREMAN_WORKSPACE_ID="wt-1"`);
+      expect(new HookRoutes(storage).launchEnv('wt-1', A)).toBe(`STACK_HOOK_URL="${A}" STACK_WORKSPACE_ID="wt-1"`);
     });
   });
 });

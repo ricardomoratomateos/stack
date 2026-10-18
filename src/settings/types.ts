@@ -44,10 +44,8 @@ export interface SettingsSnapshot {
   project: ProjectValues;
   projectFile: {
     path?: string;
-    /** The file in use relative to the repo: `.stack/config.json`, or a legacy `.foreman/config.json`. */
+    /** The file in use relative to the repo: `.stack/config.json`. */
     relative: string;
-    /** True while it is the legacy `.foreman/config.json` that is read (and saved to). */
-    legacy: boolean;
     present: boolean;
     problems: string[];
   };

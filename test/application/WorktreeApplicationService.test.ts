@@ -389,15 +389,14 @@ const DOCKER_ON: Partial<StackConfig> = {
 };
 
 /**
- * The env prefix a lifecycle script is launched with: STACK_* and their
- * deprecated FOREMAN_* and UNMESS_* twins (the project's earlier names), then
- * whatever docker adds.
+ * The env prefix a lifecycle script is launched with: STACK_*, then whatever
+ * docker adds.
  */
 function scriptEnv(path: string, branch: string, extra: Record<string, string> = {}): string {
   const project = composeProject(makeWorktree({ path }));
   const vars = { REPO_ROOT: '/repo', WORKTREE_PATH: path, BRANCH: branch, COMPOSE_PROJECT: project };
-  const prefixed = (prefix: string) => Object.fromEntries(Object.entries(vars).map(([k, v]) => [`${prefix}_${k}`, v]));
-  return envPrefix({ ...prefixed('STACK'), ...prefixed('FOREMAN'), ...prefixed('UNMESS'), ...extra });
+  const stack = Object.fromEntries(Object.entries(vars).map(([k, v]) => [`STACK_${k}`, v]));
+  return envPrefix({ ...stack, ...extra });
 }
 
 const COMPOSE_OK = { code: 0, stdout: '', stderr: '', timedOut: false };

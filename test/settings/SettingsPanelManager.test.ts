@@ -31,7 +31,7 @@ const snapshot: SettingsSnapshot = {
     docker: { composeFile: 'docker-compose.yml', overrideFile: 'docker-compose.worktree.yml', ports: [], basePort: 20000, portStride: 100 },
     debugBasePort: 9898, debugTemplate: { type: 'node', request: 'attach', name: 'Stack: Debug', port: '{{PORT}}' },
   },
-  projectFile: { path: '/repo/.stack/config.json', relative: '.stack/config.json', legacy: false, present: false, problems: [] },
+  projectFile: { path: '/repo/.stack/config.json', relative: '.stack/config.json', present: false, problems: [] },
   personalOverrides: [],
   user: {
     defaultProvider: 'claude', claudeCommand: 'claude', codexCommand: 'codex', opencodeCommand: 'opencode',

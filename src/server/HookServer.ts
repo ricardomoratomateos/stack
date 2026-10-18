@@ -272,8 +272,8 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' && v !== 
  * Reads either wire format.
  *
  * - v2 (notify.sh from 0.1.1 on, the opencode plugin): Stack's ids in
- *   `X-Stack-*` headers — `X-Foreman-*` from scripts written before the
- *   rename — (or the query string), the body the agent's own payload, untouched.
+ *   `X-Stack-*` headers (or the query string), the body the agent's own
+ *   payload, untouched.
  * - v1: a body of `{ event, terminalId, workspaceId, windowIndex }` and nothing
  *   else. Still accepted, because an agent started under the old script keeps
  *   whatever hook it had until it restarts — and Codex, until the user
@@ -286,12 +286,9 @@ export function parseHook(
   query: URLSearchParams,
   body: string | undefined,
 ): HookEvent | undefined {
-  // X-Foreman-*: the same headers under the extension's old name, sent by
-  // the notify.sh and opencode plugin Foreman installed — which agents it
-  // started keep running until they restart.
   const one = (v: string | string[] | undefined) => str(Array.isArray(v) ? v[0] : v);
   const header = (name: string): string | undefined =>
-    one(headers[`x-stack-${name}`]) ?? one(headers[`x-foreman-${name}`]) ?? str(query.get(name));
+    one(headers[`x-stack-${name}`]) ?? str(query.get(name));
 
   let json: Record<string, unknown> = {};
   if (body !== undefined && body.trim() !== '') {

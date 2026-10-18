@@ -6,27 +6,6 @@ import { StackConfig, DockerConfig, DebugTemplate } from '../types';
 export const REPO_CONFIG_RELATIVE = path.join('.stack', 'config.json');
 
 /**
- * Where it lived when the extension was called Foreman. Still read — only
- * when there is no `.stack/config.json` — so a repository that committed one
- * keeps working for everyone, whether they have upgraded yet or not.
- */
-export const LEGACY_REPO_CONFIG_RELATIVE = path.join('.foreman', 'config.json');
-
-/**
- * The repo config this repository uses, relative to its root: `.stack/config.json`
- * when it exists, else a legacy `.foreman/config.json` that does, else
- * `.stack/config.json` — which is where a new one is written.
- */
-export function repoConfigRelative(
-  repoRoot: string,
-  exists: (file: string) => boolean = fs.existsSync,
-): string {
-  if (exists(path.join(repoRoot, REPO_CONFIG_RELATIVE))) return REPO_CONFIG_RELATIVE;
-  if (exists(path.join(repoRoot, LEGACY_REPO_CONFIG_RELATIVE))) return LEGACY_REPO_CONFIG_RELATIVE;
-  return REPO_CONFIG_RELATIVE;
-}
-
-/**
  * The schema version this build writes and understands.
  *
  * A file from the future is read anyway, on the assumption that new keys are
@@ -69,8 +48,6 @@ export type RepoConfigResult = {
   values: RepoConfigValues;
   /** True when a file exists, even if nothing in it was usable. */
   present: boolean;
-  /** Set when what was read is the legacy `.foreman/config.json` (see LEGACY_REPO_CONFIG_RELATIVE). */
-  legacy?: true;
   /**
    * Human-readable complaints, in file order. Never thrown: a broken repo config
    * must degrade to the user's own settings, not break the extension. They are
@@ -192,18 +169,15 @@ function describe(v: unknown): string {
 }
 
 /**
- * Reads and validates `<repoRoot>/.stack/config.json` — or, when the
- * repository has none, the legacy `.foreman/config.json`. Never throws.
+ * Reads and validates `<repoRoot>/.stack/config.json`. Never throws.
  */
 export function readRepoConfig(
   repoRoot: string | undefined,
   io: Pick<typeof fs, 'existsSync' | 'readFileSync'> = fs,
 ): RepoConfigResult {
   if (!repoRoot) return EMPTY;
-  const relative = repoConfigRelative(repoRoot, (f) => io.existsSync(f));
-  const file = path.join(repoRoot, relative);
+  const file = path.join(repoRoot, REPO_CONFIG_RELATIVE);
   if (!io.existsSync(file)) return EMPTY;
-  const found = relative === LEGACY_REPO_CONFIG_RELATIVE ? { present: true as const, legacy: true as const } : { present: true as const };
 
   let parsed: unknown;
   try {
@@ -211,12 +185,12 @@ export function readRepoConfig(
   } catch (e) {
     // A syntax error is worth saying out loud. Falling back silently looks
     // exactly like the file being ignored, which is the confusing failure.
-    return { values: {}, ...found, problems: [`${relative} is not valid JSON: ${(e as Error).message}`] };
+    return { values: {}, present: true, problems: [`${REPO_CONFIG_RELATIVE} is not valid JSON: ${(e as Error).message}`] };
   }
 
   const problems: string[] = [];
   if (!isPlainObject(parsed)) {
-    return { values: {}, ...found, problems: [`${relative} must contain a JSON object`] };
+    return { values: {}, present: true, problems: [`${REPO_CONFIG_RELATIVE} must contain a JSON object`] };
   }
 
   const version = parsed['version'];
@@ -224,7 +198,7 @@ export function readRepoConfig(
     if (typeof version !== 'number') problems.push(`"version" must be a number, got ${describe(version)}`);
     else if (version > REPO_CONFIG_VERSION) {
       problems.push(
-        `${relative} declares version ${version}; this Stack understands ${REPO_CONFIG_VERSION}. ` +
+        `${REPO_CONFIG_RELATIVE} declares version ${version}; this Stack understands ${REPO_CONFIG_VERSION}. ` +
         'Reading the keys it recognises — update Stack if something looks wrong.',
       );
     }
@@ -246,7 +220,7 @@ export function readRepoConfig(
     if (clean !== undefined) (values as Record<string, unknown>)[key] = clean;
   }
 
-  return { values, ...found, problems };
+  return { values, present: true, problems };
 }
 
 /**

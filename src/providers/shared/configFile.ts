@@ -80,10 +80,7 @@ export function readJsonObject(file: string, action: string): Record<string, unk
  *   file must not come back world-readable.
  * - The first time Stack changes a file that already existed, the original is
  *   kept as `<file>.stack-backup`. Never overwritten afterwards, so it stays
- *   the user's own version from before Stack ever touched it — and not taken
- *   at all when a `<file>.foreman-backup` exists: Foreman, as this extension
- *   was called before, already kept that version, and the file on disk now
- *   has Foreman's hooks in it.
+ *   the user's own version from before Stack ever touched it.
  */
 export function writeFileAtomic(file: string, content: string, opts: { backup?: boolean } = {}): void {
   let target = file;
@@ -103,7 +100,7 @@ export function writeFileAtomic(file: string, content: string, opts: { backup?: 
     }
     mode = fs.statSync(target).mode & 0o777;
     const backup = `${target}.stack-backup`;
-    if (opts.backup && !fs.existsSync(backup) && !fs.existsSync(`${target}.foreman-backup`)) fs.copyFileSync(target, backup);
+    if (opts.backup && !fs.existsSync(backup)) fs.copyFileSync(target, backup);
   }
 
   const tmp = path.join(dir, `.${path.basename(target)}.stack-${process.pid}-${Date.now()}.tmp`);

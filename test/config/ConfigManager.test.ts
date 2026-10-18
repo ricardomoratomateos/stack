@@ -270,23 +270,6 @@ describe('ConfigManager', () => {
       expect(managerFor(undefined).repoConfigPath()).toBeUndefined();
     });
 
-    it("falls back to Foreman's .foreman/config.json, and its path, while there is no .stack/config.json", () => {
-      const legacy = path.join(tmpDir, '.foreman', 'config.json');
-      fs.mkdirSync(path.dirname(legacy), { recursive: true });
-      fs.writeFileSync(legacy, JSON.stringify({ defaultBaseBranch: 'from-foreman', setupScript: '.foreman/setup.sh' }));
-      const manager = managerFor(tmpDir);
-
-      expect(manager.get().defaultBaseBranch).toBe('from-foreman');
-      expect(manager.get().setupScript).toBe('.foreman/setup.sh');
-      expect(manager.repoConfigPath()).toBe(legacy);
-
-      // A .stack/config.json takes over at once — the cache follows the file.
-      writeRepoConfig({ defaultBaseBranch: 'from-stack' });
-      expect(manager.get().defaultBaseBranch).toBe('from-stack');
-      expect(manager.get().setupScript).toBe('');
-      expect(manager.repoConfigPath()).toBe(path.join(tmpDir, '.stack', 'config.json'));
-    });
-
     it('reports current problems on demand', () => {
       writeRepoConfig({ setupScript: 42 });
       expect(managerFor(tmpDir).repoConfigProblems()[0]).toContain('"setupScript" must be a string');

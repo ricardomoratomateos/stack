@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import * as fs from 'node:fs';
 import * as nodePath from 'node:path';
 import * as crypto from 'node:crypto';
 import { FakeMemento, Uri, commands, window, workspace, ConfigurationTarget, resetVscodeMock } from 'vscode';
@@ -8,6 +9,7 @@ import {
   NAMING_ASKED_KEY,
   NOT_NOW,
   NamedWorkspace,
+  SETTING_KEYS,
   STATE_STASH_KEY,
   carriedSettingKeys,
   namedWorkspacePath,
@@ -17,7 +19,6 @@ import {
   type FolderSpec,
   type NamedWorkspaceHost,
 } from '../../src/workspace/namedWorkspace';
-import { SETTING_KEYS } from '../../src/migration/legacySettings';
 import type { IFileSystem } from '../../src/ports/IFileSystem';
 
 const STORAGE = '/storage';
@@ -104,6 +105,12 @@ describe('namedWorkspacePath', () => {
 });
 
 describe('carriedSettingKeys', () => {
+  it('knows every setting package.json contributes', () => {
+    const pkg = JSON.parse(fs.readFileSync(nodePath.join(__dirname, '../../package.json'), 'utf8'));
+    const contributed = Object.keys(pkg.contributes.configuration.properties).map((k: string) => k.replace(/^stack\./, ''));
+    expect([...SETTING_KEYS].sort()).toEqual(contributed.sort());
+  });
+
   it('is every stack.* setting', () => {
     expect(carriedSettingKeys()).toEqual(SETTING_KEYS.map((k) => `stack.${k}`));
   });
@@ -162,12 +169,12 @@ describe('restoreStashedState', () => {
   });
 
   it('puts the stash back, keeps what the workspace already has, and drops the stash', async () => {
-    await globalState.update(STATE_STASH_KEY + FILE, { 'stack.activeWorktreeId': 'wt-2', 'stack.migration.state': true });
-    await workspaceState.update('stack.migration.state', 'own');
+    await globalState.update(STATE_STASH_KEY + FILE, { 'stack.activeWorktreeId': 'wt-2', 'stack.sample': true });
+    await workspaceState.update('stack.sample', 'own');
     const restored = await restoreStashedState({ scheme: 'file', fsPath: FILE }, globalState, workspaceState);
     expect(restored).toEqual(['stack.activeWorktreeId']);
     expect(workspaceState.get('stack.activeWorktreeId')).toBe('wt-2');
-    expect(workspaceState.get('stack.migration.state')).toBe('own');
+    expect(workspaceState.get('stack.sample')).toBe('own');
     expect(globalState.get(STATE_STASH_KEY + FILE)).toBeUndefined();
   });
 });
@@ -217,11 +224,11 @@ describe('NamedWorkspace', () => {
     it('stashes this window\'s workspaceState under the file before switching', async () => {
       const { host, globalState, workspaceState, named } = make();
       await workspaceState.update('stack.activeWorktreeId', 'wt-1');
-      await workspaceState.update('stack.migration.state', true);
+      await workspaceState.update('stack.sample', true);
       host.openWorkspace.mockImplementation(async () => {
         expect(globalState.get(STATE_STASH_KEY + FILE)).toEqual({
           'stack.activeWorktreeId': 'wt-1',
-          'stack.migration.state': true,
+          'stack.sample': true,
         });
       });
       await named.open(ROOT, folders);

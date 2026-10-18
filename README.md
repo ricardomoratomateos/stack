@@ -7,8 +7,6 @@
 
 Stack turns VS Code into a control panel for delegated work: spin up a git worktree per task, launch an AI coding agent (Claude Code, Codex CLI, opencode) in it, and keep every session alive, isolated, and glanceable from one sidebar.
 
-> **Stack was called Foreman.** Coming from Foreman? See [Upgrading from Foreman](#upgrading-from-foreman) — your settings, worktrees and running agents come along.
-
 ![Stack: a task per worktree, agents in parallel, the code in VS Code, review with comments, and a manager agent that turns tickets into tasks](assets/demo.gif)
 
 ## Why
@@ -116,7 +114,7 @@ Stack registers a notify hook with each agent so the sidebar can show live state
   ```
 
   Codex also has no session-end event, so a Codex session settles on *waiting* rather than ever showing *terminated*.
-- **Codex requires you to trust hooks** before they run (`/hooks`). Stack's notify script is byte-identical on every install for exactly this reason — it looks up which window to report to when it runs, so a restart never changes the script's hash and never costs you that trust. (Upgrading from Foreman changes the script and where it lives once; Codex asks to trust it again.)
+- **Codex requires you to trust hooks** before they run (`/hooks`). Stack's notify script is byte-identical on every install for exactly this reason — it looks up which window to report to when it runs, so a restart never changes the script's hash and never costs you that trust.
 
 The hooks are global — one entry in `~/.claude/settings.json` serves every VS Code window — but each agent reports to the window showing its worktree, so several windows can run side by side, and an agent keeps reporting across a window reload. With no Stack window open the hook does nothing and exits at once. Stack never rewrites an agent config it cannot parse: it leaves the file alone and says so, and the first time it changes one it keeps the original as `<file>.stack-backup`.
 
@@ -174,7 +172,7 @@ For heavier setups (dedicated Docker stack, dependency prep, debug), point the `
 
 The setup script runs in the background, its output in the **Stack** output channel, and the new worktree's agent starts once it has finished — so the agent never wakes up without its `vendor/`, `node_modules/` or `.env`. The worktree's row reads "Preparing… 1:42" meanwhile; if the script fails the row says so, with buttons to show the log, retry, or launch the agent anyway. **Init worktree** re-runs it the same way. A script that asks questions needs `stack.setupInTerminal`, which runs it in a terminal as before and starts the agent straight away.
 
-When it runs your setup script, Stack exports `STACK_REPO_ROOT`, `STACK_WORKTREE_PATH`, `STACK_BRANCH`, `STACK_COMPOSE_PROJECT` (also under their Foreman-era names, `FOREMAN_*`, which are deprecated) and the worktree's auto-generated ports, and the matching debug port is wired into the generated `launch.json`. With Docker configured it also exports `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE`, so a plain `docker compose up -d` in the script starts the very stack the card shows and deleting the worktree stops it (add `--project-directory "$STACK_WORKTREE_PATH"` when the compose file lives in the main repo). Relative paths resolve against the worktree first, then the main repo.
+When it runs your setup script, Stack exports `STACK_REPO_ROOT`, `STACK_WORKTREE_PATH`, `STACK_BRANCH`, `STACK_COMPOSE_PROJECT` and the worktree's auto-generated ports, and the matching debug port is wired into the generated `launch.json`. With Docker configured it also exports `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE`, so a plain `docker compose up -d` in the script starts the very stack the card shows and deleting the worktree stops it (add `--project-directory "$STACK_WORKTREE_PATH"` when the compose file lives in the main repo). Relative paths resolve against the worktree first, then the main repo.
 
 The teardown script runs in the background and deleting the worktree waits for it — the directory is only removed once the script is done (or after 10 minutes). Its output goes to the **Stack** output channel; a script that fails is reported, and the delete you asked for still happens.
 
@@ -186,7 +184,7 @@ Each worktree's ports are listed on its card, under Docker, and clicking one ope
 
 Ports are checked against the machine, not just against Stack's own bookkeeping: every port a worktree will bind is probed before the slot is handed out, and probed again right before a setup script or `compose up` runs. If something has taken one in the meantime — another project's container, a leftover stack from a deleted worktree, a local dev server — the worktree moves to a free slot, its `launch.json` follows, and you get a toast naming the port that was busy. Ports held by the worktree's own running stack don't count as taken. Slots are also reserved across VS Code windows, so two windows creating worktrees at the same moment never get the same one. Re-run your setup script afterwards if it bakes the port into a generated file such as `.env`.
 
-> A `.stack/` folder is a handy place to keep these together. Scripts and compose files can live anywhere; only `.stack/config.json` below is a fixed path (a repository set up under Foreman's name keeps working from `.foreman/config.json` — see [Upgrading from Foreman](#upgrading-from-foreman)).
+> A `.stack/` folder is a handy place to keep these together. Scripts and compose files can live anywhere; only `.stack/config.json` below is a fixed path.
 
 ## Per-worktree debugging
 
@@ -248,17 +246,6 @@ Run **Stack: Create Repo Config File** from the command palette to generate it f
 **Which it doesn't:** `defaultProvider`, the per-agent commands, `notifyOnAttention`, `focusMode`, `scopeSearchToActiveWorktree`. Which agent you reach for and where its binary lives are properties of your machine, and a repository you cloned has no business overriding them. Put one in the file and Stack tells you so rather than quietly ignoring it.
 
 A broken file never breaks the extension: bad JSON, an unknown key or a wrong type falls back to your own settings and says what was wrong.
-
-## Upgrading from Foreman
-
-Stack is Foreman renamed: a new extension id (`ricardomoratomateos.stack`, was `foreman.foreman`), a new settings section, new command ids. Install Stack (`code --install-extension stack-x.y.z.vsix`), then uninstall Foreman (`code --uninstall-extension foreman.foreman`, or the button Stack offers while Foreman is still installed) and reload. What carries over, and how:
-
-- **Settings.** Every `foreman.*` value you set — user, workspace or multi-root folder level — is copied once to the same `stack.*` key at the same level, never over a `stack.*` value already there. The `foreman.*` entries are left in your `settings.json`; delete them whenever you like.
-- **Repo config.** `.stack/config.json` is the file now. A repository that only has `.foreman/config.json` keeps working: it is read (and saved from the settings panel) until a `.stack/config.json` exists, and Stack says so once. To move it, rename the folder to `.stack` and update any script paths inside that point into `.foreman/`; **Stack: Create Repo Config File** writes a fresh `.stack/config.json` instead. Scripts keep working wherever they are.
-- **Scripts.** Setup and teardown scripts get `STACK_*` and, deprecated, the same values as `FOREMAN_*` (and the older `UNMESS_*`). Agents get `STACK_*` plus `FOREMAN_*` aliases.
-- **Running agents.** Nothing is stopped. A worktree's `foreman-<id>` tmux session is renamed to `stack-<id>` with its agents in it, and its tabs' sessions follow, still attached. Agents Foreman started keep running Foreman's notify hook until they restart, and still report to Stack: it accepts their `X-Foreman-*` requests and keeps Foreman's routing files current. Foreman's entries in `~/.claude/settings.json`, `~/.codex/hooks.json` and its opencode plugin are replaced by Stack's, never left beside them.
-- **Codex** asks you to trust the hooks once more (`/hooks`): the notify script moved and changed.
-- **Worktrees, tabs, breakpoints, session names.** These live in the extension's own storage, which VS Code keys on the extension id, so a new id starts empty. Stack moves Foreman's keys (`foreman.*` → `stack.*`) when they are present in its storage — copy Foreman's row of VS Code's `state.vscdb` to the new id before the first start to keep them. Without that, worktrees on disk are found again from git under new ids, without aliases or recorded base branches, and Foreman's tmux sessions are not matched to them: their agents keep running, reachable with `tmux attach -t foreman-<id>`.
 
 ## License
 

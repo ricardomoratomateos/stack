@@ -1,6 +1,5 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { legacyStoragePath } from '../../migration/legacyStorage';
 
 /** `<globalStorage>/routes/<worktree id>` → URL of the window that owns that worktree. */
 export const ROUTES_DIR = 'routes';
@@ -41,42 +40,20 @@ const SAFE_ID = /^[A-Za-z0-9_-]+$/;
  *
  * A route is a plain file holding a URL, so a window that crashed leaves only
  * a dead port behind, which costs the hook one refused connection.
- *
- * Everything written here is also written to Foreman's storage directory
- * while it exists (see legacyStoragePath): an agent Foreman started keeps
- * running Foreman's notify.sh (or opencode plugin) until it restarts, and
- * that script looks its window up THERE — in `routes/`, or in `hook-url` for
- * the 0.1.0 one. Kept current, those agents go on reporting to Stack.
  */
 export class HookRoutes {
   readonly dir: string;
 
   readonly defaultUrlPath: string;
 
-  /** Foreman's storage directory to keep in step, when this is Stack's own. */
-  private readonly legacyRoot?: string;
-
-  constructor(storagePath: string, opts: { mirrorLegacy?: boolean } = {}) {
+  constructor(storagePath: string) {
     this.dir = path.join(storagePath, ROUTES_DIR);
     this.defaultUrlPath = path.join(storagePath, DEFAULT_URL_FILE);
-    if (opts.mirrorLegacy !== false) this.legacyRoot = legacyStoragePath(storagePath);
-  }
-
-  /**
-   * The same routes in Foreman's directory — only while that directory
-   * exists: it is never created, so a machine that never ran Foreman gets
-   * nothing.
-   */
-  private legacy(): HookRoutes | undefined {
-    return this.legacyRoot && fs.existsSync(this.legacyRoot)
-      ? new HookRoutes(this.legacyRoot, { mirrorLegacy: false })
-      : undefined;
   }
 
   /** Points each worktree's hooks at `url`. Unchanged routes are not rewritten. */
   claim(worktreeIds: Iterable<string>, url: string): void {
-    const ids = [...worktreeIds];
-    for (const id of ids) {
+    for (const id of worktreeIds) {
       if (!SAFE_ID.test(id) || this.lookup(id) === url) continue;
       fs.mkdirSync(this.dir, { recursive: true });
       // Atomic: the hook reads this file while an agent is running, possibly in
@@ -85,13 +62,11 @@ export class HookRoutes {
       fs.writeFileSync(tmp, url);
       fs.renameSync(tmp, path.join(this.dir, id));
     }
-    this.legacy()?.claim(ids, url);
   }
 
   setDefault(url: string): void {
     fs.mkdirSync(path.dirname(this.defaultUrlPath), { recursive: true });
     fs.writeFileSync(this.defaultUrlPath, url);
-    this.legacy()?.setDefault(url);
   }
 
   lookup(worktreeId: string): string | undefined {
@@ -122,7 +97,6 @@ export class HookRoutes {
     try {
       if (fs.readFileSync(this.defaultUrlPath, 'utf8').trim() === url) fs.rmSync(this.defaultUrlPath, { force: true });
     } catch { /* already gone */ }
-    this.legacy()?.release(url);
   }
 
   /**
@@ -133,12 +107,9 @@ export class HookRoutes {
    * in place before the agent starts, not after.
    */
   launchEnv(worktreeId: string, url: string | undefined): string {
-    // DEPRECATED aliases: FOREMAN_* are the names from before the rename,
-    // still exported for scripts and tools an agent's session may run that
-    // read them. Stack's own hooks read STACK_* first.
-    const env = [`STACK_WORKSPACE_ID="${worktreeId}"`, `FOREMAN_WORKSPACE_ID="${worktreeId}"`];
+    const env = [`STACK_WORKSPACE_ID="${worktreeId}"`];
     if (url) {
-      env.unshift(`STACK_HOOK_URL="${url}"`, `FOREMAN_HOOK_URL="${url}"`);
+      env.unshift(`STACK_HOOK_URL="${url}"`);
       // Never fail a launch over a routing file; $STACK_HOOK_URL still works.
       try { this.claim([worktreeId], url); } catch { /* best effort */ }
     }

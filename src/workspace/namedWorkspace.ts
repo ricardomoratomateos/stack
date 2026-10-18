@@ -3,7 +3,6 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { IFileSystem } from '../ports/IFileSystem';
-import { SETTINGS_SECTION, SETTING_KEYS } from '../migration/legacySettings';
 import { canonicalPath } from '../worktree/worktreesInRepo';
 
 /**
@@ -82,6 +81,33 @@ export interface NamedWorkspaceDeps {
   workspaceState: MementoLike;
 }
 
+const SETTINGS_SECTION = 'stack';
+
+/**
+ * Every setting the extension contributes, by its key under the section.
+ * A test holds this to package.json's `contributes.configuration`, so a new
+ * setting cannot be forgotten here.
+ */
+export const SETTING_KEYS = [
+  'worktreesDirectory',
+  'defaultBaseBranch',
+  'setupScript',
+  'setupInTerminal',
+  'teardownScript',
+  'defaultProvider',
+  'claudeCommand',
+  'codexCommand',
+  'opencodeCommand',
+  'sidebarStyle',
+  'notifyOnAttention',
+  'focusMode',
+  'sessionTabs',
+  'scopeSearchToActiveWorktree',
+  'docker',
+  'debugBasePort',
+  'debugTemplate',
+] as const;
+
 /** The settings carried from the workspace being left into the named file. */
 export function carriedSettingKeys(): string[] {
   return SETTING_KEYS.map((key) => `${SETTINGS_SECTION}.${key}`);
@@ -133,7 +159,7 @@ export function renderWorkspaceFile(
  *
  * workspaceState is keyed by workspace identity, so a window that moves from
  * a folder or an untitled workspace to the named file starts from nothing —
- * the selected worktree, the one-time migrations already done. open() stashes
+ * the selected worktree. open() stashes
  * the lot in globalState under the file's path before switching; the first
  * activation in that workspace puts it back and drops the stash. A key the
  * workspace already has (it was opened before) is its own and wins.

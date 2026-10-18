@@ -44,7 +44,6 @@ function makeStub(): ISessionManager {
     selectWindow: vi.fn().mockResolvedValue(undefined),
     killWindow: vi.fn().mockResolvedValue(undefined),
     killSession: vi.fn().mockResolvedValue(undefined),
-    adoptLegacySession: vi.fn().mockResolvedValue(false),
     detachClients: vi.fn().mockResolvedValue(undefined),
     listWindows: vi.fn().mockResolvedValue([]),
     listSessions: vi.fn().mockResolvedValue([]),
@@ -459,7 +458,7 @@ describe('launch', () => {
     await mgr.launch(wt);
     expect(stub.ensureSession).toHaveBeenCalledWith(SESSION, wt.path);
     expect(stub.newWindow).toHaveBeenCalledWith(SESSION, 'claude', wt.path);
-    expect(stub.respawnWindow).toHaveBeenCalledWith(SESSION, 5, 'STACK_WINDOW_INDEX="5" FOREMAN_WINDOW_INDEX="5" STACK_WORKSPACE_ID="wt-1" FOREMAN_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"');
+    expect(stub.respawnWindow).toHaveBeenCalledWith(SESSION, 5, 'STACK_WINDOW_INDEX="5" STACK_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"');
     expect(stub.selectWindow).toHaveBeenCalledWith(SESSION, 5);
   });
 
@@ -503,7 +502,7 @@ describe('launch command line', () => {
     expect(stub.respawnWindow).toHaveBeenCalledWith(
       SESSION,
       1,
-      'STACK_WINDOW_INDEX="1" FOREMAN_WINDOW_INDEX="1" STACK_WORKSPACE_ID="wt-1" FOREMAN_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"',
+      'STACK_WINDOW_INDEX="1" STACK_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"',
     );
   });
 
@@ -723,7 +722,7 @@ describe('launch command line', () => {
     expect(stub.respawnWindow).toHaveBeenCalledWith(
       SESSION,
       1,
-      'STACK_WINDOW_INDEX="1" FOREMAN_WINDOW_INDEX="1" STACK_WORKSPACE_ID="wt-1" FOREMAN_WORKSPACE_ID="wt-1" opencode; exec "${SHELL:-/bin/sh}"',
+      'STACK_WINDOW_INDEX="1" STACK_WORKSPACE_ID="wt-1" opencode; exec "${SHELL:-/bin/sh}"',
     );
     expect(mgr.getSessions('wt-1')[0].provider).toBe('opencode');
   });
@@ -737,7 +736,7 @@ describe('launch command line', () => {
     expect(stub.respawnWindow).toHaveBeenCalledWith(
       SESSION,
       1,
-      'STACK_WINDOW_INDEX="1" FOREMAN_WINDOW_INDEX="1" STACK_WORKSPACE_ID="wt-1" FOREMAN_WORKSPACE_ID="wt-1" my-claude; exec "${SHELL:-/bin/sh}"',
+      'STACK_WINDOW_INDEX="1" STACK_WORKSPACE_ID="wt-1" my-claude; exec "${SHELL:-/bin/sh}"',
     );
     expectSubmitted(stub, `${SESSION}:1`, 'hello');
   });
@@ -1189,7 +1188,7 @@ describe('sendPromptToAgent', () => {
     it('sees a running agent through its launch wrapper, which tmux reports as the shell', async () => {
       const { mgr, stub } = create();
       seed(mgr, 'wt-1', [[3, waiting]]);
-      paneRunning(stub, 'zsh -c STACK_WINDOW_INDEX="3" FOREMAN_WINDOW_INDEX="3" STACK_WORKSPACE_ID="wt-1" FOREMAN_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"');
+      paneRunning(stub, 'zsh -c STACK_WINDOW_INDEX="3" STACK_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"');
       expect(await mgr.sendPromptToAgent(wt, 'x')).toBe(true);
       expectSubmitted(stub, `${SESSION}:3`, 'x');
     });
@@ -1564,7 +1563,7 @@ describe('reconnect', () => {
   });
 
   describe('against what is actually running', () => {
-    const WRAPPER = 'zsh -c STACK_WINDOW_INDEX="1" FOREMAN_WINDOW_INDEX="1" STACK_WORKSPACE_ID="wt-1" FOREMAN_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"';
+    const WRAPPER = 'zsh -c STACK_WINDOW_INDEX="1" STACK_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"';
     async function reloadWith(persisted: Record<number, AgentSessionState>, args: Record<number, string>) {
       const memento = new FakeMemento() as unknown as vscode.Memento;
       await memento.update('stack.claudeStates', { 'wt-1': persisted });
@@ -1606,7 +1605,7 @@ describe('reconnect', () => {
 });
 
 describe('agent liveness polling', () => {
-  const WRAPPER = 'zsh -c STACK_WINDOW_INDEX="1" FOREMAN_WINDOW_INDEX="1" STACK_WORKSPACE_ID="wt-1" FOREMAN_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"';
+  const WRAPPER = 'zsh -c STACK_WINDOW_INDEX="1" STACK_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"';
   function polled(args: string | Error) {
     vi.useFakeTimers();
     const h = create();

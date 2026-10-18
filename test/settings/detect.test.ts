@@ -113,13 +113,6 @@ describe('detect', () => {
     expect(d.teardownScript).toBe('teardown.sh');
   });
 
-  it("finds scripts in Foreman's .foreman/ (the old name) too, after .stack/", () => {
-    const d = detect('/repo', repo({ '.foreman/setup.sh': '', '.foreman/teardown.sh': '', 'scripts/setup.sh': '' }));
-    expect(d.setupScript).toBe('.foreman/setup.sh');
-    expect(d.teardownScript).toBe('.foreman/teardown.sh');
-    expect(detect('/repo', repo({ '.stack/setup.sh': '', '.foreman/setup.sh': '' })).setupScript).toBe('.stack/setup.sh');
-  });
-
   it('returns an empty detection for an unreadable root', () => {
     const io: DetectIo = { readdir: () => { throw new Error('ENOENT'); }, exists: () => false, read: () => '' };
     expect(detect('/nope', io)).toEqual({ composeFiles: [], portVars: [], stack: undefined, setupScript: undefined, teardownScript: undefined });
