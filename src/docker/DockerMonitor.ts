@@ -21,8 +21,7 @@ const DAEMON_RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
  *
  * One `docker ps` grouped by the project label replaces one `docker compose ps`
  * per worktree: the cost no longer grows with the number of worktrees, and
- * stacks under names Stack no longer uses (see legacyComposeProjects) come
- * along for free. `-a` because a stack whose containers exited is exactly the
+ * `-a` because a stack whose containers exited is exactly the
  * one the user needs to see — without it a crashed stack looked like "no
  * containers" with nothing to say why.
  */
@@ -30,8 +29,6 @@ const PS_ARGS = ['ps', '-a', '--filter', `label=${PROJECT_LABEL}`, '--format', '
 
 interface Watch {
   onChange: () => void;
-  /** Other project names whose containers count as this one's (legacy names). */
-  aliases: string[];
   /** What the card last saw; the callback only fires when this changes. */
   signature?: string;
 }
@@ -80,13 +77,13 @@ export class DockerMonitor {
     return this.failure;
   }
 
-  startPolling(project: string, onChange: () => void, aliases: string[] = []): void {
+  startPolling(project: string, onChange: () => void): void {
     // The callback is recorded even when the project is already watched. It
     // used to be captured in a closure and dropped on an early return, so
     // whoever called first owned the project forever — and a worktree created
     // in this session registered a no-op, leaving its docker badge stale.
     const existing = this.watches.get(project);
-    this.watches.set(project, { onChange, aliases, signature: existing?.signature });
+    this.watches.set(project, { onChange, signature: existing?.signature });
     if (existing) return;
     if (!this.pollTimer) this.pollTimer = setInterval(() => void this.fetch(), POLL_INTERVAL_MS);
     void this.fetch();
@@ -241,9 +238,7 @@ export class DockerMonitor {
   private notify(force: boolean): void {
     for (const [project, watch] of this.watches) {
       const signature = JSON.stringify(
-        [project, ...watch.aliases].map((p) =>
-          this.getContainers(p).map((c) => [c.name, c.state, c.exitCode, c.ports]),
-        ),
+        this.getContainers(project).map((c) => [c.name, c.state, c.exitCode, c.ports]),
       );
       if (!force && signature === watch.signature) continue;
       if (signature !== watch.signature) {

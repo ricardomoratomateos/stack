@@ -887,12 +887,10 @@ describe('viewer lifecycle', () => {
     expect(mgr.getViewer('wt-1')).toBeUndefined();
   });
 
-  it('getTerminal and getPlainTerminal are aliases of getViewer', async () => {
+  it('getPlainTerminal is an alias of getViewer', async () => {
     const { mgr } = create();
     const viewer = await mgr.getOrCreateViewer(wt);
-    expect(mgr.getTerminal('wt-1')).toBe(viewer);
     expect(mgr.getPlainTerminal('wt-1')).toBe(viewer);
-    expect(mgr.getTerminal('unknown')).toBeUndefined();
   });
 
   it('focus shows the viewer and no-ops for unknown worktrees', async () => {

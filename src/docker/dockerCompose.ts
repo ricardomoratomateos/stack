@@ -38,23 +38,6 @@ export function composeProject(worktree: Worktree): string {
   return `${base || 'worktree'}-${repoTag(worktree.repoRoot)}`;
 }
 
-/**
- * Names this worktree's stack may still be running under from before the
- * project name carried the repo hash: Stack's old sanitisation (invalid
- * characters became `-`) and compose's own default for a plain `docker compose
- * up` in the worktree. Looked up so a stack started by an older version is
- * still shown, still stopped, and never orphaned holding its ports.
- */
-export function legacyComposeProjects(worktree: Worktree): string[] {
-  if (worktree.isMain) return [];
-  const basename = path.basename(worktree.path);
-  const names = [
-    basename.toLowerCase().replace(/[^a-z0-9_-]/g, '-'),
-    normalizeProjectName(basename),
-  ];
-  return [...new Set(names)].filter((n) => n && n !== composeProject(worktree));
-}
-
 /** Docker orchestration is on when at least one port is configured — the same gate as the card's button. */
 export function dockerConfigured(config: StackConfig): boolean {
   return config.docker.ports.length > 0;
@@ -120,18 +103,16 @@ export interface ComposeFiles {
  * and env_file in a worktree's stack all quietly resolved against main's code.
  *
  * `files` is left out only for `down` when the compose file is gone: compose
- * can still remove a stack by project name alone. `project` overrides the name
- * only to address a stack still running under a legacy one.
+ * can still remove a stack by project name alone.
  */
 export function composeArgv(
   worktree: Worktree,
   files: ComposeFiles | undefined,
   subcommand: string[],
-  project = composeProject(worktree),
 ): string[] {
   if (worktree.isMain) return ['compose', ...subcommand];
   const fileArgs = files ? ['-f', files.base, ...(files.override ? ['-f', files.override] : [])] : [];
-  return ['compose', '-p', project, '--project-directory', worktree.path, ...fileArgs, ...subcommand];
+  return ['compose', '-p', composeProject(worktree), '--project-directory', worktree.path, ...fileArgs, ...subcommand];
 }
 
 /** Env vars (string values) to inject when running compose for a worktree. */
@@ -162,11 +143,10 @@ export function composeScriptEnv(
   worktree: Worktree,
   config: StackConfig,
   files: ComposeFiles,
-  project = composeProject(worktree),
 ): Record<string, string> {
   if (worktree.isMain || !dockerConfigured(config)) return {};
   return {
-    COMPOSE_PROJECT_NAME: project,
+    COMPOSE_PROJECT_NAME: composeProject(worktree),
     COMPOSE_FILE: [files.base, ...(files.override ? [files.override] : [])].join(path.delimiter),
     ...dockerEnv(worktree, config),
   };

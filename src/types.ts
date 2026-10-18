@@ -36,8 +36,6 @@ export interface DockerContainer {
   status?: string;
   /** Host ports it publishes — so its own stack's ports are not mistaken for a stranger's. */
   ports?: number[];
-  /** Compose's project-directory label; tells two stacks sharing a legacy name apart. */
-  workingDir?: string;
 }
 
 export interface GitStatus {

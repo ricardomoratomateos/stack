@@ -37,11 +37,6 @@ describe('parseContainerList — docker ps --format {{json .}} (NDJSON)', () => 
     expect(parseContainerList(psLine({ State: 'Running' }))[0].state).toBe('running');
   });
 
-  it('records the compose working dir, which tells same-named projects apart', () => {
-    const labels = 'com.docker.compose.project=x,com.docker.compose.project.working_dir=/repo/wt';
-    expect(parseContainerList(psLine({ Labels: labels }))[0].workingDir).toBe('/repo/wt');
-  });
-
   it('drops containers that no compose project owns', () => {
     expect(parseContainerList(psLine({ Labels: 'maintainer=me' }))).toEqual([]);
   });

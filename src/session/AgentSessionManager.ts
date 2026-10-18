@@ -1053,11 +1053,6 @@ export class AgentSessionManager {
     return this.terminals.current(worktreeId);
   }
 
-  /** Legacy compat — returns viewer terminal. */
-  getTerminal(worktreeId: string): vscode.Terminal | undefined {
-    return this.getViewer(worktreeId);
-  }
-
   getPlainTerminal(worktreeId: string): vscode.Terminal | undefined {
     return this.getViewer(worktreeId);
   }

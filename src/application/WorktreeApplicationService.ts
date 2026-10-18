@@ -276,18 +276,9 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   /**
    * The selection this window had, from workspaceState.
-   *
-   * One-time migration from the old global key: adopted only when it names one
-   * of THIS window's worktrees — the global value is whichever window selected
-   * last — and then written per window, so it is never consulted again.
    */
   private restoreActiveWorktreeId(): string | undefined {
-    const own = this.deps.workspaceState.get<string | null>(ACTIVE_WORKTREE_KEY);
-    if (own !== undefined) return own ?? undefined;
-    const legacy = this.deps.globalState.get<string>(ACTIVE_WORKTREE_KEY);
-    if (!legacy || !this.worktreesInWindow().some((w) => w.id === legacy)) return undefined;
-    void this.deps.workspaceState.update(ACTIVE_WORKTREE_KEY, legacy);
-    return legacy;
+    return this.deps.workspaceState.get<string | null>(ACTIVE_WORKTREE_KEY) ?? undefined;
   }
 
   private setActiveWorktreeId(id: string | undefined): void {
@@ -400,7 +391,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       STACK_REPO_ROOT: wt.repoRoot,
       STACK_WORKTREE_PATH: wt.path,
       STACK_BRANCH: wt.branch,
-      STACK_COMPOSE_PROJECT: this.stacks.project(wt),
+      STACK_COMPOSE_PROJECT: composeProject(wt),
     };
     const env: Record<string, string> = {
       ...stack,
@@ -1059,10 +1050,9 @@ export class WorktreeApplicationService implements DiffPanelHost {
     };
     if (dockerConfigured(config)) {
       const { files } = this.stacks.files(wt);
-      const project = this.stacks.project(wt);
-      const docker = (sub: string[]) => ['docker', ...composeArgv(wt, files, sub, project)].map(shellQuote).join(' ');
+      const docker = (sub: string[]) => ['docker', ...composeArgv(wt, files, sub)].map(shellQuote).join(' ');
       env.compose = {
-        project,
+        project: composeProject(wt),
         files: [files.base, ...(files.override ? [files.override] : [])],
         logs: docker(['logs', '--tail', '200', '-f']),
         ps: docker(['ps', '-a']),

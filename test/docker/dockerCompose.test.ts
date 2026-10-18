@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as path from 'node:path';
 import {
   computeDockerPorts, dockerPortsFor, portBlockFor, composeArgv, composeProject, dockerEnv,
-  legacyComposeProjects, normalizeProjectName, composeScriptEnv, dockerConfigured,
+  normalizeProjectName, composeScriptEnv, dockerConfigured,
 } from '../../src/docker/dockerCompose';
 import type { StackConfig, Worktree } from '../../src/types';
 
@@ -114,24 +114,6 @@ describe('composeProject', () => {
   });
 });
 
-describe('legacyComposeProjects', () => {
-  it('lists the names an older version (or a plain `compose up`) used for this worktree', () => {
-    expect(legacyComposeProjects(makeWorktree({ path: '/x/Feat Bar!' }))).toEqual(['feat-bar-', 'featbar']);
-  });
-
-  it('deduplicates when both spellings agree', () => {
-    expect(legacyComposeProjects(makeWorktree({ path: '/repo/zer/feat-a' }))).toEqual(['feat-a']);
-  });
-
-  it('drops names that normalise to nothing', () => {
-    expect(legacyComposeProjects(makeWorktree({ path: '/repo/zer/__' }))).toEqual(['__']);
-  });
-
-  it('has none for the main checkout, whose name never changed', () => {
-    expect(legacyComposeProjects(makeWorktree({ isMain: true }))).toEqual([]);
-  });
-});
-
 describe('composeArgv', () => {
   const wt = makeWorktree();
   const project = composeProject(wt);
@@ -146,12 +128,6 @@ describe('composeArgv', () => {
   it('runs just the base file when there is no override', () => {
     expect(composeArgv(wt, { base: '/repo/base.yml' }, ['up', '-d'])).toEqual([
       'compose', '-p', project, '--project-directory', '/repo/zer/feat-a', '-f', '/repo/base.yml', 'up', '-d',
-    ]);
-  });
-
-  it('can address a stack by name alone, under a legacy name', () => {
-    expect(composeArgv(wt, undefined, ['down'], 'feat-a')).toEqual([
-      'compose', '-p', 'feat-a', '--project-directory', '/repo/zer/feat-a', 'down',
     ]);
   });
 
@@ -180,13 +156,6 @@ describe('composeScriptEnv', () => {
       HTTP_PORT: '20000',
       DB_PORT: '20001',
       DEBUG_PORT: '9899',
-    });
-  });
-
-  it('takes an explicit project (a legacy stack still running) and a lone base file', () => {
-    expect(composeScriptEnv(makeWorktree(), makeConfig(), { base: '/r/a.yml' }, 'feat-a')).toMatchObject({
-      COMPOSE_PROJECT_NAME: 'feat-a',
-      COMPOSE_FILE: '/r/a.yml',
     });
   });
 

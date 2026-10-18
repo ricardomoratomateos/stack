@@ -3,7 +3,6 @@ import type { DockerContainer, StackConfig, Worktree } from '../types';
 import type { INotifyPort } from '../ports/INotifyPort';
 import { isPortFree as probePort } from '../worktree/portProbe';
 import { displayLabel } from '../worktree/displayLabel';
-import { canonicalPath } from '../worktree/worktreesInRepo';
 import type { DockerMonitor } from './DockerMonitor';
 import { failureSummary } from './dockerCli';
 import { conflictMessage, publishedPorts, type PortConflict } from './composeConfig';
@@ -13,7 +12,6 @@ import {
   composeScriptEnv,
   dockerEnv,
   dockerPortsFor,
-  legacyComposeProjects,
   type ComposeFiles,
 } from './dockerCompose';
 
@@ -63,7 +61,7 @@ export class DockerStacks {
   constructor(private readonly deps: DockerStacksDeps) {}
 
   watch(wt: Worktree): void {
-    this.deps.monitor.startPolling(composeProject(wt), this.deps.onChange, legacyComposeProjects(wt));
+    this.deps.monitor.startPolling(composeProject(wt), this.deps.onChange);
   }
 
   unwatch(wt: Worktree): void {
@@ -79,38 +77,8 @@ export class DockerStacks {
     return { busy: this.busy.get(wt.id), error: this.errors.get(wt.id) };
   }
 
-  /**
-   * The projects this worktree's containers currently run under: its own name,
-   * plus any legacy name a compose stack from an older version still uses. A legacy
-   * name was shared between repositories, so its containers only count when
-   * compose recorded a project directory inside this worktree or its repo.
-   */
-  projectsWithContainers(wt: Worktree): string[] {
-    const current = composeProject(wt);
-    const found = this.deps.monitor.getContainers(current).length > 0 ? [current] : [];
-    for (const legacy of legacyComposeProjects(wt)) {
-      if (this.legacyContainers(wt, legacy).length > 0) found.push(legacy);
-    }
-    return found;
-  }
-
-  /**
-   * The project name to address this worktree's stack by: a legacy one while
-   * a compose stack from an older version still runs under it, its own otherwise.
-   */
-  project(wt: Worktree): string {
-    return this.projectsWithContainers(wt)[0] ?? composeProject(wt);
-  }
-
   containers(wt: Worktree): DockerContainer[] {
-    const current = composeProject(wt);
-    const own = this.deps.monitor.getContainers(current);
-    if (own.length > 0) return own;
-    for (const legacy of legacyComposeProjects(wt)) {
-      const found = this.legacyContainers(wt, legacy);
-      if (found.length > 0) return found;
-    }
-    return [];
+    return this.deps.monitor.getContainers(composeProject(wt));
   }
 
   /**
@@ -122,12 +90,7 @@ export class DockerStacks {
    */
   ownPorts(wt: Worktree): Set<number> {
     const own = new Set<number>([wt.debugPort]);
-    for (const project of this.projectsWithContainers(wt)) {
-      const list = project === composeProject(wt)
-        ? this.deps.monitor.getContainers(project)
-        : this.legacyContainers(wt, project);
-      for (const c of list) for (const p of c.ports ?? []) own.add(p);
-    }
+    for (const c of this.containers(wt)) for (const p of c.ports ?? []) own.add(p);
     return own;
   }
 
@@ -149,7 +112,7 @@ export class DockerStacks {
 
   /** COMPOSE_PROJECT_NAME, COMPOSE_FILE and the port vars for scripts run in a worktree. */
   scriptEnv(wt: Worktree): Record<string, string> {
-    return composeScriptEnv(wt, this.deps.config(), this.files(wt).files, this.project(wt));
+    return composeScriptEnv(wt, this.deps.config(), this.files(wt).files);
   }
 
   /**
@@ -212,8 +175,7 @@ export class DockerStacks {
   }
 
   /**
-   * Bring the stack down — under every name it is running as, so a stack from
-   * an older version is not orphaned. Bounded by `timeoutMs` so deleting a
+   * Bring the stack down Bounded by `timeoutMs` so deleting a
    * worktree can never hang on a wedged daemon. With `report` off, failures are
    * left to the caller.
    */
@@ -224,20 +186,19 @@ export class DockerStacks {
     try {
       await this.deps.monitor.refresh();
       const { files, baseFound } = this.files(wt);
-      const projects = this.projectsWithContainers(wt);
+      // Without its compose file compose can still remove a stack by name.
+      const argv = composeArgv(wt, baseFound ? files : undefined, ['down']);
+      const result = await this.compose(wt, argv, this.env(wt), timeoutMs, true);
       let outcome: DownOutcome = 'ok';
-      for (const project of projects.length > 0 ? projects : [composeProject(wt)]) {
-        // Without its compose file compose can still remove a stack by name.
-        const argv = composeArgv(wt, baseFound ? files : undefined, ['down'], project);
-        const result = await this.compose(wt, argv, this.env(wt), timeoutMs, true);
-        if (result.timedOut) outcome = 'timeout';
-        else if (result.code !== 0 && outcome === 'ok') {
-          outcome = 'failed';
-          this.errors.set(wt.id, failureSummary(result.stderr) || `docker compose down exited with ${result.code}`);
-        }
+      if (result.timedOut) {
+        outcome = 'timeout';
+        this.errors.set(wt.id, `docker compose down did not finish within ${timeoutMs / 1000}s.`);
+      } else if (result.code !== 0) {
+        outcome = 'failed';
+        this.errors.set(wt.id, failureSummary(result.stderr) || `docker compose down exited with ${result.code}`);
+      } else {
+        this.errors.delete(wt.id);
       }
-      if (outcome === 'ok') this.errors.delete(wt.id);
-      if (outcome === 'timeout') this.errors.set(wt.id, `docker compose down did not finish within ${timeoutMs / 1000}s.`);
       if (outcome !== 'ok' && report) {
         this.deps.output.showError(`Docker stack for "${displayLabel(wt)}" did not stop: ${this.errors.get(wt.id)}`);
       }
@@ -319,15 +280,6 @@ export class DockerStacks {
     await this.deps.monitor.refresh();
     this.deps.monitor.nudge();
     this.deps.onChange();
-  }
-
-  private legacyContainers(wt: Worktree, project: string): DockerContainer[] {
-    const roots = [canonicalPath(wt.path), canonicalPath(wt.repoRoot)];
-    return this.deps.monitor.getContainers(project).filter((c) => {
-      if (!c.workingDir) return true;
-      const dir = canonicalPath(c.workingDir);
-      return roots.some((r) => dir === r || dir.startsWith(r + path.sep));
-    });
   }
 }
 

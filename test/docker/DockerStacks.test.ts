@@ -139,12 +139,12 @@ describe('DockerStacks.files', () => {
 });
 
 describe('DockerStacks.watch', () => {
-  it('watches the worktree project with its legacy names as aliases', () => {
+  it('watches the worktree project', () => {
     const { stacks, monitor } = makeStacks();
     const start = vi.spyOn(monitor, 'startPolling');
     const stop = vi.spyOn(monitor, 'stopPolling');
     stacks.watch(wt);
-    expect(start).toHaveBeenCalledWith(project, expect.any(Function), ['feat-b']);
+    expect(start).toHaveBeenCalledWith(project, expect.any(Function));
     stacks.unwatch(wt);
     expect(stop).toHaveBeenCalledWith(project);
   });
@@ -311,22 +311,6 @@ describe('DockerStacks.down', () => {
     expect(composeCalls()[0].options.timeoutMs).toBe(60_000);
   });
 
-  it('also stops a stack an older version started under the legacy name — it is not orphaned', async () => {
-    const { stacks, composeCalls } = makeStacks({
-      docker: { containers: [ps(project, 'web'), ps('feat-b', 'old-web', { Labels: `com.docker.compose.project=feat-b,com.docker.compose.project.working_dir=${wt.path}` })] },
-    });
-    await stacks.down(wt);
-    expect(composeCalls().map((c) => c.args[2])).toEqual([project, 'feat-b']);
-  });
-
-  it('leaves another repo\'s stack alone even when it shares the legacy name', async () => {
-    const { stacks, composeCalls } = makeStacks({
-      docker: { containers: [ps('feat-b', 'web', { Labels: 'com.docker.compose.project=feat-b,com.docker.compose.project.working_dir=/other/.worktrees/feat-b' })] },
-    });
-    await stacks.down(wt);
-    expect(composeCalls().map((c) => c.args[2])).toEqual([project]);
-  });
-
   it('removes the stack by name when its compose file is gone', async () => {
     const { stacks, composeCalls } = makeStacks({ files: [wt.path] });
     await stacks.down(wt);
@@ -390,34 +374,16 @@ describe('DockerStacks.down', () => {
 });
 
 describe('DockerStacks — which containers are this worktree\'s', () => {
-  const legacy = (dir?: string) => ps('feat-b', 'feat-b-web-1', {
-    Labels: `com.docker.compose.project=feat-b${dir ? `,com.docker.compose.project.working_dir=${dir}` : ''}`,
-    Ports: '0.0.0.0:20000->80/tcp',
-  });
-
-  it('shows its own project first', async () => {
-    const { stacks, monitor } = makeStacks({ docker: { containers: [ps(project, 'new'), legacy(wt.path)] } });
+  it('shows its own project\'s containers only', async () => {
+    const { stacks, monitor } = makeStacks({ docker: { containers: [ps(project, 'new'), ps('feat-b', 'other')] } });
     await monitor.refresh();
     expect(stacks.containers(wt).map((c) => c.name)).toEqual(['new']);
-    expect(stacks.project(wt)).toBe(project);
   });
 
-  it('falls back to a legacy stack from this worktree or its repo (compose file in main/.stack)', async () => {
-    for (const dir of [wt.path, '/repo/.stack', '/repo', undefined]) {
-      const { stacks, monitor } = makeStacks({ docker: { containers: [legacy(dir)] } });
-      await monitor.refresh();
-      expect(stacks.containers(wt).map((c) => c.name)).toEqual(['feat-b-web-1']);
-      expect(stacks.project(wt)).toBe('feat-b');
-      expect(stacks.ownPorts(wt)).toEqual(new Set([9899, 20000]));
-      expect(stacks.scriptEnv(wt).COMPOSE_PROJECT_NAME).toBe('feat-b');
-    }
-  });
-
-  it('ignores a same-named legacy stack of another repository', async () => {
-    const { stacks, monitor } = makeStacks({ docker: { containers: [legacy('/elsewhere/feat-b')] } });
+  it('has none while nothing runs under its project name', async () => {
+    const { stacks, monitor } = makeStacks({ docker: { containers: [ps('feat-b', 'other')] } });
     await monitor.refresh();
     expect(stacks.containers(wt)).toEqual([]);
-    expect(stacks.project(wt)).toBe(project);
   });
 
   it('copes with a container that reports no ports at all', () => {

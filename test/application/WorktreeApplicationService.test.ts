@@ -50,7 +50,6 @@ function makeWorktree(over: Partial<Worktree> = {}): Worktree {
 interface HarnessOpts {
   worktrees?: Worktree[];
   persistedActiveId?: string | null;
-  legacyGlobalActiveId?: string;
   config?: Partial<StackConfig>;
   /** worktree ids that currently have an open viewer terminal */
   viewerIds?: string[];
@@ -326,8 +325,6 @@ function makeHarness(o: HarnessOpts = {}) {
   };
   const globalState = {
     get: vi.fn(<T,>(k: string): T | undefined => {
-      // Where 0.1.0 kept the selection, shared by every window.
-      if (k === ACTIVE_WORKTREE_KEY) return o.legacyGlobalActiveId as T | undefined;
       if (k === WORKTREE_ORDER_KEY) return o.worktreeOrder as T | undefined;
       return undefined;
     }),
@@ -1241,34 +1238,6 @@ describe('active worktree, per window', () => {
   const scoping = (h: ReturnType<typeof makeHarness>) =>
     h.calls.filter((c) => c.startsWith('host.updateFolderSetting:') && c.includes(':search.exclude:'));
 
-  it('migrates the old global selection once, when it is one of this window\'s worktrees', () => {
-    const h = makeHarness({ worktrees: [main(), a()], workspaceFolders: ['/repo'], legacyGlobalActiveId: 'a' });
-    expect(h.service.activeWorktreeId()).toBe('a');
-    expect(h.workspaceState.update).toHaveBeenCalledWith(ACTIVE_WORKTREE_KEY, 'a');
-  });
-
-  it("ignores another window's global selection", () => {
-    const h = makeHarness({
-      worktrees: [main(), a(), elsewhere()], workspaceFolders: ['/repo'], legacyGlobalActiveId: 'x',
-    });
-    expect(h.service.activeWorktreeId()).toBeUndefined();
-    expect(h.workspaceState.update).not.toHaveBeenCalled();
-  });
-
-  it('prefers its own selection over the global one', () => {
-    const h = makeHarness({
-      worktrees: [main(), a()], workspaceFolders: ['/repo'], persistedActiveId: 'main', legacyGlobalActiveId: 'a',
-    });
-    expect(h.service.activeWorktreeId()).toBe('main');
-  });
-
-  it('an explicitly cleared selection does not re-run the migration', () => {
-    const h = makeHarness({
-      worktrees: [main(), a()], workspaceFolders: ['/repo'], persistedActiveId: null, legacyGlobalActiveId: 'a',
-    });
-    expect(h.service.activeWorktreeId()).toBeUndefined();
-  });
-
   it('a selection that resolves to no worktree here scopes search to main, never to nothing', async () => {
     // The bug: search.exclude {"**": true} on EVERY folder — search and Quick
     // Open found nothing, and the explorer was dimmed end to end.
@@ -1708,8 +1677,7 @@ describe('loadWorktreesForRepo', () => {
       'docker.startPolling:repo',
       `docker.startPolling:${composeProject(b)}`,
     ]);
-    // The legacy name rides along, so a stack started by an older version shows.
-    expect(h.dockerMonitor.startPolling).toHaveBeenCalledWith(composeProject(b), expect.any(Function), ['feat-b']);
+    expect(h.dockerMonitor.startPolling).toHaveBeenCalledWith(composeProject(b), expect.any(Function));
   });
 
   it('uses alias as workspace folder display name when present', async () => {

@@ -82,20 +82,6 @@ describe('DockerMonitor', () => {
       expect(onChange).toHaveBeenCalledTimes(2);
     });
 
-    it('repaints when a legacy alias project changes, too', async () => {
-      let out = '';
-      const monitor = new DockerMonitor(makeRunner(() => ok(out)));
-      const onChange = vi.fn();
-      vi.spyOn(console, 'log').mockImplementation(() => {});
-      monitor.startPolling('feat-a-123456', onChange, ['feat-a']);
-      await vi.advanceTimersByTimeAsync(0);
-      onChange.mockClear();
-
-      out = ps('feat-a', 'feat-a-web-1');
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(onChange).toHaveBeenCalledTimes(1);
-    });
-
     it('a later startPolling replaces the callback without polling again', async () => {
       const runner = makeRunner(() => ok(ps('p', `web-${runner.run.mock.calls.length}`)));
       const monitor = new DockerMonitor(runner);

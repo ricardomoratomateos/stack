@@ -3,7 +3,6 @@ import type { DockerContainer } from '../types';
 /** Compose's own labels, which is how a container is tied back to its stack. */
 export const PROJECT_LABEL = 'com.docker.compose.project';
 const SERVICE_LABEL = 'com.docker.compose.service';
-const WORKING_DIR_LABEL = 'com.docker.compose.project.working_dir';
 
 /** One container as listed, with the compose project it belongs to. */
 export interface ListedContainer extends DockerContainer {
@@ -69,7 +68,6 @@ function toContainer(row: RawRow): ListedContainer | undefined {
   if (service) out.service = service;
   if (exitCode !== undefined) out.exitCode = exitCode;
   if (row.Status) out.status = row.Status;
-  if (labels[WORKING_DIR_LABEL]) out.workingDir = labels[WORKING_DIR_LABEL];
   return out;
 }
 
