@@ -1,7 +1,7 @@
 # Stack
 
-[![Marketplace](https://img.shields.io/visual-studio-marketplace/v/ricardomoratomateos.stack-agents?label=Marketplace&color=c8ff00&labelColor=0a0a0a)](https://marketplace.visualstudio.com/items?itemName=ricardomoratomateos.stack-agents)
-[![Installs](https://img.shields.io/visual-studio-marketplace/i/ricardomoratomateos.stack-agents?color=c8ff00&labelColor=0a0a0a)](https://marketplace.visualstudio.com/items?itemName=ricardomoratomateos.stack-agents)
+[![Marketplace](https://vsmarketplacebadges.dev/version-short/ricardomoratomateos.stack-agents.svg?label=Marketplace&color=c8ff00&labelColor=0a0a0a)](https://marketplace.visualstudio.com/items?itemName=ricardomoratomateos.stack-agents)
+[![Installs](https://vsmarketplacebadges.dev/installs-short/ricardomoratomateos.stack-agents.svg?label=Installs&color=c8ff00&labelColor=0a0a0a)](https://marketplace.visualstudio.com/items?itemName=ricardomoratomateos.stack-agents)
 [![CI](https://github.com/ricardomoratomateos/stack/actions/workflows/ci.yml/badge.svg)](https://github.com/ricardomoratomateos/stack/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
