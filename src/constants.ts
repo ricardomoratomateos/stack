@@ -1,5 +1,5 @@
 /** `<publisher>.<name>` from package.json: what VS Code keys this extension's storage and walkthrough on. */
-export const EXTENSION_ID = 'ricardomoratomateos.stack';
+export const EXTENSION_ID = 'ricardomoratomateos.stack-agents';
 export const STORE_KEY = 'stack.store';
 export const COMMENTS_KEY_PREFIX = 'stack.comments.';
 export const SIDEBAR_VIEW_ID = 'stack-sidebar';

@@ -41,6 +41,7 @@ Working on several things at once with AI agents gets messy fast: branches colli
 
 ## Getting started
 
+1. Install **Stack** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=ricardomoratomateos.stack-agents) (`code --install-extension ricardomoratomateos.stack-agents`).
 1. Install tmux and an agent CLI (`claude`, `codex` or `opencode`).
 2. Open a git repository in VS Code and open the **Stack** view in the activity bar.
 3. Hit **+** (or the *What should an agent build?* box) and describe the task: Stack creates the branch and worktree and starts the agent on it.

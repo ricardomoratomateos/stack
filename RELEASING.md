@@ -33,7 +33,7 @@ exist — on both marketplaces a few minutes later.
 | Where | Who uses it | Secret | How to get the token |
 |---|---|---|---|
 | GitHub Releases | manual installs (`code --install-extension stack-x.y.z.vsix`) | none | — |
-| [VS Code Marketplace](https://marketplace.visualstudio.com/manage) | VS Code | `VSCE_PAT` | Azure DevOps → Personal Access Token, scope *Marketplace → Manage*, all organizations. The `ricardomoratomateos` publisher (package.json `publisher`; the extension id is `ricardomoratomateos.stack`) must exist first. |
+| [VS Code Marketplace](https://marketplace.visualstudio.com/manage) | VS Code | `VSCE_PAT` | Azure DevOps → Personal Access Token, scope *Marketplace → Manage*, all organizations. The `ricardomoratomateos` publisher (package.json `publisher`; the extension id is `ricardomoratomateos.stack-agents`) must exist first. |
 | [Open VSX](https://open-vsx.org) | Cursor, Windsurf, VSCodium, code-server, Gitpod, Theia | `OVSX_PAT` | open-vsx.org → sign the publisher agreement → Access Tokens. Create the namespace once: `npx ovsx create-namespace ricardomoratomateos -p <token>`. |
 
 Both publish steps are skipped, not failed, while their secret is absent.

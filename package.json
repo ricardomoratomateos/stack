@@ -1,5 +1,5 @@
 {
-  "name": "stack",
+  "name": "stack-agents",
   "displayName": "Stack",
   "description": "Run parallel AI coding agents (Claude Code, Codex CLI, opencode) across git worktrees, each in its own tmux session, from one sidebar.",
   "version": "0.1.0",
