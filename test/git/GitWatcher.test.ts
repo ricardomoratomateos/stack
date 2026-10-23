@@ -182,6 +182,23 @@ describe('isGitIndexChange', () => {
 // ---------------------------------------------------------------------------
 
 describe('fetchStatus (real git repos)', () => {
+  it('never rewrites the index, so it never holds index.lock against the user', async () => {
+    const repo = makeRealRepo();
+    fs.writeFileSync(path.join(repo, 'a.txt'), 'a');
+    git(repo, 'add a.txt');
+    git(repo, 'commit -q -m a');
+    const index = path.join(repo, '.git', 'index');
+    // A touched file: same content, new stat — what a plain `git status` writes back into the index.
+    const touch = (s: number) => fs.utimesSync(path.join(repo, 'a.txt'), s, s);
+    touch(Date.now() / 1000 + 120);
+    const before = fs.readFileSync(index);
+    await fetchStatus(repo, 'main');
+    expect(fs.readFileSync(index).equals(before)).toBe(true);
+    // The same status without Stack's environment does write it.
+    git(repo, 'status --porcelain');
+    expect(fs.readFileSync(index).equals(before)).toBe(false);
+  });
+
   it('returns all-zeros DEFAULT status when the path is not a git repo', async () => {
     const dir = makeTmpDir();
     expect(await fetchStatus(dir)).toEqual({

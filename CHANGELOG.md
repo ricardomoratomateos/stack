@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-10-23
+
+### Fixed
+
+- **Stack no longer holds `.git/index.lock`.** Its background `git status` and `git diff` refreshed the index as a side effect, taking the lock every few seconds on every worktree — and its own watcher saw that write and ran status again — so your `git commit`, `checkout` or `rebase` failed with "index.lock: File exists". Every git command Stack runs now sets `GIT_OPTIONAL_LOCKS=0`, like VS Code's own git extension.
+
 ## [0.1.0] — 2026-10-18
 
 First release.
@@ -40,5 +46,6 @@ First release.
 - **Renameable sessions** and **shell sessions that say what they are running** (`npm`, `vim`, `psql`), read from tmux.
 - **A Get started walkthrough** (opens on install; later under Help → Welcome, or `Stack: Getting Started`), and a one-time offer, per repository, to set up Docker and debugging when Stack first sees a compose file or a PHP stack.
 
-[Unreleased]: https://github.com/ricardomoratomateos/stack/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ricardomoratomateos/stack/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/ricardomoratomateos/stack/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ricardomoratomateos/stack/releases/tag/v0.1.0

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { BaseDrift, GitStatus } from '../types';
+import { gitEnv } from './gitEnv';
 
 const execAsync = promisify(exec);
 
@@ -77,7 +78,7 @@ export async function baseDrift(
   worktreePath: string,
   baseBranch: string,
   run: (cmd: string) => Promise<string> = async (cmd) =>
-    (await execAsync(cmd, { cwd: worktreePath })).stdout,
+    (await execAsync(cmd, { cwd: worktreePath, env: gitEnv() })).stdout,
 ): Promise<BaseDrift | undefined> {
   for (const ref of [`origin/${baseBranch}`, baseBranch]) {
     try {
@@ -123,7 +124,7 @@ export async function diffLines(
   worktreePath: string,
   base: BaseDrift | undefined,
   run: (cmd: string) => Promise<string> = async (cmd) =>
-    (await execAsync(cmd, { cwd: worktreePath, maxBuffer: 16 * 1024 * 1024 })).stdout,
+    (await execAsync(cmd, { cwd: worktreePath, env: gitEnv(), maxBuffer: 16 * 1024 * 1024 })).stdout,
 ): Promise<{ added: number; removed: number } | undefined> {
   try {
     let from = 'HEAD';
@@ -153,7 +154,7 @@ function quoteRef(ref: string): string {
 
 export async function fetchStatus(worktreePath: string, baseBranch?: string): Promise<GitStatus> {
   try {
-    const { stdout: statusOutput } = await execAsync('git status --porcelain', { cwd: worktreePath });
+    const { stdout: statusOutput } = await execAsync('git status --porcelain', { cwd: worktreePath, env: gitEnv() });
     const { staged, unstaged, untracked, hasChanges } = parseStatus(statusOutput);
 
     let ahead = 0;
@@ -162,7 +163,7 @@ export async function fetchStatus(worktreePath: string, baseBranch?: string): Pr
     try {
       const { stdout: revOutput } = await execAsync(
         'git rev-list --left-right --count HEAD...@{upstream}',
-        { cwd: worktreePath },
+        { cwd: worktreePath, env: gitEnv() },
       );
       ({ ahead, behind } = parseAheadBehind(revOutput));
       upstream = true;

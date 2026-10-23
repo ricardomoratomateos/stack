@@ -2,6 +2,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GitWorktreeEntry, GitWorktreePath, IGitPort, DiffOptions, DiffError } from '../ports/IGitPort';
 import { MAIN_BRANCH_CANDIDATES } from '../constants';
+import { gitEnv } from '../git/gitEnv';
 
 // Every git call here is an argument array run WITHOUT a shell (execFile).
 //
@@ -19,13 +20,13 @@ const MAX_BUFFER = 1024 * 1024 * 64;
 
 /** `git <args>` in cwd, no shell. Resolves with stdout, rejects on non-zero exit. */
 async function git(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, { cwd, maxBuffer: MAX_BUFFER });
+  const { stdout } = await execFileAsync('git', args, { cwd, env: gitEnv(), maxBuffer: MAX_BUFFER });
   return stdout;
 }
 
 /** Synchronous twin of git(), for the parts of the port that are synchronous. */
 function gitSync(args: string[], cwd: string): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe', maxBuffer: MAX_BUFFER });
+  return execFileSync('git', args, { cwd, env: gitEnv(), encoding: 'utf8', stdio: 'pipe', maxBuffer: MAX_BUFFER });
 }
 
 /**
