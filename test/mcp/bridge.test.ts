@@ -55,6 +55,7 @@ describe('TOOLS', () => {
     const t = (name: string) => TOOLS.find((d) => d.name === name)!;
     expect(t('stack_status').timeoutMs({})).toBe(30_000);
     expect(t('stack_create_task').timeoutMs({})).toBe(180_000);
+    expect(t('stack_delete_task').timeoutMs({})).toBe(60_000);
     expect(t('stack_send_to_agent').timeoutMs({})).toBe(60_000);
     expect(t('stack_wait').timeoutMs({})).toBe(125_000);
     expect(t('stack_wait').timeoutMs({ timeout_s: 10 })).toBe(25_000);

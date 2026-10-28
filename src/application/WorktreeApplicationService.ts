@@ -1398,6 +1398,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     if (!this.controlSession || canonicalPath(this.controlSession.repoRoot) !== canonicalPath(repoRoot)) {
       this.controlSession = buildControlSession(repoRoot);
     }
+    const control = this.controlSession;
     const { current, missing } = await this.deps.manager.reconcile(repoRoot);
     this.missing = new Set(missing.map((w) => w.id));
     const normalizedRoot = canonicalPath(repoRoot);
@@ -1476,12 +1477,11 @@ export class WorktreeApplicationService implements DiffPanelHost {
     // `mine`, not `current`: reconnecting another repo's worktrees costs a tmux
     // lookup each and leaves the session manager tracking windows this window
     // will never show — which the shell poller would then keep polling.
-    const control = this.controlSession;
-    await this.deps.agentManager.reconnect(control ? [...mine, control] : mine);
+    await this.deps.agentManager.reconnect([...mine, control]);
     // Its tmux session survives a window reload like any other — reconnect()
     // above already restored it if so. Only launch when there is truly none
     // yet, or every reload would open a second window in the same session.
-    if (control && !(await this.deps.agentManager.hasSession(control.id))) {
+    if (!(await this.deps.agentManager.hasSession(control.id))) {
       await this.deps.agentManager.launch(control);
     }
     this.settled = true;

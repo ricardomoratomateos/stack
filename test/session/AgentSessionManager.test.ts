@@ -1441,6 +1441,16 @@ describe('submitting a prompt', () => {
 
 // ── reconnect ─────────────────────────────────────────────────────────────────
 
+describe('hasSession', () => {
+  it('asks tmux about the worktree\'s own session, so a caller can reattach instead of launching a duplicate', async () => {
+    const { mgr, stub } = create();
+    (stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    expect(await mgr.hasSession('wt-1')).toBe(true);
+    expect(stub.hasSession).toHaveBeenCalledWith(SESSION);
+    expect(await mgr.hasSession('wt-1')).toBe(false);
+  });
+});
+
 describe('reconnect', () => {
   it('restores window map from tmux listWindows', async () => {
     const { mgr, stub } = create();

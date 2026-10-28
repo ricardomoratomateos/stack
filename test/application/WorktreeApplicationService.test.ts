@@ -5,6 +5,7 @@ import * as nodePath from 'node:path';
 import {
   WorktreeApplicationService,
   ACTIVE_WORKTREE_KEY,
+  CONTROL_ALIAS_KEY,
   WORKTREE_ORDER_KEY,
   GROUP_SINCE_KEY,
   TEARDOWN_TIMEOUT_MS,
@@ -106,6 +107,8 @@ interface HarnessOpts {
   focusedSessions?: Record<string, number>;
   /** folders whose .vscode/settings.json git tracks */
   trackedSettings?: string[];
+  /** what workspaceState holds under CONTROL_ALIAS_KEY: the control session's saved title */
+  savedControlAlias?: string;
   /** what workspaceState holds under GROUP_SINCE_KEY, as a previous session left it */
   savedSince?: Record<string, { group: string; at: number }>;
   /** the named-workspace port; omitted, folders are edited the way VS Code does by default */
@@ -338,6 +341,7 @@ function makeHarness(o: HarnessOpts = {}) {
     get: vi.fn(<T,>(k: string): T | undefined => {
       if (k === ACTIVE_WORKTREE_KEY) return o.persistedActiveId as T | undefined;
       if (k === GROUP_SINCE_KEY) return o.savedSince as T | undefined;
+      if (k === CONTROL_ALIAS_KEY) return o.savedControlAlias as T | undefined;
       return undefined;
     }),
     update: vi.fn(async (k: string, v: unknown) => { calls.push(`workspaceState.update:${k}:${v}`); }),
@@ -1672,6 +1676,18 @@ describe('loadWorktreesForRepo', () => {
     expect(h.claude.reconnect).toHaveBeenCalledWith([...h.worktrees, buildControlSession('/repo')]);
   });
 
+  it('launches the control session only when tmux has no session for it yet, so a reload reattaches', async () => {
+    const h = makeHarness({ worktrees: [] });
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(h.claude.hasSession).toHaveBeenCalledWith(buildControlSession('/repo').id);
+    expect(h.claude.launch).not.toHaveBeenCalled();
+
+    h.claude.hasSession.mockResolvedValue(false);
+    await h.service.loadWorktreesForRepo('/repo');
+    expect(h.claude.launch).toHaveBeenCalledTimes(1);
+    expect(h.claude.launch).toHaveBeenCalledWith(buildControlSession('/repo'));
+  });
+
   it('polls docker only when it is configured — main under compose\'s default name, worktrees under theirs', async () => {
     const a = makeWorktree({ id: 'a', path: '/repo', branch: 'main', isMain: true });
     const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
@@ -2463,6 +2479,76 @@ describe('deleteWorktree', () => {
   });
 });
 
+describe('deleteWorktree on the control session', () => {
+  it('does nothing: it is not a git worktree, and its path is the repo root\'s', async () => {
+    const h = makeHarness({ worktrees: [], workspaceFolders: ['/repo'], existingPaths: ['/repo'] });
+    await h.service.loadWorktreesForRepo('/repo');
+    h.calls.length = 0;
+    await h.service.deleteWorktree(buildControlSession('/repo'));
+    expect(h.notify.showWarning).not.toHaveBeenCalled();
+    expect(h.notify.confirm).not.toHaveBeenCalled();
+    expect(h.manager.delete).not.toHaveBeenCalled();
+    expect(h.calls).toEqual([]);
+  });
+});
+
+describe('deleteWorktreeById', () => {
+  it('reports an unknown id without touching anything', async () => {
+    const h = makeHarness();
+    expect(await h.service.deleteWorktreeById('nope', { deleteBranch: false })).toEqual({ ok: false, error: 'No worktree "nope".' });
+    expect(h.manager.delete).not.toHaveBeenCalled();
+  });
+
+  it('tears the worktree down with no confirm dialog, keeping or dropping the branch as told', async () => {
+    const a = makeWorktree({ id: 'a' });
+    let h = makeHarness({ worktrees: [a], existingPaths: [a.path] });
+    expect(await h.service.deleteWorktreeById('a', { deleteBranch: false })).toEqual({ ok: true });
+    expect(h.manager.delete).toHaveBeenCalledWith('a', false);
+    expect(h.notify.confirm).not.toHaveBeenCalled();
+
+    h = makeHarness({ worktrees: [a], existingPaths: [a.path] });
+    expect((await h.service.deleteWorktreeById('a', { deleteBranch: true })).ok).toBe(true);
+    expect(h.manager.delete).toHaveBeenCalledWith('a', true);
+    expect(h.notify.confirm).not.toHaveBeenCalled();
+  });
+
+  it('refuses the main worktree, by flag or by sitting at the repo root', async () => {
+    const flagged = makeWorktree({ id: 'm', path: '/elsewhere', isMain: true });
+    let h = makeHarness({ worktrees: [flagged], workspaceFolders: ['/repo'], gitDirs: ['/repo/.git'] });
+    expect(await h.service.deleteWorktreeById('m', { deleteBranch: true })).toEqual({ ok: false, error: 'Cannot delete the main worktree.' });
+
+    const atRoot = makeWorktree({ id: 'r', path: '/repo', branch: 'main' });
+    h = makeHarness({ worktrees: [atRoot], workspaceFolders: ['/repo'], gitDirs: ['/repo/.git'] });
+    expect(await h.service.deleteWorktreeById('r', { deleteBranch: true })).toEqual({ ok: false, error: 'Cannot delete the main worktree.' });
+    expect(h.manager.delete).not.toHaveBeenCalled();
+  });
+
+  it('refuses the control session, which shares the repo root\'s path', async () => {
+    const h = makeHarness({ worktrees: [], workspaceFolders: ['/repo'], gitDirs: ['/repo/.git'] });
+    await h.service.loadWorktreesForRepo('/repo');
+    const control = buildControlSession('/repo');
+    expect(await h.service.deleteWorktreeById(control.id, { deleteBranch: false })).toEqual({ ok: false, error: 'Cannot delete the main worktree.' });
+    expect(h.manager.delete).not.toHaveBeenCalled();
+  });
+
+  it('refuses a worktree that is already being deleted', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({
+      worktrees: [a], confirmResult: 'Delete',
+      config: { teardownScript: '/scripts/teardown.sh', docker: { composeFile: 'docker-compose.yml', overrideFile: '', ports: ['HTTP_PORT'], basePort: 20000, portStride: 100 } },
+      existingPaths: [a.path],
+    });
+    let release!: () => void;
+    h.dockerMonitor.runCompose.mockReturnValue(new Promise((r) => { release = () => r(COMPOSE_OK); }));
+    const done = h.service.deleteWorktree(a);
+    await flushMicrotasks();
+
+    expect(await h.service.deleteWorktreeById('a', { deleteBranch: false })).toEqual({ ok: false, error: 'Already being deleted.' });
+    release();
+    await done;
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // renameWorktree flow
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2534,6 +2620,51 @@ describe('renameWorktree', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // initWorktree / openTerminal / launchClaude commands
 // ─────────────────────────────────────────────────────────────────────────────
+
+describe('renameWorktree on the control session', () => {
+  async function controlHarness(o: { savedAlias?: string } = {}) {
+    const h = makeHarness({ worktrees: [], workspaceFolders: ['/repo'], existingPaths: ['/repo'], savedControlAlias: o.savedAlias });
+    await h.service.loadWorktreesForRepo('/repo');
+    h.calls.length = 0;
+    return h;
+  }
+  const control = () => buildControlSession('/repo');
+
+  it('asks for a title, defaulting to Manager, and stores it in workspaceState rather than the worktree store', async () => {
+    const h = await controlHarness();
+    h.host.showInputBox.mockResolvedValue('Boss');
+    await h.service.renameWorktree(control());
+    expect(h.host.showInputBox).toHaveBeenCalledWith({
+      prompt: 'Title for the control session', value: 'Manager', placeHolder: 'Manager',
+    });
+    expect(h.workspaceState.update).toHaveBeenCalledWith(CONTROL_ALIAS_KEY, 'Boss');
+    expect(h.store.setAlias).not.toHaveBeenCalled();
+    expect(h.host.renameWorkspaceFolder).not.toHaveBeenCalled();
+    expect(h.service.buildState().controlSession?.alias).toBe('Boss');
+    expect(h.calls).toContain('ui.pushWebview');
+  });
+
+  it('falls back to Manager when the title is emptied', async () => {
+    const h = await controlHarness();
+    h.host.showInputBox.mockResolvedValue('');
+    await h.service.renameWorktree(control());
+    expect(h.workspaceState.update).toHaveBeenCalledWith(CONTROL_ALIAS_KEY, 'Manager');
+    expect(h.service.buildState().controlSession?.alias).toBe('Manager');
+  });
+
+  it('changes nothing when the input box is cancelled', async () => {
+    const h = await controlHarness();
+    h.host.showInputBox.mockResolvedValue(undefined);
+    await h.service.renameWorktree(control());
+    expect(h.workspaceState.update).not.toHaveBeenCalled();
+    expect(h.calls).toEqual([]);
+  });
+
+  it('restores a saved title after a reload', async () => {
+    const h = await controlHarness({ savedAlias: 'Boss' });
+    expect(h.service.buildState().controlSession?.alias).toBe('Boss');
+  });
+});
 
 describe('initWorktree', () => {
   it('does nothing when no worktree given and store is empty', async () => {

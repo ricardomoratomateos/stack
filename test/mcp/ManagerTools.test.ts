@@ -270,7 +270,78 @@ describe('stack_create_task', () => {
   });
 });
 
+describe('stack_delete_task', () => {
+  it('tears the task down without keeping the branch by default', async () => {
+    const h = harness();
+    expect(await h.ok('stack_delete_task', { task_id: 'a' })).toEqual({
+      task_id: 'a', branch: 'feat/a', deleted_branch: false, status: 'deleted',
+    });
+    expect(h.deps.deleteWorktree).toHaveBeenCalledWith('a', { deleteBranch: false });
+  });
+
+  it('deletes the branch only when delete_branch is exactly true', async () => {
+    const h = harness();
+    expect((await h.ok('stack_delete_task', { task_id: 'a', delete_branch: true })).deleted_branch).toBe(true);
+    expect(h.deps.deleteWorktree).toHaveBeenLastCalledWith('a', { deleteBranch: true });
+    expect((await h.ok('stack_delete_task', { task_id: 'a', delete_branch: 'yes' })).deleted_branch).toBe(false);
+  });
+
+  it('refuses the main worktree and unknown tasks without deleting anything', async () => {
+    const h = harness();
+    expect(await h.err('stack_delete_task', { task_id: 'main' })).toBe('Cannot delete the main worktree.');
+    expect(await h.err('stack_delete_task', { task_id: 'zz' })).toMatch(/No task "zz"/);
+    expect(h.deps.deleteWorktree).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the service\'s reason, or names the task when it gives none', async () => {
+    const h = harness({ worktrees: [wt({ alias: 'Login' })] });
+    h.deps.deleteWorktree.mockResolvedValueOnce({ ok: false, error: 'Already being deleted.' } as never);
+    expect(await h.err('stack_delete_task', { task_id: 'a' })).toBe('Already being deleted.');
+    h.deps.deleteWorktree.mockResolvedValueOnce({ ok: false } as never);
+    expect(await h.err('stack_delete_task', { task_id: 'a' })).toBe('Could not delete "Login".');
+    const plain = harness();
+    plain.deps.deleteWorktree.mockResolvedValueOnce({ ok: false } as never);
+    expect(await plain.err('stack_delete_task', { task_id: 'a' })).toBe('Could not delete "feat/a".');
+  });
+
+  it('forgets a task that was still starting, so a reused id is not reported as starting', async () => {
+    const h = harness({ worktrees: [wt({ id: 'new', path: '/n' })], items: [item({ id: 'new', sessions: [] })] });
+    h.deps.createWorktree.mockResolvedValueOnce({ ok: true, worktree: wt({ id: 'new', path: '/n' }), started: new Promise(() => {}) });
+    await h.ok('stack_create_task', { title: 'T', prompt: 'P' });
+    expect(((await h.ok('stack_status')).tasks as Array<Record<string, unknown>>)[0].starting).toBe(true);
+    await h.ok('stack_delete_task', { task_id: 'new' });
+    expect(((await h.ok('stack_status')).tasks as Array<Record<string, unknown>>)[0]).not.toHaveProperty('starting');
+  });
+});
+
 describe('stack_send_to_agent', () => {
+  it('wakes an idle task with the message as its first prompt', async () => {
+    const h = harness({ items: [item({ sessions: [] })] });
+    h.deps.sendPrompt.mockResolvedValueOnce(false);
+    const res = await h.ok('stack_send_to_agent', { task_id: 'a', message: 'review this' });
+    expect(res.status).toBe('launched');
+    expect(h.deps.launchAgent).toHaveBeenCalledWith('a', 'review this');
+    expect(h.deps.clearReview).not.toHaveBeenCalled();
+  });
+
+  it('refuses when waking the idle task fails, or when a session was named', async () => {
+    const idle = harness({ items: [item({ sessions: [] })] });
+    idle.deps.sendPrompt.mockResolvedValueOnce(false);
+    idle.deps.launchAgent.mockResolvedValueOnce(false);
+    expect((await idle.ok('stack_send_to_agent', { task_id: 'a', message: 'm' })).status).toBe('refused');
+    // A named session that is not live is not an idle task: never launch a new agent for it.
+    const named = harness({ items: [item({ sessions: [session({ index: 1 })] })] });
+    named.deps.sendPrompt.mockResolvedValueOnce(false);
+    expect((await named.ok('stack_send_to_agent', { task_id: 'a', message: 'm', session: 1 })).status).toBe('refused');
+    // A live agent that rejects the prompt is not idle either.
+    const live = harness();
+    live.deps.sendPrompt.mockResolvedValueOnce(false);
+    expect((await live.ok('stack_send_to_agent', { task_id: 'a', message: 'm' })).status).toBe('refused');
+    expect(idle.deps.launchAgent).toHaveBeenCalledTimes(1);
+    expect(named.deps.launchAgent).not.toHaveBeenCalled();
+    expect(live.deps.launchAgent).not.toHaveBeenCalled();
+  });
+
   it('delivers through the submit path and clears a review request', async () => {
     const h = harness();
     expect(await h.ok('stack_send_to_agent', { task_id: 'a', message: 'go on' })).toEqual({ status: 'delivered' });
