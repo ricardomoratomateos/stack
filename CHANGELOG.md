@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-28
+
 ### Added
 
 - **`stack_delete_task` (MCP) and `/stack-task-remove`.** The manager agent can now tear a task down itself: agent session, tmux windows, teardown script, docker stack, the git worktree, and — only with `delete_branch: true` — its local branch. No confirm dialog (the sidebar's "Delete" still asks); the manager agent is expected to check `stack_status` first.
@@ -52,6 +54,7 @@ First release.
 - **Renameable sessions** and **shell sessions that say what they are running** (`npm`, `vim`, `psql`), read from tmux.
 - **A Get started walkthrough** (opens on install; later under Help → Welcome, or `Stack: Getting Started`), and a one-time offer, per repository, to set up Docker and debugging when Stack first sees a compose file or a PHP stack.
 
-[Unreleased]: https://github.com/ricardomoratomateos/stack/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/ricardomoratomateos/stack/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ricardomoratomateos/stack/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ricardomoratomateos/stack/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ricardomoratomateos/stack/releases/tag/v0.1.0
