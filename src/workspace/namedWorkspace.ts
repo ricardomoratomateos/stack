@@ -98,6 +98,7 @@ export const SETTING_KEYS = [
   'claudeCommand',
   'codexCommand',
   'opencodeCommand',
+  'promptPrefix',
   'sidebarStyle',
   'notifyOnAttention',
   'focusMode',
