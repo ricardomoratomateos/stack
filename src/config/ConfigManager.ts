@@ -131,6 +131,7 @@ export class ConfigManager {
       setupInTerminal: this.pick(cfg, repo, 'setupInTerminal', PROJECT_DEFAULTS.setupInTerminal),
       teardownScript: this.pick(cfg, repo, 'teardownScript', PROJECT_DEFAULTS.teardownScript),
       defaultProvider: cfg.get<ProviderId>('defaultProvider', 'claude'),
+      promptPrefix: cfg.get<string>('promptPrefix', ''),
       claudeCommand: cfg.get<string>('claudeCommand', 'claude'),
       codexCommand: cfg.get<string>('codexCommand', 'codex'),
       opencodeCommand: cfg.get<string>('opencodeCommand', 'opencode'),

@@ -34,6 +34,7 @@ export const MAX_WAIT_SECONDS = 110;
 export const TOOL_NAMES = [
   'stack_status',
   'stack_create_task',
+  'stack_delete_task',
   'stack_send_to_agent',
   'stack_read_agent',
   'stack_wait',

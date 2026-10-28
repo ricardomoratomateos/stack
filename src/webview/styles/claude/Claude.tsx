@@ -45,7 +45,7 @@ function Glyph({ group }: { group: WorktreeGroup }) {
   }
 }
 
-export function Claude({ state, loaded, items, selectedId, select, dragFor, now }: LayoutProps) {
+export function Claude({ state, loaded, items, controlItem, selectedId, select, dragFor, now }: LayoutProps) {
   const selected = items.find((d) => d.wt.id === selectedId);
 
   return (
@@ -58,6 +58,12 @@ export function Claude({ state, loaded, items, selectedId, select, dragFor, now 
           <span className="cl-placeholder fm-ellipsis">Describe a task for a new agent…</span>
         </button>
       </div>
+
+      {loaded && controlItem && (
+        <div className="cl-pinned">
+          <Row d={controlItem} selected={controlItem.wt.id === selectedId} now={now} state={state} select={select} drag={dragFor(controlItem.wt)} />
+        </div>
+      )}
 
       <div className="cl-list">
         {/* One list in the user's own order (drag to reorder). Grouping by state
@@ -105,7 +111,7 @@ function Row({ d, selected, now, state, select, drag }: {
   return (
     <div
       id={`fm-wt-${wt.id}`}
-      className={`cl-row fm-drag${wt.deleting ? ' fm-deleting' : ''}`}
+      className={`cl-row fm-drag${wt.deleting ? ' fm-deleting' : ''}${wt.isControl ? ' fm-control' : ''}`}
       data-selected={selected || undefined}
       data-group={d.group}
       data-dragging={drag.dragging || undefined}

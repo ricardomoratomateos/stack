@@ -126,6 +126,8 @@ The hooks are global — one entry in `~/.claude/settings.json` serves every VS 
 
 Stack ships an MCP server, so one agent can run the others. The intended setup: the official Claude Code panel in VS Code as the *manager*, with your company's Jira / Slack / Linear MCP servers, and Stack's tools to turn tickets into tasks, follow them, and answer their questions.
 
+Stack also runs one of these for you, out of the box: a standing control session, pinned above the task list in the sidebar, started automatically and kept to a single agent. It is not a git worktree — no branch, no diff, never listed by `stack_status` or touched by `stack_delete_task` — just the same Stack MCP tools in a place that stays put instead of being one more row among the tasks it manages. It survives a window reload by reattaching to its own tmux session rather than starting a second one.
+
 **Enable it:** switch on **Stack tools in Claude Code** in Stack settings › General (or run **Stack: Enable Manager (MCP)**). It also installs a `stack-manager` skill and three slash commands into `~/.claude` — `/stack` (how are my agents), `/stack-task <ticket or idea>`, `/stack-next` — so you can just ask in plain words; switching it off removes them (only files Stack wrote, never your own). It registers the server with Claude Code at user scope (`claude mcp add --scope user stack -- node <globalStorage>/stack-mcp.js`, replacing an earlier `stack` entry). Start a new Claude Code session and the `stack_*` tools are there. **Stack: Disable Manager (MCP)** removes it. Where VS Code supports it, Copilot's agent mode sees the same server under *Stack*.
 
 Then ask, for example:
@@ -139,7 +141,8 @@ Then ask, for example:
 |---|---|
 | `stack_status` | Every task: id, name, branch, base, group (needs you / review / working / idle / missing), sessions with state and pending question, diff `+N −M`, PR and CI, ports, ticket |
 | `stack_create_task` | New branch + worktree + agent on a prompt. With a `ticket`, the branch is `<KEY>-<slug>`, the ticket shows as a chip beside the task's name, and its text reaches the worker fenced as reference data. Idempotent per ticket key |
-| `stack_send_to_agent` | Types a message into a task's running agent and submits it (the same path the Review panel uses); refused when no agent is running. On a permission prompt, this answers it |
+| `stack_delete_task` | Tears a task down: agent session, tmux, teardown script, docker stack, the git worktree, and — with `delete_branch: true` — its local branch. No confirm dialog; refuses the main worktree |
+| `stack_send_to_agent` | Types a message into a task's running agent and submits it (the same path the Review panel uses); if none is running, starts one with the message as its first prompt instead. On a permission prompt, this answers it |
 | `stack_read_agent` | The last lines (≤ 200) of an agent's terminal |
 | `stack_wait` | Blocks until a task goes idle, needs input, or the timeout (≤ 110 s) passes — event-driven, from the agents' own hooks |
 | `stack_env` | For workers: worktree path, branch, ports with URLs, the compose project and a ready `docker compose … logs` command, setup/teardown scripts, test command |

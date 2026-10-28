@@ -23,6 +23,10 @@ export interface ManagerDeps {
     branch: string; title: string; description: string; baseBranch?: string;
     provider?: ProviderId; ticket?: WorktreeTicket; silent: true; select: false;
   }): Promise<{ ok: boolean; error?: string; worktree?: Worktree; started?: Promise<StartOutcome> }>;
+  /** Full teardown, no confirm dialog: session, docker stack, git worktree and (if asked) its branch. */
+  deleteWorktree(worktreeId: string, opts: { deleteBranch: boolean }): Promise<{ ok: boolean; error?: string }>;
+  /** Starts an agent in an existing, idle task with `prompt` as its first message. False if the task is unknown. */
+  launchAgent(worktreeId: string, prompt: string): Promise<boolean>;
   requestReview(worktreeId: string, summary: string): Promise<boolean>;
   clearReview(worktreeId: string): Promise<void>;
   taskEnv(worktreeId: string): TaskEnv | undefined;
@@ -188,6 +192,7 @@ export class ManagerTools {
     switch (tool) {
       case 'stack_status': return Promise.resolve(this.status(args));
       case 'stack_create_task': return this.createTask(args);
+      case 'stack_delete_task': return this.deleteTask(args);
       case 'stack_send_to_agent': return this.sendToAgent(args);
       case 'stack_read_agent': return this.readAgent(args);
       case 'stack_wait': return this.wait(args);
@@ -328,6 +333,18 @@ export class ManagerTools {
     return { task_id: wt.id, worktree: wt.path, branch: wt.branch, status: 'created' };
   }
 
+  // ── stack_delete_task ────────────────────────────────────────────────────
+
+  async deleteTask(args: Args): Promise<unknown> {
+    const wt = this.worktree(reqString(args, 'task_id'));
+    if (wt.isMain) throw new ToolError('Cannot delete the main worktree.');
+    const deleteBranch = args.delete_branch === true;
+    const result = await this.deps.deleteWorktree(wt.id, { deleteBranch });
+    if (!result.ok) throw new ToolError(result.error ?? `Could not delete "${wt.alias ?? wt.branch}".`);
+    this.starting.delete(wt.id);
+    return { task_id: wt.id, branch: wt.branch, deleted_branch: deleteBranch, status: 'deleted' };
+  }
+
   // ── stack_send_to_agent ──────────────────────────────────────────────────
 
   async sendToAgent(args: Args): Promise<unknown> {
@@ -346,6 +363,12 @@ export class ManagerTools {
       return { status: 'refused', reason: 'The task\'s agent is still starting (setup or boot). Wait with stack_wait, then send.' };
     }
     if (!(await this.deps.sendPrompt(wt, message, index))) {
+      // No session named, and the task truly has none listed: idle rather
+      // than unreachable — wake it with this message as its first prompt
+      // instead of refusing outright.
+      if (index === undefined && agents.length === 0 && !pending && (await this.deps.launchAgent(wt.id, message))) {
+        return { status: 'launched', reason: 'No agent was running in this task; started one with this message as its first prompt.' };
+      }
       return { status: 'refused', reason: `No live agent in "${wt.alias ?? wt.branch}". It has exited or was never started; create a new task or launch an agent from the sidebar.` };
     }
     await this.deps.clearReview(wt.id);

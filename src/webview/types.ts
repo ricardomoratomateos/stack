@@ -104,6 +104,8 @@ export interface WorktreeItem {
   alias?: string;
   path: string;
   isMain: boolean;
+  /** The standing control session shown pinned above the task list — see src/types.ts. */
+  isControl?: true;
   deleting: boolean;
   agent: AgentState;
   agentCount: number;
@@ -150,6 +152,8 @@ export interface SetupItem {
 
 export interface StackState {
   worktrees: WorktreeItem[];
+  /** The standing control session, pinned above the task list — never part of `worktrees`. */
+  controlSession?: WorktreeItem;
   activeWorktreeId?: string;
   /** Provider launched by the main agent button (stack.defaultProvider). */
   defaultProvider?: ProviderId;

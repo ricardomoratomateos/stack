@@ -187,6 +187,8 @@ button.fm-port:hover { background: var(--fm-hover); border-color: var(--fm-accen
 .fm-port[data-static] { color: var(--fm-text-dim); border-style: dashed; }
 .fm-port-label { color: var(--fm-text-dim); }
 .fm-chip-text { font-family: var(--fm-mono); font-size: 10.5px; }
+/** The control session's row/card: pinned above the task list, visually set apart. */
+.fm-control { border-color: var(--fm-accent-border); }
 .fm-containers { width: 100%; display: flex; flex-direction: column; gap: 2px; padding-left: 2px; }
 .fm-containers li { display: flex; align-items: center; gap: 6px; min-height: 18px; color: var(--fm-text-dim); }
 .fm-container-dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--fm-idle); }

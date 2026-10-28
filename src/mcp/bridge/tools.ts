@@ -67,13 +67,31 @@ export const TOOLS: ToolDef[] = [
     timeoutMs: () => 180_000,
   },
   {
+    name: 'stack_delete_task',
+    title: 'Stack: delete task',
+    description:
+      'Tear down a task completely: kills its agent session(s) and tmux windows, runs its teardown script if any, brings its docker compose stack down, '
+      + 'removes the git worktree, and — only if `delete_branch` is true — deletes its local branch too (never touches the remote). '
+      + 'Irreversible: uncommitted changes are always lost with the worktree, and with `delete_branch` so are any commits that exist only on that branch. '
+      + 'Check stack_status first (diff, PR state) before setting `delete_branch` on one that was never merged or pushed. Refuses the main worktree. '
+      + 'Use it to clean up finished or abandoned tasks — "borra esta tarea", "limpia los worktrees ya mergeados", "quita el de X", "elimina todos los que ya tienen PR mergeada".',
+    inputSchema: {
+      task_id: taskId,
+      delete_branch: z.boolean().optional()
+        .describe('Also delete the local branch (never the remote). Defaults to false — the worktree directory goes, the branch stays.'),
+      repo,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    timeoutMs: () => 60_000,
+  },
+  {
     name: 'stack_send_to_agent',
     title: 'Stack: send to agent',
     description:
       'Type a message into a task\'s running agent and submit it, the way a person would at its prompt. '
       + 'If the agent is showing a permission prompt, this answers that prompt (Enter accepts the highlighted option). '
-      + 'Answers delivered, or refused with the reason when the task has no live agent. '
-      + 'Use it to relay feedback or context to an agent: "dile al agente de payments que añada tests", "pásale este hilo", "tell the login task to use the new API".',
+      + 'If the task has no agent running (idle, never started), this starts one with your message as its first prompt instead of refusing — "launched" rather than "delivered" in the result. '
+      + 'Use it to relay feedback or context to an agent, or to wake a dormant task back up: "dile al agente de payments que añada tests", "pásale este hilo", "tell the login task to use the new API", "reactiva la tarea de X y que revise esto".',
     inputSchema: { task_id: taskId, message: z.string().describe('The message.'), session, repo },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     timeoutMs: () => 60_000,

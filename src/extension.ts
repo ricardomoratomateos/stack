@@ -302,6 +302,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   const agentManager = new AgentSessionManager(
     providerFactory, ctx.globalState, undefined, undefined, undefined, undefined,
     () => config.get().sessionTabs,
+    () => config.get().promptPrefix,
   );
   const dockerMonitor = new DockerMonitor();
   const gitWatcher = new GitWatcher();
@@ -687,6 +688,13 @@ export async function activate(ctx: vscode.ExtensionContext) {
       // Routable by its id from the next call on.
       claimHookRoutes();
       return result;
+    },
+    deleteWorktree: (id, opts) => service.deleteWorktreeById(id, opts),
+    launchAgent: async (id, prompt) => {
+      const wt = service.windowWorktrees().find((w) => w.id === id);
+      if (!wt) return false;
+      await agentManager.launchWithPrompt(wt, prompt);
+      return true;
     },
     requestReview: (id, summary) => service.requestReview(id, summary),
     clearReview: (id) => service.clearReview(id),

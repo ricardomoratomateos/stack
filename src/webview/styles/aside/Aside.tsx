@@ -53,7 +53,7 @@ function Mark() {
   );
 }
 
-export function Aside({ state, loaded, items, selectedId, select, dragFor, now }: LayoutProps) {
+export function Aside({ state, loaded, items, controlItem, selectedId, select, dragFor, now }: LayoutProps) {
   const [filter, setFilter] = useState<WorktreeGroup | 'all'>('all');
   const counts = countByGroup(items);
   const visible = items.filter((d) => filter === 'all' || d.group === filter);
@@ -90,6 +90,12 @@ export function Aside({ state, loaded, items, selectedId, select, dragFor, now }
         </div>
       )}
 
+      {loaded && controlItem && (
+        <div className="as-pinned">
+          <Row d={controlItem} selected={controlItem.wt.id === selectedId} now={now} state={state} select={select} drag={dragFor(controlItem.wt)} />
+        </div>
+      )}
+
       <div className="as-list">
         {/* The user's own order, never re-sorted by state: rows jumping between
             groups as agents worked was disorienting. The chips still filter. */}
@@ -119,7 +125,7 @@ function Row({ d, selected, now, state, select, drag }: {
   return (
     <div
       id={`fm-wt-${wt.id}`}
-      className={`as-row fm-drag${wt.deleting ? ' fm-deleting' : ''}`}
+      className={`as-row fm-drag${wt.deleting ? ' fm-deleting' : ''}${wt.isControl ? ' fm-control' : ''}`}
       data-selected={selected || undefined}
       data-group={d.group}
       data-dragging={drag.dragging || undefined}
@@ -149,7 +155,7 @@ function Row({ d, selected, now, state, select, drag }: {
 
       {selected && d.group !== 'missing' && (
         <div className="as-expand">
-          <Details d={d} dockerEnabled={state.dockerEnabled} />
+          {!wt.isControl && <Details d={d} dockerEnabled={state.dockerEnabled} />}
           <SessionList wt={wt} variant="aside" onSelect={pick} />
           <div className="as-actions">
             <LaunchSplit

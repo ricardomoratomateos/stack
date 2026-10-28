@@ -20,6 +20,13 @@ interface Action {
 
 /** Every worktree action, most used first: the end of the list is what overflows first. */
 export function worktreeActions(wt: WorktreeItem, dockerEnabled?: boolean): Action[] {
+  // Not a worktree: no diff, no docker, no setup, no branch to delete.
+  if (wt.isControl) {
+    return [
+      { id: 'terminal', icon: 'terminal', label: 'Open terminal', run: () => send({ type: 'openTerminal', worktreeId: wt.id }) },
+      { id: 'rename', icon: 'edit', label: 'Rename / set title', run: () => send({ type: 'renameWorktree', worktreeId: wt.id }) },
+    ];
+  }
   const running = stackRunning(wt);
   const actions: Action[] = [
     { id: 'terminal', icon: 'terminal', label: 'Open terminal', run: () => send({ type: 'openTerminal', worktreeId: wt.id }) },

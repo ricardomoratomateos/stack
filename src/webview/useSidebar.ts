@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 import { getState, send, setState } from './vscode';
 import { normalizeSidebarStyle } from '../sidebarStyle';
-import { describeAll, type Described } from './derive';
+import { describe, describeAll, type Described } from './derive';
 import type { ExtMessage, StackState, WorktreeItem } from './types';
 
 /**
@@ -62,7 +62,7 @@ export function useWorktreeDrag(worktrees: WorktreeItem[]): (wt: WorktreeItem) =
   }, [worktrees]);
 
   return useCallback((wt) => {
-    const draggable = !wt.isMain && !wt.deleting && !wt.missing;
+    const draggable = !wt.isMain && !wt.isControl && !wt.deleting && !wt.missing;
     const end = () => { setDragId(null); setOverId(null); };
     return {
       props: {
@@ -83,6 +83,8 @@ export interface Sidebar {
   state: StackState;
   loaded: boolean;
   items: Described[];
+  /** The standing control session, described the same way a task is — pinned above `items`, never inside it. */
+  controlItem?: Described;
   selectedId: string | null;
   select: (id: string) => void;
   dragFor: (wt: WorktreeItem) => DragBinding;
@@ -133,7 +135,11 @@ export function useSidebar(): Sidebar {
   }, []);
 
   const items = useMemo(() => describeAll(state), [state]);
+  const controlItem = useMemo(
+    () => (state.controlSession ? describe(state.controlSession, state.dockerUnavailable) : undefined),
+    [state.controlSession, state.dockerUnavailable],
+  );
   const dragFor = useWorktreeDrag(state.worktrees);
 
-  return { state, loaded, items, selectedId: selected, select, dragFor, now };
+  return { state, loaded, items, controlItem, selectedId: selected, select, dragFor, now };
 }

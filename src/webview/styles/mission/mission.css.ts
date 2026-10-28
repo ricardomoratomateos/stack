@@ -92,6 +92,8 @@ body.vscode-high-contrast .fm-mission, body.vscode-high-contrast-light .fm-missi
 .ms-badge[data-group='missing'] { background: transparent; border: 1px dashed var(--fm-border-strong); }
 .ms-when { font-family: var(--fm-mono); font-size: 11px; color: var(--fm-text-faint); }
 
+.ms-pinned { flex: none; padding: 0 12px 10px; }
+
 /* cards */
 .ms-cards { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 12px; display: flex; flex-direction: column; gap: 8px; }
 .ms-cards > .fm-empty { flex: 1; }
@@ -136,6 +138,7 @@ body.vscode-high-contrast .fm-mission, body.vscode-high-contrast-light .fm-missi
   .ms-q { grid-template-columns: 70px minmax(0, 1fr) auto; }
   .ms-badge { min-width: 62px; }
   .ms-cards { padding-left: 8px; padding-right: 8px; }
+  .ms-pinned { padding-left: 8px; padding-right: 8px; }
   .ms-meta { grid-template-columns: minmax(0, 1fr); }
 }
 `;

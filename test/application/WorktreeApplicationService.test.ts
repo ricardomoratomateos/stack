@@ -18,6 +18,7 @@ import type { Worktree, StackConfig } from '../../src/types';
 import type { SessionItem } from '../../src/webview/types';
 import type { ProviderId } from '../../src/ports/IAgentProvider';
 import type { WorktreeManager } from '../../src/worktree/WorktreeManager';
+import { buildControlSession } from '../../src/worktree/controlSession';
 import type { AgentSessionManager } from '../../src/session/AgentSessionManager';
 import type { TabManager } from '../../src/worktree/TabManager';
 import type { ConfigManager } from '../../src/config/ConfigManager';
@@ -177,6 +178,9 @@ function makeHarness(o: HarnessOpts = {}) {
     killWorktreeSession: vi.fn(async (id: string) => { calls.push(`claude.killWorktreeSession:${id}`); }),
     register: vi.fn((id: string) => { calls.push(`claude.register:${id}`); }),
     reconnect: vi.fn(async () => { calls.push('claude.reconnect'); }),
+    // true by default: the control session already has a session, so loadWorktreesForRepo's
+    // launch-if-absent path stays quiet unless a test opts into the "none yet" case.
+    hasSession: vi.fn(async () => true),
     sendPromptToAgent: vi.fn(async (w: Worktree, prompt: string) => {
       calls.push(`claude.sendPromptToAgent:${w.id}:${prompt}`);
       return o.liveAgentAccepts ?? true;
@@ -1665,7 +1669,7 @@ describe('loadWorktreesForRepo', () => {
       'host.updateFolderSetting:/repo:search.exclude:clear',
       'host.updateFolderSetting:/repo/zer/feat-b:search.exclude:{"**":true}',
     ]);
-    expect(h.claude.reconnect).toHaveBeenCalledWith(h.worktrees);
+    expect(h.claude.reconnect).toHaveBeenCalledWith([...h.worktrees, buildControlSession('/repo')]);
   });
 
   it('polls docker only when it is configured — main under compose\'s default name, worktrees under theirs', async () => {

@@ -115,6 +115,7 @@ body.vscode-high-contrast .fm-aside, body.vscode-high-contrast-light .fm-aside {
 .as-chip[data-group='review'] .as-chip-dot { background: var(--fm-review); }
 .as-chip[data-group='working'] .as-chip-dot { background: var(--fm-working); }
 
+.as-pinned { flex: none; padding: 0 8px; margin-bottom: 4px; border-bottom: 1px solid var(--fm-border); padding-bottom: 6px; }
 .as-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 12px; display: flex; flex-direction: column; }
 .as-list > .fm-empty { flex: 1; }
 .as-group-head {

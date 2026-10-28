@@ -229,6 +229,12 @@
           "default": "",
           "description": "Script to run before deleting a worktree Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
         },
+        "stack.promptPrefix": {
+          "type": "string",
+          "default": "",
+          "editPresentation": "multilineText",
+          "description": "Text prepended to the first prompt of every agent you launch (new tasks, the control session, waking an idle one) — sent on its own when there is no prompt otherwise. A personal setting, not meant for .stack/config.json: put reminders here that a fresh agent would not otherwise pick up, e.g. which skill to check first."
+        },
         "stack.defaultProvider": {
           "type": "string",
           "enum": [

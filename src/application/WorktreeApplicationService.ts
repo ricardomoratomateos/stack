@@ -6,7 +6,7 @@ import type { AgentSessionManager } from '../session/AgentSessionManager';
 import type { TabManager } from '../worktree/TabManager';
 import type { BreakpointManager } from '../worktree/BreakpointManager';
 import type { ConfigManager } from '../config/ConfigManager';
-import type { GitWatcher } from '../git/GitWatcher';
+import { DEFAULT_STATUS, type GitWatcher } from '../git/GitWatcher';
 import type { DockerMonitor } from '../docker/DockerMonitor';
 import type { PrMonitor } from '../pr/PrMonitor';
 import type { IWorktreeRepository } from '../ports/IWorktreeRepository';
@@ -22,6 +22,7 @@ import { buildCommentPrompt } from '../diff/commentPrompt';
 import { displayLabel, truncateLabel } from '../worktree/displayLabel';
 import { findRepoRoot } from '../worktree/findRepoRoot';
 import { canonicalPath, worktreesInRepo } from '../worktree/worktreesInRepo';
+import { buildControlSession } from '../worktree/controlSession';
 import { MAIN_BRANCH_CANDIDATES, SETTINGS_JSON_PATH } from '../constants';
 import { attentionQueue, groupOf, nextInQueue, type WorktreeGroup } from '../webview/derive';
 import { envPrefix, shellQuote } from '../shell/shellQuote';
@@ -59,6 +60,9 @@ export const ACTIVE_WORKTREE_KEY = 'stack.activeWorktreeId';
 export const WORKTREE_ORDER_KEY = 'stack.worktreeOrder';
 /** workspaceState: when each worktree entered its group — see groupSince. */
 export const GROUP_SINCE_KEY = 'stack.groupSince';
+/** workspaceState: the control session's own title, set via "Rename / set title" — see renameControlSession. */
+export const CONTROL_ALIAS_KEY = 'stack.controlAlias';
+const DEFAULT_CONTROL_ALIAS = 'Manager';
 /**
  * How long a teardown script may hold up a delete. Generous — a `compose down`
  * with volumes can take minutes — but finite: a script stuck on a prompt nobody
@@ -230,6 +234,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
   private groupSince = new Map<string, { group: WorktreeGroup; at: number; restored?: true }>();
   /** The first load has reconnected this window's sessions; see groupSince. */
   private settled = false;
+  /** This window's standing control session — never a real worktree; see controlSession.ts. */
+  private controlSession?: Worktree;
+  /** The control session's title, from "Rename / set title" — see renameControlSession. */
+  private controlAlias: string = DEFAULT_CONTROL_ALIAS;
   /**
    * What this window is watching and polling, by worktree id — so a reload can
    * stop what it no longer shows instead of only ever starting more.
@@ -259,6 +267,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     this.currentWorktreeId = this.restoreActiveWorktreeId();
     const since = deps.workspaceState.get<Record<string, { group: WorktreeGroup; at: number }>>(GROUP_SINCE_KEY) ?? {};
     for (const [id, entry] of Object.entries(since)) this.groupSince.set(id, { ...entry, restored: true });
+    this.controlAlias = deps.workspaceState.get<string>(CONTROL_ALIAS_KEY) ?? DEFAULT_CONTROL_ALIAS;
     this.stacks = new DockerStacks({
       monitor: deps.dockerMonitor,
       config: () => deps.config.get(),
@@ -342,6 +351,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
   }
 
   private findWorktree(worktreeId: string): Worktree | undefined {
+    if (this.controlSession?.id === worktreeId) return this.controlSession;
     return this.deps.manager.list().find((w) => w.id === worktreeId);
   }
 
@@ -1121,8 +1131,27 @@ export class WorktreeApplicationService implements DiffPanelHost {
     }));
     this.stampSince(items);
     const activeWorktreeId = worktrees.find((wt) => wt.id === this.currentWorktreeId)?.id;
+    const control = this.controlSession;
+    const controlItem: WorktreeItem | undefined = control && {
+      id: control.id,
+      branch: control.branch,
+      alias: this.controlAlias,
+      path: control.path,
+      isMain: false,
+      isControl: true,
+      deleting: false,
+      agent: this.deps.agentManager.getState(control.id),
+      agentCount: this.deps.agentManager.getAgentCount(control.id),
+      terminalCount: this.deps.agentManager.getShellCount(control.id),
+      sessions: this.deps.agentManager.getSessions(control.id),
+      git: DEFAULT_STATUS,
+      docker: [],
+      ports: [],
+      pr: null,
+    };
     return {
       worktrees: items,
+      ...(controlItem ? { controlSession: controlItem } : {}),
       activeWorktreeId,
       defaultProvider: config.defaultProvider,
       installedProviders: (this.deps.installedProviders ?? installedProviders)(config),
@@ -1366,6 +1395,9 @@ export class WorktreeApplicationService implements DiffPanelHost {
   }
 
   async loadWorktreesForRepo(repoRoot: string): Promise<void> {
+    if (!this.controlSession || canonicalPath(this.controlSession.repoRoot) !== canonicalPath(repoRoot)) {
+      this.controlSession = buildControlSession(repoRoot);
+    }
     const { current, missing } = await this.deps.manager.reconcile(repoRoot);
     this.missing = new Set(missing.map((w) => w.id));
     const normalizedRoot = canonicalPath(repoRoot);
@@ -1444,7 +1476,14 @@ export class WorktreeApplicationService implements DiffPanelHost {
     // `mine`, not `current`: reconnecting another repo's worktrees costs a tmux
     // lookup each and leaves the session manager tracking windows this window
     // will never show — which the shell poller would then keep polling.
-    await this.deps.agentManager.reconnect(mine);
+    const control = this.controlSession;
+    await this.deps.agentManager.reconnect(control ? [...mine, control] : mine);
+    // Its tmux session survives a window reload like any other — reconnect()
+    // above already restored it if so. Only launch when there is truly none
+    // yet, or every reload would open a second window in the same session.
+    if (control && !(await this.deps.agentManager.hasSession(control.id))) {
+      await this.deps.agentManager.launch(control);
+    }
     this.settled = true;
     this.ui.pushWebview();
     this.refreshDecorations();
@@ -1782,6 +1821,9 @@ export class WorktreeApplicationService implements DiffPanelHost {
   async deleteWorktree(worktree?: Worktree): Promise<void> {
     const wt = this.resolveWorktree(worktree);
     if (!wt) return;
+    // Not a git worktree — its path equals the repo root's, which would
+    // otherwise read as the stale-main-entry case just below.
+    if (wt.isControl) return;
     if (this.deleting.has(wt.id)) return; // already tearing down
 
     const repoRoot = this.findRepoRoot();
@@ -1813,13 +1855,42 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const confirm = await this.deps.notify.confirm(`Delete worktree "${wt.branch}"?`, plan.detail, ...plan.choices);
     if (!confirm) return;
     const deleteBranch = confirm !== plan.choices[plan.keepBranch];
+    await this.teardownAndDelete(wt, deleteBranch);
+  }
 
-    // Lock the worktree and hand control straight back to the user — the actual
-    // teardown (docker down, session kill, git remove) runs without blocking, and
-    // the card renders as "deleting" until it finishes.
+  /**
+   * The same teardown as the sidebar's "Delete", for a caller that already
+   * decided — no confirm dialog, no "keep the branch?" prompt. Used by the
+   * stack_delete_task MCP tool: a manager agent that has already looked at
+   * stack_status (diff, PR state) and knows whether the branch is safe to
+   * drop.
+   */
+  async deleteWorktreeById(id: string, opts: { deleteBranch: boolean }): Promise<{ ok: boolean; error?: string }> {
+    const wt = this.findWorktree(id);
+    if (!wt) return { ok: false, error: `No worktree "${id}".` };
+    if (this.deleting.has(wt.id)) return { ok: false, error: 'Already being deleted.' };
+    const repoRoot = this.findRepoRoot();
+    if (wt.isMain || (repoRoot && canonicalPath(wt.path) === canonicalPath(repoRoot))) {
+      return { ok: false, error: 'Cannot delete the main worktree.' };
+    }
+    return this.teardownAndDelete(wt, opts.deleteBranch);
+  }
+
+  /**
+   * Tears a worktree down: its agent session and tmux windows, its teardown
+   * script if any, its docker compose stack, then the git worktree itself and
+   * — if asked — its branch. Shared by the confirm-dialog flow above and
+   * deleteWorktreeById; the only difference between the two callers is
+   * whether a human was asked first.
+   */
+  private async teardownAndDelete(wt: Worktree, deleteBranch: boolean): Promise<{ ok: boolean; error?: string }> {
+    // Lock the worktree and hand control straight back to the caller — the
+    // actual teardown (docker down, session kill, git remove) runs without
+    // blocking, and the card renders as "deleting" until it finishes.
     this.deleting.add(wt.id);
     this.ui.pushWebview();
 
+    let result: { ok: boolean; error?: string } = { ok: true };
     try {
       this.stopMonitoring(wt);
 
@@ -1870,17 +1941,19 @@ export class WorktreeApplicationService implements DiffPanelHost {
         this.forgetActive(wt.id);
       } catch (e) {
         // The manager refuses to purge the store while git still registers the
-        // worktree, so the card stays and the user is told why — better than a
-        // card that disappears and returns nameless on the next reconcile.
+        // worktree, so the card stays and the caller is told why — better than
+        // a card that disappears and returns nameless on the next reconcile.
         this.deps.notify.showError(
           `Could not delete "${displayLabel(wt)}": ${String(e)}. The worktree is still registered with git.`,
         );
+        result = { ok: false, error: String(e) };
       }
     } finally {
       this.deleting.delete(wt.id);
       this.ui.pushWebview();
       this.refreshDecorations();
     }
+    return result;
   }
 
   /**
@@ -1946,6 +2019,10 @@ export class WorktreeApplicationService implements DiffPanelHost {
   async renameWorktree(worktree?: Worktree): Promise<void> {
     const wt = this.resolveWorktree(worktree);
     if (!wt) return;
+    // Not a stored worktree, and its path is the repo root's — store.setAlias
+    // would silently no-op (safe), but renaming the workspace folder at that
+    // path would rename MAIN's instead.
+    if (wt.isControl) return this.renameControlSession(wt);
 
     const alias = await this.deps.host.showInputBox({
       prompt: 'Description / alias for this worktree',
@@ -1961,6 +2038,19 @@ export class WorktreeApplicationService implements DiffPanelHost {
     // The stored alias keeps the user's full text; only the folder label is capped.
     if (idx !== -1) this.deps.host.renameWorkspaceFolder(idx, { path: wt.path, name: truncateLabel(finalAlias) });
 
+    this.ui.pushWebview();
+  }
+
+  /** Renaming the control session touches neither the store nor a workspace folder — see renameWorktree. */
+  private async renameControlSession(wt: Worktree): Promise<void> {
+    const alias = await this.deps.host.showInputBox({
+      prompt: 'Title for the control session',
+      value: wt.alias ?? DEFAULT_CONTROL_ALIAS,
+      placeHolder: DEFAULT_CONTROL_ALIAS,
+    });
+    if (alias === undefined) return;
+    this.controlAlias = alias || DEFAULT_CONTROL_ALIAS;
+    await this.deps.workspaceState.update(CONTROL_ALIAS_KEY, this.controlAlias);
     this.ui.pushWebview();
   }
 

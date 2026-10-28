@@ -154,24 +154,22 @@ function quoteRef(ref: string): string {
 
 export async function fetchStatus(worktreePath: string, baseBranch?: string): Promise<GitStatus> {
   try {
-    const { stdout: statusOutput } = await execAsync('git status --porcelain', { cwd: worktreePath, env: gitEnv() });
+    // status, the upstream ahead/behind count, and the base's ahead/behind
+    // count are three independent reads — none needs another's result — so
+    // they run concurrently instead of one git subprocess after another.
+    // Only diffLines() below genuinely depends on what comes out of these.
+    const [{ stdout: statusOutput }, upstreamResult, base] = await Promise.all([
+      execAsync('git status --porcelain', { cwd: worktreePath, env: gitEnv() }),
+      execAsync('git rev-list --left-right --count HEAD...@{upstream}', { cwd: worktreePath, env: gitEnv() })
+        .catch(() => undefined), // no upstream or detached HEAD
+      baseBranch ? baseDrift(worktreePath, baseBranch) : Promise.resolve(undefined),
+    ]);
     const { staged, unstaged, untracked, hasChanges } = parseStatus(statusOutput);
 
     let ahead = 0;
     let behind = 0;
-    let upstream = false;
-    try {
-      const { stdout: revOutput } = await execAsync(
-        'git rev-list --left-right --count HEAD...@{upstream}',
-        { cwd: worktreePath, env: gitEnv() },
-      );
-      ({ ahead, behind } = parseAheadBehind(revOutput));
-      upstream = true;
-    } catch {
-      // no upstream or detached HEAD
-    }
-
-    const base = baseBranch ? await baseDrift(worktreePath, baseBranch) : undefined;
+    const upstream = upstreamResult !== undefined;
+    if (upstreamResult) ({ ahead, behind } = parseAheadBehind(upstreamResult.stdout));
 
     // Only worth a process when there is something to count.
     const lines = hasChanges || (base?.ahead ?? 0) > 0 ? await diffLines(worktreePath, base) : undefined;

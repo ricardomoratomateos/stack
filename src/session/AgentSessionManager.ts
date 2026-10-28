@@ -121,6 +121,12 @@ export class AgentSessionManager {
      * predates the setting; extension.ts passes the setting itself.
      */
     private sessionTabs: () => SessionTabsMode = () => 'single',
+    /**
+     * Read on every launch, same reason as sessionTabs: stack.promptPrefix
+     * prepended to the first prompt sent to a freshly launched agent, on its
+     * own when there is no prompt otherwise.
+     */
+    private promptPrefix: () => string = () => '',
   ) {
     this.terminals = new SessionTerminals(tmux, pathExists);
 
@@ -581,7 +587,12 @@ export class AgentSessionManager {
     // is still starting it lands nowhere. If it never arrives (binary missing,
     // instant exit) the text is left unsent rather than submitted, because what
     // is sitting at that prompt is then a shell, and a prompt is not a command.
-    if (opts?.prompt) {
+    // stack.promptPrefix goes first, and goes even alone: it is the one thing
+    // a fresh agent has no other way to pick up (a skill reminder, say), so it
+    // is not conditional on the caller having a prompt of its own to attach it to.
+    const prefix = this.promptPrefix().trim();
+    const prompt = [prefix, opts?.prompt].filter(Boolean).join('\n\n') || undefined;
+    if (prompt) {
       const started = await this.waitForAgentProcess(sessionName, windowIndex);
       // A running process is not yet a listening one: raw input and bracketed
       // paste come on a beat later, and until then a paste sits in the tty's
@@ -591,7 +602,7 @@ export class AgentSessionManager {
       if (started && (await this.waitForHook(worktree.id, windowIndex))) {
         await this.sleep(AgentSessionManager.INPUT_READY_SETTLE_MS);
       }
-      await this.submitPrompt(worktree.id, windowIndex, opts.prompt, started);
+      await this.submitPrompt(worktree.id, windowIndex, prompt, started);
     }
     return viewer;
   }
@@ -877,6 +888,11 @@ export class AgentSessionManager {
 
   getState(worktreeId: string): AgentSessionState {
     return this.aggregateState(worktreeId);
+  }
+
+  /** Whether a tmux session already exists for this id — so a caller can reattach instead of launching a duplicate. */
+  hasSession(worktreeId: string): Promise<boolean> {
+    return this.tmux.hasSession(TmuxManager.sessionName(worktreeId));
   }
 
   updateState(workspaceId: string, state: AgentSessionState, windowIndex?: number): void {

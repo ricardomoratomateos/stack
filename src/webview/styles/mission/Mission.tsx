@@ -35,7 +35,7 @@ const NONE: Record<WorktreeGroup, string> = {
 
 type Filter = WorktreeGroup | 'all';
 
-export function Mission({ state, loaded, items, selectedId, select, dragFor, now }: LayoutProps) {
+export function Mission({ state, loaded, items, controlItem, selectedId, select, dragFor, now }: LayoutProps) {
   const [filter, setFilter] = useState<Filter>('all');
   const counts = countByGroup(items);
   const queue = attentionQueue(items);
@@ -94,6 +94,12 @@ export function Mission({ state, loaded, items, selectedId, select, dragFor, now
         </section>
       )}
 
+      {loaded && controlItem && (
+        <div className="ms-pinned">
+          <Card d={controlItem} selected={controlItem.wt.id === selectedId} now={now} state={state} select={select} drag={dragFor(controlItem.wt)} />
+        </div>
+      )}
+
       <div className="ms-cards">
         {!loaded ? <LoadingState /> : items.length === 0 ? <EmptyState /> : cards.length === 0 ? (
           <NothingHere text={NONE[filter as WorktreeGroup]} onClear={() => setFilter('all')} />
@@ -124,12 +130,12 @@ function Card({ d, selected, now, state, select, drag }: {
 }) {
   const wt = d.wt;
   const pick = () => select(wt.id);
-  const showMeta = d.group !== 'missing' && d.group !== 'idle';
+  const showMeta = !wt.isControl && d.group !== 'missing' && d.group !== 'idle';
 
   return (
     <article
       id={`fm-wt-${wt.id}`}
-      className={`ms-card fm-drag${wt.deleting ? ' fm-deleting' : ''}`}
+      className={`ms-card fm-drag${wt.deleting ? ' fm-deleting' : ''}${wt.isControl ? ' fm-control' : ''}`}
       data-group={d.group}
       data-selected={selected || undefined}
       data-dragging={drag.dragging || undefined}
@@ -174,7 +180,7 @@ function Card({ d, selected, now, state, select, drag }: {
       {selected && d.group !== 'missing' && (
         <div className="ms-expand">
           <SessionList wt={wt} variant="mission" onSelect={pick} />
-          <Details d={d} dockerEnabled={state.dockerEnabled} />
+          {!wt.isControl && <Details d={d} dockerEnabled={state.dockerEnabled} />}
           <div className="ms-actions">
             <Primary d={d} state={state} select={pick} />
             {/* The contextual button above may already be the launcher. */}

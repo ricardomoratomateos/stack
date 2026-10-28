@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`stack_delete_task` (MCP) and `/stack-task-remove`.** The manager agent can now tear a task down itself: agent session, tmux windows, teardown script, docker stack, the git worktree, and — only with `delete_branch: true` — its local branch. No confirm dialog (the sidebar's "Delete" still asks); the manager agent is expected to check `stack_status` first.
+- **A standing control session, pinned above the task list.** One per window, started automatically and kept to a single agent — not a git worktree (no branch, no diff, not in `stack_status`/`stack_delete_task`/reconcile), just the Stack MCP tools and a place that is always on screen instead of one more row among the tasks. Reattaches to its existing tmux session on reload instead of spawning a second one.
+- **`stack_send_to_agent` wakes an idle task.** A task with no agent running (never started, or exited) now gets one launched with your message as its first prompt, instead of being refused — the result says `launched` rather than `delivered`.
+
 ## [0.1.1] — 2026-10-23
 
 ### Fixed

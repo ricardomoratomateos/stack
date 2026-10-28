@@ -51,6 +51,7 @@ body.vscode-high-contrast .fm-claude, body.vscode-high-contrast-light .fm-claude
 .cl-prompt { font-family: var(--fm-mono); font-weight: 600; color: var(--fm-accent); }
 .cl-placeholder { flex: 1; color: var(--vscode-input-placeholderForeground, var(--fm-text-dim)); }
 
+.cl-pinned { flex: none; padding: 0 8px 6px; margin-bottom: 4px; border-bottom: 1px solid var(--fm-border); }
 .cl-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 12px; display: flex; flex-direction: column; }
 .cl-list > .fm-empty { flex: 1; }
 .cl-group { margin-bottom: 6px; }

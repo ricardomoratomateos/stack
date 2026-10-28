@@ -59,12 +59,19 @@ function makeFactory(claudeCommand = 'claude'): ProviderFactory {
   return new ProviderFactory(config, '/tmp/stack-test-storage');
 }
 
-function create(claudeCommand = 'claude', memento: vscode.Memento = new FakeMemento() as unknown as vscode.Memento) {
+function create(
+  claudeCommand = 'claude',
+  memento: vscode.Memento = new FakeMemento() as unknown as vscode.Memento,
+  promptPrefix: () => string = () => '',
+) {
   const stub = makeStub();
   // Default: worktree directories exist, deterministic hostname. Individual tests override as needed.
   // Instant sleep: waitForAgentProcess is bounded by attempts, so this runs
   // its whole budget without any wall-clock time.
-  const mgr = new AgentSessionManager(makeFactory(claudeCommand), memento, stub, () => true, 'Test-Host.local', async () => {});
+  const mgr = new AgentSessionManager(
+    makeFactory(claudeCommand), memento, stub, () => true, 'Test-Host.local', async () => {},
+    () => 'single', promptPrefix,
+  );
   const stateEvents: Array<{ worktreeId: string; state: AgentSessionState }> = [];
   let terminalsChanges = 0;
   mgr.onStateChange(e => stateEvents.push(e));
@@ -513,6 +520,24 @@ describe('launch command line', () => {
     ]);
     await mgr.launch(wt, { prompt: 'fix ${user.id}' });
     expectSubmitted(stub, `${SESSION}:1`, 'fix ${user.id}');
+  });
+
+  it('prepends stack.promptPrefix to the prompt', async () => {
+    const { mgr, stub } = create('claude', undefined, () => 'Check the skill first.');
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'claude', command: 'node' },
+    ]);
+    await mgr.launch(wt, { prompt: 'fix the bug' });
+    expectSubmitted(stub, `${SESSION}:1`, 'Check the skill first.\n\nfix the bug');
+  });
+
+  it('sends the prefix on its own when launched with no prompt', async () => {
+    const { mgr, stub } = create('claude', undefined, () => 'Check the skill first.');
+    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { index: 1, name: 'claude', command: 'node' },
+    ]);
+    await mgr.launch(wt);
+    expectSubmitted(stub, `${SESSION}:1`, 'Check the skill first.');
   });
 
   it('shows the viewer before waiting on the agent, so its boot is watched rather than waited out', async () => {

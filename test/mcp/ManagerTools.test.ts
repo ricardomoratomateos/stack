@@ -36,6 +36,8 @@ function harness(o: { worktrees?: Worktree[]; items?: WorktreeItem[]; root?: str
       ok: true,
       worktree: wt({ id: 'new', branch: opts.branch, path: `/repo/.worktrees/${opts.branch}` }),
     }) as Awaited<ReturnType<ManagerDeps['createWorktree']>>),
+    deleteWorktree: vi.fn(async () => ({ ok: true })),
+    launchAgent: vi.fn(async () => true),
     requestReview: vi.fn(async () => true),
     clearReview: vi.fn(async () => {}),
     taskEnv: vi.fn((id: string) => ({ task_id: id, name: 'x', path: '/p', branch: 'b', repo_root: '/repo', ports: {} })),
