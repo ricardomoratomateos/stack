@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-11-04
+
+### Fixed
+
+- **The control session opens again from the sidebar.** Clicking its card did nothing: it is not a worktree, so the switch that reveals a worktree's terminal skipped it, and once its tab was closed or its agent had exited the only way back was a new window. A click now reopens its terminal, and starts a new agent when the old one has exited.
+
 ## [0.2.0] — 2026-10-28
 
 ### Added
@@ -55,7 +61,8 @@ First release.
 - **Renameable sessions** and **shell sessions that say what they are running** (`npm`, `vim`, `psql`), read from tmux.
 - **A Get started walkthrough** (opens on install; later under Help → Welcome, or `Stack: Getting Started`), and a one-time offer, per repository, to set up Docker and debugging when Stack first sees a compose file or a PHP stack.
 
-[Unreleased]: https://github.com/ricardomoratomateos/stack/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ricardomoratomateos/stack/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/ricardomoratomateos/stack/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ricardomoratomateos/stack/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ricardomoratomateos/stack/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ricardomoratomateos/stack/releases/tag/v0.1.0

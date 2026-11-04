@@ -782,6 +782,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
   // ── Worktree switch orchestration ──────────────────────────────────────────
 
   async switchToWorktree(worktreeId: string): Promise<void> {
+    const control = this.controlSession;
+    if (control?.id === worktreeId) return this.openControlSession(control);
     if (this.currentWorktreeId === worktreeId) return;
     // This window's worktrees only. The whole store used to go to the
     // breakpoint and tab managers from here, bypassing the scoping they are
@@ -824,6 +826,19 @@ export class WorktreeApplicationService implements DiffPanelHost {
     if (!this.deps.agentManager.hasTerminals(target.id)) return;
     const viewer = await this.deps.agentManager.getOrCreateViewer(target).catch(() => undefined);
     viewer?.show();
+  }
+
+  /**
+   * The control session is not a worktree to switch to — nothing is scoped to
+   * it, and it is never in the window's worktree list — so a click only puts it
+   * on screen. It is meant to be always there: once its agent has exited, the
+   * click starts a new one instead of leaving the card with nothing to open.
+   */
+  private async openControlSession(control: Worktree): Promise<void> {
+    const terminal = this.deps.agentManager.getAgentCount(control.id) === 0
+      ? await this.deps.agentManager.launch(control).catch(() => undefined)
+      : await this.deps.agentManager.getOrCreateViewer(control).catch(() => undefined);
+    terminal?.show();
   }
 
   /** Clean-slate switch (stack.focusMode): only the active worktree on screen. */

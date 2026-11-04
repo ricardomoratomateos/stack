@@ -1688,6 +1688,36 @@ describe('loadWorktreesForRepo', () => {
     expect(h.claude.launch).toHaveBeenCalledWith(buildControlSession('/repo'));
   });
 
+  it('a click on the control session reopens its terminal, without making it the active worktree', async () => {
+    const a = makeWorktree({ id: 'a' });
+    const h = makeHarness({ worktrees: [a], persistedActiveId: 'a' });
+    await h.service.loadWorktreesForRepo('/repo');
+    const control = buildControlSession('/repo');
+    h.calls.length = 0;
+
+    await h.service.handleMessage({ type: 'selectWorktree', worktreeId: control.id });
+
+    expect(h.claude.getOrCreateViewer).toHaveBeenCalledWith(control);
+    expect(h.calls).toContain(`viewer.show:${control.id}`);
+    expect(h.claude.launch).not.toHaveBeenCalled();
+    expect(h.calls).not.toContain(`workspaceState.update:stack.activeWorktreeId:${control.id}`);
+  });
+
+  it('a click on the control session starts a new agent once the old one has exited', async () => {
+    const h = makeHarness({ worktrees: [] });
+    await h.service.loadWorktreesForRepo('/repo');
+    const control = buildControlSession('/repo');
+    const terminal = { show: vi.fn() };
+    h.claude.getAgentCount.mockReturnValue(0);
+    h.claude.launch.mockResolvedValueOnce(terminal as never);
+
+    await h.service.handleMessage({ type: 'selectWorktree', worktreeId: control.id });
+
+    expect(h.claude.launch).toHaveBeenCalledWith(control);
+    expect(terminal.show).toHaveBeenCalled();
+    expect(h.claude.getOrCreateViewer).not.toHaveBeenCalled();
+  });
+
   it('polls docker only when it is configured — main under compose\'s default name, worktrees under theirs', async () => {
     const a = makeWorktree({ id: 'a', path: '/repo', branch: 'main', isMain: true });
     const b = makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/feat-b' });
