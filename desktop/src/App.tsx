@@ -26,6 +26,8 @@ import {
   resetSize, resize, saveLayout, setMode, toggleMaximized, DEFAULT_SIZES, type LayoutState, type Maximized, type Mode,
 } from './modes/layout';
 import { applyWindowMode, loadFrames, saveFrames, windowFrame, type Frames } from './modes/windowApi';
+import { useShell } from './notify/useShell';
+import { needsOf } from './notify/tray';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
 const initialLayoutState = (): LayoutState => {
@@ -150,29 +152,49 @@ export function App() {
   // Shortcuts. Capture phase, so they win over the focused terminal.
   const latest = useRef({ items, selectedId: selected?.wt.id, mode, expanded: stripExpanded || maximized === 'manager' });
   latest.current = { items, selectedId: selected?.wt.id, mode, expanded: stripExpanded || maximized === 'manager' };
+  const runEffect = useCallback((fx: Effect) => {
+    if (fx.select) select(fx.select);
+    if (fx.toggleManager) {
+      if (latest.current.mode === 'full') setManagerOpen((o) => !o);
+      else setStripExpanded((x) => !x);
+    }
+    if (fx.cycleMode) setLayout((l) => setMode(l, nextMode(l.mode)));
+    if (fx.maximize) setMaximized((m) => cycleMaximized(m, latest.current.mode));
+    if (fx.focusManager) {
+      if (latest.current.mode === 'full') setManagerOpen(true);
+      if (latest.current.mode === 'full' || latest.current.expanded) setFocusTick((t) => t + 1);
+      else stripRef.current?.focus();
+    }
+  }, [select]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const sc = shortcutOf(e);
       if (!sc) return;
       e.preventDefault();
       e.stopPropagation();
-      const fx: Effect = resolveShortcut(sc, latest.current.items ?? [], latest.current.selectedId);
-      if (fx.select) select(fx.select);
-      if (fx.toggleManager) {
-        if (latest.current.mode === 'full') setManagerOpen((o) => !o);
-        else setStripExpanded((x) => !x);
-      }
-      if (fx.cycleMode) setLayout((l) => setMode(l, nextMode(l.mode)));
-      if (fx.maximize) setMaximized((m) => cycleMaximized(m, latest.current.mode));
-      if (fx.focusManager) {
-        if (latest.current.mode === 'full') setManagerOpen(true);
-        if (latest.current.mode === 'full' || latest.current.expanded) setFocusTick((t) => t + 1);
-        else stripRef.current?.focus();
-      }
+      runEffect(resolveShortcut(sc, latest.current.items ?? [], latest.current.selectedId));
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [select]);
+  }, [runEffect]);
+
+  // Notifications, menu-bar item and global shortcuts (⌃⌥⌘J / M / S): they may point at a worktree of another repo.
+  const selectAnywhere = useCallback((id: string) => {
+    const repo = snapshot?.repos.find((r) => r.state.worktrees.some((w) => w.id === id));
+    if (repo) setRepoRoot(repo.repoRoot);
+    select(id);
+  }, [snapshot, select]);
+  useShell(snapshot, selected?.wt.id, {
+    onSelect: selectAnywhere,
+    onNext: () => {
+      const queue = needsOf(snapshot);
+      if (queue.length === 0) return;
+      const at = queue.findIndex((n) => n.id === latest.current.selectedId);
+      selectAnywhere(queue[(at + 1) % queue.length].id);
+    },
+    onManager: () => runEffect({ focusManager: true }),
+    onNotice: setNotice,
+  });
 
   useEffect(() => {
     if (focusTick > 0 && manager.pane) registry.focus(manager.pane);

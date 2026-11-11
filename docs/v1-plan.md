@@ -152,7 +152,7 @@ T8 follow-up (Rust-side coalescing: one frame per pane every 16 ms or 64 KiB, ac
   input line; ⌘⇧M expands it. Float: always-on-top window (non-activating
   NSPanel on macOS), compact worktree list with Allow on the one that needs
   you, session area, Manager strip always visible. Same state everywhere.
-- [ ] **T11 · Notifications, tray, global shortcuts.** No Apple Developer
+- [x] **T11 · Notifications, tray, global shortcuts.** No Apple Developer
   account yet: ad-hoc signed app, native notifications WITHOUT action
   buttons (click → app focuses that session), best-effort with a fallback;
   Allow lives in the app (Float list, menu-bar menu). Notifications for
@@ -218,3 +218,7 @@ T8 follow-up (Rust-side coalescing: one frame per pane every 16 ms or 64 KiB, ac
 - 2026-11-11 · T10 strip: N (3–12, default 6) is stored per mode (Half, Float) and changed by dragging the strip splitter (snaps to 16 px lines); ⌘⇧M expands the strip into the Manager terminal in Half/Float (hides the column in Full); ⌘0 focuses the strip input.
 - 2026-11-11 · T10 resizable panels: splitters for sidebar (Full, Half), Manager column (Full) and strip height (Half, Float); min/max per mode, double-click resets, keyboard arrows, one update per frame, sizes remembered per mode.
 - 2026-11-11 · T10 maximize: double-click a session tab or the Manager header (or ⌘⇧Enter) maximizes that panel, again restores; sizes untouched; not persisted, cleared on mode change. Float: ⌘⇧Enter goes session, Manager-only, restore.
+- 2026-11-11 · T11 split: the notification policy (5 s grouping, never for the focused on-screen session, 2/10 min re-notify then stop, DND) is a pure TS module (`desktop/src/notify/policy.ts`) ticked each second by the webview; Rust (`shell.rs`) only delivers (notification, tray, shortcuts).
+- 2026-11-11 · T11 notifications: tauri-plugin-notification, no actions, no replace-in-place (desktop plugin has no id/replace), so a group is one summary notification ("3 tasks need you"); it cannot report clicks on desktop, so a window focus within 30 s of a notification is treated as the click and selects the session it was about. In `tauri dev` it posts as Terminal; on failure it logs and the app shows a notice once.
+- 2026-11-11 · T11 daemon: no change needed — the app's `/events` stream already counts in `clients()`, so stackd does not notify natively while the app runs.
+- 2026-11-11 · T11 tray/shortcuts: tray title "◆ needs  ◇ review" beside a drawn lime square; Allow in the menu calls `respondPermission` from Rust; ⌃⌥⌘J/M/S hardcoded (J selects next needing across repos, S toggles show/hide); DND is persisted in localStorage and mutes notifications only (the tray keeps counting).

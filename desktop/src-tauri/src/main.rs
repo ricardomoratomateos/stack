@@ -3,6 +3,7 @@
 
 mod bridge;
 mod commands;
+mod shell;
 mod stackd;
 mod window;
 
@@ -10,8 +11,12 @@ fn main() {
     tauri::Builder::default()
         .manage(commands::Bridge::default())
         .manage(commands::StackdLatest::default())
+        .manage(shell::Shell::default())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(shell::global_shortcut_plugin())
         .setup(|app| {
             commands::start_stackd_watch(app.handle().clone());
+            shell::setup(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -28,6 +33,8 @@ fn main() {
             commands::stackd_command,
             commands::vscode_settings,
             commands::open_url,
+            shell::set_tray,
+            shell::notify_show,
             window::window_frame,
             window::set_window_mode,
         ])
