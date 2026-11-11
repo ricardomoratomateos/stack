@@ -612,6 +612,7 @@ export function App() {
                     <button type="button" className="tab tab-review" data-selected={reviewing || undefined} onClick={() => setReviewId(selected.wt.id)} title="Review the changes and comment">
                       <i className="codicon codicon-git-compare" aria-hidden="true" />
                       Review
+                      {reviewing && <span className="tab-close" role="button" aria-label="Close review" title="Close review (Esc)" onClick={(e) => { e.stopPropagation(); closeReview(); }}><i className="codicon codicon-close" aria-hidden="true" /></span>}
                     </button>
                   </nav>
                   <div className="centre-body">

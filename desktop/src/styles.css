@@ -231,3 +231,6 @@ body[data-resizing] .term-host, body[data-resizing] .sidebar-body { pointer-even
   background: var(--app-bg); color: var(--app-text);
 }
 .tab-review i { font-size: 14px; }
+.tab-close { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-left: 2px; border-radius: 4px; color: var(--app-text-faint); }
+.tab-close:hover { background: var(--app-hover); color: var(--app-text); }
+.tab-close i { font-size: 12px; }
