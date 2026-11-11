@@ -23,6 +23,7 @@ fn main() {
             commands::capture,
             commands::stackd_latest,
             commands::stackd_command,
+            commands::vscode_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Stack desktop");

@@ -1,4 +1,5 @@
 import { Terminal } from '@xterm/xterm';
+import { documentVar, terminalOptions } from '../theme/terminalTheme';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { FitAddon } from '@xterm/addon-fit';
 import type { TmuxApi } from './api';
@@ -180,9 +181,7 @@ export class TerminalRegistry {
     if (e) return e;
     const term = new Terminal({
       scrollback: SCROLLBACK,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      fontSize: 13,
-      cursorBlink: true,
+      ...terminalOptions(documentVar),
       allowProposedApi: true,
     });
     const fit = new FitAddon();

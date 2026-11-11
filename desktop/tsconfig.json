@@ -21,7 +21,9 @@
   },
   "include": [
     "src",
-    "../src/webview/derive.ts",
+    "../src/webview",
+    "../src/sidebarStyle.ts",
+    "../src/application/deletePlan.ts",
     "../src/newtask/composer.ts"
   ]
 }

@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { nameOf } from '@core/webview/derive';
-import { buildView, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, stateWord, type Effect } from './model';
+import { buildView, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, stateWord, taskFromText, type Effect } from './model';
 import { useStackd } from './stackd/useStackd';
 import { useTerminals } from './terminals';
-import { Sidebar } from './ui/Sidebar';
+import { SidebarHost } from './sidebar/SidebarHost';
+import { ViewTitle } from './sidebar/ViewTitle';
+import { describeCounts, toSidebarState, translate, type Action } from './sidebar/bridge';
+import { loadSidebarStyle } from './sidebar/settings';
+import { Dialog, type DialogSpec } from './ui/Dialog';
+import type { SidebarStyle } from '@core/sidebarStyle';
+import type { WebMessage } from '@core/webview/types';
 import { SessionView } from './ui/Pane';
 import { useSessionPane } from './ui/useSessionPane';
 
@@ -18,12 +24,16 @@ export function App() {
   const [managerOpen, setManagerOpen] = useState(true);
   const [focusTick, setFocusTick] = useState(0);
   const [sessionOf, setSessionOf] = useState<Record<string, string>>({});
-  const [now, setNow] = useState(() => Date.now());
+  const [style, setStyle] = useState<SidebarStyle>('aside');
+  const [dialog, setDialog] = useState<DialogSpec | null>(null);
+  const [notice, setNotice] = useState('');
 
+  useEffect(() => { void loadSidebarStyle().then(setStyle); }, []);
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, []);
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(''), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const view = useMemo(() => buildView(snapshot, repoRoot), [snapshot, repoRoot]);
   const items = view?.items;
@@ -74,6 +84,59 @@ export function App() {
     if (focusTick > 0 && manager.pane) registry.focus(manager.pane);
   }, [focusTick, manager.pane, registry]);
 
+  const sidebarState = useMemo(
+    () => toSidebarState(snapshot, { repoRoot, activeWorktreeId: selected?.wt.id, sidebarStyle: style }),
+    [snapshot, repoRoot, selected?.wt.id, style],
+  );
+
+  const runCommand = useCallback(async (name: string, body: Record<string, unknown>) => {
+    try {
+      return await api.command<{ windowIndex?: number; worktree?: { id: string } }>(name, body);
+    } catch (e) {
+      setNotice(String(e instanceof Error ? e.message : e));
+      return undefined;
+    }
+  }, [api]);
+
+  const onMessage = useCallback((msg: WebMessage) => {
+    if (!view) return;
+    const ctx = { repoRoot: view.repoRoot, worktrees: [...view.items.map((d) => d.wt), ...(view.control ? [view.control.wt] : [])] };
+    const act = (a: Action): void => {
+      switch (a.kind) {
+        case 'select':
+          select(a.worktreeId, a.index);
+          break;
+        case 'command':
+          void runCommand(a.name, a.body).then((res) => {
+            if (a.selectNew) select(a.selectNew, res?.windowIndex);
+            if (a.name === 'createTask' && res?.worktree?.id) select(res.worktree.id);
+          });
+          break;
+        case 'ask':
+          setDialog({ kind: 'ask', title: a.title, label: a.label, initial: a.initial, confirm: a.confirm, onSubmit: (text) => void runCommand(a.then.name, { ...a.then.body, [a.then.field]: text }) });
+          break;
+        case 'confirm':
+          setDialog({ kind: 'confirm', title: a.title, detail: a.detail, choices: a.choices, onChoose: (i) => { const c = a.then(i); void runCommand(c.name, c.body); } });
+          break;
+        case 'newTask':
+          setDialog({
+            kind: 'ask', title: 'New task', label: 'Describe the task; the title becomes the branch', initial: '', confirm: 'Create',
+            onSubmit: (text) => {
+              const task = taskFromText(text, view.repoRoot);
+              if (task) act({ kind: 'command', name: 'createTask', body: task });
+            },
+          });
+          break;
+        case 'unsupported':
+          setNotice(`${a.what} is not in the desktop app yet.`);
+          break;
+        case 'none':
+          break;
+      }
+    };
+    act(translate(msg, ctx));
+  }, [view, select, runCommand]);
+
   const commands = useCallback((id: string) => {
     const session = sessionOf[id];
     const out: Record<number, string> = {};
@@ -112,19 +175,17 @@ export function App() {
 
   return (
     <div className="app" data-manager={managerOpen ? 'open' : 'closed'}>
-      <Sidebar
-        view={view}
-        selectedId={selected?.wt.id}
-        selectedIndex={selectedIndex}
-        now={now}
-        commands={commands}
-        onSelect={select}
-        onRepo={(r) => { setRepoRoot(r); setSelectedId(undefined); }}
-        onCreate={async (task) => {
-          const res = await api.command<{ worktree?: { id: string } }>('createTask', task);
-          if (res.worktree?.id) setSelectedId(res.worktree.id);
-        }}
-      />
+      <aside className="sidebar" aria-label="Worktrees">
+        <ViewTitle counts={sidebarState ? describeCounts(sidebarState) : ''} onAdd={() => onMessage({ type: 'openNewTask' })}>
+          {view.repos.length > 1 && (
+            <select className="repo-select" value={view.repoRoot} onChange={(e) => { setRepoRoot(e.target.value); setSelectedId(undefined); }}>
+              {view.repos.map((r) => <option key={r.repoRoot} value={r.repoRoot}>{r.name}</option>)}
+            </select>
+          )}
+        </ViewTitle>
+        <div className="sidebar-body"><SidebarHost state={sidebarState} onMessage={onMessage} /></div>
+        {notice && <div className="notice" role="status">{notice}</div>}
+      </aside>
 
       <main className="centre">
         {selected ? (
@@ -170,6 +231,7 @@ export function App() {
           </div>
         </section>
       )}
+      {dialog && <Dialog spec={dialog} onClose={() => setDialog(null)} />}
     </div>
   );
 }

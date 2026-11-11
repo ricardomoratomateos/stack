@@ -270,3 +270,12 @@ pub async fn stackd_command(name: String, body: Option<Value>) -> Result<Value, 
     let body = body.unwrap_or_else(|| Value::Object(Default::default()));
     stackd::request(&stackd::socket_path(), "POST", &format!("/commands/{name}"), Some(&body)).await
 }
+
+/// The user's VS Code `settings.json` (JSONC, parsed by the frontend), or `None` when there is none.
+/// Read-only: the app takes `stack.sidebarStyle` from it.
+#[tauri::command]
+pub fn vscode_settings() -> Option<String> {
+    let home = std::env::var_os("HOME")?;
+    let path = std::path::Path::new(&home).join("Library/Application Support/Code/User/settings.json");
+    std::fs::read_to_string(path).ok()
+}
