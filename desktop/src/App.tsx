@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { nameOf } from '@core/webview/derive';
-import { buildView, floatRows, managerIndex, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, stateWord, type Effect } from './model';
+import { MANAGER_ID, buildView, floatRows, managerIndex, managerSession, mruTouch, pickSession, stepWrap, switcherRows, type SwitcherRow, resolveShortcut, sessionRows, shortcutOf, stateWord, type Effect } from './model';
 import { StartStackd } from './stackd/StartStackd';
 import { useStackd } from './stackd/useStackd';
 import { ManagerStrip, useTerminals, type StripHandle } from './terminals';
@@ -23,6 +23,7 @@ import { SessionView } from './ui/Pane';
 import { useSessionPane } from './ui/useSessionPane';
 import { Splitter } from './ui/Splitter';
 import { FloatList } from './ui/FloatList';
+import { Switcher } from './ui/Switcher';
 import {
   LINE_H, cycleMaximized, heightFromLines, limits, linesFromHeight, loadLayout, maxPanelWidth, modeFromQuery, nextMode,
   resetSize, resize, saveLayout, setMode, toggleMaximized, DEFAULT_SIZES, type LayoutState, type Maximized, type Mode,
@@ -148,10 +149,18 @@ export function App() {
   const selected = items?.find((d) => d.wt.id === selectedId) ?? items?.[0];
   const selectedIndex = selected ? pickSession(selected.wt, remembered[selected.wt.id]) : undefined;
 
+  // Selection history per repo (worktree ids and 'manager'), most recent first: the ⌃Tab switcher's order.
+  const history = useRef<Record<string, string[]>>({});
+  const touch = useCallback((id: string) => {
+    const repo = latest.current.repoRoot;
+    if (repo) history.current[repo] = mruTouch(history.current[repo] ?? [], id);
+  }, []);
   const select = useCallback((id: string, index?: number) => {
+    touch(id);
     setSelectedId(id);
     if (index !== undefined) setRemembered((r) => ({ ...r, [id]: index }));
-  }, []);
+  }, [touch]);
+  useEffect(() => { if (view && selected) { latest.current.repoRoot = view.repoRoot; touch(selected.wt.id); } }, [view?.repoRoot, selected?.wt.id, touch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Centre: the selected session. Right: the Manager.
   const centreTarget = useMemo(
@@ -170,8 +179,8 @@ export function App() {
   const manager = useSessionPane(managerWanted ? managerTarget : null, onSession);
 
   // Shortcuts. Capture phase, so they win over the focused terminal.
-  const latest = useRef({ items, selectedId: selected?.wt.id, mode, expanded: stripExpanded || maximized === 'manager' });
-  latest.current = { items, selectedId: selected?.wt.id, mode, expanded: stripExpanded || maximized === 'manager' };
+  const latest = useRef({ items, control: view?.control, repoRoot: view?.repoRoot, selectedId: selected?.wt.id, mode, expanded: stripExpanded || maximized === 'manager' });
+  latest.current = { items, control: view?.control, repoRoot: view?.repoRoot, selectedId: selected?.wt.id, mode, expanded: stripExpanded || maximized === 'manager' };
   const runEffect = useCallback((fx: Effect) => {
     if (fx.select) select(fx.select);
     if (fx.toggleManager) {
@@ -181,11 +190,12 @@ export function App() {
     if (fx.cycleMode) setLayout((l) => setMode(l, nextMode(l.mode)));
     if (fx.maximize) setMaximized((m) => cycleMaximized(m, latest.current.mode));
     if (fx.focusManager) {
+      touch(MANAGER_ID);
       if (latest.current.mode === 'full') setManagerOpen(true);
       if (latest.current.mode === 'full' || latest.current.expanded) setFocusTick((t) => t + 1);
       else stripRef.current?.focus();
     }
-  }, [select]);
+  }, [select, touch]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const sc = shortcutOf(e);
@@ -197,6 +207,70 @@ export function App() {
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [runEffect]);
+
+  // ⌃Tab switcher (Alt+Tab style). Hold Control, Tab steps through worktrees in MRU order, releasing Control selects.
+  // The overlay only shows after a short hold, so a quick ⌃Tab just toggles to the previous one.
+  const [sw, setSw] = useState<{ rows: SwitcherRow[]; index: number; visible: boolean } | null>(null);
+  const swRef = useRef<{ rows: SwitcherRow[]; index: number } | null>(null);
+  const swTimer = useRef(0);
+  const [centreFocusTick, setCentreFocusTick] = useState(0);
+  const closeSwitcher = useCallback(() => {
+    clearTimeout(swTimer.current);
+    swRef.current = null;
+    setSw(null);
+  }, []);
+  const commitSwitcher = useCallback((id: string | undefined) => {
+    closeSwitcher();
+    if (!id) return;
+    if (id === MANAGER_ID) { runEffect({ focusManager: true }); return; }
+    select(id);
+    setCentreFocusTick((t) => t + 1);
+  }, [closeSwitcher, runEffect, select]);
+  useEffect(() => {
+    const stepTo = (dir: 1 | -1) => {
+      const cur = swRef.current;
+      if (!cur) return;
+      cur.index = stepWrap(cur.index, cur.rows.length, dir);
+      setSw((s) => (s ? { ...s, index: cur.index } : s));
+    };
+    const onKey = (e: KeyboardEvent) => {
+      const cur = swRef.current;
+      if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Tab') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!cur) {
+          const { items: its, control, repoRoot: repo } = latest.current;
+          const rows = switcherRows(its ?? [], control, (repo && history.current[repo]) || []);
+          if (rows.length < 2) return;
+          const index = e.shiftKey ? rows.length - 1 : 1;
+          swRef.current = { rows, index };
+          setSw({ rows, index, visible: false });
+          swTimer.current = window.setTimeout(() => setSw((s) => (s ? { ...s, visible: true } : s)), 150);
+        } else stepTo(e.shiftKey ? -1 : 1);
+        return;
+      }
+      if (!cur) return;
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSwitcher(); }
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); stepTo(1); }
+      else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); stepTo(-1); }
+      else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); commitSwitcher(cur.rows[cur.index]?.id); }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      const cur = swRef.current;
+      if (cur && e.key === 'Control') { e.preventDefault(); e.stopPropagation(); commitSwitcher(cur.rows[cur.index]?.id); }
+    };
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('blur', closeSwitcher);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+      window.removeEventListener('blur', closeSwitcher);
+    };
+  }, [commitSwitcher, closeSwitcher]);
+  useEffect(() => {
+    if (centreFocusTick > 0 && centre.pane) registry.focus(centre.pane);
+  }, [centreFocusTick, centre.pane, registry]);
 
   // Notifications, menu-bar item and global shortcuts (⌃⌥⌘J / M / S): they may point at a worktree of another repo.
   const selectAnywhere = useCallback((id: string) => {
@@ -478,6 +552,7 @@ export function App() {
         )}
         {newTaskOpen && <NewTaskHost style={style} onMessage={(m) => void onNewTaskMessage(m)} registerPost={registerPost} />}
         {settingsOpen && <SettingsHost repo={view.repos.find((r) => r.repoRoot === view.repoRoot) && { name: view.repos.find((r) => r.repoRoot === view.repoRoot)!.name, root: view.repoRoot }} onClose={() => setSettingsOpen(false)} onSaved={(file) => void loadSidebarStyle().then(setStyle).catch(() => setStyle(resolveSidebarStyle(file, null)))} />}
+        {sw?.visible && <Switcher rows={sw.rows} index={sw.index} onPick={(id) => commitSwitcher(id)} />}
         {dialog && <Dialog spec={dialog} onClose={() => setDialog(null)} />}
       </div>
     </div>

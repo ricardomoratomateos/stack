@@ -196,4 +196,44 @@ export function floatRows(items: Described[]): FloatRow[] {
   });
 }
 
+export const MANAGER_ID = 'manager';
+
+/** Most-recently-selected first: `id` moves to the front. */
+export function mruTouch(history: string[], id: string, cap = 50): string[] {
+  return [id, ...history.filter((h) => h !== id)].slice(0, cap);
+}
+
+/** `ids` ordered by recency; the ones never selected follow in their own order. */
+export function mruOrder(ids: string[], history: string[]): string[] {
+  const known = new Set(ids);
+  const seen = new Set<string>();
+  const first = history.filter((h) => known.has(h) && !seen.has(h) && seen.add(h));
+  return [...first, ...ids.filter((i) => !seen.has(i))];
+}
+
+/** Move `from` by one step, wrapping. */
+export function stepWrap(from: number, count: number, dir: 1 | -1): number {
+  return count <= 0 ? 0 : (from + dir + count) % count;
+}
+
+export interface SwitcherRow {
+  id: string;
+  name: string;
+  state: AgentState;
+  line: string;
+  /** ⌘N hint, "⌘0" for the Manager. */
+  hint: string;
+}
+
+/** The rows of the ⌃Tab switcher: the repo's worktrees and the Manager, in MRU order. */
+export function switcherRows(items: Described[], control: Described | undefined, history: string[]): SwitcherRow[] {
+  const byId = new Map<string, SwitcherRow>();
+  const row = (d: Described, id: string, hint: string): SwitcherRow => ({
+    id, name: d.name, state: d.agent?.state ?? d.wt.agent, line: d.line, hint,
+  });
+  items.forEach((d, i) => byId.set(d.wt.id, row(d, d.wt.id, i < 9 ? `⌘${i + 1}` : '')));
+  if (control) byId.set(MANAGER_ID, { ...row(control, MANAGER_ID, '⌘0'), name: control.name || 'Manager' });
+  return mruOrder([...byId.keys()], history).map((id) => byId.get(id)!);
+}
+
 export { nameOf };

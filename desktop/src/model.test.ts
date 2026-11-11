@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionItem, StackState, WorktreeItem } from '@core/webview/types';
-import { floatRows, buildView, managerIndex, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, taskFromText, type KeyLike } from './model';
+import { mruOrder, mruTouch, stepWrap, floatRows, buildView, managerIndex, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, taskFromText, type KeyLike } from './model';
 import type { Snapshot } from './stackd/api';
 
 const session = (o: Partial<SessionItem> & { index: number }): SessionItem => ({ name: 'claude', kind: 'agent', provider: 'claude', state: 'idle', ...o });
@@ -167,5 +167,23 @@ describe('mode shortcuts and the float list', () => {
     expect(rows[0].asking).toEqual({ index: 1, label: 'Bash: ls' });
     expect(rows[0].sessions).toHaveLength(2);
     expect(rows[1].asking).toBeUndefined();
+  });
+});
+
+describe('switcher MRU', () => {
+  it('moves the touched id to the front without duplicates', () => {
+    expect(mruTouch(['a', 'b', 'c'], 'c')).toEqual(['c', 'a', 'b']);
+    expect(mruTouch([], 'a')).toEqual(['a']);
+    expect(mruTouch(['a', 'b', 'c'], 'd', 3)).toEqual(['d', 'a', 'b']);
+  });
+  it('orders by recency, dropping gone ids and appending never-selected ones', () => {
+    expect(mruOrder(['a', 'b', 'c', 'manager'], ['c', 'gone', 'a'])).toEqual(['c', 'a', 'b', 'manager']);
+    expect(mruOrder(['a', 'b'], [])).toEqual(['a', 'b']);
+  });
+  it('steps with wrap', () => {
+    expect(stepWrap(0, 3, 1)).toBe(1);
+    expect(stepWrap(2, 3, 1)).toBe(0);
+    expect(stepWrap(0, 3, -1)).toBe(2);
+    expect(stepWrap(0, 0, 1)).toBe(0);
   });
 });
