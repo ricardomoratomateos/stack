@@ -4,7 +4,7 @@ const ANSI = ['Black', 'Red', 'Green', 'Yellow', 'Blue', 'Magenta', 'Cyan', 'Whi
 
 /**
  * The xterm theme from the `--vscode-terminal-*` variables, the way VS Code's terminal reads its
- * theme keys: `terminal.background` falls back to the editor background (the terminal sits in the
+ * theme keys (background excepted, see below): `terminal.background` falls back to the editor background (the terminal sits in the
  * editor area), the cursor to the terminal foreground.
  */
 export function xtermTheme(get: (cssVar: string) => string): ITheme {
@@ -15,8 +15,10 @@ export function xtermTheme(get: (cssVar: string) => string): ITheme {
     }
     return undefined;
   };
+  // The chrome's panel colour (--app-bg, from the sidebar style) so the terminal has no seam with its host; everything else stays VS Code's.
+  const appBg = get('--app-bg').trim();
   const theme: ITheme = {
-    background: v('terminal.background', 'editor.background'),
+    background: /^(#|rgb)/i.test(appBg) ? appBg : v('terminal.background', 'editor.background'),
     foreground: v('terminal.foreground', 'editor.foreground'),
     cursor: v('terminalCursor.foreground', 'terminal.foreground'),
     cursorAccent: v('terminalCursor.background', 'terminal.background', 'editor.background'),

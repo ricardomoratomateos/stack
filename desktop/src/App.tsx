@@ -72,6 +72,14 @@ export function App() {
   const registerPost = useCallback((post: ((msg: NewTaskExtMessage) => void) | null) => { postToNewTask.current = post; }, []);
 
   useEffect(() => { void loadSidebarStyle().then(setStyle); }, []);
+  // The chrome paints from the sidebar style's palette: its `fm-<style>` class on <html> defines --fm-* for the --app-* tokens.
+  useEffect(() => {
+    const root = document.documentElement;
+    const cls = `fm-${style}`;
+    root.classList.remove('fm-aside', 'fm-claude', 'fm-mission');
+    root.classList.add(cls);
+    registry.refreshTheme();
+  }, [style, registry]);
   useEffect(() => saveLayout(layout), [layout]);
   // The native menu (menu.rs): Settings… (⌘,) and the window modes.
   useEffect(() => {

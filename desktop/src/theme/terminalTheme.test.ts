@@ -24,6 +24,10 @@ describe('xtermTheme', () => {
   it('prefers terminal.background when the theme sets it', () => {
     expect(xtermTheme((n) => (n === '--vscode-terminal-background' ? '#000' : get(n))).background).toBe('#000');
   });
+  it('paints the background with the chrome token when it resolves to a colour', () => {
+    expect(xtermTheme((n) => (n === '--app-bg' ? '#111111' : get(n))).background).toBe('#111111');
+    expect(xtermTheme((n) => (n === '--app-bg' ? 'color-mix(in srgb, red, blue)' : get(n))).background).toBe('#1F1F1F');
+  });
   it('uses the editor font', () => {
     expect(terminalOptions(get).fontFamily).toBe("Menlo, Monaco, 'Courier New', monospace");
   });

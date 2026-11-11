@@ -1,5 +1,5 @@
 import { Terminal } from '@xterm/xterm';
-import { documentVar, terminalOptions } from '../theme/terminalTheme';
+import { documentVar, terminalOptions, xtermTheme } from '../theme/terminalTheme';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { FitAddon } from '@xterm/addon-fit';
 import type { TmuxApi } from './api';
@@ -49,6 +49,12 @@ export class TerminalRegistry {
   private scheduled = false;
 
   constructor(private api: TmuxApi, private scheduler: Scheduler = rafScheduler) {}
+
+  /** Re-reads the theme (the sidebar style changed the chrome background) into every open terminal. */
+  refreshTheme(): void {
+    const theme = xtermTheme(documentVar);
+    for (const e of this.entries.values()) e.term.options.theme = theme;
+  }
 
   has(pane: string): boolean {
     return this.entries.has(pane);

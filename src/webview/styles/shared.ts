@@ -136,12 +136,12 @@ body.vscode-high-contrast .fm .fm-split-solid .fm-split-chev, body.vscode-high-c
 .fm-sess[data-state='permission'] .fm-sess-state { color: var(--fm-needs-text); }
 .fm-sess[data-state='active'] .fm-sess-state { color: var(--fm-working-text, var(--fm-working)); }
 .fm-sess[data-state='waiting'] .fm-sess-state { color: var(--fm-ok); }
-/* The state indicator (StatusDot): the aside card's square, with its own palette so it looks the same everywhere. */
+/* The state indicator (StatusDot): the aside card's square. Colours come from the active style's --fm-* palette (the desktop chrome defines it on <html> too); the aside values are only fallbacks. */
 .fm-dot {
-  --sd-needs: #c8ff00; --sd-review: #3b82f6; --sd-working: #fafafa; --sd-idle: #525252;
+  --sd-needs: var(--fm-needs, #c8ff00); --sd-review: var(--fm-review, #3b82f6); --sd-working: var(--fm-working, #fafafa); --sd-idle: var(--fm-idle, #525252);
   display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 2px; background: var(--sd-idle);
 }
-body.vscode-light .fm-dot { --sd-review: #2563eb; --sd-working: #0a0a0a; --sd-idle: #a3a3a3; }
+body.vscode-light .fm-dot { --sd-review: var(--fm-review, #2563eb); --sd-working: var(--fm-working, #0a0a0a); --sd-idle: var(--fm-idle, #a3a3a3); }
 .fm-dot[data-size='sm'] { width: 6px; height: 6px; }
 .fm-dot[data-group='needs'] { background: var(--sd-needs); animation: stack-blink 1s ease-in-out infinite; }
 .fm-dot[data-group='review'] { background: var(--sd-review); }
