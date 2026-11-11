@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { Sheet } from '../ui/Sheet';
 import { PROJECT_DEFS, USER_DEFS, isModified, repoValueOf, valueOf, type SettingDef, type SettingValue } from './schema';
 
-/** Full-window Settings editor over ~/.config/stack/settings.json, in the look of VS Code's. */
+/** Settings editor, a centred sheet, over ~/.config/stack/settings.json, in the look of VS Code's. */
 export function SettingsHost({ repo, onClose, onSaved }: { repo?: { name: string; root: string }; onClose: () => void; onSaved: (file: Record<string, unknown>) => void }) {
   const [file, setFile] = useState<Record<string, unknown> | null>(null);
   const [repoFile, setRepoFile] = useState<Record<string, unknown> | null>(null);
@@ -50,12 +51,8 @@ export function SettingsHost({ repo, onClose, onSaved }: { repo?: { name: string
   const inRepo = scope === 'repo' && !!repo;
 
   return (
-    <div className="newtask-host settings-host">
-      <div className="newtask-bar" data-tauri-drag-region>
-        <button type="button" className="newtask-back" onClick={onClose} title="Back (Esc)"><span aria-hidden>←</span> Back</button>
-      </div>
+    <Sheet title="Settings" width={720} className="settings-host" onClose={onClose}>
       <div className="settings-body">
-        <h1>Settings</h1>
         <div className="settings-tabs" role="tablist">
           <button type="button" role="tab" aria-selected={!inRepo} onClick={() => setScope('user')}>User</button>
           {repo && <button type="button" role="tab" aria-selected={inRepo} onClick={() => setScope('repo')}>{repo.name}</button>}
@@ -84,7 +81,7 @@ export function SettingsHost({ repo, onClose, onSaved }: { repo?: { name: string
           <button type="button" className="secondary" onClick={() => invoke('open_settings_file').catch((e) => setError(String(e)))}>Open settings.json</button>
         </div>}
       </div>
-    </div>
+    </Sheet>
   );
 }
 

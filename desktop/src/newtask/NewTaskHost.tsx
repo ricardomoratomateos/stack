@@ -2,10 +2,11 @@ import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from
 // Must come first: the webview modules call acquireVsCodeApi() when they are evaluated.
 import { loadWith, newTaskShim, postToWebview } from '../sidebar/shim';
 import '../sidebar/webviewStyles';
+import { Sheet } from '../ui/Sheet';
 import type { NewTaskExtMessage, NewTaskMessage } from '@core/newtask/types';
 
 /**
- * The extension's own new-task panel, rendered full-window over the app. Its messages come back
+ * The extension's own new-task panel, rendered as a centred sheet over the app. Its messages come back
  * through `onMessage`; the host answers with `post`-ed `init` / `error` (see `NewTaskPanelManager`).
  * The panel and its stylesheet are loaded on first use.
  */
@@ -47,13 +48,8 @@ export function NewTaskHost({ style, onMessage, registerPost }: {
   const back = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
 
   return (
-    <div className="newtask-host" data-style={style}>
-      <div className="newtask-bar" data-tauri-drag-region>
-        <button type="button" className="newtask-back" onClick={back} title="Back (Esc)">
-          <span aria-hidden>←</span> Back
-        </button>
-      </div>
-      {Panel && <Panel />}
-    </div>
+    <Sheet title="New task" className="newtask-sheet" onClose={back}>
+      <div data-style={style}>{Panel && <Panel />}</div>
+    </Sheet>
   );
 }
