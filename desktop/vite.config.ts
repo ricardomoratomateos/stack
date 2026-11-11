@@ -12,5 +12,8 @@ export default defineConfig({
       '@codicons': path.resolve(__dirname, '../node_modules/@vscode/codicons/dist'),
     },
   },
+  // WKWebView on current macOS: no need to lower ES2021+. Lowering xterm's `r ||= {}` let the
+  // minifier drop `let r`, so its DECRQM handler threw a ReferenceError and the terminal stopped.
+  build: { target: 'safari16' },
   server: { port: 1420, strictPort: true, fs: { allow: ['..'] } },
 });
