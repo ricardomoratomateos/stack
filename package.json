@@ -280,6 +280,11 @@
           "default": true,
           "description": "Show a native OS notification, with a chime on macOS, when an agent finishes or asks for permission while VS Code is in the background. Off means no notification and no sound. The sidebar attention badge is always shown regardless."
         },
+        "stack.useDaemon": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Experimental. Let `stackd` (a background process, `dist/stackd.js`) own the worktree state, the agents' hooks and the manager MCP, and use this window as its client; agents keep running when VS Code closes. Needs a window reload. Falls back to the in-window mode if the daemon cannot start."
+        },
         "stack.focusMode": {
           "type": "boolean",
           "default": false,

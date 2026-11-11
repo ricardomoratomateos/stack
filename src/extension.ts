@@ -58,6 +58,54 @@ import { BRIDGE_FILE } from './mcp/protocol';
 import { bridgeCommand, installBridge, type BridgeCommand } from './mcp/workerMcp';
 import { claudeBinary, disableManager, enableManager, execRun, managerEnabled } from './mcp/registration';
 import { installClaudeAssets, removeClaudeAssets } from './mcp/claudeAssets';
+import { DaemonClient } from './daemon/client/DaemonClient';
+import { daemonConfigDir, ensureDaemon, spawnDaemon } from './daemon/client/launch';
+import { RemoteService } from './daemon/client/RemoteService';
+import { explicitUserSettings, stackKeys } from './daemon/client/settings';
+import { socketPathFor } from './daemon/api';
+import { SessionTerminals } from './session/SessionTerminals';
+import type { TerminalTarget } from './session/terminalHost';
+import type { StateChange } from './session/AttentionNotifier';
+import type { Event } from './core/Emitter';
+
+/** What the service the window runs is called by: WorktreeApplicationService in-process, RemoteService over `stackd`. */
+type StackService = Pick<WorktreeApplicationService,
+  | 'setUi' | 'buildState' | 'handleMessage' | 'handleActiveTerminalChange' | 'activeWorktreeId' | 'attachDroppedFiles'
+  | 'handleAddedWorkspaceFolders' | 'syncMainFolderLabel' | 'syncDockerPolling' | 'start'
+  | 'createWorktree' | 'deleteWorktree' | 'renameWorktree' | 'initWorktree' | 'openTerminal' | 'launchAgent'
+  | 'focusNextWorktree' | 'focusPrevWorktree' | 'focusNextAttention' | 'openSessionToSide'
+  | 'getDiff' | 'getContext' | 'send' | 'openFile' | 'newTaskInit' | 'showProviderInstall' | 'confirmDiscardNewTask'>;
+
+/**
+ * Everything the window's UI needs from whoever owns the state: the service,
+ * the session/terminal lookups behind terminal links, image drops and
+ * attention, and the lifecycle bits that differ (hook routes, discovery file).
+ */
+interface Backend {
+  service: StackService;
+  sessionEvents: { onStateChange: Event<StateChange>; onTerminalsChange: Event<void> };
+  gitEvents: Pick<GitWatcher, 'onChange'>;
+  worktreeIdForTerminal(terminal: vscode.Terminal): string | undefined;
+  targetForTerminal(terminal: vscode.Terminal): TerminalTarget | undefined;
+  targetForTerminalName(name: string): TerminalTarget | undefined;
+  hasTerminals(worktreeId: string): boolean;
+  worktreePath(worktreeId: string): string | undefined;
+  labelFor(worktreeId: string): string | undefined;
+  sessionTitle(worktreeId: string, windowIndex: number): string | undefined;
+  paste(worktreeId: string, text: string, windowIndex?: number): Promise<void>;
+  onStateChange: Event<StateChange>;
+  isWatching(worktreeId: string): boolean;
+  bridge: BridgeCommand | undefined;
+  listBranches(repoRoot: string): string[];
+  windowFocused(): void;
+  foldersChanged(): void;
+  /** The UI exists: `push` repaints the sidebar. */
+  attachUi(push: () => void): void;
+  start(): Promise<void>;
+  /** Gets what the new-task panel shows ready (the branch list). */
+  prepareNewTask(): Promise<void>;
+  dispose(): void;
+}
 
 /**
  * Surfaces a broken `.stack/config.json` with a way to go fix it.
@@ -278,6 +326,25 @@ export async function activate(ctx: vscode.ExtensionContext) {
     repoRoot: repoRootOf,
     onProblems: (problems) => void reportRepoConfigProblems(config, problems),
   });
+  // Setup and teardown scripts run headless so the agent launch and a delete
+  // can wait for them; this is where their output goes instead of a terminal.
+  const scriptOutput = vscode.window.createOutputChannel('Stack');
+  ctx.subscriptions.push(scriptOutput);
+
+  // The window is named after the project ("aside (Workspace)") rather than
+  // "Untitled (Workspace)": see workspace/namedWorkspace.ts.
+  const namedWorkspace = new NamedWorkspace({
+    storageDir: ctx.globalStorageUri.fsPath,
+    fs: new NodeFileSystem(),
+    host: vscodeNamedWorkspaceHost(scriptOutput),
+    globalState: ctx.globalState,
+    workspaceState: ctx.workspaceState,
+  });
+
+  const git = new GitCliAdapter();
+
+  // The in-process backend: this window owns the state, the hooks and the agents (the default).
+  const buildLocal = async (): Promise<Backend> => {
   const store = new WorktreeStore({ globalState: new MementoStore(ctx.globalState) });
   // The config getter lets the allocator probe the whole derived docker block,
   // not just the debug port, before handing a slot out. The base port is a
@@ -307,7 +374,6 @@ export async function activate(ctx: vscode.ExtensionContext) {
   );
   const dockerMonitor = new DockerMonitor();
   const gitWatcher = new GitWatcher();
-  const git = new GitCliAdapter();
 
   const hookServer = new HookServer(agentManager);
   const hookUrl = await hookServer.start();
@@ -328,53 +394,12 @@ export async function activate(ctx: vscode.ExtensionContext) {
 
   const prMonitor = new PrMonitor();
 
-  // Clickable file paths in stack terminals — resolves the relative paths
-  // Claude prints (src/foo.ts:12) against the terminal's worktree.
-  const fileLinkProvider = new TerminalFileLinkProvider({
-    resolveBase: (terminal) => {
-      const worktreeId = agentManager.getWorktreeIdForTerminal(terminal);
-      if (worktreeId) return manager.list().find((w) => w.id === worktreeId)?.path;
-      const cwd = (terminal.creationOptions as vscode.TerminalOptions).cwd;
-      return typeof cwd === 'string' ? cwd : cwd?.fsPath;
-    },
-    exists: (p) => fs.existsSync(p),
-    open: async (absPath, line, column) => {
-      const doc = await vscode.workspace.openTextDocument(absPath);
-      const editor = await vscode.window.showTextDocument(doc);
-      if (line !== undefined) {
-        const pos = new vscode.Position(Math.max(line - 1, 0), Math.max((column ?? 1) - 1, 0));
-        editor.selection = new vscode.Selection(pos, pos);
-        editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-      }
-    },
-  });
-  ctx.subscriptions.push(vscode.window.registerTerminalLinkProvider(fileLinkProvider));
-
-  // Dims non-active worktrees in the file explorer so the active one stands out.
-  const dimProvider = new WorktreeDimDecorationProvider();
-  ctx.subscriptions.push(vscode.window.registerFileDecorationProvider(dimProvider));
-
   // Scoped to this window's repository, like everything else that answers
   // "what is in front of the user". Both managers attribute an open file to a
   // worktree by path prefix, so handing them the global store let a file opened
   // in another project's worktree be saved under that worktree's id — in a
   // window that does not manage it, into state its own window then restores.
   const worktreesHere = () => worktreesInRepo(manager.list(), repoRootOf());
-
-  // Setup and teardown scripts run headless so the agent launch and a delete
-  // can wait for them; this is where their output goes instead of a terminal.
-  const scriptOutput = vscode.window.createOutputChannel('Stack');
-  ctx.subscriptions.push(scriptOutput);
-
-  // The window is named after the project ("aside (Workspace)") rather than
-  // "Untitled (Workspace)": see workspace/namedWorkspace.ts.
-  const namedWorkspace = new NamedWorkspace({
-    storageDir: ctx.globalStorageUri.fsPath,
-    fs: new NodeFileSystem(),
-    host: vscodeNamedWorkspaceHost(scriptOutput),
-    globalState: ctx.globalState,
-    workspaceState: ctx.workspaceState,
-  });
 
   // Point the hooks of this window's worktrees at this window's server. Done
   // now, so agents still running from before a reload reach the new port on
@@ -447,6 +472,198 @@ export async function activate(ctx: vscode.ExtensionContext) {
     workspaceNaming: namedWorkspace,
   });
 
+    let pushUi: () => void = () => {};
+    return {
+      service,
+      sessionEvents: agentManager,
+      gitEvents: gitWatcher,
+      worktreeIdForTerminal: (t) => agentManager.getWorktreeIdForTerminal(t),
+      targetForTerminal: (t) => agentManager.getTargetForTerminal(t),
+      targetForTerminalName: (n) => agentManager.getTargetForTerminalName(n),
+      hasTerminals: (id) => agentManager.hasTerminals(id),
+      worktreePath: (id) => manager.list().find((w) => w.id === id)?.path,
+      labelFor: (id) => { const wt = manager.list().find((w) => w.id === id); return wt ? wt.alias ?? wt.branch : undefined; },
+      sessionTitle: (id, index) => agentManager.getSessions(id).find((s) => s.index === index)?.title,
+      paste: (id, text, index) => agentManager.pasteToActiveWindow(id, text, index),
+      onStateChange: agentManager.onStateChange,
+      isWatching: (id) =>
+        vscode.window.state.focused &&
+        vscode.window.activeTerminal !== undefined &&
+        agentManager.getWorktreeIdForTerminal(vscode.window.activeTerminal) === id,
+      bridge,
+      listBranches: (root) => git.listBranches(root),
+      windowFocused: () => { try { windowRegistry.focus(); } catch { /* best effort */ } },
+      foldersChanged: () => updateWindowRegistry(),
+      // Once the UI exists: hook events refresh it, and the window API behind the MCP bridge goes live.
+      attachUi: (push) => {
+        pushUi = push;
+  // What an agent said when it asked for you, for the sidebar's "needs you" rows.
+  // A new prompt also ends a review request: the agent is working again.
+  ctx.subscriptions.push(
+    hookServer.onHookEvent((e) => {
+      if (agentManager.noteHookEvent(e)) pushUi();
+      if (e.event === 'UserPromptSubmit' && e.workspaceId) void service.clearReview(e.workspaceId);
+    }),
+  );
+
+  // The window API the Stack MCP bridge calls (POST /api/<tool>, this
+  // window's token): the manager agent's way in. See mcp/ManagerTools.ts.
+  const managerTools = new ManagerTools({
+    repoRoot: repoRootOf,
+    worktrees: () => service.windowWorktrees(),
+    items: () => service.buildState().worktrees,
+    createWorktree: async (opts) => {
+      const result = await service.createWorktree(opts);
+      // Routable by its id from the next call on.
+      claimHookRoutes();
+      return result;
+    },
+    deleteWorktree: (id, opts) => service.deleteWorktreeById(id, opts),
+    launchAgent: async (id, prompt) => {
+      const wt = service.windowWorktrees().find((w) => w.id === id);
+      if (!wt) return false;
+      await agentManager.launchWithPrompt(wt, prompt);
+      return true;
+    },
+    requestReview: (id, summary) => service.requestReview(id, summary),
+    clearReview: (id) => service.clearReview(id),
+    taskEnv: (id) => service.taskEnv(id),
+    sendPrompt: (wt, text, index) => agentManager.sendPromptToAgent(wt, text, index),
+    capturePane: (id, index, lines) => agentManager.capturePane(id, index, lines),
+    agentState: (id) => agentManager.getState(id),
+    onStateChange: (listener) => agentManager.onStateChange(listener),
+  });
+  hookServer.setApi({ token: windowRegistry.token, handle: (tool, request) => managerTools.handle(tool, request) });
+  windowApiReady = true;
+  updateWindowRegistry();
+  if (vscode.window.state.focused) windowRegistry.focus();
+
+      },
+      start: () => service.start().then(claimHookRoutes),
+      prepareNewTask: () => Promise.resolve(),
+      dispose: () => {
+        agentManager.dispose();
+        gitWatcher.dispose();
+        dockerMonitor.dispose();
+        hookServer.dispose();
+        prMonitor.dispose();
+        // Withdraw this window's routes, but leave the hooks registered. They are
+        // global — one entry in ~/.claude/settings.json serves every window — and
+        // uninstalling them here, as this used to, pulled them out from under
+        // every other window still open, and from the new window of a reload.
+        // With no Stack listening the hook finds no endpoint and exits 0.
+        try { hookRoutes.release(hookUrl); } catch { /* best effort */ }
+        windowRegistry.dispose();
+      },
+    };
+  };
+
+  // Behind `stack.useDaemon`: `stackd` owns the state and the hooks; this window is a client.
+  const buildRemote = async (): Promise<Backend> => {
+    const dir = daemonConfigDir();
+    const socketPath = socketPathFor(dir);
+    const script = path.join(ctx.extensionPath, 'dist', 'stackd.js');
+    const startDaemon = () => spawnDaemon({ node: process.execPath, script, configDir: dir });
+    await ensureDaemon({ socketPath, start: startDaemon });
+    const client = new DaemonClient({ socketPath, revive: () => ensureDaemon({ socketPath, start: startDaemon }).then(() => undefined) });
+    ctx.subscriptions.push({ dispose: () => client.dispose() });
+    // Before anything reads state: this window's Memento goes over (once, never overwriting), then the user's settings.
+    await client.command('importState', {
+      global: stackKeys(ctx.globalState), workspace: stackKeys(ctx.workspaceState), repo: repoRootOf(),
+    });
+    const pushSettings = () => {
+      const cfg = vscode.workspace.getConfiguration('stack');
+      void client.command('setSettings', { values: explicitUserSettings((key) => cfg.inspect(key)) }).catch(() => {});
+    };
+    pushSettings();
+    ctx.subscriptions.push(
+      vscode.workspace.onDidChangeConfiguration((e) => { if (e.affectsConfiguration('stack')) pushSettings(); }),
+      client.onConnection((up) => { if (up) pushSettings(); }),
+    );
+    const first = await client.start();
+    // The MCP bridge the daemon's workers use also finds the daemon (its discovery files live in the same directory).
+    let bridge: BridgeCommand | undefined;
+    try {
+      const installed = installBridge(path.join(ctx.extensionPath, 'dist', BRIDGE_FILE), dir);
+      if (installed) bridge = bridgeCommand(installed);
+    } catch (e) {
+      console.error('[stack] installing the MCP bridge failed:', e);
+    }
+    const terminals = new SessionTerminals(new TmuxManager(first.tmux.socket), (p) => fs.existsSync(p));
+    ctx.subscriptions.push(terminals);
+    const remote = new RemoteService({
+      client, repoRoot: repoRootOf, terminals, notify: new VsCodeNotifyAdapter(), host: new VsCodeWorkspaceHost(scriptOutput),
+      config, installedProviders, workspaceState: ctx.workspaceState,
+    });
+    ctx.subscriptions.push({ dispose: () => remote.dispose() });
+    const never = () => ({ dispose() {} });
+    return {
+      service: remote,
+      // The sidebar repaints on every snapshot: the daemon sends one after each change.
+      sessionEvents: { onStateChange: remote.onStateChange, onTerminalsChange: remote.onChange },
+      gitEvents: { onChange: never },
+      worktreeIdForTerminal: (t) => terminals.targetOf(t)?.worktreeId,
+      targetForTerminal: (t) => terminals.targetOf(t),
+      targetForTerminalName: (n) => terminals.targetOfName(n),
+      hasTerminals: (id) => remote.hasSessions(id),
+      worktreePath: (id) => remote.pathOf(id),
+      labelFor: (id) => remote.labelOf(id),
+      sessionTitle: (id, index) => remote.sessionTitle(id, index),
+      paste: (id, text, index) => remote.paste(id, text, index),
+      onStateChange: remote.onStateChange,
+      isWatching: (id) =>
+        vscode.window.state.focused &&
+        vscode.window.activeTerminal !== undefined &&
+        terminals.targetOf(vscode.window.activeTerminal)?.worktreeId === id,
+      bridge,
+      listBranches: (root) => git.listBranches(root),
+      windowFocused() {},
+      foldersChanged() {},
+      attachUi() {},
+      start: () => remote.start(),
+      prepareNewTask: () => remote.refreshNewTask(),
+      dispose() {},
+    };
+  };
+
+  let backend: Backend | undefined;
+  if (vscode.workspace.getConfiguration('stack').get<boolean>('useDaemon', false)) {
+    try {
+      backend = await buildRemote();
+    } catch (e) {
+      void vscode.window.showWarningMessage(`Stack: could not use stackd (${e instanceof Error ? e.message : String(e)}). Running in this window instead.`);
+    }
+  }
+  backend ??= await buildLocal();
+  const service = backend.service;
+
+  // Clickable file paths in stack terminals — resolves the relative paths
+  // Claude prints (src/foo.ts:12) against the terminal's worktree.
+  const fileLinkProvider = new TerminalFileLinkProvider({
+    resolveBase: (terminal) => {
+      const worktreeId = backend.worktreeIdForTerminal(terminal);
+      if (worktreeId) return backend.worktreePath(worktreeId);
+      const cwd = (terminal.creationOptions as vscode.TerminalOptions).cwd;
+      return typeof cwd === 'string' ? cwd : cwd?.fsPath;
+    },
+    exists: (p) => fs.existsSync(p),
+    open: async (absPath, line, column) => {
+      const doc = await vscode.workspace.openTextDocument(absPath);
+      const editor = await vscode.window.showTextDocument(doc);
+      if (line !== undefined) {
+        const pos = new vscode.Position(Math.max(line - 1, 0), Math.max((column ?? 1) - 1, 0));
+        editor.selection = new vscode.Selection(pos, pos);
+        editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+      }
+    },
+  });
+  ctx.subscriptions.push(vscode.window.registerTerminalLinkProvider(fileLinkProvider));
+
+  // Dims non-active worktrees in the file explorer so the active one stands out.
+  const dimProvider = new WorktreeDimDecorationProvider();
+  ctx.subscriptions.push(vscode.window.registerFileDecorationProvider(dimProvider));
+
+  // (the scripts output, the named workspace and the services above are built before the panels.)
   const diffPanelManager = new DiffPanelManager(ctx.extensionUri, service, () => config.get().sidebarStyle);
 
   const newTaskPanel = new NewTaskPanelManager(ctx.extensionUri, {
@@ -459,8 +676,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
     confirmDiscard: () => service.confirmDiscardNewTask(),
   });
   ctx.subscriptions.push(newTaskPanel);
+  // Over the daemon the branch list is fetched first (the panel's init is synchronous).
+  const openNewTask = () => { void backend.prepareNewTask().catch(() => {}).then(() => newTaskPanel.open()); };
 
-  const webviewProvider = new StackWebviewProvider(ctx.extensionUri, agentManager, gitWatcher, service);
+  const webviewProvider = new StackWebviewProvider(ctx.extensionUri, backend.sessionEvents, backend.gitEvents, service);
   ctx.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SIDEBAR_VIEW_ID, webviewProvider, {
       webviewOptions: { retainContextWhenHidden: true },
@@ -602,9 +821,9 @@ export async function activate(ctx: vscode.ExtensionContext) {
   let shotsDir: string | undefined;
   void screenshotDir().then((dir) => { shotsDir = dir; });
   ctx.subscriptions.push(new ImageDropCatcher({
-    targetForTerminalName: (name) => agentManager.getTargetForTerminalName(name),
-    hasTerminals: (id) => agentManager.hasTerminals(id),
-    labelFor: (id) => { const wt = manager.list().find((w) => w.id === id); return wt ? wt.alias ?? wt.branch : undefined; },
+    targetForTerminalName: (name) => backend.targetForTerminalName(name),
+    hasTerminals: (id) => backend.hasTerminals(id),
+    labelFor: (id) => backend.labelFor(id),
     activeWorktreeId: () => service.activeWorktreeId(),
     isScreenshotLike: (file) => {
       let mtimeMs: number | undefined;
@@ -622,16 +841,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // (inside the window the badge suffices).
   const osaNotify = new OsaNotifyAdapter();
   const attention = new AttentionNotifier({
-    onStateChange: agentManager.onStateChange,
-    labelFor: (id) => {
-      const wt = manager.list().find((w) => w.id === id);
-      return wt ? wt.alias ?? wt.branch : undefined;
-    },
-    sessionTitle: (id, index) => agentManager.getSessions(id).find((s) => s.index === index)?.title,
-    isWatching: (id) =>
-      vscode.window.state.focused &&
-      vscode.window.activeTerminal !== undefined &&
-      agentManager.getWorktreeIdForTerminal(vscode.window.activeTerminal) === id,
+    onStateChange: backend.onStateChange,
+    labelFor: (id) => backend.labelFor(id),
+    sessionTitle: (id, index) => backend.sessionTitle(id, index),
+    isWatching: (id) => backend.isWatching(id),
     enabled: () => config.get().notifyOnAttention,
     notify: (message) => {
       if (!vscode.window.state.focused) osaNotify.notify(message);
@@ -645,20 +858,18 @@ export async function activate(ctx: vscode.ExtensionContext) {
   const acknowledgeActiveTerminal = () => {
     const terminal = vscode.window.activeTerminal;
     if (!terminal) return;
-    const id = agentManager.getWorktreeIdForTerminal(terminal);
+    const id = backend.worktreeIdForTerminal(terminal);
     if (id) attention.acknowledge(id);
   };
   ctx.subscriptions.push(
     vscode.window.onDidChangeActiveTerminal((terminal) => {
       if (!terminal) return;
-      const id = agentManager.getWorktreeIdForTerminal(terminal);
+      const id = backend.worktreeIdForTerminal(terminal);
       if (id) attention.acknowledge(id);
     }),
     vscode.window.onDidChangeWindowState((s) => {
       if (s.focused) acknowledgeActiveTerminal();
-      if (s.focused) {
-        try { windowRegistry.focus(); } catch { /* best effort */ }
-      }
+      if (s.focused) backend.windowFocused();
     }),
   );
 
@@ -666,54 +877,14 @@ export async function activate(ctx: vscode.ExtensionContext) {
     pushWebview: () => webviewProvider.push(),
     syncDecorations: (worktrees, activeWorktreeId) => dimProvider.update(worktrees, activeWorktreeId),
     openDiffPanel: (worktreeId) => diffPanelManager.open(worktreeId),
-    openNewTask: () => newTaskPanel.open(),
+    openNewTask,
   });
-
-  // What an agent said when it asked for you, for the sidebar's "needs you" rows.
-  // A new prompt also ends a review request: the agent is working again.
-  ctx.subscriptions.push(
-    hookServer.onHookEvent((e) => {
-      if (agentManager.noteHookEvent(e)) webviewProvider.push();
-      if (e.event === 'UserPromptSubmit' && e.workspaceId) void service.clearReview(e.workspaceId);
-    }),
-  );
-
-  // The window API the Stack MCP bridge calls (POST /api/<tool>, this
-  // window's token): the manager agent's way in. See mcp/ManagerTools.ts.
-  const managerTools = new ManagerTools({
-    repoRoot: repoRootOf,
-    worktrees: () => service.windowWorktrees(),
-    items: () => service.buildState().worktrees,
-    createWorktree: async (opts) => {
-      const result = await service.createWorktree(opts);
-      // Routable by its id from the next call on.
-      claimHookRoutes();
-      return result;
-    },
-    deleteWorktree: (id, opts) => service.deleteWorktreeById(id, opts),
-    launchAgent: async (id, prompt) => {
-      const wt = service.windowWorktrees().find((w) => w.id === id);
-      if (!wt) return false;
-      await agentManager.launchWithPrompt(wt, prompt);
-      return true;
-    },
-    requestReview: (id, summary) => service.requestReview(id, summary),
-    clearReview: (id) => service.clearReview(id),
-    taskEnv: (id) => service.taskEnv(id),
-    sendPrompt: (wt, text, index) => agentManager.sendPromptToAgent(wt, text, index),
-    capturePane: (id, index, lines) => agentManager.capturePane(id, index, lines),
-    agentState: (id) => agentManager.getState(id),
-    onStateChange: (listener) => agentManager.onStateChange(listener),
-  });
-  hookServer.setApi({ token: windowRegistry.token, handle: (tool, request) => managerTools.handle(tool, request) });
-  windowApiReady = true;
-  updateWindowRegistry();
-  if (vscode.window.state.focused) windowRegistry.focus();
+  backend.attachUi(() => webviewProvider.push());
 
   // VS Code's own agents (Copilot) see the same server, where the API exists.
   const lm = (vscode as unknown as { lm?: Partial<typeof vscode.lm> }).lm;
-  if (bridge && typeof lm?.registerMcpServerDefinitionProvider === 'function' && typeof vscode.McpStdioServerDefinition === 'function') {
-    const { command, args } = bridge;
+  if (backend.bridge && typeof lm?.registerMcpServerDefinitionProvider === 'function' && typeof vscode.McpStdioServerDefinition === 'function') {
+    const { command, args } = backend.bridge;
     ctx.subscriptions.push(lm.registerMcpServerDefinitionProvider('stack.mcp', {
       provideMcpServerDefinitions: () => {
         const def = new vscode.McpStdioServerDefinition('Stack', command, args, {}, String(ctx.extension.packageJSON.version ?? ''));
@@ -728,7 +899,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   ctx.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders((e) => {
       void service.handleAddedWorkspaceFolders(e.added.map((f) => f.uri.fsPath));
-      updateWindowRegistry();
+      backend.foldersChanged();
       // Folders have actually registered by the time this fires, so the main
       // repo's folder can now be relabelled to its branch (the async add in
       // loadWorktreesForRepo still reads a count of 1 and can't).
@@ -770,7 +941,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     ),
     // The "+" in the view header: opens the webview's rich new-task modal
     // (title, branch, base branch, description) rather than a bare input box.
-    vscode.commands.registerCommand('stack.newTask', () => newTaskPanel.open()),
+    vscode.commands.registerCommand('stack.newTask', openNewTask),
     vscode.commands.registerCommand('stack.openSettings', () => settingsPanel.open()),
     vscode.commands.registerCommand('stack.gettingStarted', () =>
       vscode.commands.executeCommand('workbench.action.openWalkthrough', `${EXTENSION_ID}#stack.gettingStarted`, false),
@@ -796,6 +967,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     ),
     vscode.commands.registerCommand('stack.focusSession', (terminal: vscode.Terminal | undefined) => terminal?.show()),
     vscode.commands.registerCommand('stack.enableManagerMcp', async () => {
+      const bridge = backend.bridge;
       if (!bridge) {
         void vscode.window.showErrorMessage('Stack: the MCP bridge is missing from this build (dist/stack-mcp.js).');
         return;
@@ -827,7 +999,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       const term = vscode.window.activeTerminal;
       // The session of the focused tab, not just its worktree: with a tab per
       // session, the worktree's other agent may be the one in front of tmux.
-      const target = term ? agentManager.getTargetForTerminal(term) : undefined;
+      const target = term ? backend.targetForTerminal(term) : undefined;
       if (!target) {
         vscode.window.showWarningMessage('Stack: focus an agent terminal first, then attach the screenshot.');
         return;
@@ -839,34 +1011,23 @@ export async function activate(ctx: vscode.ExtensionContext) {
       }
       // Paste the path single-quoted (as a terminal file-drop does), unsent, so
       // the agent picks up the image and you can still add prompt text.
-      await agentManager.pasteToActiveWindow(target.worktreeId, `'${shot}' `, target.windowIndex);
+      await backend.paste(target.worktreeId, `'${shot}' `, target.windowIndex);
     }),
   );
 
   ctx.subscriptions.push({
     dispose: () => {
       attention.dispose();
-      agentManager.dispose();
-      gitWatcher.dispose();
-      dockerMonitor.dispose();
-      hookServer.dispose();
-      prMonitor.dispose();
       dimProvider.dispose();
       diffPanelManager.dispose();
-      // Withdraw this window's routes, but leave the hooks registered. They are
-      // global — one entry in ~/.claude/settings.json serves every window — and
-      // uninstalling them here, as this used to, pulled them out from under
-      // every other window still open, and from the new window of a reload.
-      // With no Stack listening the hook finds no endpoint and exits 0.
-      try { hookRoutes.release(hookUrl); } catch { /* best effort */ }
-      windowRegistry.dispose();
+      backend.dispose();
     },
   });
 
   // Load worktrees if a repo is already open (e.g. reload window). Fire-and-forget
   // so activation never blocks — the webview renders immediately and folder
   // mutations (which may reload the window) happen after activate() resolves.
-  void service.start().then(claimHookRoutes, (e) => {
+  void backend.start().catch((e) => {
     vscode.window.showErrorMessage(`Stack failed to load worktrees: ${String(e)}`);
   });
 
@@ -877,7 +1038,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // genuinely has nothing open. Gated on a git repo: there's nothing to create a
   // worktree in otherwise.
   const noTabsOpen = vscode.window.tabGroups.all.every((g) => g.tabs.length === 0);
-  if (repoRootOf() && noTabsOpen) newTaskPanel.open();
+  if (repoRootOf() && noTabsOpen) openNewTask();
 
   // A window that is already "Untitled (Workspace)" — made before Stack named
   // them — is offered its name once per repository.

@@ -89,6 +89,7 @@ const SETTINGS_SECTION = 'stack';
  * setting cannot be forgotten here.
  */
 export const SETTING_KEYS = [
+  'useDaemon',
   'worktreesDirectory',
   'defaultBaseBranch',
   'setupScript',

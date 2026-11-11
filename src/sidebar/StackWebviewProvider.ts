@@ -34,9 +34,9 @@ export class StackWebviewProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly agentManager: AgentSessionManager,
-    private readonly gitWatcher: GitWatcher,
-    private readonly service: WorktreeApplicationService,
+    private readonly agentManager: Pick<AgentSessionManager, 'onStateChange' | 'onTerminalsChange'>,
+    private readonly gitWatcher: Pick<GitWatcher, 'onChange'>,
+    private readonly service: Pick<WorktreeApplicationService, 'handleMessage' | 'buildState' | 'handleActiveTerminalChange'>,
   ) {}
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
