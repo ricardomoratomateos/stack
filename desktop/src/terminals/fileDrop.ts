@@ -1,5 +1,6 @@
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import type { TerminalRegistry } from './registry';
+import { log } from '../log';
 
 /** Like Terminal.app: backslash before anything the shell would read specially. */
 export function shellEscapePath(p: string): string {
@@ -25,10 +26,12 @@ export async function watchFileDrops(registry: TerminalRegistry): Promise<() => 
   if (!('__TAURI_INTERNALS__' in window)) return () => {};
   return getCurrentWebview().onDragDropEvent((ev) => {
     if (ev.payload.type !== 'drop') return;
+    log('info', 'drop', JSON.stringify(ev.payload), window.devicePixelRatio);
     const scale = window.devicePixelRatio || 1;
     const { x, y } = ev.payload.position;
     const pane = paneAt(x / scale, y / scale);
     const text = dropText(ev.payload.paths);
+    log('info', 'drop target', pane ?? '(none)');
     if (!pane || !text) return;
     registry.paste(pane, text);
     registry.focus(pane);
