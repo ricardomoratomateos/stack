@@ -34,7 +34,7 @@ With a daemon running, the VS Code extension (`stack.useDaemon` unset) becomes i
 
 In the window: `⌘1`..`⌘9` select a session, `⌘⇧[` / `⌘⇧]` previous/next, `⌘⇧J` next needing you, `⌘0` focus the Manager, `⌘⇧M` expand/collapse it, `⌘⇧F` cycle window mode.
 
-Global (anywhere): `⌃⌥⌘J` next needing you, `⌃⌥⌘M` Manager, `⌃⌥⌘S` show/hide Stack.
+Global (anywhere): `⌃⌥⌘J` next needing you, `⌃⌥⌘M` Manager, `⌃⌥⌘S` show/hide Stack, `⌃⌥⌘F` Float (again to hide).
 
 ## Window modes
 

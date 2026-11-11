@@ -226,10 +226,10 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<TrayIcon> {
         .build(app)
 }
 
-/// Hardcoded for now: ⌃⌥⌘ + J / M / S.
+/// Hardcoded for now: ⌃⌥⌘ + J / M / S / F.
 fn setup_shortcuts(app: &AppHandle) {
     let mods = Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER;
-    let keys = [Code::KeyJ, Code::KeyM, Code::KeyS];
+    let keys = [Code::KeyJ, Code::KeyM, Code::KeyS, Code::KeyF];
     for code in keys {
         if let Err(e) = app.global_shortcut().register(Shortcut::new(Some(mods), code)) {
             eprintln!("global shortcut {code:?} not registered: {e}");
@@ -250,6 +250,19 @@ fn on_shortcut(app: &AppHandle, shortcut: &Shortcut) {
         Code::KeyS => {
             if let Some(w) = app.get_webview_window("main") {
                 toggle_app(&w);
+            }
+        }
+        // Float from anywhere; pressed again while floating and in front, it hides.
+        // Float is the only always-on-top mode (window.rs), so that tells the mode.
+        Code::KeyF => {
+            if let Some(w) = app.get_webview_window("main") {
+                let floating = w.is_always_on_top().unwrap_or(false);
+                if floating && w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false) {
+                    let _ = w.hide();
+                } else {
+                    show_app(app);
+                    let _ = app.emit("menu://mode", "float");
+                }
             }
         }
         _ => {}
