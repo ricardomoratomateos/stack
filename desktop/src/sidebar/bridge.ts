@@ -24,6 +24,7 @@ export function toSidebarState(
   if (!repo) return null;
   return {
     ...repo.state,
+    host: 'desktop',
     activeWorktreeId: opts.activeWorktreeId ?? repo.state.activeWorktreeId,
     sidebarStyle: normalizeSidebarStyle(opts.sidebarStyle ?? repo.state.sidebarStyle),
     ...(opts.defaultProvider ? { defaultProvider: opts.defaultProvider } : {}),

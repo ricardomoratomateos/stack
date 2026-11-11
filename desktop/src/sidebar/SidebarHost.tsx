@@ -1,4 +1,5 @@
-import { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 // Must come first: the webview calls acquireVsCodeApi() when its modules are evaluated.
 import { postToWebview, shim } from './shim';
 import { App as Sidebar } from '@core/webview/App';
@@ -9,7 +10,10 @@ import './webviewStyles';
  * The extension's own sidebar webview, rendered in the app. It gets the same messages the
  * extension posts and its outgoing messages come back through `onMessage`.
  */
-export function SidebarHost({ state, onMessage }: { state: StackState | null; onMessage: (msg: WebMessage) => void }) {
+export function SidebarHost({ state, onMessage, actions }: { state: StackState | null; onMessage: (msg: WebMessage) => void; actions?: ReactNode }) {
+  // `actions` (repo picker, "+") go into the slot the webview leaves in its brand row.
+  const root = useRef<HTMLDivElement>(null);
+  const [slot, setSlot] = useState<Element | null>(null);
   const latest = useRef({ state, onMessage });
   latest.current = { state, onMessage };
 
@@ -30,5 +34,15 @@ export function SidebarHost({ state, onMessage }: { state: StackState | null; on
     if (state) postToWebview({ type: 'state', payload: state });
   }, [state]);
 
-  return <Sidebar />;
+  useLayoutEffect(() => {
+    const found = root.current?.querySelector('[data-host-slot]') ?? null;
+    if (found !== slot) setSlot(found);
+  });
+
+  return (
+    <div ref={root} className="sidebar-webview">
+      <Sidebar />
+      {actions && (slot ? createPortal(actions, slot) : <div className="host-actions">{actions}</div>)}
+    </div>
+  );
 }

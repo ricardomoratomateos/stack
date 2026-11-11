@@ -92,6 +92,8 @@ body.vscode-high-contrast .fm-aside, body.vscode-high-contrast-light .fm-aside {
 .as-wordmark { font-weight: 600; letter-spacing: -.01em; }
 .as-sub { font-family: var(--fm-mono); font-size: 11px; color: var(--fm-text-faint); }
 
+.as-host-slot { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+
 .as-composer-wrap { flex: none; padding: 0 12px 10px; }
 .as-composer {
   width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 12px;
@@ -102,20 +104,16 @@ body.vscode-high-contrast .fm-aside, body.vscode-high-contrast-light .fm-aside {
 .as-placeholder { flex: 1; color: var(--fm-text-faint); }
 .as-new { flex: none; height: 24px; padding: 0 10px; display: flex; align-items: center; border-radius: 4px; background: var(--fm-accent); color: var(--fm-accent-ink, #0a0a0a); font-size: 12px; font-weight: 600; }
 
-.as-chips { flex: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0 12px 8px; padding: 2px; border-radius: 6px; background: var(--fm-chips-bg, rgba(127,127,127,.08)); }
+.as-chips { flex: none; display: flex; flex-wrap: wrap; gap: 4px; margin: 0 12px 8px; }
 .as-chip {
-  height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 4px;
-  background: transparent; border: 0; color: var(--fm-text-dim); font-size: 11.5px; white-space: nowrap;
+  height: 22px; display: flex; align-items: center; gap: 5px; padding: 0 8px; border-radius: 11px;
+  background: var(--fm-chips-bg, rgba(127,127,127,.08)); border: 0; color: var(--fm-text-dim); font-size: 11.5px; white-space: nowrap;
   min-width: 0; overflow: hidden;
-}
-.as-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-@container fm (max-width: 400px) {
-  .as-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .as-chip:hover { background: var(--fm-hover); }
 .as-chip[aria-pressed='true'] { background: var(--fm-selected); border-color: var(--fm-text-faint); color: var(--fm-text); }
 .as-chip-n { font-family: var(--fm-mono); color: var(--fm-text); }
-.as-chip-dot { width: 6px; height: 6px; border-radius: 1px; background: var(--fm-idle); }
+.as-chip-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fm-idle); }
 .as-chip[data-group='needs'] .as-chip-dot { background: var(--fm-needs); }
 .as-chip[data-group='review'] .as-chip-dot { background: var(--fm-review); }
 .as-chip[data-group='working'] .as-chip-dot { background: var(--fm-working); }

@@ -57,6 +57,9 @@ export function Aside({ state, loaded, items, controlItem, selectedId, select, d
   const [filter, setFilter] = useState<WorktreeGroup | 'all'>('all');
   const counts = countByGroup(items);
   const visible = items.filter((d) => filter === 'all' || d.group === filter);
+  // The desktop app hosts the webview: it supplies the picker and "+" in the brand row (a slot it fills)
+  // and has no composer; the "/ aside" label and the composer stay in VS Code.
+  const desktop = state.host === 'desktop';
 
   return (
     <div className="fm fm-aside">
@@ -65,34 +68,35 @@ export function Aside({ state, loaded, items, controlItem, selectedId, select, d
       <div className="as-brand">
         <span className="as-mark"><Mark /></span>
         <span className="as-wordmark">{PRODUCT_NAME.toLowerCase()}</span>
-        <span className="as-sub">/ aside</span>
+        {desktop ? <span className="as-host-slot" data-host-slot /> : <span className="as-sub">/ aside</span>}
       </div>
 
-      <div className="as-composer-wrap">
-        <button type="button" className="as-composer" aria-label="New task" onClick={() => send({ type: 'openNewTask' })}>
-          <span className="as-placeholder fm-ellipsis">What should an agent build?</span>
-          <span className="as-new">New</span>
-        </button>
-      </div>
+      {loaded && controlItem && (
+        <div className="as-pinned">
+          <Row d={controlItem} selected={controlItem.wt.id === selectedId} now={now} state={state} select={select} drag={dragFor(controlItem.wt)} />
+        </div>
+      )}
+
+      {!desktop && (
+        <div className="as-composer-wrap">
+          <button type="button" className="as-composer" aria-label="New task" onClick={() => send({ type: 'openNewTask' })}>
+            <span className="as-placeholder fm-ellipsis">What should an agent build?</span>
+            <span className="as-new">New</span>
+          </button>
+        </div>
+      )}
 
       {loaded && items.length > 0 && (
         <div className="as-chips" role="group" aria-label="Filter by state">
           {CHIPS.map((group) => {
             const on = filter === group;
             return (
-              <button key={group} type="button" className="as-chip" data-group={group} aria-pressed={on} onClick={() => setFilter(on ? 'all' : group)}>
+              <button key={group} type="button" className="as-chip" data-group={group} aria-pressed={on} title={`${GROUP_SHORT[group]}: ${counts[group]}`} aria-label={`${GROUP_SHORT[group]}: ${counts[group]}`} onClick={() => setFilter(on ? 'all' : group)}>
                 <span className="as-chip-dot" aria-hidden="true" />
                 <span className="as-chip-n">{counts[group]}</span>
-                <span className="as-chip-label">{GROUP_SHORT[group]}</span>
               </button>
             );
           })}
-        </div>
-      )}
-
-      {loaded && controlItem && (
-        <div className="as-pinned">
-          <Row d={controlItem} selected={controlItem.wt.id === selectedId} now={now} state={state} select={select} drag={dragFor(controlItem.wt)} />
         </div>
       )}
 

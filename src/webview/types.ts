@@ -166,6 +166,8 @@ export interface StackState {
    * CLI missing). While set, an empty stack means "unknown", not "down".
    */
   dockerUnavailable?: string;
+  /** Set by the desktop app, which hosts this webview: it fills the brand row's slot and has no composer. */
+  host?: 'desktop';
   /** Which layout the sidebar renders (stack.sidebarStyle). */
   sidebarStyle?: SidebarStyle;
   /** Local branches offered as the base for a new worktree (filled on demand). */

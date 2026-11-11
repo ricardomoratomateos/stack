@@ -15,7 +15,7 @@ export function DevSidebar() {
   const width = Number(params.get('width')) || 340;
   const [selected, setSelected] = useState('ask');
   const [last, setLast] = useState('');
-  const state = useMemo(() => ({ ...sampleState(), sidebarStyle: style, activeWorktreeId: selected }), [style, selected]);
+  const state = useMemo(() => ({ ...sampleState(), host: 'desktop' as const, sidebarStyle: style, activeWorktreeId: selected }), [style, selected]);
   const ctx = useMemo(() => ({ repoRoot: '/r', worktrees: [...state.worktrees, ...(state.controlSession ? [state.controlSession] : [])] }), [state]);
 
   return (
