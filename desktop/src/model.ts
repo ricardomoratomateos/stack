@@ -114,11 +114,23 @@ export interface KeyLike {
   shiftKey: boolean;
   altKey: boolean;
   code: string;
+  key?: string;
 }
 
-/** ⌘1..9, ⌘⇧[ / ⌘⇧], ⌘⇧J, ⌘0, ⌘⇧M, ⌘⇧F, ⌘⇧Enter. Layout-independent (uses the physical key). */
+function bracketOf(e: KeyLike): 'prev' | 'next' | null {
+  if (e.code === 'BracketLeft' || e.key === '[' || e.key === '{') return 'prev';
+  if (e.code === 'BracketRight' || e.key === ']' || e.key === '}') return 'next';
+  return null;
+}
+
+/** ⌘1..9, ⌘⇧[ / ⌘⇧], ⌘⇧J, ⌘0, ⌘⇧M, ⌘⇧F, ⌘⇧Enter. Digits and letters use the physical key; the brackets match the
+ * physical key OR the produced character ('[' ']' '{' '}'), since on some layouts (Spanish) they need ⌥ and
+ * the key code is not what the user presses. The layout-proof next/previous are the menu's ⌥⌘↓ / ⌥⌘↑. */
 export function shortcutOf(e: KeyLike): Shortcut | null {
-  if (!e.metaKey || e.ctrlKey || e.altKey) return null;
+  if (!e.metaKey || e.ctrlKey) return null;
+  const bracket = e.shiftKey ? bracketOf(e) : null;
+  if (bracket) return { kind: bracket };
+  if (e.altKey) return null;
   const digit = /^Digit([0-9])$/.exec(e.code);
   if (!e.shiftKey && digit) {
     const n = Number(digit[1]);
@@ -126,8 +138,6 @@ export function shortcutOf(e: KeyLike): Shortcut | null {
   }
   if (e.shiftKey) {
     if (e.code === 'Enter' || e.code === 'NumpadEnter') return { kind: 'maximize' };
-    if (e.code === 'BracketLeft') return { kind: 'prev' };
-    if (e.code === 'BracketRight') return { kind: 'next' };
     if (e.code === 'KeyJ') return { kind: 'needs' };
     if (e.code === 'KeyM') return { kind: 'toggle-manager' };
     if (e.code === 'KeyF') return { kind: 'cycle-mode' };

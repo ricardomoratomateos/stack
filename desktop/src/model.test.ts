@@ -104,6 +104,9 @@ describe('shortcutOf', () => {
     expect(shortcutOf(key('BracketLeft', { shiftKey: true }))).toEqual({ kind: 'prev' });
     expect(shortcutOf(key('BracketRight', { shiftKey: true }))).toEqual({ kind: 'next' });
     expect(shortcutOf(key('KeyJ', { shiftKey: true }))).toEqual({ kind: 'needs' });
+    expect(shortcutOf({ ...key('Quote', { shiftKey: true }), key: '{' })).toEqual({ kind: 'prev' });
+    expect(shortcutOf({ ...key('Equal', { shiftKey: true }), key: ']' })).toEqual({ kind: 'next' });
+    expect(shortcutOf({ ...key('BracketLeft', { shiftKey: true, altKey: true }), key: '”' })).toEqual({ kind: 'prev' });
     expect(shortcutOf(key('KeyM', { shiftKey: true }))).toEqual({ kind: 'toggle-manager' });
   });
   it('ignores everything else, so the terminal keeps its keys', () => {

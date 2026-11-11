@@ -196,17 +196,26 @@ export function App() {
       else stripRef.current?.focus();
     }
   }, [select, touch]);
+  // ⌘⇧J is both a menu accelerator and a JS shortcut; only one of the two may act per press.
+  const lastNeeds = useRef(0);
+  const dedupeNeeds = useCallback(() => {
+    const now = performance.now();
+    if (now - lastNeeds.current < 60) return false;
+    lastNeeds.current = now;
+    return true;
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const sc = shortcutOf(e);
       if (!sc) return;
       e.preventDefault();
       e.stopPropagation();
+      if (sc.kind === 'needs' && !dedupeNeeds()) return;
       runEffect(resolveShortcut(sc, latest.current.items ?? [], latest.current.selectedId));
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [runEffect]);
+  }, [runEffect, dedupeNeeds]);
 
   // ⌃Tab switcher (Alt+Tab style). Hold Control, Tab steps through worktrees in MRU order, releasing Control selects.
   // The overlay only shows after a short hold, so a quick ⌃Tab just toggles to the previous one.
@@ -226,48 +235,73 @@ export function App() {
     select(id);
     setCentreFocusTick((t) => t + 1);
   }, [closeSwitcher, runEffect, select]);
-  useEffect(() => {
-    const stepTo = (dir: 1 | -1) => {
-      const cur = swRef.current;
-      if (!cur) return;
+  const lastStep = useRef(0);
+  // One ⌃Tab press: opens the switcher, or moves the highlight if it is open. The native menu accelerator
+  // (menu://go) is the real path; the JS keydown is a fallback, deduped in case both ever fire.
+  const switchStep = useCallback((dir: 1 | -1) => {
+    const now = performance.now();
+    if (now - lastStep.current < 60) return;
+    lastStep.current = now;
+    const cur = swRef.current;
+    if (cur) {
       cur.index = stepWrap(cur.index, cur.rows.length, dir);
       setSw((s) => (s ? { ...s, index: cur.index } : s));
-    };
+      return;
+    }
+    const { items: its, control, repoRoot: repo } = latest.current;
+    const rows = switcherRows(its ?? [], control, (repo && history.current[repo]) || []);
+    if (rows.length < 2) return;
+    const index = dir === -1 ? rows.length - 1 : 1;
+    swRef.current = { rows, index };
+    setSw({ rows, index, visible: false });
+    swTimer.current = window.setTimeout(() => setSw((s) => (s ? { ...s, visible: true } : s)), 150);
+  }, []);
+  const commitCurrent = useCallback(() => {
+    const cur = swRef.current;
+    if (cur) commitSwitcher(cur.rows[cur.index]?.id);
+  }, [commitSwitcher]);
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const cur = swRef.current;
       if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Tab') {
         e.preventDefault();
         e.stopPropagation();
-        if (!cur) {
-          const { items: its, control, repoRoot: repo } = latest.current;
-          const rows = switcherRows(its ?? [], control, (repo && history.current[repo]) || []);
-          if (rows.length < 2) return;
-          const index = e.shiftKey ? rows.length - 1 : 1;
-          swRef.current = { rows, index };
-          setSw({ rows, index, visible: false });
-          swTimer.current = window.setTimeout(() => setSw((s) => (s ? { ...s, visible: true } : s)), 150);
-        } else stepTo(e.shiftKey ? -1 : 1);
+        switchStep(e.shiftKey ? -1 : 1);
         return;
       }
       if (!cur) return;
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSwitcher(); }
-      else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); stepTo(1); }
-      else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); stepTo(-1); }
-      else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); commitSwitcher(cur.rows[cur.index]?.id); }
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); switchStep(1); }
+      else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); switchStep(-1); }
+      else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); commitCurrent(); }
     };
+    // Releasing Control commits (keyup reaches the page even though ⌃Tab itself goes through the native menu).
     const onKeyUp = (e: KeyboardEvent) => {
-      const cur = swRef.current;
-      if (cur && e.key === 'Control') { e.preventDefault(); e.stopPropagation(); commitSwitcher(cur.rows[cur.index]?.id); }
+      if (swRef.current && e.key === 'Control') { e.preventDefault(); e.stopPropagation(); commitCurrent(); }
     };
+    const offs = [
+      listen<string>('menu://go', (e) => {
+        switch (e.payload) {
+          case 'switch': switchStep(1); break;
+          case 'switch-back': switchStep(-1); break;
+          case 'needs': if (!dedupeNeeds()) break; // fallthrough
+          case 'next': case 'prev':
+            runEffect(resolveShortcut({ kind: e.payload }, latest.current.items ?? [], latest.current.selectedId));
+            break;
+          case 'manager': runEffect({ focusManager: true }); break;
+        }
+      }),
+    ];
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('keyup', onKeyUp, true);
-    window.addEventListener('blur', closeSwitcher);
+    window.addEventListener('blur', commitCurrent);
     return () => {
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('keyup', onKeyUp, true);
-      window.removeEventListener('blur', closeSwitcher);
+      window.removeEventListener('blur', commitCurrent);
+      offs.forEach((p) => void p.then((off) => off()).catch(() => {}));
     };
-  }, [commitSwitcher, closeSwitcher]);
+  }, [commitCurrent, closeSwitcher, switchStep, runEffect, dedupeNeeds]);
   useEffect(() => {
     if (centreFocusTick > 0 && centre.pane) registry.focus(centre.pane);
   }, [centreFocusTick, centre.pane, registry]);

@@ -1,6 +1,8 @@
 //! The native application menu (macOS menu bar): Stack (About, Settings…, Hide, Quit), Edit (so ⌘C / ⌘V
 //! work in inputs), View (window modes) and Window. Clicks become events for the webview:
-//! `menu://settings` and `menu://mode` (payload "full" / "half" / "float" / "cycle" / "side").
+//! `menu://settings`, `menu://mode` (payload "full" / "half" / "float" / "cycle" / "side") and `menu://go` (payload
+//! "switch" / "switch-back" / "next" / "prev" / "needs" / "manager"). Go carries ⌃Tab: AppKit swallows it as a key-view
+//! loop key before the page sees it, but menu key equivalents are matched first.
 //!
 //! "Cycle mode" has no accelerator here: ⇧⌘F is already handled by the webview (src/model.ts), and
 //! both would toggle it twice.
@@ -10,6 +12,12 @@ use tauri::{AppHandle, Emitter};
 
 const SETTINGS: &str = "app-settings";
 const MODE_PREFIX: &str = "app-mode:";
+const GO_PREFIX: &str = "app-go:";
+
+/// The payload of `menu://go` for a menu item id, if it is one of the Go items.
+pub fn go_of(id: &str) -> Option<&str> {
+    id.strip_prefix(GO_PREFIX).filter(|m| matches!(*m, "switch" | "switch-back" | "next" | "prev" | "needs" | "manager"))
+}
 
 /// The payload of `menu://mode` for a menu item id, if it is one of the mode items.
 pub fn mode_of(id: &str) -> Option<&str> {
@@ -61,13 +69,29 @@ fn build(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &mode("side", "Snap Half to the Other Side", None)?,
         ],
     )?;
+    let go_item = |id: &str, text: &str, accel: &str| MenuItem::with_id(app, format!("{GO_PREFIX}{id}"), text, true, Some(accel));
+    let go = Submenu::with_items(
+        app,
+        "Go",
+        true,
+        &[
+            &go_item("switch", "Switch Agent", "Ctrl+Tab")?,
+            &go_item("switch-back", "Switch Agent Backwards", "Ctrl+Shift+Tab")?,
+            &PredefinedMenuItem::separator(app)?,
+            &go_item("next", "Next Worktree", "Alt+Cmd+Down")?,
+            &go_item("prev", "Previous Worktree", "Alt+Cmd+Up")?,
+            &go_item("needs", "Next That Needs You", "Cmd+Shift+J")?,
+            &PredefinedMenuItem::separator(app)?,
+            &go_item("manager", "Manager", "Cmd+0")?,
+        ],
+    )?;
     let window = Submenu::with_items(
         app,
         "Window",
         true,
         &[&PredefinedMenuItem::minimize(app, None)?, &PredefinedMenuItem::maximize(app, Some("Zoom"))?],
     )?;
-    Menu::with_items(app, &[&stack, &edit, &view, &window])
+    Menu::with_items(app, &[&stack, &edit, &view, &go, &window])
 }
 
 pub fn setup(app: &AppHandle) -> tauri::Result<()> {
@@ -78,6 +102,8 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
             let _ = app.emit("menu://settings", ());
         } else if let Some(m) = mode_of(id) {
             let _ = app.emit("menu://mode", m);
+        } else if let Some(g) = go_of(id) {
+            let _ = app.emit("menu://go", g);
         }
     });
     Ok(())
@@ -86,6 +112,13 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn go_ids_map_to_the_payload() {
+        assert_eq!(go_of("app-go:switch-back"), Some("switch-back"));
+        assert_eq!(go_of("app-go:needs"), Some("needs"));
+        assert_eq!(go_of("app-go:nope"), None);
+    }
 
     #[test]
     fn mode_ids_map_to_the_payload() {

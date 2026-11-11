@@ -175,6 +175,7 @@ body[data-resizing] .term-host, body[data-resizing] .sidebar-body { pointer-even
 .switcher-row:not([data-selected]):hover { background: var(--vscode-list-hoverBackground); }
 .switcher-name { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .switcher-line { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.7; font-size: 0.9em; }
+.switcher-foot { position: sticky; bottom: 0; padding: 6px 16px 2px; font-size: 0.85em; opacity: 0.6; background: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .switcher-hint { flex: none; opacity: 0.6; font-size: 0.9em; }
 .switcher-row[data-state='permission'] .switcher-name { font-weight: 600; }
 .switcher-row[data-state='permission'] > .dot { background: var(--vscode-terminal-ansiBrightGreen, var(--vscode-editorWarning-foreground)); box-shadow: 0 0 0 2px var(--vscode-editorWarning-foreground); }

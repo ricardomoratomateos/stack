@@ -17,6 +17,7 @@ export function Switcher({ rows, index, onPick }: { rows: SwitcherRow[]; index: 
             <span className="switcher-hint">{r.hint}</span>
           </li>
         ))}
+        <li className="switcher-foot" role="presentation">⌃Tab cambiar · ⌥⌘↑↓ anterior/siguiente · ⌘⇧J te necesita</li>
       </ul>
     </div>
   );
