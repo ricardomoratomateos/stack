@@ -13,7 +13,7 @@ always visible), native notifications with Allow / View.
 ## Rules for every task
 
 - Work on branch `v1`, directly (no worktrees). One task = one commit.
-- Before committing: `npm run compile`, `npm test` and `npm run lint` pass
+- Before committing: `npm run compile`, `npm test` and `npx tsc --noEmit` pass (no ESLint config exists; `npm run lint` is not used)
   (Rust tasks: `cargo build`, `cargo test`, `cargo clippy`).
 - Rust: run `. "$HOME/.cargo/env"` first; `cargo` is not on the default PATH.
 - Don't change user-visible behaviour of the extension unless the task says so.
