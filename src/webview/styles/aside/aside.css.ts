@@ -114,7 +114,6 @@ body.vscode-high-contrast .fm-aside, body.vscode-high-contrast-light .fm-aside {
 .as-chip[aria-pressed='true'] { background: var(--fm-selected); color: var(--fm-text); }
 .as-chip-n { font-family: var(--fm-mono); color: var(--fm-text); }
 .as-chip[data-zero] { opacity: .4; }
-.as-chip[data-group='needs'] .as-chip[data-group='review'] .as-chip[data-group='working'] 
 .as-pinned { flex: none; padding: 8px 8px; margin-bottom: 4px; border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-sideBar-border, var(--fm-border))); }
 .as-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 16px; display: flex; flex-direction: column; }
 .as-list > .fm-empty { flex: 1; }
