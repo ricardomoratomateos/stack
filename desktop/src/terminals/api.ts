@@ -17,6 +17,8 @@ export interface TmuxApi {
   paneCursor(pane: string): Promise<[number, number, boolean]>;
   /** What ⌘V should paste: an image (agents read it on Ctrl+V) or the clipboard's text. */
   clipboardPaste(): Promise<{ image: boolean; text: string }>;
+  /** Paste through tmux, bracketed when the program asked for it. */
+  pasteText(pane: string, text: string): Promise<void>;
   /** Pane output as raw bytes (one binary `Channel`, no base64). Resolves once subscribed. */
   onOutput(cb: (pane: string, data: Uint8Array) => void): Promise<UnlistenFn>;
   onLayout(cb: (session: string) => void): Promise<UnlistenFn>;
@@ -33,6 +35,7 @@ export const tmux: TmuxApi = {
   resize: (pane, cols, rows) => invoke('resize', { pane, cols, rows }),
   paneCursor: (pane) => invoke('pane_cursor', { pane }),
   clipboardPaste: () => invoke('clipboard_paste'),
+  pasteText: (pane, text) => invoke('paste_text', { pane, text }),
   capture: (pane, start, end) => invoke('capture', { pane, start, end: end ?? null }),
   onOutput: async (cb) => {
     const channel = new Channel<ArrayBuffer | number[]>();

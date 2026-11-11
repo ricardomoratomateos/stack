@@ -153,7 +153,7 @@ export class TerminalRegistry {
 
   /** Paste text into a pane the way the user's paste would (bracketed when the app asked for it). */
   paste(pane: string, text: string): void {
-    this.entries.get(pane)?.term.paste(text);
+    void this.api.pasteText(pane, text).catch(() => {});
   }
 
   /** Focus a pane's terminal (it must be shown). */
@@ -262,7 +262,7 @@ export class TerminalRegistry {
       if (ev.type !== 'keydown' || !ev.metaKey || ev.ctrlKey || ev.altKey || ev.key.toLowerCase() !== 'v') return true;
       ev.preventDefault();
       void this.api.clipboardPaste().then(
-        (c) => (c.image ? this.api.write(pane, [0x16]) : c.text && term.paste(c.text)),
+        (c) => (c.image ? this.api.write(pane, [0x16]) : c.text ? this.api.pasteText(pane, c.text) : undefined),
         () => {},
       );
       return false;

@@ -268,6 +268,27 @@ pub async fn pane_cursor(state: State<'_, Bridge>, pane: String) -> Result<(u16,
     bridge::parse_cursor(&out).ok_or_else(|| format!("unexpected cursor reply {out:?}"))
 }
 
+/// Paste `text` into a pane through tmux (`paste-buffer -p`), so it arrives bracketed when the
+/// program asked for bracketed paste. xterm can't know that after a resync, and agents only turn a
+/// pasted image path into an attachment when it comes as a paste, not as typing.
+#[tauri::command]
+pub async fn paste_text(state: State<'_, Bridge>, pane: String, text: String) -> Result<(), String> {
+    check(&pane, '%')?;
+    if text.is_empty() {
+        return Ok(());
+    }
+    let client = state.client_for_pane(&pane).await?;
+    let file = std::env::temp_dir().join(format!("stack-paste-{}-{}", std::process::id(), pane.trim_start_matches('%')));
+    std::fs::write(&file, text.as_bytes()).map_err(|e| e.to_string())?;
+    let buffer = format!("stack-paste-{}", pane.trim_start_matches('%'));
+    let path = file.to_string_lossy().into_owned();
+    let loaded = client.run(&format!("load-buffer -b {buffer} {}", tmux_cc::client::quote(&path))).await;
+    let _ = std::fs::remove_file(&file);
+    loaded.map_err(err)?;
+    client.run(&format!("paste-buffer -p -d -b {buffer} -t {pane}")).await.map_err(err)?;
+    Ok(())
+}
+
 /// What ⌘V should paste: `image` when the clipboard holds a picture (agents read it themselves
 /// on Ctrl+V), otherwise its text. WKWebView gives a paste event no image data, so ask macOS.
 #[derive(Serialize)]

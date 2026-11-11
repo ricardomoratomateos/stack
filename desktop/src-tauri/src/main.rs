@@ -35,6 +35,7 @@ fn main() {
             commands::capture,
             commands::pane_cursor,
             commands::clipboard_paste,
+            commands::paste_text,
             commands::stackd_latest,
             commands::stackd_command,
             commands::stackd_login_status,
