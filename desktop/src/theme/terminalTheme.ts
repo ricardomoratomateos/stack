@@ -35,7 +35,7 @@ export function xtermTheme(get: (cssVar: string) => string): ITheme {
 export function terminalOptions(get: (cssVar: string) => string): ITerminalOptions {
   return {
     fontFamily: get('--vscode-editor-font-family').trim() || "Menlo, Monaco, 'Courier New', monospace",
-    fontSize: 14,
+    fontSize: 12, // VS Code default on macOS (editor.fontSize = 12)
     lineHeight: 1,
     cursorBlink: false,
     cursorStyle: 'block',
