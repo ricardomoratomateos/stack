@@ -148,11 +148,15 @@ Interpretation:
   input line; ⌘⇧M expands it. Float: always-on-top window (non-activating
   NSPanel on macOS), compact worktree list with Allow on the one that needs
   you, session area, Manager strip always visible. Same state everywhere.
-- [ ] **T11 · Notifications, tray, global shortcuts.** Native notifications
-  for "needs you" with Allow / View (grouped within 5 s, never for the
+- [ ] **T11 · Notifications, tray, global shortcuts.** No Apple Developer
+  account yet: ad-hoc signed app, native notifications WITHOUT action
+  buttons (click → app focuses that session), best-effort with a fallback;
+  Allow lives in the app (Float list, menu-bar menu). Notifications for
+  "needs you" (grouped within 5 s, never for the
   session on screen, re-notify at 2 and 10 min); menu-bar item with counts;
   global ⌃⌥⌘J (next needing you), ⌃⌥⌘M (Manager), ⌃⌥⌘S (show Stack).
-- [ ] **T12 · Packaging.** Signed `.app`, `stackd` bundled and run as a
+- [ ] **T12 · Packaging.** Ad-hoc signed `.app` (Developer ID + notification
+  actions later, when there is an account), `stackd` bundled and run as a
   launchd user agent; the extension defaults `stack.useDaemon` to true when
   a daemon is present.
 
@@ -195,3 +199,4 @@ Interpretation:
 - 2026-11-11 · Desktop theme: `desktop/scripts/gen-vscode-theme.mjs` writes `src/theme/vscode-theme.css` (`--vscode-*` for Dark Modern + font vars + the webview default stylesheet, all read from the local VS Code install: theme + `include`s, `registerColor` defaults of workbench.desktop.main.js, `contributes.colors` of built-in extensions); `--theme/--kind` regenerate for another theme. Chrome (tabs, Manager header, dialogs) and xterm (`terminal.*`, editor font, size 14) use the same variables; centre terminals use editor.background, Manager sideBar.background.
 - 2026-11-11 · Desktop `stack.sidebarStyle` comes from the user's VS Code `settings.json` (Tauri `vscode_settings`, JSONC), else `aside`. Dev page: `/?dev=sidebar[&style=claude|mission][&width=]` renders the sidebar on a fixed sample state (`sidebar/fixtures.ts`).
 - 2026-11-11 · Sidebar in the app is the extension's own webview (`src/webview`) + generated VS Code theme variables; shared CSS fixes apply to both.
+- 2026-11-11 · No Apple Developer account: ad-hoc signing; notifications without action buttons for now.
