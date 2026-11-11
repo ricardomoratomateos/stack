@@ -83,7 +83,7 @@ export function Aside({ state, loaded, items, controlItem, selectedId, select, d
               <button key={group} type="button" className="as-chip" data-group={group} aria-pressed={on} onClick={() => setFilter(on ? 'all' : group)}>
                 <span className="as-chip-dot" aria-hidden="true" />
                 <span className="as-chip-n">{counts[group]}</span>
-                <span>{GROUP_SHORT[group]}</span>
+                <span className="as-chip-label">{GROUP_SHORT[group]}</span>
               </button>
             );
           })}
