@@ -27,9 +27,9 @@ export async function watchFileDrops(registry: TerminalRegistry): Promise<() => 
   return getCurrentWebview().onDragDropEvent((ev) => {
     if (ev.payload.type !== 'drop') return;
     log('info', 'drop', JSON.stringify(ev.payload), window.devicePixelRatio);
-    const scale = window.devicePixelRatio || 1;
+    // Typed as a PhysicalPosition, but on macOS Tauri reports it in logical (CSS) points already.
     const { x, y } = ev.payload.position;
-    const pane = paneAt(x / scale, y / scale);
+    const pane = paneAt(x, y);
     const text = dropText(ev.payload.paths);
     log('info', 'drop target', pane ?? '(none)');
     if (!pane || !text) return;
