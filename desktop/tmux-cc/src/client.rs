@@ -61,6 +61,8 @@ impl Config {
         if let Some(s) = &self.socket {
             a.extend(["-L".to_string(), s.clone()]);
         }
+        // -u: UTF-8 even when launched without a UTF-8 locale (apps opened from Finder have none).
+        a.push("-u".into());
         a.push("-C".into());
         match &self.mode {
             Mode::Attach { target } => a.extend(["attach-session".into(), "-t".into(), target.clone()]),

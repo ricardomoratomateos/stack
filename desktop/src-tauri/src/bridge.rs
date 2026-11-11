@@ -85,14 +85,18 @@ pub struct PaneInfo {
     pub command: String,
 }
 
-/// Format string for `list-panes`; fields are tab separated.
+/// Separator between `list-panes` fields. Printable ASCII on purpose: tmux turns control
+/// characters such as a tab into `_` when it doesn't see a UTF-8 locale (an app opened from Finder).
+pub const LIST_SEP: &str = "|~|";
+
+/// Format string for `list-panes`. The window name, free text, goes last.
 pub const LIST_FORMAT: &str =
-    "#{pane_id}\t#{window_id}\t#{window_index}\t#{window_name}\t#{pane_width}\t#{pane_height}\t#{pane_active}\t#{pane_current_command}";
+    "#{pane_id}|~|#{window_id}|~|#{window_index}|~|#{pane_width}|~|#{pane_height}|~|#{pane_active}|~|#{pane_current_command}|~|#{window_name}";
 
 pub fn parse_panes(text: &str) -> Vec<PaneInfo> {
     text.lines()
         .filter_map(|l| {
-            let f: Vec<&str> = l.split('\t').collect();
+            let f: Vec<&str> = l.splitn(8, LIST_SEP).collect();
             if f.len() < 8 {
                 return None;
             }
@@ -101,11 +105,11 @@ pub fn parse_panes(text: &str) -> Vec<PaneInfo> {
                 session: String::new(),
                 window: f[1].into(),
                 window_index: f[2].parse().ok()?,
-                window_name: f[3].into(),
-                cols: f[4].parse().ok()?,
-                rows: f[5].parse().ok()?,
-                active: f[6] == "1",
-                command: f[7].into(),
+                window_name: f[7].into(),
+                cols: f[3].parse().ok()?,
+                rows: f[4].parse().ok()?,
+                active: f[5] == "1",
+                command: f[6].into(),
             })
         })
         .collect()
@@ -303,12 +307,14 @@ mod tests {
 
     #[test]
     fn parses_list_panes() {
-        let text = "%0\t@0\t0\tzsh\t80\t24\t1\tzsh\n%1\t@0\t0\tzsh\t80\t24\t0\tvim\nbroken line";
+        // a window name may hold the separator itself: it is the last field
+        let text = "%0|~|@0|~|0|~|80|~|24|~|1|~|zsh|~|zsh\n%1|~|@0|~|0|~|80|~|24|~|0|~|vim|~|my |~| win\nbroken line";
         let p = parse_panes(text);
         assert_eq!(p.len(), 2);
         assert_eq!(p[0], PaneInfo { id: "%0".into(), session: String::new(), window: "@0".into(), window_index: 0, window_name: "zsh".into(), cols: 80, rows: 24, active: true, command: "zsh".into() });
         assert!(!p[1].active);
         assert_eq!(p[1].command, "vim");
+        assert_eq!(p[1].window_name, "my |~| win");
     }
 
     #[test]
