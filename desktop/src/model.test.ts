@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionItem, StackState, WorktreeItem } from '@core/webview/types';
-import { mruOrder, mruTouch, stepWrap, floatRows, buildView, managerIndex, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, taskFromText, type KeyLike } from './model';
+import { mruOrder, mruTouch, stepWrap, floatRows, buildView, managerIndex, managerSession, pickSession, resolveShortcut, stepSessionIndex, sessionRows, shortcutOf, taskFromText, type KeyLike } from './model';
 import type { Snapshot } from './stackd/api';
 
 const session = (o: Partial<SessionItem> & { index: number }): SessionItem => ({ name: 'claude', kind: 'agent', provider: 'claude', state: 'idle', ...o });
@@ -146,6 +146,17 @@ describe('resolveShortcut', () => {
     expect(resolveShortcut({ kind: 'needs' }, ids, 'b')).toEqual({ select: 'c' });
     expect(resolveShortcut({ kind: 'needs' }, [ids[0], ids[3]], 'a')).toEqual({});
   });
+  it('repeat: ⌘N on the selected worktree advances its tab, ⌘0 on a focused Manager too', () => {
+    expect(resolveShortcut({ kind: 'worktree', n: 1 }, ids, 'a', 'centre')).toEqual({ tab: { pane: 'centre', dir: 1 } });
+    expect(resolveShortcut({ kind: 'worktree', n: 1 }, ids, 'a', 'manager')).toEqual({ select: 'a', focusCentre: true });
+    expect(resolveShortcut({ kind: 'worktree', n: 2 }, ids, 'a', 'centre')).toEqual({ select: 'b' });
+    expect(resolveShortcut({ kind: 'focus-manager' }, ids, 'a', 'centre')).toEqual({ focusManager: true });
+    expect(resolveShortcut({ kind: 'focus-manager' }, ids, 'a', 'manager')).toEqual({ tab: { pane: 'manager', dir: 1 } });
+  });
+  it('tab-prev/next act on the focused pane', () => {
+    expect(resolveShortcut({ kind: 'tab-next' }, ids, 'a', 'manager')).toEqual({ tab: { pane: 'manager', dir: 1 } });
+    expect(resolveShortcut({ kind: 'tab-prev' }, ids, 'a')).toEqual({ tab: { pane: 'centre', dir: -1 } });
+  });
   it('flags the manager actions', () => {
     expect(resolveShortcut({ kind: 'focus-manager' }, ids, 'a')).toEqual({ focusManager: true });
     expect(resolveShortcut({ kind: 'toggle-manager' }, ids, 'a')).toEqual({ toggleManager: true });
@@ -188,5 +199,25 @@ describe('switcher MRU', () => {
     expect(stepWrap(2, 3, 1)).toBe(0);
     expect(stepWrap(0, 3, -1)).toBe(2);
     expect(stepWrap(0, 0, 1)).toBe(0);
+  });
+});
+
+describe('stepSessionIndex', () => {
+  const w = wt('a', [session({ index: 3 }), session({ index: 1 }), session({ index: 2 })]);
+  const item = buildView(snap([w]))!.items[0].wt;
+  it('steps through tab order and wraps', () => {
+    expect(stepSessionIndex(item, 1, 1)).toBe(2);
+    expect(stepSessionIndex(item, 3, 1)).toBe(1);
+    expect(stepSessionIndex(item, 1, -1)).toBe(3);
+    expect(stepSessionIndex(item, 99, 1)).toBe(1);
+    expect(stepSessionIndex(undefined, 1, 1)).toBeUndefined();
+  });
+});
+
+describe('alt-arrow shortcuts', () => {
+  it('maps ⌥⌘←/→ to tab-prev/next', () => {
+    expect(shortcutOf(key('ArrowLeft', { altKey: true }))).toEqual({ kind: 'tab-prev' });
+    expect(shortcutOf(key('ArrowRight', { altKey: true }))).toEqual({ kind: 'tab-next' });
+    expect(shortcutOf(key('ArrowRight'))).toBeNull();
   });
 });

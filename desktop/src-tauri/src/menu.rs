@@ -1,7 +1,7 @@
 //! The native application menu (macOS menu bar): Stack (About, Settings…, Hide, Quit), Edit (so ⌘C / ⌘V
 //! work in inputs), View (window modes) and Window. Clicks become events for the webview:
 //! `menu://settings`, `menu://mode` (payload "full" / "half" / "float" / "cycle" / "side") and `menu://go` (payload
-//! "switch" / "switch-back" / "next" / "prev" / "needs" / "manager"). Go carries ⌃Tab: AppKit swallows it as a key-view
+//! "switch" / "switch-back" / "next" / "prev" / "tab-prev" / "tab-next" / "needs" / "manager"). Go carries ⌃Tab: AppKit swallows it as a key-view
 //! loop key before the page sees it, but menu key equivalents are matched first.
 //!
 //! "Cycle mode" has no accelerator here: ⇧⌘F is already handled by the webview (src/model.ts), and
@@ -80,6 +80,8 @@ fn build(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &PredefinedMenuItem::separator(app)?,
             &go_item("next", "Next Worktree", "Alt+Cmd+Down")?,
             &go_item("prev", "Previous Worktree", "Alt+Cmd+Up")?,
+            &go_item("tab-prev", "Previous Tab", "Alt+Cmd+Left")?,
+            &go_item("tab-next", "Next Tab", "Alt+Cmd+Right")?,
             &go_item("needs", "Next That Needs You", "Cmd+Shift+J")?,
             &PredefinedMenuItem::separator(app)?,
             &go_item("manager", "Manager", "Cmd+0")?,

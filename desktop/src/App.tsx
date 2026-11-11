@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StatusDot } from '@core/webview/components/StatusDot';
 import { nameOf } from '@core/webview/derive';
-import { MANAGER_ID, buildView, floatRows, managerIndex, managerSession, mruTouch, pickSession, stepWrap, switcherRows, type SwitcherRow, resolveShortcut, sessionRows, shortcutOf, stateWord, type Effect } from './model';
+import { MANAGER_ID, buildView, floatRows, managerIndex, managerSession, mruTouch, pickSession, stepWrap, switcherRows, type SwitcherRow, resolveShortcut, stepSessionIndex, type Pane, sessionRows, shortcutOf, stateWord, type Effect } from './model';
 import { StartStackd } from './stackd/StartStackd';
 import { useStackd } from './stackd/useStackd';
 import { ManagerStrip, useTerminals, type StripHandle } from './terminals';
@@ -180,10 +180,42 @@ export function App() {
   const manager = useSessionPane(managerWanted ? managerTarget : null, onSession);
 
   // Shortcuts. Capture phase, so they win over the focused terminal.
-  const latest = useRef({ items, control: view?.control, repoRoot: view?.repoRoot, selectedId: selected?.wt.id, mode, expanded: stripExpanded || maximized === 'manager' });
-  latest.current = { items, control: view?.control, repoRoot: view?.repoRoot, selectedId: selected?.wt.id, mode, expanded: stripExpanded || maximized === 'manager' };
+  const latest = useRef({ items, control: view?.control, repoRoot: view?.repoRoot, selectedId: selected?.wt.id, selected: selected?.wt, selectedIndex, managerIdx, mode, expanded: stripExpanded || maximized === 'manager' });
+  latest.current = { items, control: view?.control, repoRoot: view?.repoRoot, selectedId: selected?.wt.id, selected: selected?.wt, selectedIndex, managerIdx, mode, expanded: stripExpanded || maximized === 'manager' };
+  // Which pane had focus last (centre or Manager): ⌥⌘←/→ and the repeat-to-cycle shortcuts act on it.
+  const focusedPane = useRef<Pane>('centre');
+  useEffect(() => {
+    const note = (e: Event) => {
+      const el = e.target as Element | null;
+      if (!el || !el.closest) return;
+      if (el.closest('.manager, .manager-dock')) focusedPane.current = 'manager';
+      else if (el.closest('.centre')) focusedPane.current = 'centre';
+    };
+    document.addEventListener('focusin', note, true);
+    document.addEventListener('mousedown', note, true);
+    return () => { document.removeEventListener('focusin', note, true); document.removeEventListener('mousedown', note, true); };
+  }, []);
   const runEffect = useCallback((fx: Effect) => {
-    if (fx.select) select(fx.select);
+    if (fx.select) { select(fx.select); focusedPane.current = 'centre'; }
+    if (fx.focusCentre) setCentreFocusTick((t) => t + 1);
+    if (fx.tab) {
+      const l = latest.current;
+      if (fx.tab.pane === 'manager') {
+        const to = stepSessionIndex(l.control?.wt, l.managerIdx, fx.tab.dir);
+        const repo = l.repoRoot;
+        if (to !== undefined && repo) {
+          touch(MANAGER_ID);
+          focusedPane.current = 'manager';
+          setManagerTabs((m) => ({ ...m, [repo]: to }));
+          if (l.mode === 'full') setManagerOpen(true);
+          if (l.mode === 'full' || l.expanded) setFocusTick((t) => t + 1);
+          else stripRef.current?.focus();
+        }
+      } else {
+        const to = stepSessionIndex(l.selected, l.selectedIndex, fx.tab.dir);
+        if (l.selected && to !== undefined) { select(l.selected.id, to); focusedPane.current = 'centre'; setCentreFocusTick((t) => t + 1); }
+      }
+    }
     if (fx.toggleManager) {
       if (latest.current.mode === 'full') setManagerOpen((o) => !o);
       else setStripExpanded((x) => !x);
@@ -192,6 +224,7 @@ export function App() {
     if (fx.maximize) setMaximized((m) => cycleMaximized(m, latest.current.mode));
     if (fx.focusManager) {
       touch(MANAGER_ID);
+      focusedPane.current = 'manager';
       if (latest.current.mode === 'full') setManagerOpen(true);
       if (latest.current.mode === 'full' || latest.current.expanded) setFocusTick((t) => t + 1);
       else stripRef.current?.focus();
@@ -211,8 +244,8 @@ export function App() {
       if (!sc) return;
       e.preventDefault();
       e.stopPropagation();
-      if (sc.kind === 'needs' && !dedupeNeeds()) return;
-      runEffect(resolveShortcut(sc, latest.current.items ?? [], latest.current.selectedId));
+      if ((sc.kind === 'needs' || sc.kind === 'tab-prev' || sc.kind === 'tab-next' || sc.kind === 'focus-manager') && !dedupeNeeds()) return;
+      runEffect(resolveShortcut(sc, latest.current.items ?? [], latest.current.selectedId, focusedPane.current));
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
@@ -289,7 +322,10 @@ export function App() {
           case 'next': case 'prev':
             runEffect(resolveShortcut({ kind: e.payload }, latest.current.items ?? [], latest.current.selectedId));
             break;
-          case 'manager': runEffect({ focusManager: true }); break;
+          case 'tab-prev': case 'tab-next': case 'manager':
+            if (!dedupeNeeds()) break;
+            runEffect(resolveShortcut({ kind: e.payload === 'manager' ? 'focus-manager' : e.payload }, latest.current.items ?? [], latest.current.selectedId, focusedPane.current));
+            break;
         }
       }),
     ];

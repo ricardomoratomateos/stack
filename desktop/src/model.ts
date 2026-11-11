@@ -104,6 +104,8 @@ export type Shortcut =
   | { kind: 'next' }
   | { kind: 'needs' }
   | { kind: 'focus-manager' }
+  | { kind: 'tab-prev' }
+  | { kind: 'tab-next' }
   | { kind: 'toggle-manager' }
   | { kind: 'cycle-mode' }
   | { kind: 'maximize' };
@@ -130,7 +132,12 @@ export function shortcutOf(e: KeyLike): Shortcut | null {
   if (!e.metaKey || e.ctrlKey) return null;
   const bracket = e.shiftKey ? bracketOf(e) : null;
   if (bracket) return { kind: bracket };
-  if (e.altKey) return null;
+  if (e.altKey) {
+    if (e.shiftKey) return null;
+    if (e.code === 'ArrowLeft') return { kind: 'tab-prev' };
+    if (e.code === 'ArrowRight') return { kind: 'tab-next' };
+    return null;
+  }
   const digit = /^Digit([0-9])$/.exec(e.code);
   if (!e.shiftKey && digit) {
     const n = Number(digit[1]);
@@ -145,8 +152,14 @@ export function shortcutOf(e: KeyLike): Shortcut | null {
   return null;
 }
 
+export type Pane = 'centre' | 'manager';
+
 export interface Effect {
   select?: string;
+  /** Focus the centre terminal (after selecting a worktree that is already selected, from the Manager). */
+  focusCentre?: true;
+  /** Move to the previous/next session tab of a pane, wrapping, and focus its terminal. */
+  tab?: { pane: Pane; dir: 1 | -1 };
   focusManager?: true;
   toggleManager?: true;
   cycleMode?: true;
@@ -154,10 +167,14 @@ export interface Effect {
 }
 
 /** What a shortcut does given the worktrees (in sidebar order) and the selected one. */
-export function resolveShortcut(sc: Shortcut, items: Described[], selectedId: string | undefined): Effect {
+export function resolveShortcut(sc: Shortcut, items: Described[], selectedId: string | undefined, focus: Pane = 'centre'): Effect {
   switch (sc.kind) {
     case 'focus-manager':
-      return { focusManager: true };
+      // ⌘0 again while the Manager is focused advances its tab.
+      return focus === 'manager' ? { tab: { pane: 'manager', dir: 1 } } : { focusManager: true };
+    case 'tab-prev':
+    case 'tab-next':
+      return { tab: { pane: focus, dir: sc.kind === 'tab-next' ? 1 : -1 } };
     case 'toggle-manager':
       return { toggleManager: true };
     case 'cycle-mode':
@@ -166,7 +183,10 @@ export function resolveShortcut(sc: Shortcut, items: Described[], selectedId: st
       return { maximize: true };
     case 'worktree': {
       const d = items[sc.n - 1];
-      return d ? { select: d.wt.id } : {};
+      if (!d) return {};
+      // ⌘N again on the selected worktree (centre focused) advances to its next session tab.
+      if (d.wt.id === selectedId) return focus === 'centre' ? { tab: { pane: 'centre', dir: 1 } } : { select: d.wt.id, focusCentre: true };
+      return { select: d.wt.id };
     }
     case 'prev':
     case 'next': {
@@ -181,6 +201,15 @@ export function resolveShortcut(sc: Shortcut, items: Described[], selectedId: st
       return next ? { select: next.wt.id } : {};
     }
   }
+}
+
+/** The session index one tab away from `current` (wrapping), among the window's sessions in tab order. */
+export function stepSessionIndex(wt: WorktreeItem | undefined, current: number | undefined, dir: 1 | -1): number | undefined {
+  const idx = [...(wt?.sessions ?? [])].map((s) => s.index).sort((a, b) => a - b);
+  if (idx.length === 0) return undefined;
+  const at = current === undefined ? -1 : idx.indexOf(current);
+  if (at < 0) return idx[dir === 1 ? 0 : idx.length - 1];
+  return idx[stepWrap(at, idx.length, dir)];
 }
 
 /** One line of the Float list: a worktree, its sessions, and the session asking for permission (if any). */
