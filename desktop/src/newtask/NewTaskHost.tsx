@@ -43,5 +43,17 @@ export function NewTaskHost({ style, onMessage, registerPost }: {
     return () => { alive = false; };
   }, []);
 
-  return <div className="newtask-host" data-style={style}>{Panel && <Panel />}</div>;
+  // Same as Esc in the panel, so a written description still asks before it is discarded.
+  const back = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+
+  return (
+    <div className="newtask-host" data-style={style}>
+      <div className="newtask-bar" data-tauri-drag-region>
+        <button type="button" className="newtask-back" onClick={back} title="Back (Esc)">
+          <span aria-hidden>←</span> Back
+        </button>
+      </div>
+      {Panel && <Panel />}
+    </div>
+  );
 }
