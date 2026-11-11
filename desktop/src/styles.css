@@ -55,12 +55,13 @@ kbd { font-size: 11px; color: var(--app-text-dim); border: 1px solid var(--app-b
 
 /* centre: editor group */
 .centre { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--app-bg); }
-.tabs { display: flex; align-items: stretch; height: 36px; box-sizing: border-box; flex: none; background: var(--app-surface); border-bottom: 1px solid var(--app-border); overflow-x: auto; }
+.tabs { display: flex; align-items: stretch; height: 36px; box-sizing: border-box; flex: none; background: color-mix(in srgb, var(--app-bg) 55%, #000); border-bottom: 1px solid var(--app-border); overflow-x: auto; overflow-y: hidden; }
 .tabs::-webkit-scrollbar { height: 3px; }
 .tabs-title { display: flex; align-items: center; padding: 0 12px 0 16px; font-weight: 500; color: var(--app-text); border-right: 1px solid var(--app-border); white-space: nowrap; }
-.tab { display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--app-text-dim); background: transparent; border-right: 1px solid var(--app-border); border-top: 1px solid transparent; white-space: nowrap; }
-.tab:hover { background: var(--app-hover); }
-.tab[data-selected] { color: var(--app-text); background: var(--app-bg); border-top-color: var(--app-accent); }
+.tab { display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--app-text-faint); background: transparent; border: 1px solid transparent; border-bottom: 0; margin-bottom: -1px; white-space: nowrap; }
+.tab:hover { color: var(--app-text-dim); }
+/* The selected tab is cut out of the strip: panel background, side borders, no bottom edge, so it joins the terminal below. */
+.tab[data-selected] { color: var(--app-text); background: var(--app-bg); border-color: var(--app-border); box-shadow: inset 0 1px 0 var(--app-accent); }
 .tab-state { color: var(--app-text-dim); font-size: 11px; font-family: var(--vscode-editor-font-family); }
 .term-host { --term-bg: var(--app-bg); flex: 1; min-height: 0; background: var(--term-bg); padding: 8px 0 0 16px; }
 .term { width: 100%; height: 100%; }
