@@ -52,14 +52,25 @@ VS Code-only; they are not part of the core.
   `esbuild.js` → `dist/stackd.js`. CLI: `node dist/stackd.js status [repo]`
   prints worktrees, sessions and states. Done when it runs outside VS Code
   and its output matches the sidebar for the same repo.
-- [ ] **T3 · `stackd` API.** Local socket (Unix socket or localhost HTTP
-  with a token, like HookServer): `GET /state`, an event stream (SSE or
-  WebSocket) of state changes, and commands: `createTask`, `deleteTask`,
-  `spawnAgent`, `spawnShell`, `killWindow`, `sendToAgent`,
-  `respondPermission` (v1: `sendKeys` to the pane), `attachTarget`
-  (returns tmux session/window). Integration tests against a real tmux.
-  Decide (and write down here) how extension and `stackd` avoid both
-  claiming the same worktrees' hook routes.
+- [ ] **T3 · `stackd` owns state + API.** `stackd` becomes the single owner:
+  `stackd serve` runs as a long-lived daemon (one per user, all repos),
+  state in `~/.config/stack/state.json` (`JsonFileStore`; one-time import
+  from the VS Code store read by T2), HookServer + MCP + GitWatcher started
+  here, and it receives the agents' hooks (adapt `HookRoutes`/`discovery` so
+  hook scripts reach `stackd`). Local API (Unix socket or localhost HTTP with
+  a token, like HookServer): `GET /state`, an event stream (SSE or WebSocket)
+  of state changes, commands `createTask`, `deleteTask`, `spawnAgent`,
+  `spawnShell`, `killWindow`, `sendToAgent`, `respondPermission` (v1:
+  `sendKeys` to the pane), `attachTarget` (returns tmux session/window).
+  `stackd status` uses the API when the daemon runs. Integration tests
+  against a real tmux (isolated tmux socket, `-L`). Until T3b, the extension
+  and `stackd` must not run on the same repo at once (document it).
+- [ ] **T3b · Extension as `stackd` client.** The extension starts (or
+  connects to) `stackd` and reads state / sends commands through its API
+  instead of owning the store and hooks; terminals stay VS Code-side
+  (attach via `attachTarget`). Keep a migration path for existing users
+  (first run imports their Memento state). Done when sidebar, review,
+  new task and the manager MCP work as before on top of `stackd`.
 
 **Checkpoint A** — user reviews before Phase 1.
 
@@ -88,3 +99,4 @@ notifications, shortcuts.
 
 - 2026-11-11 · Rust UI + tmux control mode; no forks of tmux or agent TUIs;
   current TS core kept as `stackd`.
+- 2026-11-11 · State ownership: option 1 — `stackd` owns state and hooks; the extension becomes a client (T3b).
