@@ -45,7 +45,7 @@ VS Code-only; they are not part of the core.
   EventEmitter/Memento only). Done when: those core modules have no
   `vscode` import, compile/test/lint pass, new unit tests cover the JSON
   store, and the extension behaves the same.
-- [ ] **T2 · `stackd` entry point.** `src/daemon/main.ts` composes the core
+- [x] **T2 · `stackd` entry point.** `src/daemon/main.ts` composes the core
   (WorktreeApplicationService, TmuxManager, HookServer, MCP tools, GitWatcher,
   Docker) with Node adapters (JSON store, `OsaNotifyAdapter`, settings from
   `~/.config/stack/settings.json` + `.stack/config.json`). Build target in

@@ -88,17 +88,30 @@ const bridgeConfig = {
   define: { 'process.env.STACK_MCP_VERSION': JSON.stringify(require('./package.json').version) },
 };
 
+// stackd: the Stack core without VS Code (see docs/v1-plan.md).
+const stackdConfig = {
+  entryPoints: ['src/daemon/main.ts'],
+  bundle: true,
+  outfile: 'dist/stackd.js',
+  format: 'cjs',
+  platform: 'node',
+  target: 'node20',
+  sourcemap: true,
+  minify: !isWatch,
+};
+
 async function build() {
   if (isWatch) {
-    const [extCtx, webCtx, diffCtx, newTaskCtx, settingsCtx, bridgeCtx] = await Promise.all([
+    const [extCtx, webCtx, diffCtx, newTaskCtx, settingsCtx, bridgeCtx, stackdCtx] = await Promise.all([
       esbuild.context(extensionConfig),
       esbuild.context(webviewConfig),
       esbuild.context(diffPanelConfig),
       esbuild.context(newTaskPanelConfig),
       esbuild.context(settingsPanelConfig),
       esbuild.context(bridgeConfig),
+      esbuild.context(stackdConfig),
     ]);
-    await Promise.all([extCtx.watch(), webCtx.watch(), diffCtx.watch(), newTaskCtx.watch(), settingsCtx.watch(), bridgeCtx.watch()]);
+    await Promise.all([extCtx.watch(), webCtx.watch(), diffCtx.watch(), newTaskCtx.watch(), settingsCtx.watch(), bridgeCtx.watch(), stackdCtx.watch()]);
     copyCodeicons();
     console.log('Watching for changes...');
   } else {
@@ -109,6 +122,7 @@ async function build() {
       esbuild.build(newTaskPanelConfig),
       esbuild.build(settingsPanelConfig),
       esbuild.build(bridgeConfig),
+      esbuild.build(stackdConfig),
     ]);
     copyCodeicons();
     console.log('Build complete.');
