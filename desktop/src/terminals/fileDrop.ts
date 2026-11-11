@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import type { TerminalRegistry } from './registry';
 import { log } from '../log';
@@ -30,10 +31,15 @@ export async function watchFileDrops(registry: TerminalRegistry): Promise<() => 
     // Typed as a PhysicalPosition, but on macOS Tauri reports it in logical (CSS) points already.
     const { x, y } = ev.payload.position;
     const pane = paneAt(x, y);
-    const text = dropText(ev.payload.paths);
     log('info', 'drop target', pane ?? '(none)');
-    if (!pane || !text) return;
-    registry.paste(pane, text);
-    registry.focus(pane);
+    if (!pane || !ev.payload.paths.length) return;
+    const dropped = ev.payload.paths;
+    // A screenshot thumbnail's file vanishes after the drag: the backend copies those first.
+    void invoke<string[]>('stage_drops', { paths: dropped })
+      .catch(() => dropped)
+      .then((paths) => {
+        registry.paste(pane, dropText(paths));
+        registry.focus(pane);
+      });
   });
 }

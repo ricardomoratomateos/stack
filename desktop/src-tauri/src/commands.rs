@@ -289,6 +289,34 @@ pub async fn paste_text(state: State<'_, Bridge>, pane: String, text: String) ->
     Ok(())
 }
 
+/// Dropped files that live in a macOS temporary drag location (a screenshot's floating thumbnail
+/// lands in `…/TemporaryItems/NSIRD_screencaptureui_*`) are gone or unreadable by the time an
+/// agent in tmux opens them. Copy those into `~/Library/Caches/Stack/drops/` while this process can
+/// still read them, and hand back the paths to use. Other paths come back unchanged.
+#[tauri::command]
+pub async fn stage_drops(paths: Vec<String>) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(home) = std::env::var_os("HOME") else { return Ok(paths) };
+        let dir = std::path::Path::new(&home).join("Library/Caches/Stack/drops");
+        Ok(paths.into_iter().map(|p| stage_one(&p, &dir).unwrap_or(p)).collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn stage_one(path: &str, dir: &std::path::Path) -> Option<String> {
+    if !bridge::is_transient_drop(path) {
+        return None;
+    }
+    let src = std::path::Path::new(path);
+    let name = src.file_name()?;
+    std::fs::create_dir_all(dir).ok()?;
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_millis();
+    let dest = dir.join(format!("{stamp}-{}", name.to_string_lossy()));
+    std::fs::copy(src, &dest).ok()?;
+    Some(dest.to_string_lossy().into_owned())
+}
+
 /// What ⌘V should paste: `image` when the clipboard holds a picture (agents read it themselves
 /// on Ctrl+V), otherwise its text. WKWebView gives a paste event no image data, so ask macOS.
 #[derive(Serialize)]

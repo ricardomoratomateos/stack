@@ -108,6 +108,11 @@ pub fn clipboard_has_image(info: &str) -> bool {
     ["«class PNGf»", "«class TIFF»", "«class JPEG»", "«class GIFf»", "picture"].iter().any(|c| info.contains(c))
 }
 
+/// A path from a drag source that macOS deletes or guards once the drag ends.
+pub fn is_transient_drop(path: &str) -> bool {
+    path.contains("/TemporaryItems/") || path.contains("/NSIRD_")
+}
+
 pub fn parse_panes(text: &str) -> Vec<PaneInfo> {
     text.lines()
         .filter_map(|l| {
@@ -327,6 +332,8 @@ mod tests {
         assert_eq!(parse_cursor("x"), None);
         assert!(clipboard_has_image("«class PNGf», 123456, «class 8BPS», 99"));
         assert!(!clipboard_has_image("«class utf8», 12, string, 12"));
+        assert!(is_transient_drop("/var/folders/yv/x/T/TemporaryItems/NSIRD_screencaptureui_ab/Captura.png"));
+        assert!(!is_transient_drop("/Users/r/Desktop/Captura.png"));
     }
 
     #[test]
