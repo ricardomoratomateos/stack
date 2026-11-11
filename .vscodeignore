@@ -37,3 +37,6 @@ RELEASING.md
 # Repo hygiene that has no place in an installable package.
 .gitignore
 .vscodeignore
+
+# Desktop prototype has its own toolchain.
+desktop/**

@@ -1,0 +1,12 @@
+[package]
+name = "stack-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tmux-cc = { path = "../tmux-cc" }

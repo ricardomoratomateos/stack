@@ -6,3 +6,7 @@ coverage/
 
 # Notes Claude Code subagents keep while working on this repo — theirs, not the project's.
 .claude/agent-memory/
+
+# Desktop prototype (Tauri + Rust) is self-contained under desktop/.
+desktop/target/
+desktop/node_modules/

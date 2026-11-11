@@ -76,7 +76,7 @@ VS Code-only; they are not part of the core.
 
 ## Phase 1 — Desktop prototype (Tauri v2 + xterm.js)
 
-- [ ] **T4 · tmux control-mode client.** `desktop/` with a Tauri v2 app
+- [x] **T4 · tmux control-mode client.** `desktop/` with a Tauri v2 app
   (`desktop/src-tauri`) and a Rust crate `tmux-cc` in the same cargo
   workspace: spawn `tmux -CC` on a given `-L` socket, parse
   `%begin/%end/%error`, `%output`, `%extended-output`, `%window-add/close`,
@@ -117,3 +117,7 @@ notifications, shortcuts.
 - 2026-11-11 · T3b notifications: the daemon sends the native "needs you" notification only while no client follows `/events`; with a client the extension's `AttentionNotifier` runs on agent-state changes derived from snapshots (badge always, OS notification when the window is unfocused).
 - 2026-11-11 · T3b terminals: `SessionTerminals` (unchanged) attaches to the daemon's tmux sessions; a tab opens for every session that appears after the first snapshot (manager-created tasks included) and closes when its window is gone (3 s grace for a tab just opened). Known gaps in client mode: no focus mode, no folder-scoped search exclusion, no named-workspace switch (worktree folders are just added), `-L` sockets are not used for attach (default tmux server only), setup script output goes to `stackd.log`.
 - 2026-11-11 · Tests: sandboxed integration test spawns the built `dist/stackd.js` (own config dir, `-L` tmux socket, temp home); `test/helpers/tmuxSocket.ts` removes the socket file under `/tmp/tmux-<uid>/` that `kill-server` leaves behind (fixes the stale `stackd-test-*` files).
+- 2026-11-11 · T4 layout: `desktop/` is a cargo workspace (`tmux-cc`, `src-tauri`) with its own `package.json` (Vite + React + Tauri CLI); root builds ignore it (`.vscodeignore`, `.gitignore`; root tsconfig/vitest/esbuild only look at `src/`, `test/`). `src-tauri` is a blank window for now.
+- 2026-11-11 · T4 transport: spawn `tmux -L <sock> -C` over pipes, not `-CC` (`-CC` fails with `tcgetattr` without a tty; same protocol minus the DCS wrapper). New session or `attach-session`, optional `pause-after=N` on connect.
+- 2026-11-11 · T4 API: `tmux_cc::protocol` is a pure byte-level `Parser` (blocks swallow `%` lines until their `%end`/`%error`; `%output` and `%extended-output` octal-unescaped; unknown notifications kept as `Other`); `Client::connect` returns a cloneable handle and an `mpsc` stream of `Event` (`Notification` | `Closed`). `command()` replies are paired FIFO; blocks with flags 0 (tmux's own attach block) are ignored. Helpers: `run`, `resize`, `send_bytes` (`send-keys -H`), `continue_pane`, `set_pause_after`, `detach`.
+- 2026-11-11 · T4 fixtures: `tests/fixtures/session.raw` is real output from an isolated `tmux -L` server (3.7c); `pause.raw` is hand-written (a real `%pause` needs a client slower than the pane). The integration test uses a unique `-L` socket and removes its file under `/tmp/tmux-<uid>/`.

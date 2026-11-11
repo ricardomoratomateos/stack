@@ -1,0 +1,4 @@
+%extended-output %0 3000 : \033[2Jhi\015\012
+%pause %0
+%continue %0
+%exit server exited

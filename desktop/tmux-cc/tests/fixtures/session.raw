@@ -1,0 +1,98 @@
+%begin 1794379064 279 0
+%end 1794379064 279 0
+%window-add @0
+%sessions-changed
+%session-changed $0 0
+%output %0 \033[1m\033[7m%\033[27m\033[1m\033[0m                                                                               \015 \015
+%output %0 \033k/tmp\033\134
+%output %0 \033]7;file://MacBook-Air-de-Ricardo.local/tmp\033\134
+%output %0 \015\033[0m\033[27m\033[24m\033[J\033[39m\033[0m\033[49m\033[48;5;240m\033[97m ricardo@MacBook-Air-de-Ricardo \033[48;5;24m\033[38;5;240m\033[97m /tmp \033[49m\033[38;5;24m\033[39m \033[K
+%output %0 \033[?1h\033=
+%output %0 \033[?2004h
+%begin 1794379064 285 1
+%end 1794379064 285 1
+%begin 1794379065 286 1
+%end 1794379065 286 1
+%session-window-changed $0 @1
+%window-add @1
+%window-renamed @1 tmux
+%extended-output %1 0 : \033[1m\033[7m%\033[27m\033[1m\033[0m                                                                               \015 \015
+%extended-output %1 0 : \033k/tmp\033\134
+%extended-output %1 0 : \033]7;file://MacBook-Air-de-Ricardo.local/tmp\033\134
+%extended-output %1 0 : \015\033[0m\033[27m\033[24m\033[J\033[39m\033[0m\033[49m\033[48;5;240m\033[97m ricardo@MacBook-Air-de-Ricardo \033[48;5;24m\033[38;5;240m\033[97m /tmp \033[49m\033[38;5;24m\033[39m \033[K
+%extended-output %1 0 : \033[?1h\033=
+%extended-output %1 0 : \033[?2004h
+%begin 1794379065 290 1
+%end 1794379065 290 1
+%extended-output %0 0 : p
+%extended-output %0 0 : \010pr
+%extended-output %0 0 : i
+%extended-output %0 0 : n
+%extended-output %0 0 : t
+%extended-output %0 0 : f
+%extended-output %0 0 :  
+%extended-output %0 0 : '
+%extended-output %0 0 : h
+%extended-output %0 0 : é
+%extended-output %0 0 : l
+%extended-output %0 0 : l
+%extended-output %0 0 : o
+%extended-output %0 0 : \134
+%extended-output %0 0 : x
+%extended-output %0 0 : \033[?1l\033>
+%extended-output %0 0 : \033[?2004l\015\015\012
+%extended-output %0 0 : \015\033[0m\033[27m\033
+%extended-output %0 0 : [24m\033[Jquot
+%extended-output %0 0 : e> \033[K
+%extended-output %0 0 : \033[?1h\033=
+%extended-output %0 0 : \033[?2004h
+%extended-output %0 0 : '
+%extended-output %0 0 : \010'; 
+%extended-output %0 0 : s
+%extended-output %0 0 : e
+%extended-output %0 0 : q 
+%extended-output %0 0 : 1 
+%extended-output %0 0 : 3
+%extended-output %0 0 : \033[?1l\033>
+%extended-output %0 0 : \033[?2004l\015\015\012
+%extended-output %0 0 : \033kprintf\033\134
+%extended-output %0 0 : héllo\000
+%extended-output %0 0 : 1\015\0122\015\0123\015\012
+%window-renamed @0 seq
+%extended-output %0 0 : \033[1m\033[7m%\033[27m\033[1m\033[0m                                                                               \015 \015
+%extended-output %0 0 : \033k/tmp\033\134
+%extended-output %0 0 : \033]7;file://MacBook-Air-de-Ricardo.local/tmp\033\134
+%extended-output %0 0 : \015\033[0m\033[27m\033[24m\033[J\033[39m\033[0m\033[49m\033[48;5;240m\033[97m ricardo@MacBook-Air-de-Ricardo \033[48;5;24m\033[38;5;240m\033[97m /tmp \033[49m\033[38;5;24m\033[39m \033[K
+%extended-output %0 0 : \033[?1h\033=
+%extended-output %0 0 : \033[?2004h
+%window-renamed @1 zsh
+%begin 1794379065 293 1
+0: seq- (1 panes) [80x24] [layout b25d,80x24,0,0,0] @0
+1: zsh* (1 panes) [80x24] [layout b25e,80x24,0,0,1] @1 (active)
+%end 1794379065 293 1
+%begin 1794379065 294 1
+parse error: unknown command: bogus
+%error 1794379065 294 1
+%begin 1794379065 295 1
+%end 1794379065 295 1
+%window-pane-changed @1 %2
+%layout-change @1 419a,80x24,0,0[80x12,0,0,1,80x11,0,13,2] 419a,80x24,0,0[80x12,0,0,1,80x11,0,13,2] *
+%window-renamed @0 zsh
+%extended-output %1 0 : \015\015\033[0m\033[27m\033[24m\033[J\033[39m\033[0m\033[49m\033[48;5;240m\033[97m ricardo@MacBook-Air-de-Ricardo \033[48;5;24m\033[38;5;240m\033[97m /tmp \033[49m\033[38;5;24m\033[39m 
+%extended-output %2 0 : \033[1m\033[7m%\033[27m\033[1m\033[0m                                                                               \015 \015
+%extended-output %2 0 : \033k/tmp\033\134
+%extended-output %2 0 : \033]7;file://MacBook-Air-de-Ricardo.local/tmp\033\134
+%extended-output %2 0 : \015\033[0m\033[27m\033[24m\033[J\033[39m\033[0m\033[49m\033[48;5;240m\033[97m ricardo@MacBook-Air-de-Ricardo \033[48;5;24m\033[38;5;240m\033[97m /tmp \033[49m\033[38;5;24m\033[39m \033[K
+%extended-output %2 0 : \033[?1h\033=
+%extended-output %2 0 : \033[?2004h
+%begin 1794379066 299 1
+%end 1794379066 299 1
+%session-window-changed $0 @0
+%unlinked-window-close @1
+%begin 1794379066 302 1
+parse error: syntax error
+%error 1794379066 302 1
+%begin 1794379067 303 1
+%end 1794379067 303 1
+%sessions-changed
+%exit
