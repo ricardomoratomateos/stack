@@ -89,7 +89,7 @@ describe('TerminalRegistry show/hide', () => {
     const { reg } = setup();
     const host = () => {
       const children: unknown[] = [];
-      return { children, replaceChildren: () => void children.splice(0), appendChild: (c: unknown) => void children.push(c) };
+      return { children, dataset: {}, addEventListener() {}, removeEventListener() {}, replaceChildren: () => void children.splice(0), appendChild: (c: unknown) => void children.push(c) };
     };
     const a = host();
     const b = host();

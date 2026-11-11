@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import { tmux as defaultApi, type TmuxApi } from './api';
 import { PaneBook, type PaneInfo } from './paneBook';
 import { TerminalRegistry } from './registry';
+import { watchFileDrops } from './fileDrop';
 
 export interface Terminals {
   api: TmuxApi;
@@ -48,6 +49,7 @@ export function TerminalsProvider({ children, api = defaultApi }: { children: Re
       api.onOutput((pane, data) => registry.feed(pane, data)),
       api.onLayout((session) => void api.listPanes(session).then((l) => applyList(session, l)).catch(() => {})),
       api.onExit((session) => dropSession(session)),
+      watchFileDrops(registry),
     ];
     return () => offs.forEach((p) => void p.then((off) => off()));
     // eslint-disable-next-line react-hooks/exhaustive-deps

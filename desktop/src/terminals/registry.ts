@@ -13,6 +13,7 @@ interface Entry {
   webgl?: WebglAddon;
   fit: FitAddon;
   observer?: ResizeObserver;
+  offPaste?: () => void;
   el?: HTMLElement;
   /** Output queued until the initial capture is written. */
   pending: Uint8Array[] | null;
@@ -133,11 +134,14 @@ export class TerminalRegistry {
       el.replaceChildren();
       if (e.el) this.detach(e);
       e.el = el;
+      el.dataset.pane = pane;
       // xterm ignores a second `open()`: move its existing element into the new host instead.
       if (e.term.element) el.appendChild(e.term.element);
       else e.term.open(el);
       this.enableWebgl(e);
       e.term.refresh(0, e.term.rows - 1);
+      e.offPaste?.();
+      e.offPaste = this.watchImagePaste(pane, el);
       let raf = 0;
       e.observer = new ResizeObserver(() => {
         cancelAnimationFrame(raf);
@@ -148,6 +152,29 @@ export class TerminalRegistry {
     // Size the pane's own window to this element first, then fill it, so the capture matches.
     const sized = this.fit(pane, e, true);
     if (e.stale || e.loaded === 0) void sized.then(() => this.sync(pane));
+  }
+
+  /**
+   * ⌘V with an image (and no text) on the clipboard: xterm would paste nothing. Send Ctrl+V
+   * instead, which is how Claude Code and Codex read an image from the clipboard themselves.
+   */
+  private watchImagePaste(pane: string, el: HTMLElement): () => void {
+    const onPaste = (ev: ClipboardEvent) => {
+      const data = ev.clipboardData;
+      if (!data || data.getData('text/plain')) return;
+      const hasImage = [...data.items].some((i) => i.kind === 'file' && i.type.startsWith('image/'));
+      if (!hasImage) return;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      void this.api.write(pane, [0x16]);
+    };
+    el.addEventListener('paste', onPaste, true);
+    return () => el.removeEventListener('paste', onPaste, true);
+  }
+
+  /** Paste text into a pane the way the user's paste would (bracketed when the app asked for it). */
+  paste(pane: string, text: string): void {
+    this.entries.get(pane)?.term.paste(text);
   }
 
   /** Focus a pane's terminal (it must be shown). */
@@ -212,6 +239,8 @@ export class TerminalRegistry {
   }
 
   private detach(e: Entry): void {
+    e.offPaste?.();
+    e.offPaste = undefined;
     e.observer?.disconnect();
     e.observer = undefined;
     e.webgl?.dispose();
