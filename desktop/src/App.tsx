@@ -355,8 +355,8 @@ export function App() {
 
   return (
     <div className="shell" data-mode={mode}>
-      <header className="titlebar">
-        <span className="titlebar-name">Stack</span>
+      <header className="titlebar" data-tauri-drag-region>
+        <span className="titlebar-name" data-tauri-drag-region>Stack</span>
         <ModeSwitch mode={mode} onChange={(m) => setLayout((l) => setMode(l, m))} />
         {mode === 'half' && (
           <button type="button" className="icon-btn side-btn" title={`Snap to the ${side === 'left' ? 'right' : 'left'} half`} aria-label="Switch side" onClick={() => setLayout((l) => setMode(l, 'half', l.side === 'left' ? 'right' : 'left'))}>{side === 'left' ? '◧' : '◨'}</button>

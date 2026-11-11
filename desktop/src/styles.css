@@ -78,14 +78,14 @@ kbd { font-size: 10px; color: var(--vscode-descriptionForeground); border: 1px s
 
 /* shell: title area + panels */
 .shell { height: 100%; display: flex; flex-direction: column; }
-.titlebar { flex: none; height: 30px; display: flex; align-items: center; gap: 10px; padding: 0 10px 0 12px; background: var(--vscode-titleBar-activeBackground, var(--vscode-sideBar-background)); color: var(--vscode-titleBar-activeForeground, var(--vscode-foreground)); border-bottom: 1px solid var(--vscode-titleBar-border, var(--vscode-sideBar-border, transparent)); }
-.titlebar-name { font-size: 11px; font-weight: 700; text-transform: uppercase; flex: 1; }
+/* Overlay title bar: macOS draws the traffic lights over it (titleBarStyle Overlay), like VS Code's custom title bar. */
+.titlebar { flex: none; height: 32px; position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 0 8px 0 78px; background: var(--vscode-titleBar-activeBackground, var(--vscode-sideBar-background)); color: var(--vscode-titleBar-activeForeground, var(--vscode-foreground)); border-bottom: 1px solid var(--vscode-titleBar-border, var(--vscode-sideBar-border, transparent)); user-select: none; -webkit-user-select: none; }
+.titlebar-name { position: absolute; left: 50%; transform: translateX(-50%); font-size: 12px; color: var(--vscode-descriptionForeground); pointer-events: auto; }
 .side-btn { width: auto; padding: 0 6px; }
-.mode-switch { display: flex; border: 1px solid var(--vscode-widget-border, var(--vscode-input-border, #555)); border-radius: 5px; overflow: hidden; }
-.mode-switch button { padding: 1px 10px; font-size: 11px; color: var(--vscode-descriptionForeground); }
-.mode-switch button + button { border-left: 1px solid var(--vscode-widget-border, var(--vscode-input-border, #555)); }
-.mode-switch button:hover { background: var(--vscode-toolbar-hoverBackground); }
-.mode-switch button[data-active] { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.mode-switch { display: flex; gap: 1px; padding: 2px; border-radius: 6px; background: var(--vscode-input-background, rgba(255,255,255,.04)); }
+.mode-switch button { padding: 1px 9px; border-radius: 4px; font-size: 11px; line-height: 18px; color: var(--vscode-descriptionForeground); }
+.mode-switch button:hover { color: var(--vscode-foreground); }
+.mode-switch button[data-active] { background: var(--vscode-toolbar-activeBackground, rgba(255,255,255,.1)); color: var(--vscode-foreground); }
 
 .app { flex: 1; min-height: 0; display: flex; }
 .app > .sidebar, .app > .manager { flex: none; }

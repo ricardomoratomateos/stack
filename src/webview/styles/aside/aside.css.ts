@@ -102,10 +102,10 @@ body.vscode-high-contrast .fm-aside, body.vscode-high-contrast-light .fm-aside {
 .as-placeholder { flex: 1; color: var(--fm-text-faint); }
 .as-new { flex: none; height: 24px; padding: 0 10px; display: flex; align-items: center; border-radius: 4px; background: var(--fm-accent); color: var(--fm-accent-ink, #0a0a0a); font-size: 12px; font-weight: 600; }
 
-.as-chips { flex: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 0 12px 8px; }
+.as-chips { flex: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0 12px 8px; padding: 2px; border-radius: 6px; background: var(--fm-chips-bg, rgba(127,127,127,.08)); }
 .as-chip {
-  height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 4px;
-  background: transparent; border: 1px solid var(--fm-border); color: var(--fm-text-dim); font-size: 11.5px; white-space: nowrap;
+  height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 4px;
+  background: transparent; border: 0; color: var(--fm-text-dim); font-size: 11.5px; white-space: nowrap;
   min-width: 0; overflow: hidden;
 }
 .as-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -167,6 +167,7 @@ body.vscode-high-contrast .fm-aside, body.vscode-high-contrast-light .fm-aside {
 @container fm (max-width: 280px) {
   .as-row-main { gap: 8px; padding: 8px 6px; }
   .as-expand, .fm-ask, .fm-row-actions, .as-indent { margin-left: 8px; margin-right: 8px; }
-  .as-brand, .as-composer-wrap, .as-chips { padding-left: 8px; padding-right: 8px; }
+  .as-brand, .as-composer-wrap { padding-left: 8px; padding-right: 8px; }
+  .as-chips { margin-left: 8px; margin-right: 8px; }
 }
 `;
