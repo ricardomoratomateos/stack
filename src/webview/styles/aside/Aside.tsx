@@ -91,7 +91,7 @@ export function Aside({ state, loaded, items, controlItem, selectedId, select, d
           {CHIPS.map((group) => {
             const on = filter === group;
             return (
-              <button key={group} type="button" className="as-chip" data-group={group} aria-pressed={on} title={`${GROUP_SHORT[group]}: ${counts[group]}`} aria-label={`${GROUP_SHORT[group]}: ${counts[group]}`} onClick={() => setFilter(on ? 'all' : group)}>
+              <button key={group} type="button" className="as-chip" data-group={group} data-zero={counts[group] === 0 ? '' : undefined} aria-pressed={on} title={`${GROUP_SHORT[group]}: ${counts[group]}`} aria-label={`${GROUP_SHORT[group]}: ${counts[group]}`} onClick={() => setFilter(on ? 'all' : group)}>
                 <span className="as-chip-dot" aria-hidden="true" />
                 <span className="as-chip-n">{counts[group]}</span>
               </button>

@@ -18,7 +18,11 @@ kbd { font-size: 11px; color: var(--vscode-descriptionForeground); border: 1px s
 .view-title-actions { display: flex; align-items: center; gap: 2px; }
 .icon-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; font-size: 16px; color: var(--vscode-icon-foreground); }
 .icon-btn:hover { background: var(--vscode-toolbar-hoverBackground); }
-.repo-select { background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border); border-radius: 6px; font: inherit; font-size: 12px; height: 28px; box-sizing: border-box; padding: 0 8px; max-width: 120px; }
+.repo-picker { position: relative; display: flex; align-items: center; gap: 2px; height: 28px; padding: 0 8px; border-radius: 6px; font-size: 12px; color: var(--vscode-foreground); }
+.repo-picker:hover, .repo-picker:focus-within { background: var(--vscode-toolbar-hoverBackground); }
+.repo-picker .codicon { font-size: 14px; }
+.repo-picker select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font: inherit; }
+.repo-picker-label { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .notice { position: absolute; left: 8px; right: 8px; bottom: 8px; padding: 6px 10px; background: var(--vscode-notifications-background); color: var(--vscode-notifications-foreground); border: 1px solid var(--vscode-notifications-border); border-radius: 4px; font-size: 12px; box-shadow: 0 0 8px 2px var(--vscode-widget-shadow); }
 
 /* centre: editor group */
@@ -34,13 +38,15 @@ kbd { font-size: 11px; color: var(--vscode-descriptionForeground); border: 1px s
 [data-state='permission'] > .dot { background: var(--vscode-editorWarning-foreground); }
 [data-state='active'] > .dot { background: var(--vscode-terminal-ansiGreen); }
 [data-state='waiting'] > .dot { background: var(--vscode-terminal-ansiBlue); }
-.term-host { flex: 1; min-height: 0; background: var(--vscode-terminal-background, var(--vscode-editor-background)); padding: 8px 0 0 16px; }
+.term-host { --term-bg: var(--vscode-terminal-background, var(--vscode-editor-background)); flex: 1; min-height: 0; background: var(--term-bg); padding: 8px 0 0 16px; }
 .term { width: 100%; height: 100%; }
-.term-host .xterm { height: 100%; }
+.term-host .xterm { height: 100%; background: var(--term-bg); }
+/* xterm.css paints the viewport black; the leftover space below the last row must match the host */
+.term-host .xterm .xterm-viewport, .term-host .xterm .xterm-screen, .term-host .xterm .xterm-scrollable-element { background-color: var(--term-bg) !important; }
 
 /* manager column: the secondary side bar */
 .manager { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--vscode-sideBar-background); border-left: 1px solid var(--vscode-panel-border, var(--vscode-sideBar-border, transparent)); }
-.manager .term-host { background: var(--vscode-terminal-background, var(--vscode-sideBar-background)); }
+.manager .term-host { background: var(--term-bg); }
 .manager-head { display: flex; align-items: center; gap: 8px; height: 36px; box-sizing: border-box; padding: 0 16px; flex: none; color: var(--vscode-sideBarTitle-foreground); border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-sideBar-border, transparent)); }
 .manager-title { flex: 1; font-size: 12px; font-weight: 500; }
 
@@ -78,8 +84,13 @@ kbd { font-size: 11px; color: var(--vscode-descriptionForeground); border: 1px s
 .sheet-head { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 8px 16px; border-bottom: 1px solid var(--vscode-widget-border, transparent); }
 .sheet-title { font-size: 13px; font-weight: 600; }
 .sheet-body { flex: 1; min-height: 0; overflow-y: auto; }
-.newtask-sheet .sheet-body { min-height: 320px; }
-.newtask-sheet .sheet-body .nt { height: auto; min-height: 320px; overflow: visible; }
+.newtask-sheet .sheet-body { min-height: 0; }
+.newtask-sheet .sheet-body .nt { height: auto; min-height: 0; overflow: visible; }
+.newtask-sheet .nt-col { margin: 0; max-width: none; padding: 16px; }
+.newtask-sheet .nt-sub { display: none; }
+.newtask-sheet .nt-title { font-size: 13px; font-weight: 500; letter-spacing: 0; margin-bottom: 8px; }
+.newtask-sheet .nt-card { margin-top: 0; }
+.newtask-sheet .nt-note { margin-top: 8px; }
 
 /* dev page: /?dev=sidebar */
 .dev-sidebar { height: 100%; display: flex; flex-direction: column; background: var(--vscode-sideBar-background); border-right: 1px solid var(--vscode-panel-border, var(--vscode-sideBar-border, transparent)); }

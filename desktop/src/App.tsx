@@ -393,13 +393,14 @@ export function App() {
               <div className="sidebar-body">
                 <SidebarHost state={sidebarState} onMessage={onMessage} actions={(
                   <>
-                    <select className="repo-select" value={view.repoRoot} aria-label="Repository" title="Repository" onChange={(e) => {
+                    <span className="repo-picker"><span className="repo-picker-label">{view.repos.find((r) => r.repoRoot === view.repoRoot)?.name ?? 'Repository'}</span><i className="codicon codicon-chevron-down" aria-hidden="true" />
+                    <select value={view.repoRoot} aria-label="Repository" title="Repository" onChange={(e) => {
                       if (e.target.value === ADD_REPO) { void addRepository(); return; }
                       setRepoRoot(e.target.value); setSelectedId(undefined);
                     }}>
                       {view.repos.map((r) => <option key={r.repoRoot} value={r.repoRoot}>{r.name}</option>)}
                       <option value={ADD_REPO}>Add repository…</option>
-                    </select>
+                    </select></span>
                     <button type="button" className="icon-btn" title="New task" aria-label="New task" onClick={() => onMessage({ type: 'openNewTask' })}><i className="codicon codicon-add" aria-hidden="true" /></button>
                   </>
                 )} />
