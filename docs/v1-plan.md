@@ -132,6 +132,30 @@ Interpretation:
 - stackd and the GPU process are irrelevant to the cost (<= 5 %). Not measured: output throughput (lines/s) or latency while flooded; footprint/vmmap only printed for the app at the end.
 - Helper processes are found as new `com.apple.WebKit.*` processes after the app starts, so other WebKit apps launched mid-run would be miscounted.
 
+## Phase 2 — Daily driver
+
+- [ ] **T8 · Output path.** Pane output over a Tauri `Channel` as raw bytes
+  (no base64 JSON), coalesced per pane and written to xterm once per
+  animation frame. Rerun `desktop/bench/run.sh`; add the numbers to T7 results.
+- [ ] **T9 · Parity gaps.** New-task dialog uses the extension's real
+  new-task panel (`src/newtask/webview`) the same way the sidebar is reused,
+  with the base-branch picker wired to stackd; PR / ticket / port links open
+  in the default browser; default-provider picker and provider install hint
+  work. The review/diff panel is out of scope (not needed).
+- [ ] **T10 · Window modes.** Full / Half / Float switch (title-bar control +
+  ⌘⇧F). Half: snap to left/right half of the current screen, narrow sidebar,
+  Manager as a bottom strip with its last N lines (setting, default 6) + an
+  input line; ⌘⇧M expands it. Float: always-on-top window (non-activating
+  NSPanel on macOS), compact worktree list with Allow on the one that needs
+  you, session area, Manager strip always visible. Same state everywhere.
+- [ ] **T11 · Notifications, tray, global shortcuts.** Native notifications
+  for "needs you" with Allow / View (grouped within 5 s, never for the
+  session on screen, re-notify at 2 and 10 min); menu-bar item with counts;
+  global ⌃⌥⌘J (next needing you), ⌃⌥⌘M (Manager), ⌃⌥⌘S (show Stack).
+- [ ] **T12 · Packaging.** Signed `.app`, `stackd` bundled and run as a
+  launchd user agent; the extension defaults `stack.useDaemon` to true when
+  a daemon is present.
+
 ## Decisions log
 
 - 2026-11-11 · Rust UI + tmux control mode; no forks of tmux or agent TUIs;
@@ -170,3 +194,4 @@ Interpretation:
 - 2026-11-11 · Desktop message seam: `sidebar/bridge.ts` (pure, tested) builds the `{type:'state'}` payload from stackd's snapshot (+ app selection as `activeWorktreeId`, style) and turns each `WebMessage` into stackd commands (`spawnAgent`/`spawnShell`/`killWindow`/`renameTask`/`renameSession`/`deleteTask` with the extension's `planDelete` text/`initTask`/`createTask`/`message` for docker, drift, setup, reorder, forget), app actions (select, in-app dialogs) or "not yet in desktop" (review panel, opening PR/ticket/port links, default-provider picker, provider install).
 - 2026-11-11 · Desktop theme: `desktop/scripts/gen-vscode-theme.mjs` writes `src/theme/vscode-theme.css` (`--vscode-*` for Dark Modern + font vars + the webview default stylesheet, all read from the local VS Code install: theme + `include`s, `registerColor` defaults of workbench.desktop.main.js, `contributes.colors` of built-in extensions); `--theme/--kind` regenerate for another theme. Chrome (tabs, Manager header, dialogs) and xterm (`terminal.*`, editor font, size 14) use the same variables; centre terminals use editor.background, Manager sideBar.background.
 - 2026-11-11 · Desktop `stack.sidebarStyle` comes from the user's VS Code `settings.json` (Tauri `vscode_settings`, JSONC), else `aside`. Dev page: `/?dev=sidebar[&style=claude|mission][&width=]` renders the sidebar on a fixed sample state (`sidebar/fixtures.ts`).
+- 2026-11-11 · Sidebar in the app is the extension's own webview (`src/webview`) + generated VS Code theme variables; shared CSS fixes apply to both.
