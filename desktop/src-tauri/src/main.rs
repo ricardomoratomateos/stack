@@ -9,6 +9,7 @@ mod stackd;
 mod window;
 
 fn main() {
+    launchd::adopt_login_path();
     tauri::Builder::default()
         .manage(commands::Bridge::default())
         .manage(commands::StackdLatest::default())

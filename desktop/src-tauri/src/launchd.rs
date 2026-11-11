@@ -221,6 +221,28 @@ pub fn current_uid() -> u32 {
     unsafe { libc::getuid() }
 }
 
+/// Apps opened from Finder/Dock get launchd's bare PATH (/usr/bin:/bin:…), so `tmux`, `git` and
+/// `node` from Homebrew or nvm aren't found. Adopt the login shell's PATH, keeping the common
+/// install dirs as a fallback. Call once at startup, before any thread is spawned.
+pub fn adopt_login_path() {
+    let probe = probe_login_shell(&RealRunner);
+    let current = std::env::var("PATH").unwrap_or_default();
+    let merged = merge_path(probe.path.as_deref(), &current);
+    // SAFETY: called from main() before the Tauri runtime or any other thread starts.
+    unsafe { std::env::set_var("PATH", merged) };
+}
+
+/// Login-shell PATH first, then the current one, then Homebrew/usr-local; no duplicates.
+pub fn merge_path(login: Option<&str>, current: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    for part in login.unwrap_or("").split(':').chain(current.split(':')).chain(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]) {
+        if !part.is_empty() && !out.contains(&part) {
+            out.push(part);
+        }
+    }
+    out.join(":")
+}
+
 pub fn default_path(probe: &ShellProbe) -> String {
     probe.path.clone().unwrap_or_else(|| "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin".into())
 }
@@ -356,5 +378,12 @@ mod tests {
         // then Homebrew
         assert_eq!(resolve_node(&home, None, &none, &has(&["/usr/local/bin/node"]), &|_| vec![]), Some("/usr/local/bin/node".into()));
         assert_eq!(resolve_node(&home, None, &none, &has(&[]), &|_| vec![]), None);
+    }
+
+    #[test]
+    fn merge_path_prefers_login_shell_and_keeps_fallbacks() {
+        let m = super::merge_path(Some("/Users/x/.nvm/bin:/opt/homebrew/bin:/usr/bin"), "/usr/bin:/bin");
+        assert_eq!(m, "/Users/x/.nvm/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/local/bin:/usr/sbin:/sbin");
+        assert!(super::merge_path(None, "/usr/bin:/bin").starts_with("/usr/bin:/bin:/opt/homebrew/bin"));
     }
 }
