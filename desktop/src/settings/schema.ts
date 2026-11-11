@@ -6,6 +6,9 @@ export const SHOWN = [
   'defaultProvider', 'claudeCommand', 'codexCommand', 'opencodeCommand', 'sidebarStyle', 'notifyOnAttention',
 ] as const;
 
+/** The project keys the screen edits (a repo's `.stack/config.json` owns them); the rest of SHOWN is the user's. */
+export const PROJECT_KEYS: readonly string[] = ['worktreesDirectory', 'defaultBaseBranch', 'setupScript', 'setupInTerminal', 'teardownScript'];
+
 export type SettingValue = string | boolean;
 
 export interface SettingDef {
@@ -64,4 +67,13 @@ export const isModified = (def: SettingDef, value: SettingValue | undefined): bo
 /** `stack.sidebarStyle` from the stack settings file, when set. */
 export function sidebarStyleOf(file: Record<string, unknown>): unknown {
   return file.sidebarStyle ?? file['stack.sidebarStyle'];
+}
+
+export const PROJECT_DEFS: SettingDef[] = DEFS.filter((d) => PROJECT_KEYS.includes(d.key));
+export const USER_DEFS: SettingDef[] = DEFS.filter((d) => !PROJECT_KEYS.includes(d.key));
+
+/** A key in a repo's `.stack/config.json` (unprefixed, unlike settings.json); undefined when unset or of the wrong type. */
+export function repoValueOf(def: SettingDef, file: Record<string, unknown>): SettingValue | undefined {
+  const v = file[def.key];
+  return typeof v === def.type ? (v as SettingValue) : undefined;
 }

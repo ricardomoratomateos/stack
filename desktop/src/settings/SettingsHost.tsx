@@ -1,15 +1,22 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { DEFS, isModified, valueOf, type SettingDef, type SettingValue } from './schema';
+import { PROJECT_DEFS, USER_DEFS, isModified, repoValueOf, valueOf, type SettingDef, type SettingValue } from './schema';
 
 /** Full-window Settings editor over ~/.config/stack/settings.json, in the look of VS Code's. */
-export function SettingsHost({ onClose, onSaved }: { onClose: () => void; onSaved: (file: Record<string, unknown>) => void }) {
+export function SettingsHost({ repo, onClose, onSaved }: { repo?: { name: string; root: string }; onClose: () => void; onSaved: (file: Record<string, unknown>) => void }) {
   const [file, setFile] = useState<Record<string, unknown> | null>(null);
+  const [repoFile, setRepoFile] = useState<Record<string, unknown> | null>(null);
+  const [scope, setScope] = useState<'user' | 'repo'>(repo ? 'repo' : 'user');
   const [error, setError] = useState('');
 
   useEffect(() => {
     invoke<Record<string, unknown>>('read_settings').then(setFile).catch((e) => { setError(String(e)); setFile({}); });
   }, []);
+  useEffect(() => {
+    if (!repo) return;
+    setRepoFile(null);
+    invoke<Record<string, unknown>>('read_repo_config', { repoRoot: repo.root }).then(setRepoFile).catch((e) => { setError(String(e)); setRepoFile({}); });
+  }, [repo]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
@@ -31,6 +38,17 @@ export function SettingsHost({ onClose, onSaved }: { onClose: () => void; onSave
     }
   };
 
+  const saveRepo = async (key: string, value: SettingValue | null) => {
+    if (!repo) return;
+    try {
+      setRepoFile(await invoke<Record<string, unknown>>('write_repo_config', { repoRoot: repo.root, changes: { [key]: value } }));
+      setError('');
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+  const inRepo = scope === 'repo' && !!repo;
+
   return (
     <div className="newtask-host settings-host">
       <div className="newtask-bar" data-tauri-drag-region>
@@ -38,20 +56,39 @@ export function SettingsHost({ onClose, onSaved }: { onClose: () => void; onSave
       </div>
       <div className="settings-body">
         <h1>Settings</h1>
-        <p className="settings-sub">Saved to <code>~/.config/stack/settings.json</code>; stackd picks changes up right away.</p>
+        <div className="settings-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={!inRepo} onClick={() => setScope('user')}>User</button>
+          {repo && <button type="button" role="tab" aria-selected={inRepo} onClick={() => setScope('repo')}>{repo.name}</button>}
+        </div>
+        {inRepo && repo ? (
+          <p className="settings-sub">Saved to <code>{repo.root}/.stack/config.json</code>, shared with everyone who clones the repository.</p>
+        ) : (
+          <p className="settings-sub">Saved to <code>~/.config/stack/settings.json</code>; stackd picks changes up right away.</p>
+        )}
         {error && <div className="settings-error" role="alert">{error}</div>}
-        {file && DEFS.map((d) => <SettingRow key={d.key} def={d} stored={valueOf(d, file)} onSave={save} />)}
-        <div className="setting-item">
+        {inRepo && repoFile && PROJECT_DEFS.map((d) => (
+          <SettingRow key={`repo-${d.key}`} def={d} stored={repoValueOf(d, repoFile)} onSave={saveRepo}
+            note={file && valueOf(d, file) !== undefined ? 'Overridden by User setting' : undefined} />
+        ))}
+        {!inRepo && file && USER_DEFS.map((d) => <SettingRow key={d.key} def={d} stored={valueOf(d, file)} onSave={save} />)}
+        {!inRepo && file && (
+          <>
+            <h2 className="settings-group">Project settings</h2>
+            <p className="settings-sub">A value set here overrides this key in every repository, including its <code>.stack/config.json</code>. Leave it unset to let each repo decide.</p>
+            {PROJECT_DEFS.map((d) => <SettingRow key={d.key} def={d} stored={valueOf(d, file)} onSave={save} />)}
+          </>
+        )}
+        {!inRepo && <div className="setting-item">
           <div className="setting-title">Other settings</div>
           <div className="setting-desc">Docker and the rest are objects or advanced options: edit them in the file.</div>
           <button type="button" className="secondary" onClick={() => invoke('open_settings_file').catch((e) => setError(String(e)))}>Open settings.json</button>
-        </div>
+        </div>}
       </div>
     </div>
   );
 }
 
-function SettingRow({ def, stored, onSave }: { def: SettingDef; stored: SettingValue | undefined; onSave: (key: string, v: SettingValue | null) => void }) {
+function SettingRow({ def, stored, onSave, note }: { def: SettingDef; stored: SettingValue | undefined; onSave: (key: string, v: SettingValue | null) => void; note?: string }) {
   const current = stored ?? def.default;
   const [draft, setDraft] = useState(String(current));
   useEffect(() => setDraft(String(current)), [current]);
@@ -65,6 +102,7 @@ function SettingRow({ def, stored, onSave }: { def: SettingDef; stored: SettingV
       <label className="setting-title" htmlFor={id}>
         {def.title}
         {modified && <span className="setting-modified">Modified</span>}
+        {note && <span className="setting-override">{note}</span>}
         {modified && <button type="button" className="setting-reset" title="Reset to default" onClick={() => onSave(def.key, null)}>Reset</button>}
       </label>
       {def.type === 'boolean' ? (

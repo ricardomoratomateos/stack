@@ -43,6 +43,8 @@ fn main() {
             commands::read_settings,
             commands::write_settings,
             commands::open_settings_file,
+            commands::read_repo_config,
+            commands::write_repo_config,
             shell::set_tray,
             shell::notify_show,
             window::window_frame,

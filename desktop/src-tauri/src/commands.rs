@@ -468,6 +468,110 @@ mod settings_tests {
     }
 }
 
+// ── <repo>/.stack/config.json (the project settings; the Settings screen's repo tab edits it) ──
+
+/// The keys of a repo's config the screen may write (scalar ones; the file may hold more, which stay).
+const REPO_KEYS: [&str; 5] = ["worktreesDirectory", "defaultBaseBranch", "setupScript", "setupInTerminal", "teardownScript"];
+
+/// `<root>/.stack/config.json`, only when `root` is a directory holding `.git` (file or directory).
+fn repo_config_path(root: &str) -> Result<std::path::PathBuf, String> {
+    let root = std::path::Path::new(root);
+    if !root.is_absolute() || !root.is_dir() {
+        return Err(format!("{} is not a directory", root.display()));
+    }
+    if !root.join(".git").exists() {
+        return Err(format!("{} is not a git repository", root.display()));
+    }
+    Ok(root.join(".stack").join("config.json"))
+}
+
+/// The repo's `.stack/config.json` object (`{}` when there is none).
+#[tauri::command]
+pub fn read_repo_config(repo_root: String) -> Result<Value, String> {
+    Ok(Value::Object(read_object(&repo_config_path(&repo_root)?)))
+}
+
+/// Applies `changes` (`null` = remove the key) to the repo's config, keeping every other key and the
+/// order; a new file starts with `"version": 1`. Written atomically as 2-space JSON; returns the result.
+#[tauri::command]
+pub fn write_repo_config(repo_root: String, changes: serde_json::Map<String, Value>) -> Result<Value, String> {
+    write_repo_config_at(&repo_config_path(&repo_root)?, &changes)
+}
+
+fn write_repo_config_at(path: &std::path::Path, changes: &serde_json::Map<String, Value>) -> Result<Value, String> {
+    if let Some(bad) = changes.keys().find(|k| !REPO_KEYS.contains(&k.as_str())) {
+        return Err(format!("{bad} is not a project setting"));
+    }
+    let existing = read_object(path);
+    let mut merged = serde_json::Map::new();
+    if !existing.contains_key("version") {
+        merged.insert("version".into(), Value::from(1));
+    }
+    merged.extend(existing);
+    for (key, value) in changes {
+        if value.is_null() {
+            merged.remove(key);
+        } else {
+            merged.insert(key.clone(), value.clone());
+        }
+    }
+    let merged = Value::Object(merged);
+    let dir = path.parent().ok_or("bad config path")?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let tmp = dir.join(format!(".config.json.{}.tmp", std::process::id()));
+    let text = serde_json::to_string_pretty(&merged).map_err(|e| e.to_string())? + "\n";
+    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })?;
+    Ok(merged)
+}
+
+#[cfg(test)]
+mod repo_config_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn obj(v: Value) -> serde_json::Map<String, Value> {
+        v.as_object().unwrap().clone()
+    }
+
+    fn temp_repo(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("stack-repocfg-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn rejects_non_repos_and_relative_paths() {
+        let dir = temp_repo("plain");
+        assert!(repo_config_path(dir.to_str().unwrap()).is_err());
+        assert!(repo_config_path("relative/path").is_err());
+        assert!(repo_config_path(dir.join("missing").to_str().unwrap()).is_err());
+        std::fs::write(dir.join(".git"), "gitdir: elsewhere").unwrap(); // a worktree's .git file counts
+        assert_eq!(repo_config_path(dir.to_str().unwrap()).unwrap(), dir.join(".stack/config.json"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn creates_with_version_keeps_unknown_keys_and_removes_on_null() {
+        let dir = temp_repo("write");
+        std::fs::create_dir(dir.join(".git")).unwrap();
+        let file = repo_config_path(dir.to_str().unwrap()).unwrap();
+        let out = write_repo_config_at(&file, &obj(json!({"defaultBaseBranch": "main"}))).unwrap();
+        assert_eq!(out, json!({"version": 1, "defaultBaseBranch": "main"}));
+        std::fs::write(&file, "{\"version\": 3, \"future\": {\"a\": 1}, \"setupScript\": \"x\"}").unwrap();
+        let out = write_repo_config_at(&file, &obj(json!({"setupScript": null, "setupInTerminal": true}))).unwrap();
+        assert_eq!(out, json!({"version": 3, "future": {"a": 1}, "setupInTerminal": true}));
+        assert!(std::fs::read_to_string(&file).unwrap().contains("\n  \"version\": 3"));
+        assert_eq!(std::fs::read_dir(file.parent().unwrap()).unwrap().count(), 1);
+        assert!(write_repo_config_at(&file, &obj(json!({"claudeCommand": "x"}))).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 /// Only these may reach the browser: https links and localhost ports (PR, ticket, dev servers).
 pub fn openable(url: &str) -> bool {
     let rest = if let Some(r) = url.strip_prefix("https://") {

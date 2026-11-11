@@ -477,7 +477,7 @@ export function App() {
           </>
         )}
         {newTaskOpen && <NewTaskHost style={style} onMessage={(m) => void onNewTaskMessage(m)} registerPost={registerPost} />}
-        {settingsOpen && <SettingsHost onClose={() => setSettingsOpen(false)} onSaved={(file) => void loadSidebarStyle().then(setStyle).catch(() => setStyle(resolveSidebarStyle(file, null)))} />}
+        {settingsOpen && <SettingsHost repo={view.repos.find((r) => r.repoRoot === view.repoRoot) && { name: view.repos.find((r) => r.repoRoot === view.repoRoot)!.name, root: view.repoRoot }} onClose={() => setSettingsOpen(false)} onSaved={(file) => void loadSidebarStyle().then(setStyle).catch(() => setStyle(resolveSidebarStyle(file, null)))} />}
         {dialog && <Dialog spec={dialog} onClose={() => setDialog(null)} />}
       </div>
     </div>
