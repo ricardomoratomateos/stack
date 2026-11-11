@@ -7,7 +7,7 @@
  * it too, so the "jump to the next one that needs me" shortcut walks the same
  * queue the sidebar draws.
  */
-import type { StackState, ProviderId, SessionItem, WorktreeItem } from './types';
+import type { AgentState, StackState, ProviderId, SessionItem, WorktreeItem } from './types';
 
 export type WorktreeGroup = 'needs' | 'review' | 'working' | 'idle' | 'missing';
 
@@ -67,6 +67,20 @@ export function groupOf(wt: WorktreeItem): WorktreeGroup {
   const resting = agents.some((s) => s.state === 'waiting' || s.state === 'idle');
   if (resting && (hasWork(wt) || hasOpenPr(wt))) return 'review';
   return 'idle';
+}
+
+/**
+ * Which group a single agent session reads as: the one place a session state
+ * becomes a colour, so a tab, a switcher row and a card all agree.
+ */
+export function sessionGroup(state: AgentState): WorktreeGroup {
+  switch (state) {
+    case 'permission': return 'needs';
+    case 'active': return 'working';
+    case 'waiting': return 'review';
+    case 'terminated': return 'missing';
+    default: return 'idle';
+  }
 }
 
 const PRIORITY: Record<string, number> = { permission: 0, active: 1, waiting: 2, idle: 3 };

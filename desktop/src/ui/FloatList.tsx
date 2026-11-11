@@ -1,3 +1,4 @@
+import { StatusDot } from '@core/webview/components/StatusDot';
 import { stateWord, type FloatRow } from '../model';
 
 /** Float's compact worktree list: one line per worktree with its sessions; the one asking shows Allow. */
@@ -15,7 +16,7 @@ export function FloatList({ rows, selectedId, onSelect, onAllow }: {
           <span className="float-sessions">
             {r.sessions.map((s) => (
               <button key={s.index} type="button" className="float-session" data-state={s.state} title={`${s.name}: ${stateWord(s.state)}`} onClick={() => onSelect(r.id, s.index)}>
-                <span className="dot" aria-hidden="true" />{s.name}
+                <StatusDot state={s.state} size="sm" />{s.name}
               </button>
             ))}
           </span>

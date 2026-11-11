@@ -34,10 +34,6 @@ kbd { font-size: 11px; color: var(--vscode-descriptionForeground); border: 1px s
 .tab:hover { background: var(--vscode-tab-hoverBackground); }
 .tab[data-selected] { color: var(--vscode-tab-activeForeground); background: var(--vscode-tab-activeBackground); border-top-color: var(--vscode-tab-activeBorderTop); }
 .tab-state { color: var(--vscode-descriptionForeground); font-size: 11px; font-family: var(--vscode-editor-font-family); }
-.dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--vscode-disabledForeground); display: inline-block; }
-[data-state='permission'] > .dot { background: var(--vscode-editorWarning-foreground); }
-[data-state='active'] > .dot { background: var(--vscode-terminal-ansiGreen); }
-[data-state='waiting'] > .dot { background: var(--vscode-terminal-ansiBlue); }
 .term-host { --term-bg: var(--vscode-terminal-background, var(--vscode-editor-background)); flex: 1; min-height: 0; background: var(--term-bg); padding: 8px 0 0 16px; }
 .term { width: 100%; height: 100%; }
 .term-host .xterm { height: 100%; background: var(--term-bg); }
@@ -178,4 +174,3 @@ body[data-resizing] .term-host, body[data-resizing] .sidebar-body { pointer-even
 .switcher-foot { position: sticky; bottom: 0; padding: 6px 16px 2px; font-size: 0.85em; opacity: 0.6; background: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .switcher-hint { flex: none; opacity: 0.6; font-size: 0.9em; }
 .switcher-row[data-state='permission'] .switcher-name { font-weight: 600; }
-.switcher-row[data-state='permission'] > .dot { background: var(--vscode-terminal-ansiBrightGreen, var(--vscode-editorWarning-foreground)); box-shadow: 0 0 0 2px var(--vscode-editorWarning-foreground); }

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { send } from '../vscode';
 import type { AgentState, SessionItem, WorktreeItem } from '../types';
+import { StatusDot } from './StatusDot';
 import { ProviderMark } from './providers';
 
 export type SessionVariant = 'claude' | 'mission' | 'aside';
@@ -22,7 +23,7 @@ function Mark({ session }: { session: SessionItem; variant: SessionVariant }) {
   return (
     <>
       <ProviderMark provider={session.provider} size={13} />
-      <span className="fm-sess-dot" aria-hidden="true" />
+      <StatusDot state={session.state} size="sm" />
     </>
   );
 }

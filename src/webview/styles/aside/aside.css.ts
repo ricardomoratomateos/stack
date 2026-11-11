@@ -114,11 +114,7 @@ body.vscode-high-contrast .fm-aside, body.vscode-high-contrast-light .fm-aside {
 .as-chip[aria-pressed='true'] { background: var(--fm-selected); color: var(--fm-text); }
 .as-chip-n { font-family: var(--fm-mono); color: var(--fm-text); }
 .as-chip[data-zero] { opacity: .4; }
-.as-chip-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fm-idle); }
-.as-chip[data-group='needs'] .as-chip-dot { background: var(--fm-needs); }
-.as-chip[data-group='review'] .as-chip-dot { background: var(--fm-review); }
-.as-chip[data-group='working'] .as-chip-dot { background: var(--fm-working); }
-
+.as-chip[data-group='needs'] .as-chip[data-group='review'] .as-chip[data-group='working'] 
 .as-pinned { flex: none; padding: 8px 8px; margin-bottom: 4px; border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-sideBar-border, var(--fm-border))); }
 .as-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 16px; display: flex; flex-direction: column; }
 .as-list > .fm-empty { flex: 1; }
@@ -135,13 +131,6 @@ body.vscode-high-contrast .fm-aside, body.vscode-high-contrast-light .fm-aside {
 }
 .as-row:not([data-selected]) .as-row-main:hover { background: var(--fm-hover); }
 .as-dot-wrap { height: 18px; display: flex; align-items: center; justify-content: center; }
-/* Square, like the brand: filled for live states, hollow for idle, dashed for missing. */
-.as-dot { width: 8px; height: 8px; border-radius: 2px; background: var(--fm-idle); flex: none; }
-.as-row[data-group='needs'] .as-dot { background: var(--fm-needs); animation: stack-blink 1s ease-in-out infinite; }
-.as-row[data-group='review'] .as-dot { background: var(--fm-review); }
-.as-row[data-group='working'] .as-dot { background: var(--fm-working); box-shadow: 0 0 0 3px color-mix(in srgb, var(--fm-working) 14%, transparent); animation: stack-pulse 1.6s ease-in-out infinite; }
-.as-row[data-group='idle'] .as-dot { background: transparent; border: 1.5px solid var(--fm-idle); }
-.as-row[data-group='missing'] .as-dot { background: transparent; border: 1.5px dashed var(--fm-idle); }
 .as-body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .as-name { font-weight: 500; color: var(--fm-text); }
 .as-row[data-group='idle'] .as-name, .as-row[data-group='missing'] .as-name { color: var(--fm-text-dim); }
@@ -157,8 +146,6 @@ body.vscode-high-contrast .fm-aside, body.vscode-high-contrast-light .fm-aside {
 .as-expand .fm-sessions { padding-top: 4px; }
 .as-actions { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px; }
 .as-actions .fm-split-main { padding: 0 10px; }
-/* Aside's session markers are small squares too. */
-.fm-aside .fm-sess-dot { border-radius: 2px; }
 .fm-aside .fm-sess-main { grid-template-columns: 10px minmax(0, 1fr) auto; }
 .fm-aside .fm-sess-name, .fm-aside .fm-sess-sub { font-family: var(--fm-mono); font-size: 11px; }
 .fm-aside .fm-health { border-top-color: var(--fm-border); }

@@ -127,20 +127,18 @@ body.vscode-high-contrast .fm .fm-split-solid .fm-split-chev, body.vscode-high-c
 .fm-sess-mark { position: relative; display: flex; align-items: center; justify-content: center; }
 .fm-sess-shell { font-size: 13px; color: var(--fm-text-dim); }
 /* The state, as a badge on the agent mark's corner, cut out of the row's background. */
-.fm-sess-mark .fm-sess-dot { position: absolute; right: -2px; bottom: -2px; width: 6px; height: 6px; box-shadow: 0 0 0 1.5px var(--fm-surface, var(--vscode-sideBar-background)); }
-.fm-sess-prompt { font-family: var(--fm-mono); font-size: 11px; color: var(--fm-text-dim); }
-.fm-sess-text { min-width: 0; display: flex; gap: 6px; align-items: baseline; }
-.fm-sess-name { flex: none; max-width: 60%; font-size: 12px; color: var(--fm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fm-sess-sub { min-width: 0; font-size: 11.5px; color: var(--fm-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fm-sess-state { font-size: 11px; color: var(--fm-text-dim); white-space: nowrap; }
-.fm-sess[data-state='permission'] .fm-sess-state { color: var(--fm-needs-text); }
-.fm-sess[data-state='active'] .fm-sess-state { color: var(--fm-working-text, var(--fm-working)); }
-.fm-sess[data-state='waiting'] .fm-sess-state { color: var(--fm-ok); }
-.fm-sess-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fm-idle); }
-.fm-sess[data-state='permission'] .fm-sess-dot { background: var(--fm-needs); animation: stack-blink 1s ease-in-out infinite; }
-.fm-sess[data-state='active'] .fm-sess-dot { background: var(--fm-working); animation: stack-pulse 1.6s ease-in-out infinite; }
-.fm-sess[data-state='waiting'] .fm-sess-dot { background: var(--fm-ok); }
-.fm-sess[data-state='terminated'] .fm-sess-dot { background: var(--fm-bad); }
+.fm-sess-mark /* The state indicator (StatusDot): the aside card's square, with its own palette so it looks the same everywhere. */
+.fm-dot {
+  --sd-needs: #c8ff00; --sd-review: #3b82f6; --sd-working: #fafafa; --sd-idle: #525252;
+  display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 2px; background: var(--sd-idle);
+}
+body.vscode-light .fm-dot { --sd-review: #2563eb; --sd-working: #0a0a0a; --sd-idle: #a3a3a3; }
+.fm-dot[data-size='sm'] { width: 6px; height: 6px; }
+.fm-dot[data-group='needs'] { background: var(--sd-needs); animation: stack-blink 1s ease-in-out infinite; }
+.fm-dot[data-group='review'] { background: var(--sd-review); }
+.fm-dot[data-group='working'] { background: var(--sd-working); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sd-working) 14%, transparent); animation: stack-pulse 1.6s ease-in-out infinite; }
+.fm-dot[data-group='idle'] { background: transparent; border: 1.5px solid var(--sd-idle); }
+.fm-dot[data-group='missing'] { background: transparent; border: 1.5px dashed var(--sd-idle); }
 /* Rename and kill take the state label's place on hover or keyboard focus. */
 .fm-sess-actions { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: none; gap: 2px; }
 .fm-sess:hover .fm-sess-actions, .fm-sess:focus-within .fm-sess-actions { display: flex; }

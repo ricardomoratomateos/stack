@@ -1,3 +1,4 @@
+import { StatusDot } from '@core/webview/components/StatusDot';
 import { useEffect, useRef } from 'react';
 import type { SwitcherRow } from '../model';
 
@@ -11,7 +12,7 @@ export function Switcher({ rows, index, onPick }: { rows: SwitcherRow[]; index: 
         {rows.map((r, i) => (
           <li key={r.id} className="switcher-row" role="option" aria-selected={i === index} data-selected={i === index || undefined} data-state={r.state}
             onMouseDown={(e) => { e.preventDefault(); onPick(r.id); }}>
-            <span className="dot" aria-hidden="true" />
+            <StatusDot state={r.state} size="sm" />
             <span className="switcher-name">{r.name}</span>
             <span className="switcher-line">{r.line}</span>
             <span className="switcher-hint">{r.hint}</span>

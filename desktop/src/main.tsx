@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import './theme/vscode-theme.css';
 import './styles.css';
+import './sidebar/webviewStyles';
 import { App } from './App';
 import { DevSidebar } from './sidebar/DevSidebar';
 import { StackdProvider } from './stackd/useStackd';

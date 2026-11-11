@@ -3,6 +3,7 @@ import { send } from '../../vscode';
 import { PRODUCT_NAME } from '../../brand';
 import { GROUP_LABEL, GROUP_SHORT, countByGroup, formatAge, type Described, type WorktreeGroup } from '../../derive';
 import { Details, DiffStat, TicketChip } from '../../components/Details';
+import { StatusDot } from '../../components/StatusDot';
 import { LaunchSplit } from '../../components/LaunchSplit';
 import { ActionBar } from '../../components/ActionBar';
 import { visualFor } from '../../components/providers';
@@ -92,7 +93,7 @@ export function Aside({ state, loaded, items, controlItem, selectedId, select, d
             const on = filter === group;
             return (
               <button key={group} type="button" className="as-chip" data-group={group} data-zero={counts[group] === 0 ? '' : undefined} aria-pressed={on} title={`${GROUP_SHORT[group]}: ${counts[group]}`} aria-label={`${GROUP_SHORT[group]}: ${counts[group]}`} onClick={() => setFilter(on ? 'all' : group)}>
-                <span className="as-chip-dot" aria-hidden="true" />
+                <StatusDot group={group} size="sm" title={GROUP_SHORT[group]} />
                 <span className="as-chip-n">{counts[group]}</span>
               </button>
             );
@@ -137,7 +138,7 @@ function Row({ d, selected, now, state, select, drag }: {
       {...drag.props}
     >
       <button type="button" className="as-row-main" aria-current={selected || undefined} onClick={pick}>
-        <span className="as-dot-wrap"><span className="as-dot" role="img" aria-label={GROUP_LABEL[d.group]} /></span>
+        <span className="as-dot-wrap"><StatusDot group={d.group} /></span>
         <span className="as-body">
           <span className="fm-name-row">
             <span className="as-name fm-ellipsis" title={wt.branch}>{d.name}</span>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { StatusDot } from '@core/webview/components/StatusDot';
 import { nameOf } from '@core/webview/derive';
 import { MANAGER_ID, buildView, floatRows, managerIndex, managerSession, mruTouch, pickSession, stepWrap, switcherRows, type SwitcherRow, resolveShortcut, sessionRows, shortcutOf, stateWord, type Effect } from './model';
 import { StartStackd } from './stackd/StartStackd';
@@ -533,7 +534,7 @@ export function App() {
                     <span className="tabs-title">{selected.name}</span>
                     {rows.map((r) => (
                       <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === selectedIndex || undefined} onClick={() => select(selected.wt.id, r.index)} title={[r.kind === 'agent' ? stateWord(r.state) : r.detail, r.index === selectedIndex ? 'Double-click to maximize' : ''].filter(Boolean).join(' · ') || undefined}>
-                        <span className="dot" aria-hidden="true" />
+                        <StatusDot state={r.state} size="sm" />
                         {r.name}
                         {maximized === 'session' && r.index === selectedIndex && <span className="max-badge" title={maxTitle}>maximized</span>}
                       </button>
@@ -574,7 +575,7 @@ export function App() {
                 <span className="tabs-title">{view.control?.name || 'Manager'}</span>
                 {managerRows.map((r) => (
                   <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === managerIdx || undefined} onClick={() => setManagerTabs((m) => ({ ...m, [view.repoRoot]: r.index }))} title={(r.kind === 'agent' ? stateWord(r.state) : r.detail) || undefined}>
-                    <span className="dot" aria-hidden="true" />
+                    <StatusDot state={r.state} size="sm" />
                     {r.name}
                   </button>
                 ))}
