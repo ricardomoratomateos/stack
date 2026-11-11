@@ -4,7 +4,7 @@ import { nameOf } from '@core/webview/derive';
 import { MANAGER_ID, buildView, floatRows, managerIndex, managerSession, mruTouch, pickSession, stepWrap, switcherRows, type SwitcherRow, resolveShortcut, stepSessionIndex, type Pane, sessionRows, shortcutOf, stateWord, type Effect } from './model';
 import { StartStackd } from './stackd/StartStackd';
 import { useStackd } from './stackd/useStackd';
-import { ManagerStrip, useTerminals, type StripHandle } from './terminals';
+import { useTerminals } from './terminals';
 import { SidebarHost } from './sidebar/SidebarHost';
 import { installHint, toSidebarState, translate, type Action } from './sidebar/bridge';
 import { loadDefaultProvider, saveDefaultProvider } from './sidebar/prefs';
@@ -57,7 +57,6 @@ export function App() {
   const [stripExpanded, setStripExpanded] = useState(false);
   const [appWidth, setAppWidth] = useState(1200);
   const appRef = useRef<HTMLDivElement>(null);
-  const stripRef = useRef<StripHandle>(null);
   const { mode, side } = layout;
   const sizes = layout.sizes[mode];
   const [focusTick, setFocusTick] = useState(0);
@@ -216,8 +215,7 @@ export function App() {
           focusedPane.current = 'manager';
           setManagerTabs((m) => ({ ...m, [repo]: to }));
           if (l.mode === 'full') setManagerOpen(true);
-          if (l.mode === 'full' || l.expanded) setFocusTick((t) => t + 1);
-          else stripRef.current?.focus();
+          setFocusTick((t) => t + 1);
         }
       } else {
         const to = stepSessionIndex(l.selected, l.selectedIndex, fx.tab.dir);
@@ -234,8 +232,7 @@ export function App() {
       touch(MANAGER_ID);
       focusedPane.current = 'manager';
       if (latest.current.mode === 'full') setManagerOpen(true);
-      if (latest.current.mode === 'full' || latest.current.expanded) setFocusTick((t) => t + 1);
-      else stripRef.current?.focus();
+      setFocusTick((t) => t + 1);
     }
   }, [select, touch]);
   // ⌘⇧J is both a menu accelerator and a JS shortcut; only one of the two may act per press.
@@ -522,7 +519,6 @@ export function App() {
   const showCentre = maximized !== 'manager';
   const showList = float && maximized === null;
   const columnManager = mode === 'full' && managerOpen && maximized !== 'session' || mode === 'full' && maximized === 'manager';
-  const showStrip = mode !== 'full' && maximized === null && !stripExpanded;
   const bigManager = mode !== 'full' && (maximized === 'manager' || (maximized === null && stripExpanded));
   const managerLimits = limits(mode, 'manager');
   const sidebarLimits = limits(mode, 'sidebar');
@@ -603,10 +599,10 @@ export function App() {
             <section className="manager-dock" data-expanded={bigManager || undefined} aria-label="Manager">
               {!bigManager && <Splitter orientation="row" invert label="Resize Manager strip" value={stripPx} min={heightFromLines(limits(mode, 'lines').min)} max={heightFromLines(limits(mode, 'lines').max)} reset={heightFromLines(DEFAULT_SIZES[mode].lines)} onChange={(px) => resizeTo('lines', linesFromHeight(px))} />}
               <header className="strip-head" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧M toggle">
-                <span className="strip-title">◆ {view.control?.name || 'Manager'}{!bigManager && <> · last {sizes.lines} lines</>}</span>
+                <span className="strip-title">◆ {view.control?.name || 'Manager'}</span>
                 {maximized === 'manager' && <span className="max-badge" title={maxTitle}>maximized</span>}
               </header>
-              {bigManager ? <div className="term-host">{managerView}</div> : showStrip && <ManagerStrip ref={stripRef} pane={manager.pane} lines={sizes.lines} />}
+              <div className="term-host" style={bigManager ? undefined : { flex: 'none', height: stripPx }}>{managerView}</div>
             </section>
           )}
         </div>
