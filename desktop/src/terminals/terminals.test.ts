@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { base64ToBytes, nextHistoryStart, toTerminalText } from './bytes';
+import { concatChunks, decodeFrame, nextHistoryStart, toTerminalText } from './bytes';
 import { lastLines, type LineBuffer } from './lastLines';
 import { PaneBook, type PaneInfo } from './paneBook';
 
@@ -52,8 +52,16 @@ describe('PaneBook', () => {
 });
 
 describe('bytes helpers', () => {
-  it('decodes base64 including non-utf8 bytes', () => {
-    expect(Array.from(base64ToBytes('G1swbf8='))).toEqual([0x1b, 0x5b, 0x30, 0x6d, 0xff]);
+  it('decodes a frame: pane number then raw (non-utf8) bytes', () => {
+    const f = decodeFrame(new Uint8Array([2, 1, 0, 0, 0x1b, 0x5b, 0x30, 0x6d, 0xff]).buffer)!;
+    expect(f.pane).toBe('%258');
+    expect(Array.from(f.data)).toEqual([0x1b, 0x5b, 0x30, 0x6d, 0xff]);
+    expect(decodeFrame(new Uint8Array([1, 0]))).toBeNull();
+  });
+  it('concatenates chunks', () => {
+    const a = new Uint8Array([1, 2]);
+    expect(concatChunks([a], 2)).toBe(a);
+    expect(Array.from(concatChunks([a, new Uint8Array([3])], 3))).toEqual([1, 2, 3]);
   });
   it('converts captured text to CRLF', () => {
     expect(toTerminalText('a\nb\r\nc')).toBe('a\r\nb\r\nc');

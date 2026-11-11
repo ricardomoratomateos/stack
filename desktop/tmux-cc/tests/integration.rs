@@ -2,7 +2,7 @@
 use std::time::Duration;
 
 use tmux_cc::{Client, Config, Event, Mode, Notification};
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::Receiver;
 
 struct Server(String);
 
@@ -29,7 +29,7 @@ fn have_tmux() -> bool {
     std::process::Command::new("tmux").arg("-V").output().is_ok()
 }
 
-async fn collect_until(rx: &mut UnboundedReceiver<Event>, pane: &str, needle: &str) -> String {
+async fn collect_until(rx: &mut Receiver<Event>, pane: &str, needle: &str) -> String {
     let mut acc = Vec::new();
     let res = tokio::time::timeout(Duration::from_secs(10), async {
         while let Some(ev) = rx.recv().await {

@@ -122,6 +122,9 @@ struct Inner {
     _child: StdMutex<Child>,
 }
 
+/// Events buffered before the reader waits for the consumer (which makes tmux wait on its pipe).
+const EVENT_QUEUE: usize = 256;
+
 /// Handle to a control connection; cheap to clone. The tmux client process is
 /// killed when the last handle is dropped (the server and its sessions live on).
 #[derive(Clone)]
@@ -131,7 +134,7 @@ pub struct Client {
 
 impl Client {
     /// Spawn tmux and return the handle plus its event stream.
-    pub async fn connect(config: Config) -> Result<(Client, mpsc::UnboundedReceiver<Event>), Error> {
+    pub async fn connect(config: Config) -> Result<(Client, mpsc::Receiver<Event>), Error> {
         let mut child = Command::new(&config.tmux_bin)
             .args(config.args())
             .stdin(Stdio::piped())
@@ -146,7 +149,7 @@ impl Client {
 
         let waiters: Waiters = Arc::new(StdMutex::new(VecDeque::new()));
         let inner = Arc::new(Inner { stdin: Mutex::new(Some(stdin)), waiters: waiters.clone(), _child: StdMutex::new(child) });
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(EVENT_QUEUE);
 
         let weak = Arc::downgrade(&inner);
         tokio::spawn(async move {
@@ -164,7 +167,8 @@ impl Client {
                 }
                 match parser.feed(&buf) {
                     Some(Message::Notification(n)) => {
-                        let _ = tx.send(Event::Notification(n));
+                        // if nobody listens any more, keep draining so commands still get their replies
+                        let _ = tx.send(Event::Notification(n)).await;
                     }
                     // flags 0: tmux's own block (the attach), not an answer to us.
                     Some(Message::Block(b)) if b.flags != 0 => {
@@ -188,7 +192,7 @@ impl Client {
                 }
                 None => None,
             };
-            let _ = tx.send(Event::Closed { code, stderr: err.trim().to_string() });
+            let _ = tx.send(Event::Closed { code, stderr: err.trim().to_string() }).await;
         });
 
         let client = Client { inner };

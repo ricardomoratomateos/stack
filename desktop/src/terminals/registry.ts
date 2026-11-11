@@ -3,7 +3,7 @@ import { documentVar, terminalOptions } from '../theme/terminalTheme';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { FitAddon } from '@xterm/addon-fit';
 import type { TmuxApi } from './api';
-import { base64ToBytes, nextHistoryStart, toTerminalText } from './bytes';
+import { concatChunks, nextHistoryStart, toTerminalText } from './bytes';
 import { lastLines } from './lastLines';
 
 export const SCROLLBACK = 2000;
@@ -23,7 +23,18 @@ interface Entry {
   /** Lines the last capture returned. */
   count: number;
   loadingHistory: boolean;
+  /** Output waiting for the next animation frame. */
+  queue: Uint8Array[];
+  queued: number;
 }
+
+/** Output a shown pane may hold before a frame (a hidden window runs no frames); beyond it the pane resyncs. */
+export const MAX_QUEUED = 8 * 1024 * 1024;
+
+export interface Scheduler {
+  request(cb: () => void): void;
+}
+const rafScheduler: Scheduler = { request: (cb) => void requestAnimationFrame(cb) };
 
 /**
  * One xterm per pane, created lazily. A terminal is only attached to the DOM
@@ -34,7 +45,10 @@ export class TerminalRegistry {
   private entries = new Map<string, Entry>();
   private shown = new Set<string>();
 
-  constructor(private api: TmuxApi) {}
+  private dirty = new Set<string>();
+  private scheduled = false;
+
+  constructor(private api: TmuxApi, private scheduler: Scheduler = rafScheduler) {}
 
   has(pane: string): boolean {
     return this.entries.has(pane);
@@ -45,18 +59,58 @@ export class TerminalRegistry {
     return this.ensure(pane).term;
   }
 
-  /** Called for every `tmux://output` event. */
-  feed(pane: string, b64: string): void {
+  /** Called for every output chunk; written to xterm once per animation frame, per pane. */
+  feed(pane: string, bytes: Uint8Array): void {
     const e = this.entries.get(pane);
-    if (!e) return;
+    if (!e) return this.ack(bytes.length);
     if (!this.shown.has(pane)) {
       // hidden panes are paused by the backend; whatever slipped through is not enough
       e.stale = true;
+      return this.ack(bytes.length);
+    }
+    if (e.pending) {
+      e.pending.push(bytes);
       return;
     }
-    const bytes = base64ToBytes(b64);
-    if (e.pending) e.pending.push(bytes);
-    else e.term.write(bytes);
+    e.queue.push(bytes);
+    e.queued += bytes.length;
+    if (e.queued > MAX_QUEUED) {
+      this.ack(e.queued);
+      e.queue = [];
+      e.queued = 0;
+      e.stale = true;
+      this.dirty.delete(pane);
+      void this.sync(pane);
+      return;
+    }
+    this.dirty.add(pane);
+    if (!this.scheduled) {
+      this.scheduled = true;
+      this.scheduler.request(() => this.flush());
+    }
+  }
+
+  private flush(): void {
+    this.scheduled = false;
+    const panes = [...this.dirty];
+    this.dirty.clear();
+    for (const pane of panes) {
+      const e = this.entries.get(pane);
+      if (!e || e.queue.length === 0 || e.pending) continue;
+      const data = concatChunks(e.queue, e.queued);
+      e.queue = [];
+      e.queued = 0;
+      this.write(e, data);
+    }
+  }
+
+  /** Write to xterm and tell the backend once it is parsed (that is what paces the flow). */
+  private write(e: Entry, data: Uint8Array): void {
+    e.term.write(data, () => this.ack(data.length));
+  }
+
+  private ack(bytes: number): void {
+    if (bytes > 0) void this.api.ackOutput(bytes).catch(() => {});
   }
 
   /** Last `n` lines of a pane's buffer (for the Manager strip). */
@@ -142,10 +196,12 @@ export class TerminalRegistry {
   dispose(pane: string): void {
     const e = this.entries.get(pane);
     if (!e) return;
+    this.ack(e.queued);
     this.detach(e);
     e.term.dispose();
     this.entries.delete(pane);
     this.shown.delete(pane);
+    this.dirty.delete(pane);
   }
 
   disposeAll(): void {
@@ -186,7 +242,7 @@ export class TerminalRegistry {
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
-    e = { term, fit, pending: null, stale: false, loaded: 0, count: 0, loadingHistory: false };
+    e = { term, fit, pending: null, queue: [], queued: 0, stale: false, loaded: 0, count: 0, loadingHistory: false };
     const entry = e;
     term.onData((s) => void this.api.write(pane, [...new TextEncoder().encode(s)]));
     term.onBinary((s) => void this.api.write(pane, [...s].map((c) => c.charCodeAt(0) & 0xff)));
@@ -203,6 +259,9 @@ export class TerminalRegistry {
     const e = this.entries.get(pane);
     if (!e) return;
     e.stale = false;
+    this.ack(e.queued);
+    e.queue = [];
+    e.queued = 0;
     e.pending = [];
     try {
       const text = await this.api.capture(pane, -SCROLLBACK);
@@ -215,7 +274,7 @@ export class TerminalRegistry {
     }
     const queued = e.pending;
     e.pending = null;
-    for (const b of queued ?? []) e.term.write(b);
+    for (const b of queued ?? []) this.write(e, b);
   }
 
   /** Scrolled to the top: refill with more history and keep the scrollback in step. */
@@ -232,6 +291,9 @@ export class TerminalRegistry {
         e.loaded = Number.MAX_SAFE_INTEGER; // nothing older: stop asking
         return;
       }
+      this.ack(e.queued);
+      e.queue = [];
+      e.queued = 0;
       e.pending = [];
       e.term.options.scrollback = -start;
       e.term.reset();
@@ -240,7 +302,7 @@ export class TerminalRegistry {
       e.count = count;
       const queued = e.pending;
       e.pending = null;
-      for (const b of queued ?? []) e.term.write(b);
+      for (const b of queued ?? []) this.write(e, b);
     } catch {
       // keep what we have
     } finally {

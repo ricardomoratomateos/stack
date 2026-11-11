@@ -16,7 +16,8 @@ cleanup() {
   [ -n "$APP_PID" ] && kill "$APP_PID" 2>/dev/null
   [ -n "$SD_PID" ] && kill "$SD_PID" 2>/dev/null
   sleep 1; [ -n "$SD_PID" ] && kill -9 "$SD_PID" 2>/dev/null
-  tmux -L $SOCK kill-server 2>/dev/null; [ -n "$TMUX_SOCKFILE" ] && rm -f "$TMUX_SOCKFILE"
+  tmux -L $SOCK kill-server 2>/dev/null; sleep 1; tmux -L $SOCK kill-server 2>/dev/null
+  pkill -f "tmux -L $SOCK " 2>/dev/null; [ -n "$TMUX_SOCKFILE" ] && rm -f "$TMUX_SOCKFILE"
   rm -rf "$TMP"
 }
 trap cleanup EXIT INT TERM

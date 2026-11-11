@@ -1,7 +1,8 @@
 //! Tauri commands: the webview's view of the tmux control connections (one
 //! per tmux session) and of stackd.
 //!
-//! Events emitted: `tmux://output` ({pane, data: base64}), `tmux://layout`
+//! Pane output goes over a `Channel` (see `subscribe_output`) as raw binary frames; events:
+//! `tmux://layout`
 //! ({session}: re-list that session's panes), `tmux://exit` ({session}),
 //! `stackd://status` ({running, socket}) and `stackd://state` (the snapshot).
 
@@ -10,17 +11,21 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use serde::Serialize;
 use serde_json::Value;
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tmux_cc::{Client, Config, Event, Mode};
 use tokio::sync::Mutex;
 
-use crate::bridge::{self, Action, Flow, PaneInfo, PaneOwners};
+use crate::bridge::{self, Action, Flow, Gate, PaneInfo, PaneOwners};
 use crate::stackd;
 
 #[derive(Default)]
 pub struct Bridge {
     conns: Mutex<HashMap<String, Conn>>,
     owners: StdMutex<PaneOwners>,
+    /// Where pane output goes: the webview's channel (`subscribe_output`).
+    sink: StdMutex<Option<Channel<InvokeResponseBody>>>,
+    gate: Gate,
 }
 
 struct Conn {
@@ -53,6 +58,19 @@ impl Bridge {
 
 fn err(e: tmux_cc::Error) -> String {
     e.to_string()
+}
+
+/// The webview's output channel; frames are `u32` LE pane number + raw bytes. A new call replaces the old channel.
+#[tauri::command]
+pub fn subscribe_output(state: State<'_, Bridge>, channel: Channel<InvokeResponseBody>) {
+    *state.sink.lock().unwrap() = Some(channel);
+    state.gate.reset();
+}
+
+/// The webview parsed `bytes` of output; lets the backend send more.
+#[tauri::command]
+pub fn ack_output(state: State<'_, Bridge>, bytes: usize) {
+    state.gate.ack(bytes);
 }
 
 /// Attach to `session` on the tmux server `socket` (`-L`; `None` = the
@@ -88,10 +106,20 @@ pub async fn connect(
                     for a in actions {
                         match a {
                             Action::Output { pane, data } => {
-                                let _ = task_app.emit("tmux://output", bridge::output_payload(&pane, &data));
+                                let bridge = task_app.state::<Bridge>();
+                                let sink = bridge.sink.lock().unwrap().clone();
+                                if let (Some(sink), Some(frame)) = (sink, bridge::output_frame(&pane, &data)) {
+                                    bridge.gate.wait().await;
+                                    bridge.gate.sent(data.len());
+                                    let _ = sink.send(InvokeResponseBody::Raw(frame));
+                                }
                             }
                             Action::Continue(pane) => {
-                                let _ = task_client.continue_pane(&pane).await;
+                                // not awaited here: the reader that answers it may be waiting on this loop
+                                let c = task_client.clone();
+                                tokio::spawn(async move {
+                                    let _ = c.continue_pane(&pane).await;
+                                });
                             }
                             Action::LayoutChanged => {
                                 let _ = task_app.emit("tmux://layout", SessionPayload { session: task_session.clone() });

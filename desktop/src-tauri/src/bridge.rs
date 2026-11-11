@@ -3,8 +3,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use base64::Engine;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use serde::Serialize;
+use tokio::sync::Notify;
 use tmux_cc::Notification;
 
 /// What the Tauri side should do after a tmux notification.
@@ -152,15 +154,56 @@ impl PaneOwners {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct OutputPayload {
-    pub pane: String,
-    /// Base64 of the raw bytes (terminal output is not valid UTF-8 in general).
-    pub data: String,
+/// One output chunk as sent over the output channel: the pane number (`%12` -> 12) as u32
+/// little-endian, then the raw bytes. `None` for an id that is not a pane id.
+pub fn output_frame(pane: &str, data: &[u8]) -> Option<Vec<u8>> {
+    let n: u32 = pane.strip_prefix('%')?.parse().ok()?;
+    let mut out = Vec::with_capacity(4 + data.len());
+    out.extend_from_slice(&n.to_le_bytes());
+    out.extend_from_slice(data);
+    Some(out)
 }
 
-pub fn output_payload(pane: &str, data: &[u8]) -> OutputPayload {
-    OutputPayload { pane: pane.into(), data: base64::engine::general_purpose::STANDARD.encode(data) }
+/// Output bytes sent to the webview and not yet acknowledged (`ack_output`, after xterm parsed them).
+/// Sending waits while too many are in flight, which backs up into tmux's pipe instead of memory.
+#[derive(Default)]
+pub struct Gate {
+    in_flight: AtomicUsize,
+    notify: Notify,
+}
+
+impl Gate {
+    pub const LIMIT: usize = 256 * 1024;
+
+    pub fn over(&self) -> bool {
+        self.in_flight.load(Ordering::Acquire) >= Self::LIMIT
+    }
+
+    /// Resolves once fewer than `LIMIT` bytes are in flight.
+    pub async fn wait(&self) {
+        loop {
+            let notified = self.notify.notified();
+            if !self.over() {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    pub fn sent(&self, n: usize) {
+        self.in_flight.fetch_add(n, Ordering::AcqRel);
+    }
+
+    pub fn ack(&self, n: usize) {
+        let _ = self.in_flight.try_update(Ordering::AcqRel, Ordering::Acquire, |v| Some(v.saturating_sub(n)));
+        self.notify.notify_waiters();
+    }
+
+    /// A new subscriber: whatever the old one never acknowledged is gone.
+    pub fn reset(&self) {
+        self.in_flight.store(0, Ordering::Release);
+        self.notify.notify_waiters();
+    }
 }
 
 /// Only tmux ids (`%1`, `@2`) may be spliced into commands.
@@ -259,8 +302,23 @@ mod tests {
     }
 
     #[test]
-    fn payload_is_base64() {
-        assert_eq!(output_payload("%1", b"\x1b[0m\xff").data, "G1swbf8=");
+    fn gate_counts_in_flight_bytes() {
+        let g = Gate::default();
+        g.sent(Gate::LIMIT);
+        assert!(g.over());
+        g.ack(10);
+        assert!(!g.over());
+        g.ack(usize::MAX);
+        g.sent(1);
+        g.reset();
+        assert!(!g.over());
+    }
+
+    #[test]
+    fn frame_is_pane_number_then_raw_bytes() {
+        assert_eq!(output_frame("%258", b"\x1b[0m\xff").unwrap(), [2, 1, 0, 0, 0x1b, b'[', b'0', b'm', 0xff]);
+        assert_eq!(output_frame("%1", b"").unwrap(), [1, 0, 0, 0]);
+        assert!(output_frame("1", b"x").is_none() && output_frame("%x", b"x").is_none());
     }
 
     #[test]

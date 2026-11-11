@@ -132,9 +132,11 @@ Interpretation:
 - stackd and the GPU process are irrelevant to the cost (<= 5 %). Not measured: output throughput (lines/s) or latency while flooded; footprint/vmmap only printed for the app at the end.
 - Helper processes are found as new `com.apple.WebKit.*` processes after the app starts, so other WebKit apps launched mid-run would be miscounted.
 
+T8 rerun (same script, fresh release build; before = table above, base64 events): idle and hidden-flood unchanged (all ~0 % CPU, flat RSS). Visible flood, before -> after (avg): app CPU 77 -> 70 %, WebContent CPU 99 -> 87 %, app RSS 102 -> 106 MB, WebContent RSS 164 -> 454 MB (max 500; throughput was not measured, the webview now gets raw bytes with no base64 step, so it likely parses more per second; an unbounded first attempt without the ack gate reached 2.4 GB). Full table (visible flood, min/avg/max): app RSS 101/106/112, CPU 0/70/108; webcontent RSS 93/454/500, CPU 0/87/130; gpu CPU 0/3/6; stackd CPU 0/1/2; tmux-server CPU 60/70/78.
+
 ## Phase 2 — Daily driver
 
-- [ ] **T8 · Output path.** Pane output over a Tauri `Channel` as raw bytes
+- [x] **T8 · Output path.** Pane output over a Tauri `Channel` as raw bytes
   (no base64 JSON), coalesced per pane and written to xterm once per
   animation frame. Rerun `desktop/bench/run.sh`; add the numbers to T7 results.
 - [ ] **T9 · Parity gaps.** New-task dialog uses the extension's real
@@ -200,3 +202,7 @@ Interpretation:
 - 2026-11-11 · Desktop `stack.sidebarStyle` comes from the user's VS Code `settings.json` (Tauri `vscode_settings`, JSONC), else `aside`. Dev page: `/?dev=sidebar[&style=claude|mission][&width=]` renders the sidebar on a fixed sample state (`sidebar/fixtures.ts`).
 - 2026-11-11 · Sidebar in the app is the extension's own webview (`src/webview`) + generated VS Code theme variables; shared CSS fixes apply to both.
 - 2026-11-11 · No Apple Developer account: ad-hoc signing; notifications without action buttons for now.
+- 2026-11-11 · T8 output path: one binary `Channel` (`subscribe_output`, `InvokeResponseBody::Raw`), frame = u32 LE pane number (`%12` -> 12) + raw bytes; base64 and the `tmux://output` event are gone. Layout/exit events unchanged.
+- 2026-11-11 · T8 coalescing: `TerminalRegistry.feed` queues per pane; one `requestAnimationFrame` flush joins each pane's chunks into one `term.write`. Hidden panes are dropped as before (stale, resync on show); a shown pane's queue is capped at 8 MB, beyond it the queue is dropped and the pane resyncs from `capture-pane`.
+- 2026-11-11 · T8 flow control: an unthrottled channel let WebContent reach 2.4 GB in the flood, so the frontend acks parsed bytes (`ack_output`, from xterm's write callback; dropped data is acked at once) and the Rust consumer waits while more than 256 KiB are unacknowledged (`bridge::Gate`; a new `subscribe_output` resets it). To make that wait reach tmux, `tmux_cc::Client::connect` now returns a bounded `mpsc::Receiver` (256 events); the Rust consumer no longer awaits `continue` inline (the reader that answers it could be blocked on the full queue).
+- 2026-11-11 · T8 bench: `desktop/bench/run.sh` cleanup now kills the `-L stackbench` tmux server twice plus `pkill` (a server survived one run).
