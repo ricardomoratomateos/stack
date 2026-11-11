@@ -1,10 +1,10 @@
-import * as vscode from 'vscode';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { AgentSessionState, Worktree } from '../types';
 import { TmuxManager } from './TmuxManager';
-import { SessionTerminals } from './SessionTerminals';
-import type { SessionTabsMode, TerminalTarget } from './SessionTerminals';
+import type { SessionTabsMode, TerminalTarget, SessionTerminalHost } from './terminalHost';
+import { Emitter } from '../core/Emitter';
+import type { KeyValueStore } from '../core/KeyValueStore';
 import type { ISessionManager, TmuxWindow } from '../ports/ISessionManager';
 import type { ProviderId } from '../ports/IAgentProvider';
 import { isAgentWindowName, providerForWindowName } from '../ports/IAgentProvider';
@@ -52,19 +52,32 @@ function requestSummary(payload: Record<string, unknown> | undefined): string | 
   return typeof file === 'string' && file ? `${tool}: ${file}` : undefined;
 }
 
-export class AgentSessionManager {
+/** The host with nothing on screen: no viewers, no tabs. */
+function noTerminals<T extends { show(): void }>(): SessionTerminalHost<T> {
+  const none = (): never => { throw new Error('no terminal host: this session manager is headless'); };
+  return {
+    openViewer: none, openViewerBeside: none, openTab: none,
+    current: () => undefined, focusedWindow: () => undefined, lastFocusedWindow: () => undefined,
+    targetOf: () => undefined, targetOfName: () => undefined,
+    closeTab: async () => {}, closeTabsExcept: async () => {}, closeAll: async () => {},
+    takeParked: () => [], closeViewer: async () => {}, disposeAll: () => {},
+    claim: async () => {}, pruneViews: async () => {}, killViews: async () => {}, dispose: () => {},
+  };
+}
+
+export class AgentSessionManager<T extends { show(): void } = { show(): void }> {
   // worktreeId → (tmux window index → metadata)
   private windows = new Map<string, Map<number, WindowMeta>>();
   /** The VS Code terminals showing those windows — one per worktree, or one per session. */
-  private terminals: SessionTerminals;
+  private terminals: SessionTerminalHost<T>;
 
-  private stateChangeEmitter = new vscode.EventEmitter<{
+  private stateChangeEmitter = new Emitter<{
     worktreeId: string;
     state: AgentSessionState;
     /** tmux window that triggered the change (hook events only). */
     windowIndex?: number;
   }>();
-  private terminalsChangeEmitter = new vscode.EventEmitter<void>();
+  private terminalsChangeEmitter = new Emitter<void>();
   // worktreeId → pending debounced title refresh
   private titleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -110,7 +123,7 @@ export class AgentSessionManager {
 
   constructor(
     private providers: ProviderFactory,
-    private globalState: vscode.Memento,
+    private globalState: KeyValueStore,
     private tmux: ISessionManager = new TmuxManager(),
     private pathExists: (p: string) => boolean = (p) => fs.existsSync(p),
     private hostname: string = os.hostname(),
@@ -127,8 +140,10 @@ export class AgentSessionManager {
      * own when there is no prompt otherwise.
      */
     private promptPrefix: () => string = () => '',
+    terminals?: SessionTerminalHost<T>,
   ) {
-    this.terminals = new SessionTerminals(tmux, pathExists);
+    // Headless hosts (no terminals on screen) pass none; see VsCodeAgentSessionManager.
+    this.terminals = terminals ?? noTerminals<T>();
 
     const savedOrders = this.globalState.get<Record<string, number[]>>(AgentSessionManager.ORDER_KEY, {});
     for (const [id, arr] of Object.entries(savedOrders)) this.orders.set(id, arr);
@@ -449,7 +464,7 @@ export class AgentSessionManager {
    * all still gets the single viewer — there is no session to give a tab.
    * Assumes the tmux session exists.
    */
-  async getOrCreateViewer(worktree: Worktree, windowName?: string): Promise<vscode.Terminal> {
+  async getOrCreateViewer(worktree: Worktree, windowName?: string): Promise<T> {
     const sessions = this.perSession() ? this.getSessions(worktree.id) : [];
     if (sessions.length === 0) {
       const base = this.label(worktree);
@@ -457,7 +472,7 @@ export class AgentSessionManager {
     }
     const current = this.terminals.current(worktree.id);
     if (current) return current;
-    let last: vscode.Terminal | undefined;
+    let last: T | undefined;
     for (const p of this.terminals.takeParked(worktree.id)) {
       // Checked per tab, not once up front: each open is awaited, and a
       // session can end in between.
@@ -479,7 +494,7 @@ export class AgentSessionManager {
     worktree: Worktree,
     windowIndex: number,
     opts?: { beside?: boolean; viewColumn?: number },
-  ): Promise<vscode.Terminal> {
+  ): Promise<T> {
     const meta = this.windows.get(worktree.id)!.get(windowIndex)!;
     return this.terminals.openTab(worktree, windowIndex, {
       label: this.label(worktree),
@@ -492,8 +507,8 @@ export class AgentSessionManager {
    * Bring one window on screen: its own tab, or — single mode — the worktree's
    * viewer, already switched to it by the caller's selectWindow.
    */
-  private async revealWindow(worktree: Worktree, windowIndex: number, opts?: { beside?: boolean }): Promise<vscode.Terminal> {
-    let terminal: vscode.Terminal;
+  private async revealWindow(worktree: Worktree, windowIndex: number, opts?: { beside?: boolean }): Promise<T> {
+    let terminal: T;
     if (!this.perSession()) {
       terminal = opts?.beside ? await this.moveViewerBeside(worktree) : await this.getOrCreateViewer(worktree);
     } else if (this.windows.get(worktree.id)?.has(windowIndex)) {
@@ -508,18 +523,18 @@ export class AgentSessionManager {
   }
 
   /** Single mode's "to the side": the viewer reopened beside the active group. */
-  private async moveViewerBeside(worktree: Worktree): Promise<vscode.Terminal> {
+  private async moveViewerBeside(worktree: Worktree): Promise<T> {
     await this.terminals.closeViewer(worktree.id);
-    return this.terminals.openViewer(worktree, this.label(worktree), { viewColumn: vscode.ViewColumn.Beside });
+    return this.terminals.openViewerBeside(worktree, this.label(worktree));
   }
 
   /** Reverse lookup: which worktree owns this terminal (viewer or session tab). */
-  getWorktreeIdForTerminal(terminal: vscode.Terminal): string | undefined {
+  getWorktreeIdForTerminal(terminal: T): string | undefined {
     return this.terminals.targetOf(terminal)?.worktreeId;
   }
 
   /** Which worktree — and, for a session tab, which session — a terminal shows. */
-  getTargetForTerminal(terminal: vscode.Terminal): TerminalTarget | undefined {
+  getTargetForTerminal(terminal: T): TerminalTarget | undefined {
     return this.terminals.targetOf(terminal);
   }
 
@@ -539,7 +554,7 @@ export class AgentSessionManager {
 
   // ── Public API ────────────────────────────────────────────────────────────
 
-  async launch(worktree: Worktree, opts?: { provider?: ProviderId; prompt?: string }): Promise<vscode.Terminal> {
+  async launch(worktree: Worktree, opts?: { provider?: ProviderId; prompt?: string }): Promise<T> {
     const provider = opts?.provider ? this.providers.create(opts.provider) : this.providers.defaultProvider();
     const sessionName = TmuxManager.sessionName(worktree.id);
     console.log(`[stack] launch id=${worktree.id} provider=${provider.id} path=${worktree.path} exists=${this.pathExists(worktree.path)}`);
@@ -607,7 +622,7 @@ export class AgentSessionManager {
     return viewer;
   }
 
-  launchWithPrompt(worktree: Worktree, prompt: string, provider?: ProviderId): Promise<vscode.Terminal> {
+  launchWithPrompt(worktree: Worktree, prompt: string, provider?: ProviderId): Promise<T> {
     return this.launch(worktree, { prompt, provider });
   }
 
@@ -828,7 +843,7 @@ export class AgentSessionManager {
     return this.tmux.capturePane(`${TmuxManager.sessionName(worktreeId)}:${windowIndex}`, lines);
   }
 
-  async openTerminal(worktree: Worktree): Promise<vscode.Terminal> {
+  async openTerminal(worktree: Worktree): Promise<T> {
     const sessionName = TmuxManager.sessionName(worktree.id);
     console.log(`[stack] openTerminal id=${worktree.id} path=${worktree.path} exists=${this.pathExists(worktree.path)}`);
     await this.tmux.ensureSession(sessionName, worktree.path);
@@ -1065,11 +1080,11 @@ export class AgentSessionManager {
   }
 
   /** The worktree's terminal in front: its last-focused session tab, or its single viewer. */
-  getViewer(worktreeId: string): vscode.Terminal | undefined {
+  getViewer(worktreeId: string): T | undefined {
     return this.terminals.current(worktreeId);
   }
 
-  getPlainTerminal(worktreeId: string): vscode.Terminal | undefined {
+  getPlainTerminal(worktreeId: string): T | undefined {
     return this.getViewer(worktreeId);
   }
 
@@ -1134,7 +1149,7 @@ export class AgentSessionManager {
   }
 
   /** Kept for extension.ts compat (setup/teardown scripts). No-op with tmux. */
-  register(_worktreeId: string, _terminal: vscode.Terminal): void {}
+  register(_worktreeId: string, _terminal: T): void {}
 
   /**
    * The state an agent window comes back with after a reload.

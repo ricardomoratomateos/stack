@@ -33,7 +33,7 @@ Files importing `vscode` today (non-webview): `adapters/VsCodeNotifyAdapter`,
 Panels, sidebar, terminal links, breakpoints, tabs and diff stay
 VS Code-only; they are not part of the core.
 
-- [ ] **T1 · `AgentSessionManager` without `vscode`.** Split it so the
+- [x] **T1 · `AgentSessionManager` without `vscode`.** Split it so the
   session/state model (windows, hook events, `getSessions`, attention) lives
   in a module that does not import `vscode`: Node `EventEmitter` (or a tiny
   typed emitter) instead of `vscode.EventEmitter`; a `KeyValueStore`

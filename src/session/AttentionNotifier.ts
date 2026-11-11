@@ -1,11 +1,12 @@
-import * as vscode from 'vscode';
+import { Emitter } from '../core/Emitter';
+import type { Event, Disposable } from '../core/Emitter';
 import { AgentSessionState } from '../types';
 
 export type StateChange = { worktreeId: string; state: AgentSessionState; windowIndex?: number };
 
 export interface AttentionNotifierDeps {
   /** Aggregate per-worktree state stream (AgentSessionManager.onStateChange). */
-  onStateChange: vscode.Event<StateChange>;
+  onStateChange: Event<StateChange>;
   /** Display label for a worktree (alias ?? branch). */
   labelFor(worktreeId: string): string | undefined;
   /** Live task title of one session window (e.g. "Wants to run Bash: …"). */
@@ -31,8 +32,8 @@ export interface AttentionNotifierDeps {
 export class AttentionNotifier {
   private prev = new Map<string, AgentSessionState>();
   private attention = new Set<string>();
-  private countEmitter = new vscode.EventEmitter<number>();
-  private subscription: vscode.Disposable;
+  private countEmitter = new Emitter<number>();
+  private subscription: Disposable;
 
   /** Fires with the new pending-attention count whenever it changes. */
   readonly onAttentionChange = this.countEmitter.event;

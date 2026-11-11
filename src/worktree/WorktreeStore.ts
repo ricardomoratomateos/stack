@@ -1,12 +1,12 @@
-import * as vscode from 'vscode';
+import type { KeyValueStore } from '../core/KeyValueStore';
 import { Worktree, WorktreeStoreData } from '../types';
 import { STORE_KEY } from '../constants';
 import { IWorktreeRepository } from '../ports/IWorktreeRepository';
 
 export class WorktreeStore implements IWorktreeRepository {
-  private ctx: { globalState: vscode.Memento };
+  private ctx: { globalState: KeyValueStore };
 
-  constructor(ctx: { globalState: vscode.Memento }) {
+  constructor(ctx: { globalState: KeyValueStore }) {
     this.ctx = ctx;
   }
 

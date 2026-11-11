@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as vscode from 'vscode';
 import { window, resetVscodeMock, makeTerminal, FakeMemento, TerminalLocation } from '../__mocks__/vscode';
 import type { MockTerminal } from '../__mocks__/vscode';
-import { AgentSessionManager } from '../../src/session/AgentSessionManager';
+import { VsCodeAgentSessionManager as AgentSessionManager } from '../../src/session/VsCodeAgentSessionManager';
 import { ProviderFactory } from '../../src/providers/ProviderFactory';
 import type { ConfigSource } from '../../src/providers/claude/ClaudeProvider';
 import type { ISessionManager } from '../../src/ports/ISessionManager';

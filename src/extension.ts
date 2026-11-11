@@ -15,7 +15,8 @@ import {
   updateRepoConfig,
   type RepoScopedKey,
 } from './config/RepoConfig';
-import { AgentSessionManager } from './session/AgentSessionManager';
+import { VsCodeAgentSessionManager } from './session/VsCodeAgentSessionManager';
+import { MementoStore } from './session/MementoStore';
 import { AttentionNotifier } from './session/AttentionNotifier';
 import { ProviderFactory } from './providers/ProviderFactory';
 import { ConfigFileError } from './providers/shared/configFile';
@@ -277,7 +278,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     repoRoot: repoRootOf,
     onProblems: (problems) => void reportRepoConfigProblems(config, problems),
   });
-  const store = new WorktreeStore(ctx);
+  const store = new WorktreeStore({ globalState: new MementoStore(ctx.globalState) });
   // The config getter lets the allocator probe the whole derived docker block,
   // not just the debug port, before handing a slot out. The base port is a
   // getter too: captured once here, a changed debugBasePort left the allocator
@@ -299,8 +300,8 @@ export async function activate(ctx: vscode.ExtensionContext) {
   const providerFactory = new ProviderFactory(config, ctx.globalStorageUri.fsPath, undefined, () => bridge);
   // The tab layout is read live, so flipping stack.sessionTabs applies to
   // the next terminal opened; the rest are the manager's own defaults.
-  const agentManager = new AgentSessionManager(
-    providerFactory, ctx.globalState, undefined, undefined, undefined, undefined,
+  const agentManager = new VsCodeAgentSessionManager(
+    providerFactory, new MementoStore(ctx.globalState), undefined, undefined, undefined, undefined,
     () => config.get().sessionTabs,
     () => config.get().promptPrefix,
   );

@@ -2,39 +2,9 @@ import * as vscode from 'vscode';
 import { TmuxManager } from './TmuxManager';
 import type { ISessionManager, TmuxClient } from '../ports/ISessionManager';
 import type { Worktree } from '../types';
+import type { SessionTerminalHost, TabInfo, ParkedTab, TerminalTarget } from './terminalHost';
 
-/**
- * How a worktree's sessions reach the editor (`stack.sessionTabs`).
- *
- * - `perSession`: every session (agent or shell) is a terminal tab of its own,
- *   so two of them can sit side by side, be dragged between editor groups and
- *   resized — all of it VS Code's own editor layout.
- * - `single`: one terminal per worktree attached to its tmux session; switching
- *   sessions switches the tmux window inside it. The behaviour before tabs.
- */
-export type SessionTabsMode = 'perSession' | 'single';
-
-/** What a Stack terminal shows: a worktree's whole session (the single viewer), or one window of it (a tab). */
-export interface TerminalTarget {
-  worktreeId: string;
-  /** Set for a session tab; absent for the single-mode viewer. */
-  windowIndex?: number;
-}
-
-/** What a tab says about its session. */
-export interface TabInfo {
-  /** The worktree's display label (displayLabel). */
-  label: string;
-  /** The session's name as the sidebar shows it: its alias, else the window name. */
-  session: string;
-  kind: 'agent' | 'shell';
-}
-
-/** A tab closed by closeAll (focus mode), to be reopened where it was. */
-export interface ParkedTab {
-  index: number;
-  viewColumn?: number;
-}
+export type { SessionTabsMode, TabInfo, ParkedTab, TerminalTarget } from './terminalHost';
 
 /** Between a worktree label and the session name in a tab title. */
 export const TAB_SEPARATOR = ' · ';
@@ -48,7 +18,7 @@ export const TAB_SEPARATOR = ' · ';
  * and the rest of the extension asks this class which worktree and session a
  * terminal belongs to, instead of assuming there is one terminal per worktree.
  */
-export class SessionTerminals implements vscode.Disposable {
+export class SessionTerminals implements vscode.Disposable, SessionTerminalHost<vscode.Terminal> {
   /** worktreeId → the single-mode viewer, attached to the worktree's session itself. */
   private viewers = new Map<string, vscode.Terminal>();
   /** worktreeId → (window index → the tab attached to that window's view session). */
@@ -190,6 +160,11 @@ export class SessionTerminals implements vscode.Disposable {
     });
     this.viewers.set(worktree.id, terminal);
     return terminal;
+  }
+
+  /** Single mode's "to the side": a viewer opened beside the active editor group. */
+  openViewerBeside(worktree: Worktree, name: string): vscode.Terminal {
+    return this.openViewer(worktree, name, { viewColumn: vscode.ViewColumn.Beside });
   }
 
   /**

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as vscode from 'vscode';
 import { window, resetVscodeMock, makeTerminal, FakeMemento, TerminalLocation, ViewColumn, ThemeIcon, TabInputTerminal } from '../__mocks__/vscode';
 import type { MockTerminal } from '../__mocks__/vscode';
-import { AgentSessionManager } from '../../src/session/AgentSessionManager';
+import { VsCodeAgentSessionManager as AgentSessionManager } from '../../src/session/VsCodeAgentSessionManager';
 import { SessionTerminals } from '../../src/session/SessionTerminals';
 import type { SessionTabsMode } from '../../src/session/SessionTerminals';
 import { TmuxManager } from '../../src/session/TmuxManager';
