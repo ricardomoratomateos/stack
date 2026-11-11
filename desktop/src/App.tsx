@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { nameOf } from '@core/webview/derive';
-import { buildView, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, stateWord, taskFromText, type Effect } from './model';
+import { buildView, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, stateWord, type Effect } from './model';
 import { useStackd } from './stackd/useStackd';
 import { useTerminals } from './terminals';
 import { SidebarHost } from './sidebar/SidebarHost';
 import { ViewTitle } from './sidebar/ViewTitle';
-import { describeCounts, toSidebarState, translate, type Action } from './sidebar/bridge';
+import { describeCounts, installHint, toSidebarState, translate, type Action } from './sidebar/bridge';
+import { loadDefaultProvider, saveDefaultProvider } from './sidebar/prefs';
+import { NewTaskHost } from './newtask/NewTaskHost';
+import { toNewTaskInit, translateNewTask } from './newtask/bridge';
+import { invoke } from '@tauri-apps/api/core';
+import type { NewTaskExtMessage, NewTaskInit, NewTaskMessage } from '@core/newtask/types';
+import type { ProviderId } from '@core/ports/IAgentProvider';
 import { loadSidebarStyle } from './sidebar/settings';
 import { Dialog, type DialogSpec } from './ui/Dialog';
 import type { SidebarStyle } from '@core/sidebarStyle';
@@ -27,6 +33,10 @@ export function App() {
   const [style, setStyle] = useState<SidebarStyle>('aside');
   const [dialog, setDialog] = useState<DialogSpec | null>(null);
   const [notice, setNotice] = useState('');
+  const [defaultProvider, setDefaultProvider] = useState<ProviderId | undefined>(loadDefaultProvider);
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const postToNewTask = useRef<((msg: NewTaskExtMessage) => void) | null>(null);
+  const registerPost = useCallback((post: ((msg: NewTaskExtMessage) => void) | null) => { postToNewTask.current = post; }, []);
 
   useEffect(() => { void loadSidebarStyle().then(setStyle); }, []);
   useEffect(() => {
@@ -85,8 +95,8 @@ export function App() {
   }, [focusTick, manager.pane, registry]);
 
   const sidebarState = useMemo(
-    () => toSidebarState(snapshot, { repoRoot, activeWorktreeId: selected?.wt.id, sidebarStyle: style }),
-    [snapshot, repoRoot, selected?.wt.id, style],
+    () => toSidebarState(snapshot, { repoRoot, activeWorktreeId: selected?.wt.id, sidebarStyle: style, defaultProvider }),
+    [snapshot, repoRoot, selected?.wt.id, style, defaultProvider],
   );
 
   const runCommand = useCallback(async (name: string, body: Record<string, unknown>) => {
@@ -119,14 +129,22 @@ export function App() {
           setDialog({ kind: 'confirm', title: a.title, detail: a.detail, choices: a.choices, onChoose: (i) => { const c = a.then(i); void runCommand(c.name, c.body); } });
           break;
         case 'newTask':
+          setNewTaskOpen(true);
+          break;
+        case 'open':
+          invoke('open_url', { url: a.url }).catch((e) => setNotice(String(e)));
+          break;
+        case 'pickProvider':
           setDialog({
-            kind: 'ask', title: 'New task', label: 'Describe the task; the title becomes the branch', initial: '', confirm: 'Create',
-            onSubmit: (text) => {
-              const task = taskFromText(text, view.repoRoot);
-              if (task) act({ kind: 'command', name: 'createTask', body: task });
-            },
+            kind: 'confirm', title: 'Default agent', detail: 'Launched by the main button of each task.', choices: a.choices,
+            onChoose: (i) => { saveDefaultProvider(a.choices[i]); setDefaultProvider(a.choices[i]); },
           });
           break;
+        case 'install': {
+          const hint = installHint(a.provider);
+          setDialog({ kind: 'confirm', title: hint.title, detail: hint.detail, choices: ['Copy command'], onChoose: () => void navigator.clipboard.writeText(hint.command).catch(() => {}) });
+          break;
+        }
         case 'unsupported':
           setNotice(`${a.what} is not in the desktop app yet.`);
           break;
@@ -136,6 +154,40 @@ export function App() {
     };
     act(translate(msg, ctx));
   }, [view, select, runCommand]);
+
+  // The extension's new-task panel; what NewTaskPanelManager does for it in VS Code happens here.
+  const onNewTaskMessage = useCallback(async (msg: NewTaskMessage) => {
+    if (!view) return;
+    const act = translateNewTask(msg, { repoRoot: view.repoRoot });
+    switch (act.kind) {
+      case 'init': {
+        let fromStackd: NewTaskInit | undefined;
+        try { fromStackd = await api.command<NewTaskInit>('newTaskInit', { repo: view.repoRoot }); } catch (e) { console.error(e); }
+        postToNewTask.current?.({ type: 'init', init: toNewTaskInit(fromStackd, { sidebarStyle: style, defaultProvider }) });
+        return;
+      }
+      case 'create':
+        try {
+          const res = await api.command<{ worktree?: { id: string } }>('createTask', act.body);
+          setNewTaskOpen(false);
+          if (res?.worktree?.id) select(res.worktree.id);
+        } catch (e) {
+          postToNewTask.current?.({ type: 'error', message: String(e instanceof Error ? e.message : e) || 'Could not create the worktree.' });
+        }
+        return;
+      case 'close':
+        setNewTaskOpen(false);
+        return;
+      case 'confirmDiscard':
+        setDialog({ kind: 'confirm', title: 'Discard this task?', detail: 'The description you wrote will be lost.', choices: ['Discard'], onChoose: () => setNewTaskOpen(false) });
+        return;
+      case 'install': {
+        const hint = installHint(act.provider);
+        setDialog({ kind: 'confirm', title: hint.title, detail: hint.detail, choices: ['Copy command'], onChoose: () => void navigator.clipboard.writeText(hint.command).catch(() => {}) });
+        return;
+      }
+    }
+  }, [view, api, style, defaultProvider, select]);
 
   const commands = useCallback((id: string) => {
     const session = sessionOf[id];
@@ -231,6 +283,7 @@ export function App() {
           </div>
         </section>
       )}
+      {newTaskOpen && <NewTaskHost style={style} onMessage={(m) => void onNewTaskMessage(m)} registerPost={registerPost} />}
       {dialog && <Dialog spec={dialog} onClose={() => setDialog(null)} />}
     </div>
   );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeCounts, parseJsonc, sidebarStyleFromSettings, toSidebarState, translate, type Context } from './bridge';
+import { describeCounts, installHint, parseJsonc, sidebarStyleFromSettings, toSidebarState, translate, type Context } from './bridge';
 import { sampleState } from './fixtures';
 import type { Snapshot } from '../stackd/api';
 
@@ -61,11 +61,33 @@ describe('translate', () => {
     expect(translate({ type: 'openNewTask' }, ctx)).toEqual({ kind: 'newTask' });
     expect(translate({ type: 'createWorktree', branch: 'b', title: 't' }, ctx)).toMatchObject({ kind: 'command', name: 'createTask', body: { repo: '/r', branch: 'b', title: 't' } });
   });
-  it('review, links and provider choice are not in the desktop app yet', () => {
-    for (const msg of [
-      { type: 'openDiff', worktreeId: 'a' }, { type: 'openPr', worktreeId: 'a' }, { type: 'openTicket', worktreeId: 'a' },
-      { type: 'openPort', port: 1 }, { type: 'pickDefaultProvider' }, { type: 'showProviderInstall', provider: 'codex' },
-    ] as const) expect(translate(msg, ctx).kind).toBe('unsupported');
+  it('the review panel is not in the desktop app', () => {
+    expect(translate({ type: 'openDiff', worktreeId: 'a' }, ctx).kind).toBe('unsupported');
+  });
+  it('PR, ticket and port links open in the browser, https and localhost only', () => {
+    const withLinks: Context = {
+      repoRoot: '/r',
+      worktrees: [
+        { ...state.worktrees[0], id: 'l', pr: { number: 1, state: 'OPEN', url: 'https://github.com/a/b/pull/1' }, ticket: { source: 'jira', key: 'A-1', url: 'https://x.atlassian.net/browse/A-1' } },
+        { ...state.worktrees[0], id: 'bad', pr: { number: 2, state: 'OPEN', url: 'file:///etc/passwd' }, ticket: { source: 'jira', key: 'A-2', url: 'javascript:alert(1)' } },
+      ],
+    };
+    expect(translate({ type: 'openPr', worktreeId: 'l' }, withLinks)).toEqual({ kind: 'open', url: 'https://github.com/a/b/pull/1' });
+    expect(translate({ type: 'openTicket', worktreeId: 'l' }, withLinks)).toEqual({ kind: 'open', url: 'https://x.atlassian.net/browse/A-1' });
+    expect(translate({ type: 'openPr', worktreeId: 'bad' }, withLinks)).toEqual({ kind: 'none' });
+    expect(translate({ type: 'openTicket', worktreeId: 'bad' }, withLinks)).toEqual({ kind: 'none' });
+    expect(translate({ type: 'openPr', worktreeId: 'nope' }, withLinks)).toEqual({ kind: 'none' });
+    expect(translate({ type: 'openPort', port: 3000 }, ctx)).toEqual({ kind: 'open', url: 'http://localhost:3000' });
+    expect(translate({ type: 'openPort', port: 0 }, ctx)).toEqual({ kind: 'none' });
+    expect(translate({ type: 'openPort', port: 70000 }, ctx)).toEqual({ kind: 'none' });
+  });
+  it('default-provider picker offers every agent; the install hint is the extension\'s', () => {
+    expect(translate({ type: 'pickDefaultProvider' }, ctx)).toEqual({ kind: 'pickProvider', choices: ['claude', 'codex', 'opencode'] });
+    expect(translate({ type: 'showProviderInstall', provider: 'codex' }, ctx)).toEqual({ kind: 'install', provider: 'codex' });
+    expect(installHint('codex')).toEqual({ title: 'Codex CLI is not on your PATH', detail: 'Install it with:\n\nnpm i -g @openai/codex', command: 'npm i -g @openai/codex' });
+  });
+  it('a chosen default provider overrides the snapshot\'s in the sidebar state', () => {
+    expect(toSidebarState(snapshot, { repoRoot: '/r', defaultProvider: 'codex' })!.defaultProvider).toBe('codex');
   });
   it('ready and listBranches need nothing', () => {
     expect(translate({ type: 'ready' }, ctx)).toEqual({ kind: 'none' });

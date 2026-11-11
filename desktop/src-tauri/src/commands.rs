@@ -16,7 +16,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tmux_cc::{Client, Config, Event, Mode};
 use tokio::sync::Mutex;
 
-use crate::bridge::{self, Action, Flow, Gate, PaneInfo, PaneOwners};
+use std::time::{Duration, Instant};
+
+use crate::bridge::{self, Action, Coalescer, Flow, Gate, PaneInfo, PaneOwners};
 use crate::stackd;
 
 #[derive(Default)]
@@ -53,6 +55,19 @@ impl Bridge {
         }
         self.owners.lock().unwrap().set_session(session, panes.iter().map(|p| p.id.clone()));
         Ok(panes)
+    }
+}
+
+/// Sends what is waiting, one frame per pane, each after the ack gate lets it through.
+async fn flush(app: &AppHandle, coal: &mut Coalescer) {
+    let bridge = app.state::<Bridge>();
+    for (pane, data) in coal.take() {
+        let sink = bridge.sink.lock().unwrap().clone();
+        if let (Some(sink), Some(frame)) = (sink, bridge::output_frame(&pane, &data)) {
+            bridge.gate.wait().await;
+            bridge.gate.sent(data.len());
+            let _ = sink.send(InvokeResponseBody::Raw(frame));
+        }
     }
 }
 
@@ -99,19 +114,29 @@ pub async fn connect(
 
     let (task_client, task_flow, task_app, task_session) = (client.clone(), flow.clone(), app.clone(), session.clone());
     tokio::spawn(async move {
-        while let Some(ev) = rx.recv().await {
+        let mut coal = Coalescer::default();
+        loop {
+            // With output waiting, a quiet connection still flushes once the oldest byte is 16 ms old.
+            let ev = match coal.remaining(Instant::now()) {
+                None => rx.recv().await,
+                Some(wait) => tokio::select! {
+                    ev = rx.recv() => ev,
+                    _ = tokio::time::sleep(wait) => {
+                        flush(&task_app, &mut coal).await;
+                        continue;
+                    }
+                },
+            };
+            let Some(ev) = ev else { break };
             match ev {
                 Event::Notification(n) => {
                     let actions = task_flow.lock().unwrap().on_notification(n);
                     for a in actions {
                         match a {
                             Action::Output { pane, data } => {
-                                let bridge = task_app.state::<Bridge>();
-                                let sink = bridge.sink.lock().unwrap().clone();
-                                if let (Some(sink), Some(frame)) = (sink, bridge::output_frame(&pane, &data)) {
-                                    bridge.gate.wait().await;
-                                    bridge.gate.sent(data.len());
-                                    let _ = sink.send(InvokeResponseBody::Raw(frame));
+                                coal.push(&pane, &data, Instant::now());
+                                if coal.remaining(Instant::now()) == Some(Duration::ZERO) {
+                                    flush(&task_app, &mut coal).await;
                                 }
                             }
                             Action::Continue(pane) => {
@@ -131,6 +156,7 @@ pub async fn connect(
                 Event::Closed { .. } => break,
             }
         }
+        flush(&task_app, &mut coal).await;
         let bridge = task_app.state::<Bridge>();
         bridge.conns.lock().await.remove(&task_session);
         bridge.owners.lock().unwrap().remove_session(&task_session);
@@ -306,4 +332,44 @@ pub fn vscode_settings() -> Option<String> {
     let home = std::env::var_os("HOME")?;
     let path = std::path::Path::new(&home).join("Library/Application Support/Code/User/settings.json");
     std::fs::read_to_string(path).ok()
+}
+
+/// Only these may reach the browser: https links and localhost ports (PR, ticket, dev servers).
+pub fn openable(url: &str) -> bool {
+    let rest = if let Some(r) = url.strip_prefix("https://") {
+        !r.is_empty()
+    } else if let Some(r) = url.strip_prefix("http://localhost") {
+        r.is_empty() || r.starts_with(':') || r.starts_with('/')
+    } else {
+        false
+    };
+    rest && url.len() < 2048 && !url.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
+/// Opens `url` in the default browser (macOS `open`; no shell, the URL is one argument).
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    if !openable(&url) {
+        return Err(format!("refusing to open {url}"));
+    }
+    std::process::Command::new("open").arg(&url).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::openable;
+
+    #[test]
+    fn only_https_and_localhost_open() {
+        assert!(openable("https://github.com/a/b/pull/1"));
+        assert!(openable("http://localhost:3000"));
+        assert!(openable("http://localhost/x"));
+        assert!(!openable("http://example.com"));
+        assert!(!openable("http://localhost.evil.com"));
+        assert!(!openable("file:///etc/passwd"));
+        assert!(!openable("javascript:alert(1)"));
+        assert!(!openable("https://"));
+        assert!(!openable("https://a b"));
+        assert!(!openable("-a Calculator"));
+    }
 }

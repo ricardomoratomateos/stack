@@ -49,7 +49,7 @@ export function NewTaskPanel() {
     const onMessage = (e: MessageEvent) => {
       const msg = e.data as NewTaskExtMessage;
       if (msg.type === 'init') setInit(msg.init);
-      else {
+      else if (msg.type === 'error') {
         busyRef.current = false;
         setBusy(false);
         setFailure(msg.message);

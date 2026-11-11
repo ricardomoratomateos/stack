@@ -67,6 +67,8 @@ kbd { font-size: 10px; color: var(--vscode-descriptionForeground); border: 1px s
 .dialog-detail { white-space: pre-wrap; font-size: 12px; color: var(--vscode-descriptionForeground); }
 .dialog-buttons { display: flex; justify-content: flex-end; gap: 6px; }
 
+.newtask-host { position: fixed; inset: 0; z-index: 9; overflow: auto; background: var(--vscode-editor-background); }
+
 /* dev page: /?dev=sidebar */
 .dev-sidebar { height: 100%; display: flex; flex-direction: column; background: var(--vscode-sideBar-background); border-right: 1px solid var(--vscode-sideBar-border, transparent); }
 .dev-last { padding: 4px 8px; font-size: 11px; color: var(--vscode-descriptionForeground); min-height: 22px; }

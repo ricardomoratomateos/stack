@@ -9,7 +9,7 @@
  *
  * Pure: no DOM, no Tauri, so it is unit-tested.
  */
-import type { ProviderId } from '@core/ports/IAgentProvider';
+import { PROVIDER_IDS, PROVIDER_INSTALL, type ProviderId } from '@core/ports/IAgentProvider';
 import { normalizeSidebarStyle, type SidebarStyle } from '@core/sidebarStyle';
 import type { StackState, WebMessage, WorktreeItem } from '@core/webview/types';
 import { planDelete } from '@core/application/deletePlan';
@@ -18,7 +18,7 @@ import type { Snapshot } from '../stackd/api';
 /** The state message the extension posts to its webview. */
 export function toSidebarState(
   snapshot: Snapshot | null,
-  opts: { repoRoot?: string; activeWorktreeId?: string; sidebarStyle?: SidebarStyle },
+  opts: { repoRoot?: string; activeWorktreeId?: string; sidebarStyle?: SidebarStyle; defaultProvider?: ProviderId },
 ): StackState | null {
   const repo = snapshot?.repos.find((r) => r.repoRoot === opts.repoRoot) ?? snapshot?.repos[0];
   if (!repo) return null;
@@ -26,6 +26,7 @@ export function toSidebarState(
     ...repo.state,
     activeWorktreeId: opts.activeWorktreeId ?? repo.state.activeWorktreeId,
     sidebarStyle: normalizeSidebarStyle(opts.sidebarStyle ?? repo.state.sidebarStyle),
+    ...(opts.defaultProvider ? { defaultProvider: opts.defaultProvider } : {}),
   };
 }
 
@@ -46,12 +47,29 @@ export type Action =
   | { kind: 'newTask' }
   /** Ask yes/no (or one of `choices`) before a command. */
   | { kind: 'confirm'; title: string; detail: string; choices: string[]; then: (choice: number) => { name: string; body: Record<string, unknown> } }
+  /** Open a link in the default browser. */
+  | { kind: 'open'; url: string }
+  /** Choose the agent the main button launches. */
+  | { kind: 'pickProvider'; choices: ProviderId[] }
+  /** Explain how to install an agent that is not on PATH (`installHint`). */
+  | { kind: 'install'; provider: ProviderId }
   /** Not available in the desktop app yet. */
   | { kind: 'unsupported'; what: string }
   | { kind: 'none' };
 
 /** Messages stackd runs itself (`DAEMON_MESSAGES` in src/daemon/StackDaemon.ts). */
 const DAEMON_MESSAGES = ['dockerUp', 'dockerDown', 'reorderSessions', 'reorderWorktrees', 'setupAction', 'refreshDrift', 'forgetWorktree'];
+
+/** What may be handed to the browser: https links (PR, ticket) and localhost ports. */
+export function safeUrl(url: string | undefined): string | undefined {
+  return url && /^https:\/\/[^\s]+$/.test(url) ? url : undefined;
+}
+
+/** The text of the "X is not on your PATH" dialog, as in `WorktreeApplicationService.showProviderInstall`. */
+export function installHint(provider: ProviderId): { title: string; detail: string; command: string } {
+  const { label, install } = PROVIDER_INSTALL[provider];
+  return { title: `${label} is not on your PATH`, detail: `Install it with:\n\n${install}`, command: install };
+}
 
 const label = (wt: WorktreeItem) => wt.alias ?? wt.branch;
 
@@ -116,13 +134,17 @@ export function translate(msg: WebMessage, ctx: Context): Action {
     case 'openDiff':
       return { kind: 'unsupported', what: 'The review panel' };
     case 'openPr':
-    case 'openTicket':
+    case 'openTicket': {
+      const wt = find(msg.worktreeId);
+      const url = safeUrl(msg.type === 'openPr' ? wt?.pr?.url : wt?.ticket?.url);
+      return url ? { kind: 'open', url } : { kind: 'none' };
+    }
     case 'openPort':
-      return { kind: 'unsupported', what: 'Opening links' };
+      return Number.isInteger(msg.port) && msg.port > 0 && msg.port < 65536 ? { kind: 'open', url: `http://localhost:${msg.port}` } : { kind: 'none' };
     case 'pickDefaultProvider':
-      return { kind: 'unsupported', what: 'Choosing the default agent' };
+      return { kind: 'pickProvider', choices: [...PROVIDER_IDS] };
     case 'showProviderInstall':
-      return { kind: 'unsupported', what: `Installing ${msg.provider as ProviderId}` };
+      return { kind: 'install', provider: msg.provider };
     case 'listBranches':
       return { kind: 'none' };
   }

@@ -173,7 +173,7 @@ pub struct Gate {
 }
 
 impl Gate {
-    pub const LIMIT: usize = 256 * 1024;
+    pub const LIMIT: usize = 128 * 1024;
 
     pub fn over(&self) -> bool {
         self.in_flight.load(Ordering::Acquire) >= Self::LIMIT
@@ -203,6 +203,44 @@ impl Gate {
     pub fn reset(&self) {
         self.in_flight.store(0, Ordering::Release);
         self.notify.notify_waiters();
+    }
+}
+
+/// Output waiting to go to the webview: per pane, in arrival order. Sent in one frame per pane once
+/// `MAX_BYTES` are waiting or the oldest has waited `MAX_AGE` (fewer, bigger frames to parse and ack).
+#[derive(Default)]
+pub struct Coalescer {
+    bufs: Vec<(String, Vec<u8>)>,
+    total: usize,
+    since: Option<std::time::Instant>,
+}
+
+impl Coalescer {
+    pub const MAX_BYTES: usize = 64 * 1024;
+    pub const MAX_AGE: std::time::Duration = std::time::Duration::from_millis(16);
+
+    pub fn push(&mut self, pane: &str, data: &[u8], now: std::time::Instant) {
+        self.since.get_or_insert(now);
+        self.total += data.len();
+        match self.bufs.iter_mut().find(|(p, _)| p == pane) {
+            Some((_, b)) => b.extend_from_slice(data),
+            None => self.bufs.push((pane.to_string(), data.to_vec())),
+        }
+    }
+
+    /// Time left before the oldest waiting byte is due (zero when it is, or when full); `None` when empty.
+    pub fn remaining(&self, now: std::time::Instant) -> Option<std::time::Duration> {
+        let since = self.since?;
+        if self.total >= Self::MAX_BYTES {
+            return Some(std::time::Duration::ZERO);
+        }
+        Some(Self::MAX_AGE.saturating_sub(now.saturating_duration_since(since)))
+    }
+
+    pub fn take(&mut self) -> Vec<(String, Vec<u8>)> {
+        self.total = 0;
+        self.since = None;
+        std::mem::take(&mut self.bufs)
     }
 }
 
@@ -312,6 +350,23 @@ mod tests {
         g.sent(1);
         g.reset();
         assert!(!g.over());
+    }
+
+    #[test]
+    fn coalescer_joins_per_pane_and_is_due_after_16ms_or_64k() {
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        let mut c = Coalescer::default();
+        assert!(c.remaining(t0).is_none());
+        c.push("%1", b"ab", t0);
+        c.push("%2", b"x", t0);
+        c.push("%1", b"cd", t0 + Duration::from_millis(5));
+        assert_eq!(c.remaining(t0 + Duration::from_millis(5)), Some(Duration::from_millis(11)));
+        assert_eq!(c.remaining(t0 + Duration::from_millis(30)), Some(Duration::ZERO));
+        assert_eq!(c.take(), vec![("%1".to_string(), b"abcd".to_vec()), ("%2".to_string(), b"x".to_vec())]);
+        assert!(c.remaining(t0).is_none());
+        c.push("%1", &vec![0; Coalescer::MAX_BYTES], t0);
+        assert_eq!(c.remaining(t0), Some(Duration::ZERO));
     }
 
     #[test]

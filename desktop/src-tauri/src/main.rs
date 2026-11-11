@@ -26,6 +26,7 @@ fn main() {
             commands::stackd_latest,
             commands::stackd_command,
             commands::vscode_settings,
+            commands::open_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Stack desktop");

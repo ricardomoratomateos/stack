@@ -24,6 +24,9 @@
     "../src/webview",
     "../src/sidebarStyle.ts",
     "../src/application/deletePlan.ts",
-    "../src/newtask/composer.ts"
+    "../src/newtask/composer.ts",
+    "../src/newtask/types.ts",
+    "../src/newtask/webview",
+    "../src/ports/IAgentProvider.ts"
   ]
 }

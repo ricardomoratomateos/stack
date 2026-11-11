@@ -134,12 +134,14 @@ Interpretation:
 
 T8 rerun (same script, fresh release build; before = table above, base64 events): idle and hidden-flood unchanged (all ~0 % CPU, flat RSS). Visible flood, before -> after (avg): app CPU 77 -> 70 %, WebContent CPU 99 -> 87 %, app RSS 102 -> 106 MB, WebContent RSS 164 -> 454 MB (max 500; throughput was not measured, the webview now gets raw bytes with no base64 step, so it likely parses more per second; an unbounded first attempt without the ack gate reached 2.4 GB). Full table (visible flood, min/avg/max): app RSS 101/106/112, CPU 0/70/108; webcontent RSS 93/454/500, CPU 0/87/130; gpu CPU 0/3/6; stackd CPU 0/1/2; tmux-server CPU 60/70/78.
 
+T8 follow-up (Rust-side coalescing: one frame per pane every 16 ms or 64 KiB, ack window 256 -> 128 KiB; one attempt, same script). Visible flood, T8 -> now (avg): app CPU 70 -> 9 %, WebContent CPU 87 -> 19 %, WebContent RSS 454 -> 313 MB (max 500 -> 365), app RSS 106 -> 102 MB; tmux-server CPU 70 -> 74 %. Idle and hidden-flood unchanged. Throughput (lines/s) was still not measured, so part of the CPU drop may be the gate pacing the flood; RSS is better but not flat. Full row (min/avg/max): webcontent RSS 94/313/365, CPU 18/19/27; app CPU 8/9/11.
+
 ## Phase 2 — Daily driver
 
 - [x] **T8 · Output path.** Pane output over a Tauri `Channel` as raw bytes
   (no base64 JSON), coalesced per pane and written to xterm once per
   animation frame. Rerun `desktop/bench/run.sh`; add the numbers to T7 results.
-- [ ] **T9 · Parity gaps.** New-task dialog uses the extension's real
+- [x] **T9 · Parity gaps.** New-task dialog uses the extension's real
   new-task panel (`src/newtask/webview`) the same way the sidebar is reused,
   with the base-branch picker wired to stackd; PR / ticket / port links open
   in the default browser; default-provider picker and provider install hint
@@ -206,3 +208,8 @@ T8 rerun (same script, fresh release build; before = table above, base64 events)
 - 2026-11-11 · T8 coalescing: `TerminalRegistry.feed` queues per pane; one `requestAnimationFrame` flush joins each pane's chunks into one `term.write`. Hidden panes are dropped as before (stale, resync on show); a shown pane's queue is capped at 8 MB, beyond it the queue is dropped and the pane resyncs from `capture-pane`.
 - 2026-11-11 · T8 flow control: an unthrottled channel let WebContent reach 2.4 GB in the flood, so the frontend acks parsed bytes (`ack_output`, from xterm's write callback; dropped data is acked at once) and the Rust consumer waits while more than 256 KiB are unacknowledged (`bridge::Gate`; a new `subscribe_output` resets it). To make that wait reach tmux, `tmux_cc::Client::connect` now returns a bounded `mpsc::Receiver` (256 events); the Rust consumer no longer awaits `continue` inline (the reader that answers it could be blocked on the full queue).
 - 2026-11-11 · T8 bench: `desktop/bench/run.sh` cleanup now kills the `-L stackbench` tmux server twice plus `pkill` (a server survived one run).
+- 2026-11-11 · T9 new task: the app renders the extension's `NewTaskPanel` (lazy-loaded, full-window overlay) and plays `NewTaskPanelManager`'s role in `desktop/src/newtask/bridge.ts` (pure, tested): `ready` -> `init` from stackd's `newTaskInit` (branches, base, installed agents) + app prefs, `create` -> `createTask` (close on ok, `error` message back on failure), `cancel{dirty}` -> discard confirm, `showProviderInstall` -> install dialog.
+- 2026-11-11 · T9 shim: `acquireVsCodeApi` is bound per webview (`loadWith(channel, import)`), so the sidebar and the panel have separate channels; `NewTaskPanel` now ignores window messages that are not `init`/`error` (it treated any other as an error; the sidebar's `state` posts also reach it).
+- 2026-11-11 · T9 links: PR / ticket (https only, from the snapshot) and ports (`http://localhost:<n>`) go through the Tauri command `open_url`, which re-checks the URL (https or localhost only) and runs macOS `open` with it as one argument.
+- 2026-11-11 · T9 default provider: the picker is an in-app dialog; the choice is the app's own (localStorage `stack.defaultProvider`) and overrides stackd's value in the sidebar state and the panel; it is not written to VS Code settings. Install hint = the extension's `PROVIDER_INSTALL` text with a Copy command button.
+- 2026-11-11 · T8 follow-up coalescing: the Rust consumer buffers output per pane (`bridge::Coalescer`) and sends one frame per pane every 16 ms or 64 KiB; the ack window went 256 -> 128 KiB.
