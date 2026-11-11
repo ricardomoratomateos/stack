@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionItem, StackState, WorktreeItem } from '@core/webview/types';
-import { buildView, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, taskFromText, type KeyLike } from './model';
+import { floatRows, buildView, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, taskFromText, type KeyLike } from './model';
 import type { Snapshot } from './stackd/api';
 
 const session = (o: Partial<SessionItem> & { index: number }): SessionItem => ({ name: 'claude', kind: 'agent', provider: 'claude', state: 'idle', ...o });
@@ -140,5 +140,26 @@ describe('resolveShortcut', () => {
   it('flags the manager actions', () => {
     expect(resolveShortcut({ kind: 'focus-manager' }, ids, 'a')).toEqual({ focusManager: true });
     expect(resolveShortcut({ kind: 'toggle-manager' }, ids, 'a')).toEqual({ toggleManager: true });
+  });
+});
+
+describe('mode shortcuts and the float list', () => {
+  it('maps ⌘⇧F to cycling the mode', () => {
+    expect(shortcutOf(key('KeyF', { shiftKey: true }))).toEqual({ kind: 'cycle-mode' });
+    expect(shortcutOf(key('KeyF'))).toBeNull();
+    expect(shortcutOf(key('Enter', { shiftKey: true }))).toEqual({ kind: 'maximize' });
+    expect(resolveShortcut({ kind: 'maximize' }, [], undefined)).toEqual({ maximize: true });
+    expect(resolveShortcut({ kind: 'cycle-mode' }, [], undefined)).toEqual({ cycleMode: true });
+  });
+  it('one row per worktree, Allow on the session that asks', () => {
+    const v = buildView(snap([
+      wt('a', [session({ index: 1, state: 'permission', attention: 'Bash: ls' }), session({ index: 2, kind: 'shell', name: 'zsh' })]),
+      wt('b', [session({ index: 1, state: 'active' })]),
+    ]))!;
+    const rows = floatRows(v.items);
+    expect(rows.map((r) => r.id)).toEqual(['a', 'b']);
+    expect(rows[0].asking).toEqual({ index: 1, label: 'Bash: ls' });
+    expect(rows[0].sessions).toHaveLength(2);
+    expect(rows[1].asking).toBeUndefined();
   });
 });

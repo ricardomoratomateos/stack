@@ -146,7 +146,7 @@ T8 follow-up (Rust-side coalescing: one frame per pane every 16 ms or 64 KiB, ac
   with the base-branch picker wired to stackd; PR / ticket / port links open
   in the default browser; default-provider picker and provider install hint
   work. The review/diff panel is out of scope (not needed).
-- [ ] **T10 · Window modes.** Full / Half / Float switch (title-bar control +
+- [x] **T10 · Window modes.** Full / Half / Float switch (title-bar control +
   ⌘⇧F). Half: snap to left/right half of the current screen, narrow sidebar,
   Manager as a bottom strip with its last N lines (setting, default 6) + an
   input line; ⌘⇧M expands it. Float: always-on-top window (non-activating
@@ -213,3 +213,8 @@ T8 follow-up (Rust-side coalescing: one frame per pane every 16 ms or 64 KiB, ac
 - 2026-11-11 · T9 links: PR / ticket (https only, from the snapshot) and ports (`http://localhost:<n>`) go through the Tauri command `open_url`, which re-checks the URL (https or localhost only) and runs macOS `open` with it as one argument.
 - 2026-11-11 · T9 default provider: the picker is an in-app dialog; the choice is the app's own (localStorage `stack.defaultProvider`) and overrides stackd's value in the sidebar state and the panel; it is not written to VS Code settings. Install hint = the extension's `PROVIDER_INSTALL` text with a Copy command button.
 - 2026-11-11 · T8 follow-up coalescing: the Rust consumer buffers output per pane (`bridge::Coalescer`) and sends one frame per pane every 16 ms or 64 KiB; the ack window went 256 -> 128 KiB.
+- 2026-11-11 · T10 modes: pure state in `desktop/src/modes/layout.ts` (mode, side, sizes per mode, maximize, strip helpers), saved in localStorage `stack.layout`; Rust `window.rs` only moves/sizes the window (`set_window_mode`, `window_frame`; geometry tested). `?mode=full|half|float` starts in a mode for dev.
+- 2026-11-11 · T10 Float on macOS is NOT a true non-activating NSPanel: tauri-nspanel is git-only and swapping the NSWindow class by hand is fragile. Instead `always_on_top` + `visible_on_all_workspaces` plus, via objc2-app-kit, floating window level and collectionBehavior canJoinAllSpaces|fullScreenAuxiliary. Clicking it still activates the app; behaviour over full-screen apps is unverified. Float size/position is remembered (frames of Full and Float in `stack.windowFrames`); Half snaps to the half of the current screen's work area.
+- 2026-11-11 · T10 strip: N (3–12, default 6) is stored per mode (Half, Float) and changed by dragging the strip splitter (snaps to 16 px lines); ⌘⇧M expands the strip into the Manager terminal in Half/Float (hides the column in Full); ⌘0 focuses the strip input.
+- 2026-11-11 · T10 resizable panels: splitters for sidebar (Full, Half), Manager column (Full) and strip height (Half, Float); min/max per mode, double-click resets, keyboard arrows, one update per frame, sizes remembered per mode.
+- 2026-11-11 · T10 maximize: double-click a session tab or the Manager header (or ⌘⇧Enter) maximizes that panel, again restores; sizes untouched; not persisted, cleared on mode change. Float: ⌘⇧Enter goes session, Manager-only, restore.

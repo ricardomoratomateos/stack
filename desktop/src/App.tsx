@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { nameOf } from '@core/webview/derive';
-import { buildView, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, stateWord, type Effect } from './model';
+import { buildView, floatRows, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, stateWord, type Effect } from './model';
 import { useStackd } from './stackd/useStackd';
-import { useTerminals } from './terminals';
+import { ManagerStrip, useTerminals, type StripHandle } from './terminals';
 import { SidebarHost } from './sidebar/SidebarHost';
 import { ViewTitle } from './sidebar/ViewTitle';
 import { describeCounts, installHint, toSidebarState, translate, type Action } from './sidebar/bridge';
@@ -18,6 +18,21 @@ import type { SidebarStyle } from '@core/sidebarStyle';
 import type { WebMessage } from '@core/webview/types';
 import { SessionView } from './ui/Pane';
 import { useSessionPane } from './ui/useSessionPane';
+import { Splitter } from './ui/Splitter';
+import { ModeSwitch } from './ui/ModeSwitch';
+import { FloatList } from './ui/FloatList';
+import {
+  LINE_H, cycleMaximized, heightFromLines, limits, linesFromHeight, loadLayout, maxPanelWidth, modeFromQuery, nextMode,
+  resetSize, resize, saveLayout, setMode, toggleMaximized, DEFAULT_SIZES, type LayoutState, type Maximized, type Mode,
+} from './modes/layout';
+import { applyWindowMode, loadFrames, saveFrames, windowFrame, type Frames } from './modes/windowApi';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+
+const initialLayoutState = (): LayoutState => {
+  const l = loadLayout();
+  const q = modeFromQuery(location.search);
+  return q ? setMode(l, q) : l;
+};
 
 export const NOT_RUNNING = 'stackd not running — start it with `node dist/stackd.js serve`, or enable stack.useDaemon in VS Code.';
 
@@ -28,6 +43,14 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [remembered, setRemembered] = useState<Record<string, number>>({});
   const [managerOpen, setManagerOpen] = useState(true);
+  const [layout, setLayout] = useState<LayoutState>(initialLayoutState);
+  const [maximized, setMaximized] = useState<Maximized>(null);
+  const [stripExpanded, setStripExpanded] = useState(false);
+  const [appWidth, setAppWidth] = useState(1200);
+  const appRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<StripHandle>(null);
+  const { mode, side } = layout;
+  const sizes = layout.sizes[mode];
   const [focusTick, setFocusTick] = useState(0);
   const [sessionOf, setSessionOf] = useState<Record<string, string>>({});
   const [style, setStyle] = useState<SidebarStyle>('aside');
@@ -39,6 +62,60 @@ export function App() {
   const registerPost = useCallback((post: ((msg: NewTaskExtMessage) => void) | null) => { postToNewTask.current = post; }, []);
 
   useEffect(() => { void loadSidebarStyle().then(setStyle); }, []);
+  useEffect(() => saveLayout(layout), [layout]);
+
+  // The OS window follows the mode. Frames of Full and Float are remembered; Half snaps to the screen.
+  const frames = useRef<Frames>(loadFrames());
+  const applying = useRef(0);
+  const prevMode = useRef<Mode | null>(null);
+  useEffect(() => {
+    const prev = prevMode.current;
+    prevMode.current = mode;
+    setMaximized(null);
+    setStripExpanded(false);
+    let live = true;
+    void (async () => {
+      applying.current = Date.now();
+      try {
+        if (prev && prev !== mode && prev !== 'half') {
+          frames.current = { ...frames.current, [prev]: await windowFrame() };
+          saveFrames(frames.current);
+        }
+        if (live) await applyWindowMode(mode, side, mode === 'half' ? undefined : frames.current[mode]);
+      } catch (e) {
+        if (!/invoke|__TAURI/.test(String(e))) console.error('window mode', e); // no Tauri in the browser dev server
+      } finally {
+        applying.current = Date.now();
+      }
+    })();
+    return () => { live = false; };
+  }, [mode, side]);
+  // Float remembers where the user put it and how big.
+  useEffect(() => {
+    if (mode !== 'float') return;
+    let timer = 0;
+    const save = () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        if (Date.now() - applying.current < 600) return;
+        void windowFrame().then((f) => { frames.current = { ...frames.current, float: f }; saveFrames(frames.current); }).catch(() => {});
+      }, 300);
+    };
+    let offs: Promise<() => void>[] = [];
+    try {
+      const w = getCurrentWindow();
+      offs = [w.onResized(save), w.onMoved(save)];
+    } catch { /* not in Tauri */ }
+    return () => { clearTimeout(timer); offs.forEach((p) => void p.then((off) => off()).catch(() => {})); };
+  }, [mode]);
+  useEffect(() => {
+    const el = appRef.current;
+    if (!el) return;
+    let raf = 0;
+    const ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => setAppWidth(el.clientWidth)); });
+    ro.observe(el);
+    return () => { ro.disconnect(); cancelAnimationFrame(raf); };
+  }, [running, snapshot !== null]);
   useEffect(() => {
     if (!notice) return;
     const t = setTimeout(() => setNotice(''), 4000);
@@ -67,11 +144,12 @@ export function App() {
   );
   const onSession = useCallback((id: string, session: string) => setSessionOf((m) => (m[id] === session ? m : { ...m, [id]: session })), []);
   const centre = useSessionPane(centreTarget, onSession);
-  const manager = useSessionPane(managerOpen ? managerTarget : null, onSession);
+  const managerWanted = mode !== 'full' || managerOpen || maximized === 'manager';
+  const manager = useSessionPane(managerWanted ? managerTarget : null, onSession);
 
   // Shortcuts. Capture phase, so they win over the focused terminal.
-  const latest = useRef({ items, selectedId: selected?.wt.id });
-  latest.current = { items, selectedId: selected?.wt.id };
+  const latest = useRef({ items, selectedId: selected?.wt.id, mode, expanded: stripExpanded || maximized === 'manager' });
+  latest.current = { items, selectedId: selected?.wt.id, mode, expanded: stripExpanded || maximized === 'manager' };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const sc = shortcutOf(e);
@@ -80,10 +158,16 @@ export function App() {
       e.stopPropagation();
       const fx: Effect = resolveShortcut(sc, latest.current.items ?? [], latest.current.selectedId);
       if (fx.select) select(fx.select);
-      if (fx.toggleManager) setManagerOpen((o) => !o);
+      if (fx.toggleManager) {
+        if (latest.current.mode === 'full') setManagerOpen((o) => !o);
+        else setStripExpanded((x) => !x);
+      }
+      if (fx.cycleMode) setLayout((l) => setMode(l, nextMode(l.mode)));
+      if (fx.maximize) setMaximized((m) => cycleMaximized(m, latest.current.mode));
       if (fx.focusManager) {
-        setManagerOpen(true);
-        setFocusTick((t) => t + 1);
+        if (latest.current.mode === 'full') setManagerOpen(true);
+        if (latest.current.mode === 'full' || latest.current.expanded) setFocusTick((t) => t + 1);
+        else stripRef.current?.focus();
       }
     };
     window.addEventListener('keydown', onKey, true);
@@ -217,6 +301,9 @@ export function App() {
   }
 
   const rows = selected ? sessionRows(selected.wt, commands(selected.wt.id)) : [];
+  const resizeTo = (key: 'sidebar' | 'manager' | 'lines', v: number) => setLayout((l) => resize(l, l.mode, key, v));
+  const resetTo = (key: 'sidebar' | 'manager' | 'lines') => setLayout((l) => resetSize(l, l.mode, key));
+  const allow = (worktreeId: string, windowIndex: number) => void runCommand('respondPermission', { worktreeId, windowIndex, answer: 'allow' });
   const startAgent = async (worktreeId: string) => {
     try {
       await api.command('spawnAgent', { worktreeId });
@@ -225,66 +312,119 @@ export function App() {
     }
   };
 
+  const float = mode === 'float';
+  const showSidebar = mode !== 'float' && maximized === null;
+  const showCentre = maximized !== 'manager';
+  const showList = float && maximized === null;
+  const columnManager = mode === 'full' && managerOpen && maximized !== 'session' || mode === 'full' && maximized === 'manager';
+  const showStrip = mode !== 'full' && maximized === null && !stripExpanded;
+  const bigManager = mode !== 'full' && (maximized === 'manager' || (maximized === null && stripExpanded));
+  const managerLimits = limits(mode, 'manager');
+  const sidebarLimits = limits(mode, 'sidebar');
+  const sidebarMax = Math.min(sidebarLimits.max, maxPanelWidth(appWidth, columnManager && maximized === null ? sizes.manager : 0));
+  const managerMax = Math.min(managerLimits.max, maxPanelWidth(appWidth, showSidebar ? sizes.sidebar : 0));
+  const stripPx = heightFromLines(sizes.lines);
+  const maxTitle = 'Maximized — double-click or ⌘⇧Enter to restore';
+  const managerView = (
+    <SessionView
+      resolved={manager}
+      empty={view.control && !mgr
+        ? <><p>The Manager is not running.</p><button type="button" onClick={() => void startAgent(view.control!.wt.id)}>Start the Manager</button></>
+        : 'Connecting…'}
+    />
+  );
+
   return (
-    <div className="app" data-manager={managerOpen ? 'open' : 'closed'}>
-      <aside className="sidebar" aria-label="Worktrees">
-        <ViewTitle counts={sidebarState ? describeCounts(sidebarState) : ''} onAdd={() => onMessage({ type: 'openNewTask' })}>
-          {view.repos.length > 1 && (
-            <select className="repo-select" value={view.repoRoot} onChange={(e) => { setRepoRoot(e.target.value); setSelectedId(undefined); }}>
-              {view.repos.map((r) => <option key={r.repoRoot} value={r.repoRoot}>{r.name}</option>)}
-            </select>
-          )}
-        </ViewTitle>
-        <div className="sidebar-body"><SidebarHost state={sidebarState} onMessage={onMessage} /></div>
-        {notice && <div className="notice" role="status">{notice}</div>}
-      </aside>
-
-      <main className="centre">
-        {selected ? (
-          <>
-            <nav className="tabs" aria-label={`Sessions of ${nameOf(selected.wt)}`}>
-              <span className="tabs-title">{selected.name}</span>
-              {rows.map((r) => (
-                <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === selectedIndex || undefined} onClick={() => select(selected.wt.id, r.index)}>
-                  <span className="dot" aria-hidden="true" />
-                  {r.name}
-                  <span className="tab-state">{r.kind === 'agent' ? stateWord(r.state) : r.detail}</span>
-                </button>
-              ))}
-            </nav>
-            <div className="term-host">
-              <SessionView
-                resolved={centre}
-                empty={rows.length === 0
-                  ? <><p>No sessions in this worktree.</p><button type="button" onClick={() => void startAgent(selected.wt.id)}>Start an agent</button></>
-                  : 'Connecting…'}
-              />
-            </div>
-          </>
-        ) : (
-          <div className="placeholder">Describe a task in the sidebar to start one.</div>
+    <div className="shell" data-mode={mode}>
+      <header className="titlebar">
+        <span className="titlebar-name">Stack</span>
+        <ModeSwitch mode={mode} onChange={(m) => setLayout((l) => setMode(l, m))} />
+        {mode === 'half' && (
+          <button type="button" className="icon-btn side-btn" title={`Snap to the ${side === 'left' ? 'right' : 'left'} half`} aria-label="Switch side" onClick={() => setLayout((l) => setMode(l, 'half', l.side === 'left' ? 'right' : 'left'))}>{side === 'left' ? '◧' : '◨'}</button>
         )}
-      </main>
+      </header>
+      <div className="app" ref={appRef} data-mode={mode} data-maximized={maximized ?? undefined}>
+        {showSidebar && (
+          <>
+            <aside className="sidebar" aria-label="Worktrees" style={{ width: sizes.sidebar }}>
+              <ViewTitle counts={sidebarState ? describeCounts(sidebarState) : ''} onAdd={() => onMessage({ type: 'openNewTask' })}>
+                {view.repos.length > 1 && (
+                  <select className="repo-select" value={view.repoRoot} onChange={(e) => { setRepoRoot(e.target.value); setSelectedId(undefined); }}>
+                    {view.repos.map((r) => <option key={r.repoRoot} value={r.repoRoot}>{r.name}</option>)}
+                  </select>
+                )}
+              </ViewTitle>
+              <div className="sidebar-body"><SidebarHost state={sidebarState} onMessage={onMessage} /></div>
+              {notice && <div className="notice" role="status">{notice}</div>}
+            </aside>
+            <Splitter orientation="col" label="Resize sidebar" value={sizes.sidebar} min={sidebarLimits.min} max={Math.max(sidebarLimits.min, sidebarMax)} reset={DEFAULT_SIZES[mode].sidebar} onChange={(v) => v === DEFAULT_SIZES[mode].sidebar ? resetTo('sidebar') : resizeTo('sidebar', v)} />
+          </>
+        )}
 
-      {managerOpen && (
-        <section className="manager" aria-label="Manager">
-          <header className="manager-head">
-            <span className="manager-title">Manager</span>
-            <kbd>⌘0</kbd>
-            <kbd>⌘⇧M</kbd>
-          </header>
-          <div className="term-host">
-            <SessionView
-              resolved={manager}
-              empty={view.control && !mgr
-                ? <><p>The Manager is not running.</p><button type="button" onClick={() => void startAgent(view.control!.wt.id)}>Start the Manager</button></>
-                : 'Connecting…'}
-            />
-          </div>
-        </section>
-      )}
-      {newTaskOpen && <NewTaskHost style={style} onMessage={(m) => void onNewTaskMessage(m)} registerPost={registerPost} />}
-      {dialog && <Dialog spec={dialog} onClose={() => setDialog(null)} />}
+        <div className="stage">
+          {showList && items && <FloatList rows={floatRows(items)} selectedId={selected?.wt.id} onSelect={select} onAllow={allow} />}
+          {float && notice && <div className="notice" role="status">{notice}</div>}
+          {showCentre && (
+            <main className="centre">
+              {selected ? (
+                <>
+                  <nav className="tabs" aria-label={`Sessions of ${nameOf(selected.wt)}`} onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'session'))}>
+                    <span className="tabs-title">{selected.name}</span>
+                    {rows.map((r) => (
+                      <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === selectedIndex || undefined} onClick={() => select(selected.wt.id, r.index)} title={r.index === selectedIndex ? 'Double-click to maximize' : undefined}>
+                        <span className="dot" aria-hidden="true" />
+                        {r.name}
+                        <span className="tab-state">{r.kind === 'agent' ? stateWord(r.state) : r.detail}</span>
+                        {maximized === 'session' && r.index === selectedIndex && <span className="max-badge" title={maxTitle}>maximized</span>}
+                      </button>
+                    ))}
+                  </nav>
+                  <div className="term-host">
+                    <SessionView
+                      resolved={centre}
+                      empty={rows.length === 0
+                        ? <><p>No sessions in this worktree.</p><button type="button" onClick={() => void startAgent(selected.wt.id)}>Start an agent</button></>
+                        : 'Connecting…'}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="placeholder">Describe a task in the sidebar to start one.</div>
+              )}
+            </main>
+          )}
+
+          {mode !== 'full' && maximized !== 'session' && (
+            <section className="manager-dock" data-expanded={bigManager || undefined} aria-label="Manager">
+              {!bigManager && <Splitter orientation="row" invert label="Resize Manager strip" value={stripPx} min={heightFromLines(limits(mode, 'lines').min)} max={heightFromLines(limits(mode, 'lines').max)} reset={heightFromLines(DEFAULT_SIZES[mode].lines)} onChange={(px) => resizeTo('lines', linesFromHeight(px))} />}
+              <header className="strip-head" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize">
+                <span className="strip-title">◆ Manager{!bigManager && <> · last {sizes.lines} lines</>}</span>
+                {maximized === 'manager' && <span className="max-badge" title={maxTitle}>maximized</span>}
+                <kbd>⌘0</kbd>
+                <kbd>⌘⇧M</kbd>
+              </header>
+              {bigManager ? <div className="term-host">{managerView}</div> : showStrip && <ManagerStrip ref={stripRef} pane={manager.pane} lines={sizes.lines} />}
+            </section>
+          )}
+        </div>
+
+        {columnManager && (
+          <>
+            {maximized === null && <Splitter orientation="col" invert label="Resize Manager" value={sizes.manager} min={managerLimits.min} max={Math.max(managerLimits.min, managerMax)} reset={DEFAULT_SIZES[mode].manager} onChange={(v) => v === DEFAULT_SIZES[mode].manager ? resetTo('manager') : resizeTo('manager', v)} />}
+            <section className="manager" aria-label="Manager" style={maximized === 'manager' ? { flex: 1 } : { width: sizes.manager }}>
+              <header className="manager-head" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize">
+                <span className="manager-title">Manager</span>
+                {maximized === 'manager' && <span className="max-badge" title={maxTitle}>maximized</span>}
+                <kbd>⌘0</kbd>
+                <kbd>⌘⇧M</kbd>
+              </header>
+              <div className="term-host">{managerView}</div>
+            </section>
+          </>
+        )}
+        {newTaskOpen && <NewTaskHost style={style} onMessage={(m) => void onNewTaskMessage(m)} registerPost={registerPost} />}
+        {dialog && <Dialog spec={dialog} onClose={() => setDialog(null)} />}
+      </div>
     </div>
   );
 }

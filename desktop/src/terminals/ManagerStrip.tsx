@@ -1,11 +1,21 @@
-import { useEffect, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type KeyboardEvent } from 'react';
+import { LINE_H, stripInput, stripRows } from '../modes/layout';
 import { useTerminals, useVisiblePanes } from './useTerminals';
 
-/** The last `lines` lines of a pane, read from its xterm buffer (nothing is rendered by xterm). */
-export function ManagerStrip({ pane, lines = 6 }: { pane: string | null; lines?: number }) {
-  const { registry } = useTerminals();
+export interface StripHandle {
+  focus(): void;
+}
+
+/**
+ * The Manager as a strip: its last `lines` lines (read from the xterm buffer, nothing is rendered by
+ * xterm) and an input line that types into the Manager pane.
+ */
+export const ManagerStrip = forwardRef<StripHandle, { pane: string | null; lines: number }>(function ManagerStrip({ pane, lines }, ref) {
+  const { registry, api } = useTerminals();
   const [text, setText] = useState<string[]>([]);
+  const input = useRef<HTMLInputElement>(null);
   useVisiblePanes([pane]);
+  useImperativeHandle(ref, () => ({ focus: () => input.current?.focus() }), []);
 
   useEffect(() => {
     if (!pane) {
@@ -27,9 +37,20 @@ export function ManagerStrip({ pane, lines = 6 }: { pane: string | null; lines?:
     };
   }, [registry, pane, lines]);
 
+  const send = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      e.currentTarget.blur();
+      return;
+    }
+    if (e.key !== 'Enter' || !pane || e.nativeEvent.isComposing) return;
+    void api.write(pane, stripInput(e.currentTarget.value)).catch(() => {});
+    e.currentTarget.value = '';
+  };
+
   return (
-    <pre className="manager-strip" style={{ margin: 0, padding: 8, minHeight: `${lines * 1.3}em`, overflow: 'hidden', background: '#111', color: '#ddd', fontSize: 12 }}>
-      {text.join('\n')}
-    </pre>
+    <>
+      <pre className="manager-strip" aria-label="Manager, last lines" style={{ height: lines * LINE_H }}>{stripRows(text, lines).join('\n')}</pre>
+      <input ref={input} className="manager-input" placeholder={pane ? 'Tell the Manager…  (⌘0)' : 'The Manager is not running'} disabled={!pane} spellCheck={false} onKeyDown={send} />
+    </>
   );
-}
+});

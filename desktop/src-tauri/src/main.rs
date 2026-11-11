@@ -4,6 +4,7 @@
 mod bridge;
 mod commands;
 mod stackd;
+mod window;
 
 fn main() {
     tauri::Builder::default()
@@ -27,6 +28,8 @@ fn main() {
             commands::stackd_command,
             commands::vscode_settings,
             commands::open_url,
+            window::window_frame,
+            window::set_window_mode,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Stack desktop");

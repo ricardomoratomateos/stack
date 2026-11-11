@@ -98,7 +98,9 @@ export type Shortcut =
   | { kind: 'next' }
   | { kind: 'needs' }
   | { kind: 'focus-manager' }
-  | { kind: 'toggle-manager' };
+  | { kind: 'toggle-manager' }
+  | { kind: 'cycle-mode' }
+  | { kind: 'maximize' };
 
 export interface KeyLike {
   metaKey: boolean;
@@ -108,7 +110,7 @@ export interface KeyLike {
   code: string;
 }
 
-/** ⌘1..9, ⌘⇧[ / ⌘⇧], ⌘⇧J, ⌘0, ⌘⇧M. Layout-independent (uses the physical key). */
+/** ⌘1..9, ⌘⇧[ / ⌘⇧], ⌘⇧J, ⌘0, ⌘⇧M, ⌘⇧F, ⌘⇧Enter. Layout-independent (uses the physical key). */
 export function shortcutOf(e: KeyLike): Shortcut | null {
   if (!e.metaKey || e.ctrlKey || e.altKey) return null;
   const digit = /^Digit([0-9])$/.exec(e.code);
@@ -117,10 +119,12 @@ export function shortcutOf(e: KeyLike): Shortcut | null {
     return n === 0 ? { kind: 'focus-manager' } : { kind: 'worktree', n };
   }
   if (e.shiftKey) {
+    if (e.code === 'Enter' || e.code === 'NumpadEnter') return { kind: 'maximize' };
     if (e.code === 'BracketLeft') return { kind: 'prev' };
     if (e.code === 'BracketRight') return { kind: 'next' };
     if (e.code === 'KeyJ') return { kind: 'needs' };
     if (e.code === 'KeyM') return { kind: 'toggle-manager' };
+    if (e.code === 'KeyF') return { kind: 'cycle-mode' };
   }
   return null;
 }
@@ -129,6 +133,8 @@ export interface Effect {
   select?: string;
   focusManager?: true;
   toggleManager?: true;
+  cycleMode?: true;
+  maximize?: true;
 }
 
 /** What a shortcut does given the worktrees (in sidebar order) and the selected one. */
@@ -138,6 +144,10 @@ export function resolveShortcut(sc: Shortcut, items: Described[], selectedId: st
       return { focusManager: true };
     case 'toggle-manager':
       return { toggleManager: true };
+    case 'cycle-mode':
+      return { cycleMode: true };
+    case 'maximize':
+      return { maximize: true };
     case 'worktree': {
       const d = items[sc.n - 1];
       return d ? { select: d.wt.id } : {};
@@ -155,6 +165,29 @@ export function resolveShortcut(sc: Shortcut, items: Described[], selectedId: st
       return next ? { select: next.wt.id } : {};
     }
   }
+}
+
+/** One line of the Float list: a worktree, its sessions, and the session asking for permission (if any). */
+export interface FloatRow {
+  id: string;
+  name: string;
+  group: Described['group'];
+  sessions: SessionRow[];
+  /** The session that needs you; the row shows an Allow button for it. */
+  asking?: { index: number; label: string };
+}
+
+export function floatRows(items: Described[]): FloatRow[] {
+  return items.map((d) => {
+    const ask = d.wt.sessions.find((s) => s.kind === 'agent' && s.state === 'permission');
+    return {
+      id: d.wt.id,
+      name: d.name,
+      group: d.group,
+      sessions: sessionRows(d.wt),
+      asking: ask ? { index: ask.index, label: ask.attention ?? 'needs you' } : undefined,
+    };
+  });
 }
 
 export { nameOf };

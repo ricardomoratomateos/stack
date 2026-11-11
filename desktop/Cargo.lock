@@ -2980,6 +2980,8 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 name = "stack-desktop"
 version = "0.1.0"
 dependencies = [
+ "objc2",
+ "objc2-app-kit",
  "serde",
  "serde_json",
  "tauri",
