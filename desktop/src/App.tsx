@@ -183,6 +183,8 @@ export function App() {
       setMaximized(b.maximized);
     }
   }, [reviewId]);
+  // Un-maximizing (double-click, ⌘⇧Enter) while reviewing means leaving the review: it only works full-screen.
+  useEffect(() => { if (reviewId && beforeReview.current && maximized !== 'session') setReviewId(undefined); }, [maximized]); // eslint-disable-line react-hooks/exhaustive-deps
   // Leaving the reviewed worktree (⌃Tab, ⌘N…) closes its review.
   useEffect(() => { if (reviewId && selected && selected.wt.id !== reviewId) setReviewId(undefined); }, [selected?.wt.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const select = useCallback((id: string, index?: number) => {
