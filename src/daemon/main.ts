@@ -1,7 +1,7 @@
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { NodeConfig } from './NodeConfig';
+import { daemonConfigDir } from './client/launch';
 import { MemoryStore, readVsCodeGlobalState } from './vscodeState';
 import { collectStatus, formatStatus } from './status';
 import { findRepoRoot } from '../worktree/findRepoRoot';
@@ -19,17 +19,19 @@ Usage:
                          receives the agents' hooks, serves the local API on
                          ~/.config/stack/stackd.sock (GET /state, GET /events,
                          POST /commands/<name>). One per user, all repos.
-                         Do not run it on a repo while the VS Code extension
-                         has that repo open: both would own its state.
+                         The VS Code extension uses it with the stack.useDaemon setting;
+                         without that setting, do not run it on a repo the
+                         extension has open: both would own its state.
   stackd status [repo]   Print the worktrees, sessions and states of a repo
                          (default: the repo containing the current directory).
                          Asks the daemon when it runs.
 
 Environment: STACKD_CONFIG_DIR (default ~/.config/stack), STACKD_TMUX_SOCKET
-(a tmux -L server of its own), STACKD_HOME (where ~/.claude, ~/.codex live).
+(a tmux -L server of its own), STACKD_HOME (where ~/.claude, ~/.codex live),
+STACKD_DEFER_IMPORT=1 (wait for a client's importState instead of reading VS Code's store).
 `;
 
-const configDir = (): string => process.env.STACKD_CONFIG_DIR || path.join(os.homedir(), '.config', 'stack');
+const configDir = daemonConfigDir;
 
 function resolveRepo(arg: string | undefined): string {
   const start = path.resolve(arg ?? process.cwd());
@@ -76,6 +78,8 @@ async function serve(): Promise<void> {
     configDir: dir,
     home: process.env.STACKD_HOME,
     tmuxSocket: process.env.STACKD_TMUX_SOCKET || undefined,
+    // The extension hands its live state over itself (importState) rather than have it read from VS Code's sqlite file.
+    deferImport: process.env.STACKD_DEFER_IMPORT === '1',
     bridgeSource: fs.existsSync(bridge) ? bridge : undefined,
     log: (line) => process.stderr.write(line + '\n'),
   });

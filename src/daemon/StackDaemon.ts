@@ -53,6 +53,12 @@ export interface DaemonOptions {
   installHooks?: boolean;
   /** One-time import of the VS Code extension's state; default reads VS Code's own store. */
   importState?: () => Promise<Record<string, unknown>>;
+  /**
+   * Do not import at start: a client will hand its state over with the
+   * `importState` command (the extension has its live Memento, which VS Code's
+   * sqlite file may lag behind).
+   */
+  deferImport?: boolean;
   /** The MCP bridge to hand workers (`dist/stack-mcp.js`); none: workers start without it. */
   bridgeSource?: string;
   /** Native notification sink for "the agent needs you"; default `osascript`. */
@@ -85,6 +91,9 @@ export class CommandError extends Error {
 }
 
 type Body = Record<string, unknown>;
+
+/** The sidebar messages the daemon runs itself (see the `message` command). */
+const DAEMON_MESSAGES = ['dockerUp', 'dockerDown', 'reorderSessions', 'reorderWorktrees', 'setupAction', 'refreshDrift', 'forgetWorktree'];
 
 const str = (b: Body, k: string): string | undefined => {
   const v = b[k];
@@ -135,7 +144,12 @@ export class StackDaemon {
   private timer?: ReturnType<typeof setTimeout>;
   private bridge?: BridgeCommand;
   private readonly settingsPath: string;
+  /** Settings clients pushed with `setSettings`; see NodeConfig. */
+  private pushed: Record<string, unknown> = {};
   private readonly subscriptions: Array<{ dispose(): void }> = [];
+
+  /** How many clients follow `/events`; the API server keeps it current. */
+  clients: () => number = () => 0;
 
   /** Fires (debounced) whenever anything a client shows may have changed. */
   readonly onChange = this.changes.event;
@@ -157,7 +171,7 @@ export class StackDaemon {
         this.log(`[stackd] installing the MCP bridge (${BRIDGE_FILE}) failed: ${String(e)}`);
       }
     }
-    const global = new NodeConfig(() => undefined, this.settingsPath);
+    const global = new NodeConfig(() => undefined, this.settingsPath, () => this.pushed);
     this.providers = new ProviderFactory(global, dir, opts.home, () => this.bridge);
     this.agents = new AgentSessionManager(this.providers, this.store, this.tmux, undefined, undefined, undefined, () => 'perSession', () => global.get().promptPrefix, headlessTerminals());
     this.hooks = new HookServer(this.agents);
@@ -171,14 +185,16 @@ export class StackDaemon {
       sessionTitle: (id, index) => this.agents.getSessions(id).find((s) => s.index === index)?.title,
       isWatching: () => false,
       enabled: () => global.get().notifyOnAttention,
-      notify: (message) => (opts.notify ?? ((m: string) => osa.notify(m)))(message),
+      // A connected client (the extension) shows its own badge and notification, and
+      // knows whether its window has the focus; the daemon speaks only when nobody listens.
+      notify: (message) => { if (this.clients() === 0) (opts.notify ?? ((m: string) => osa.notify(m)))(message); },
     });
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
   async start(): Promise<void> {
-    await this.importOnce();
+    if (!this.opts.deferImport) await this.importOnce();
     this.hookUrl = await this.hooks.start();
     this.routes.setDefault(this.hookUrl);
 
@@ -205,7 +221,11 @@ export class StackDaemon {
     try { this.registry.sweep(); } catch { /* best effort */ }
     this.updateRegistry();
 
-    // Every repository this user has worktrees for, plus the ones added explicitly.
+    await this.loadKnownRepos();
+  }
+
+  /** Every repository this user has worktrees for, plus the ones added explicitly. */
+  private async loadKnownRepos(): Promise<void> {
     const roots = new Set<string>(this.store.get<string[]>(REPOS_KEY, []));
     for (const wt of this.worktreeStore.getAll()) if (wt.repoRoot) roots.add(wt.repoRoot);
     for (const root of roots) {
@@ -255,7 +275,7 @@ export class StackDaemon {
     if (known) return known;
     if (!fs.existsSync(path.join(repoRoot, '.git'))) throw new CommandError(`${repoRoot} is not a git repository.`);
 
-    const config = new NodeConfig(() => repoRoot, this.settingsPath);
+    const config = new NodeConfig(() => repoRoot, this.settingsPath, () => this.pushed);
     // The window-scoped parts of the service, kept per repository in the one store.
     const scoped = stateLike(this.store, `repo:${key}:`);
     const portAllocator = new PortAllocator(this.worktreeStore, () => config.get().debugBasePort, {
@@ -498,6 +518,92 @@ export class StackDaemon {
           target: index === undefined ? `=${session}` : `=${session}:${index}`,
           command: ['tmux', ...(socket ? ['-L', socket] : []), 'attach', '-t', `=${session}`],
         };
+      }
+      case 'importState': {
+        // The extension's live Memento (global keys, and the window's workspace keys for its repo).
+        const global = (b['global'] ?? {}) as Record<string, unknown>;
+        const workspace = (b['workspace'] ?? {}) as Record<string, unknown>;
+        const repo = str(b, 'repo');
+        let copied = 0;
+        const copy = async (prefix: string, values: Record<string, unknown>): Promise<void> => {
+          for (const [key, value] of Object.entries(values)) {
+            if (!key.startsWith('stack.') || this.store.get<unknown>(prefix + key, undefined) !== undefined) continue;
+            await this.store.update(prefix + key, value);
+            copied++;
+          }
+        };
+        if (!this.store.get<boolean>(IMPORTED_KEY, false)) {
+          await copy('', global);
+          await this.store.update(IMPORTED_KEY, true);
+        }
+        if (repo) {
+          const marker = `${IMPORTED_KEY}:${canonicalPath(repo)}`;
+          if (!this.store.get<boolean>(marker, false)) {
+            await copy(`repo:${canonicalPath(repo)}:`, workspace);
+            await this.store.update(marker, true);
+          }
+        }
+        if (copied > 0) {
+          this.log(`[stackd] imported ${copied} keys from the extension's state`);
+          await this.loadKnownRepos();
+        }
+        return { copied };
+      }
+      case 'setSettings': {
+        this.pushed = (b['values'] && typeof b['values'] === 'object' ? b['values'] : {}) as Record<string, unknown>;
+        this.changed();
+        return {};
+      }
+      case 'message': {
+        // The sidebar's own messages that act on state alone; the ones that open terminals or ask questions stay with the client.
+        const msg = b['message'] as { type?: string; worktreeId?: string } | undefined;
+        if (!msg || typeof msg.type !== 'string' || !DAEMON_MESSAGES.includes(msg.type)) throw new CommandError('Not a daemon message.');
+        const ctx = typeof msg.worktreeId === 'string' ? this.findWorktree(msg.worktreeId).ctx : this.repoFor(b);
+        await ctx.service.handleMessage(msg as never);
+        return {};
+      }
+      case 'renameTask': {
+        const { wt, ctx } = this.findWorktree(need(b, 'worktreeId'));
+        await ctx.service.setWorktreeAlias(wt.id, typeof b['alias'] === 'string' ? b['alias'] : '');
+        return {};
+      }
+      case 'renameSession': {
+        const { wt } = this.findWorktree(need(b, 'worktreeId'));
+        const index = windowIndex(b);
+        if (index === undefined) throw new CommandError('"windowIndex" is required.');
+        this.agents.setSessionAlias(wt.id, index, typeof b['name'] === 'string' ? b['name'] : '');
+        this.changed();
+        return {};
+      }
+      case 'initTask': {
+        const { wt, ctx } = this.findWorktree(need(b, 'worktreeId'));
+        await ctx.service.initWorktree(wt);
+        return {};
+      }
+      case 'refreshGit': {
+        const { wt } = this.findWorktree(need(b, 'worktreeId'));
+        if (fs.existsSync(wt.path)) await this.git.refreshNow(wt.path);
+        return {};
+      }
+      case 'getDiff': {
+        const { wt, ctx } = this.findWorktree(need(b, 'worktreeId'));
+        const base = b['base'] === 'working' ? 'working' : 'branch';
+        return { unified: await ctx.service.getDiff(wt.id, base) };
+      }
+      case 'sendComments': {
+        const { wt, ctx } = this.findWorktree(need(b, 'worktreeId'));
+        const destination = str(b, 'destination');
+        if (destination !== 'live' && destination !== 'new') throw new CommandError('"destination" must be live or new.');
+        const comments = Array.isArray(b['comments']) ? (b['comments'] as never[]) : [];
+        return { went: await ctx.service.send(wt.id, destination, comments) };
+      }
+      case 'paste': {
+        const { wt } = this.findWorktree(need(b, 'worktreeId'));
+        await this.agents.pasteToActiveWindow(wt.id, need(b, 'text'), windowIndex(b));
+        return {};
+      }
+      case 'newTaskInit': {
+        return this.repoFor(b).service.newTaskInit();
       }
       default:
         throw new CommandError(`Unknown command "${name}".`, 404);

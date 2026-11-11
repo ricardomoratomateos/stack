@@ -75,6 +75,7 @@ export class ApiServer {
     });
     fs.chmodSync(this.socketPath, 0o600);
     this.sub = this.daemon.onChange(() => this.push());
+    this.daemon.clients = () => this.streams.size;
     this.keepAlive = setInterval(() => { for (const s of this.streams) s.write(': keep-alive\n\n'); }, 15000);
   }
 

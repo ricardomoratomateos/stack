@@ -33,11 +33,14 @@ export class NodeConfig {
   constructor(
     private readonly repoRoot: () => string | undefined,
     private readonly settingsPath: string = DEFAULT_SETTINGS_PATH,
+    /** Settings a client pushed (the VS Code extension's own): below settings.json, above the repo file. */
+    private readonly pushed: () => Record<string, unknown> = () => ({}),
   ) {}
 
   get(): StackConfig {
     const raw = readObject(this.settingsPath);
-    const user = (key: string): unknown => raw[key] ?? raw[`stack.${key}`];
+    const pushed = this.pushed();
+    const user = (key: string): unknown => raw[key] ?? raw[`stack.${key}`] ?? pushed[key];
     const root = this.repoRoot();
     const repo = root ? readRepoConfig(root).values : {};
     const pick = <K extends keyof typeof PROJECT_DEFAULTS>(key: K): (typeof PROJECT_DEFAULTS)[K] => {

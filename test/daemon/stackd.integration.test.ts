@@ -6,6 +6,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { StackDaemon, type Snapshot } from '../../src/daemon/StackDaemon';
 import { ApiServer, callDaemon, socketPathFor } from '../../src/daemon/api';
+import { removeTmuxServer } from '../helpers/tmuxSocket';
 
 const hasTmux = (() => { try { execFileSync('tmux', ['-V']); return true; } catch { return false; } })();
 
@@ -71,7 +72,7 @@ describe.skipIf(!hasTmux)('stackd serve (real tmux on an isolated socket)', () =
   afterAll(async () => {
     await api?.stop();
     await daemon?.stop();
-    try { tmuxOut('kill-server'); } catch { /* none started */ }
+    removeTmuxServer(SOCKET);
     fs.rmSync(root, { recursive: true, force: true });
   });
 

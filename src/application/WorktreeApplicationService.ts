@@ -28,6 +28,7 @@ import { attentionQueue, groupOf, nextInQueue, type WorktreeGroup } from '../web
 import { envPrefix, shellQuote } from '../shell/shellQuote';
 import type { NewTaskInit } from '../newtask/types';
 import { detectTestCommand } from '../mcp/testCommand';
+import { planDelete, type DeletePlan } from './deletePlan';
 
 /** How the agent of a newly created worktree got going; see createWorktree's `started`. */
 export type StartOutcome = 'launched' | 'failed' | 'setup-failed';
@@ -1971,62 +1972,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
     return result;
   }
 
-  /**
-   * What deleting a worktree would throw away, in the confirm's own words, and
-   * the buttons to match — from what Stack already knows: the git status, the
-   * drift against the base, the PR.
-   *
-   * The confirm used to say nothing at all, over a `git worktree remove
-   * --force` that discards uncommitted work and a `git branch -D` that
-   * discards unmerged commits. Now a loss is said plainly, and the branch
-   * option counts the commits it would take with it. Those are the ones that
-   * exist nowhere else: with an upstream, the unpushed ones; without one (never
-   * pushed, or deleted on the remote after a merge), everything the branch
-   * added over its base — unless its PR was merged, which carried the work.
-   *
-   * A merged PR with nothing uncommitted and nothing unpushed is the end of
-   * a task, not a risk, and the primary button says so: "Clean up", worktree
-   * and branch both.
-   *
-   * `keepBranch` is the index in `choices` of the one that keeps the branch.
-   */
-  private deletePlan(wt: Worktree): { detail: string; choices: string[]; keepBranch: number } {
-    const git = this.deps.gitWatcher.getStatus(wt.path);
-    const pr = this.deps.prMonitor.getStatus(wt.id) ?? undefined;
-    const merged = pr?.state === 'MERGED';
-    const beyondBase = git.base?.ahead ?? 0;
-    const unsaved = git.upstream ? git.ahead : merged ? 0 : beyondBase;
-    const commits = (n: number) => `${n} commit${n === 1 ? '' : 's'}`;
-
-    const lines: string[] = [];
-    if (git.hasChanges) {
-      const parts = [
-        git.staged > 0 ? `${git.staged} staged` : '',
-        git.unstaged > 0 ? `${git.unstaged} unstaged` : '',
-        git.untracked > 0 ? `${git.untracked} untracked` : '',
-      ].filter(Boolean);
-      lines.push(`Uncommitted changes (${parts.join(', ')}) are lost with the worktree.`);
-    }
-    if (git.upstream && git.ahead > 0) lines.push(`${commits(git.ahead)} not pushed.`);
-    if (git.base && beyondBase > 0) {
-      lines.push(`${commits(beyondBase)} not in ${git.base.ref}${git.upstream ? '' : ', and the branch was never pushed'}.`);
-    }
-    if (pr) lines.push(`PR #${pr.number} is ${pr.state === 'OPEN' && pr.isDraft ? 'a draft' : pr.state.toLowerCase()}.`);
-    if (unsaved > 0) lines.push(`Deleting the branch too discards ${unsaved === 1 ? 'that commit' : `those ${commits(unsaved)}`}; "Delete" keeps it.`);
-
-    if (merged && !git.hasChanges && unsaved === 0) {
-      return {
-        detail: `${lines.join('\n')}\nNothing here is uncommitted or unpushed: clean up removes the worktree and its branch.`,
-        choices: ['Clean up', 'Delete, keep branch'],
-        keepBranch: 1,
-      };
-    }
-    if (lines.length === 0) lines.push('No uncommitted changes and no unpushed commits.');
-    return {
-      detail: lines.join('\n'),
-      choices: ['Delete', unsaved > 0 ? `Delete + branch (discards ${commits(unsaved)})` : 'Delete + branch'],
-      keepBranch: 0,
-    };
+  private deletePlan(wt: Worktree): DeletePlan {
+    return planDelete(this.deps.gitWatcher.getStatus(wt.path), this.deps.prMonitor.getStatus(wt.id) ?? undefined);
   }
 
   // ── Rename ─────────────────────────────────────────────────────────────────
@@ -2045,7 +1992,23 @@ export class WorktreeApplicationService implements DiffPanelHost {
       placeHolder: 'e.g. Fix rate-limit bug on Shopify',
     });
     if (alias === undefined) return;
+    await this.setWorktreeAlias(wt.id, alias);
+  }
 
+  /**
+   * Stores a worktree's alias (empty: back to the branch name) and relabels its
+   * folder. The prompt-free half of renameWorktree, for a caller that already asked.
+   */
+  async setWorktreeAlias(worktreeId: string, alias: string): Promise<void> {
+    const control = this.controlSession;
+    if (control?.id === worktreeId) {
+      this.controlAlias = alias || DEFAULT_CONTROL_ALIAS;
+      await this.deps.workspaceState.update(CONTROL_ALIAS_KEY, this.controlAlias);
+      this.ui.pushWebview();
+      return;
+    }
+    const wt = this.findWorktree(worktreeId);
+    if (!wt) return;
     const finalAlias = alias || wt.branch;
     await this.deps.store.setAlias(wt.id, finalAlias);
 
