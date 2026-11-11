@@ -52,7 +52,7 @@ VS Code-only; they are not part of the core.
   `esbuild.js` → `dist/stackd.js`. CLI: `node dist/stackd.js status [repo]`
   prints worktrees, sessions and states. Done when it runs outside VS Code
   and its output matches the sidebar for the same repo.
-- [ ] **T3 · `stackd` owns state + API.** `stackd` becomes the single owner:
+- [x] **T3 · `stackd` owns state + API.** `stackd` becomes the single owner:
   `stackd serve` runs as a long-lived daemon (one per user, all repos),
   state in `~/.config/stack/state.json` (`JsonFileStore`; one-time import
   from the VS Code store read by T2), HookServer + MCP + GitWatcher started
@@ -100,3 +100,7 @@ notifications, shortcuts.
 - 2026-11-11 · Rust UI + tmux control mode; no forks of tmux or agent TUIs;
   current TS core kept as `stackd`.
 - 2026-11-11 · State ownership: option 1 — `stackd` owns state and hooks; the extension becomes a client (T3b).
+- 2026-11-11 · T3 API: HTTP over a Unix socket (`<configDir>/stackd.sock`, 0600 in a 0700 dir, so no token); SSE (`GET /events`, `event: state` with the full snapshot, debounced 25 ms) rather than WebSocket; commands are `POST /commands/<name>` with JSON bodies, answers `{ok, result|error}`.
+- 2026-11-11 · T3 hooks: no change to `HookRoutes`/`discovery`; `stackd` uses `<configDir>` as the storage path, so hook scripts read its `routes/` and `hook-url`, and the MCP bridge finds it through `<configDir>/windows/<pid>.json` (the daemon is one "window" for all repos; tool calls are routed to a repo with `resolveWindow`). The agents' global hooks point at whoever installed them last: extension and `stackd` must not run on the same repo at once until T3b.
+- 2026-11-11 · T3 composition: one `WorktreeApplicationService` per repo over a `HeadlessHost` (in-memory workspace folders, scripts to the log) with no-op tab/breakpoint managers; per-repo selection keys are prefixed `repo:<path>:` in `state.json`. `TmuxManager` takes an optional `-L` socket (`STACKD_TMUX_SOCKET`).
+- 2026-11-11 · T3 import: first start copies the extension's `stack.*` keys (read-only from VS Code's sqlite) into `state.json`, never overwriting, once (`stackd.imported`). `respondPermission` in v1: `answer` allow = Enter, deny = Escape, or explicit `keys`. `attachTarget` returns the `tmux [-L sock] attach -t =<session>` argv and selects the window.

@@ -163,8 +163,20 @@ export class TmuxManager implements ISessionManager {
     });
   }
 
+  /**
+   * @param socket A tmux socket name (`tmux -L <name>`): a server of its own,
+   *   apart from the user's default one. For tests and for running `stackd`
+   *   on an isolated server; undefined is the default server, as ever.
+   */
+  constructor(readonly socket?: string) {}
+
   private tmux(...args: string[]): Promise<string> {
-    return this.runFile('tmux', args);
+    return this.runFile('tmux', this.socket ? ['-L', this.socket, ...args] : args);
+  }
+
+  /** One key (or key name: `Enter`, `Escape`, `y`) sent to a window, with nothing after it. */
+  async sendKey(target: string, key: string): Promise<void> {
+    await this.tmux('send-keys', '-t', target, key);
   }
 
   static isAvailable(): Promise<boolean> {
