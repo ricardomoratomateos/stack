@@ -82,6 +82,12 @@ export function managerSession(control: WorktreeItem | undefined): SessionItem |
   return control && (primaryAgent(control) ?? control.sessions[0]);
 }
 
+/** The Manager window to show: the remembered tab if it still exists, else the Manager's agent. */
+export function managerIndex(control: WorktreeItem | undefined, remembered?: number): number | undefined {
+  if (control && remembered !== undefined && control.sessions.some((s) => s.index === remembered)) return remembered;
+  return managerSession(control)?.index;
+}
+
 /** Branch name and prompt for a task typed in the composer. */
 export function taskFromText(text: string, repoRoot: string): { repo: string; branch: string; title: string; description: string } | null {
   const title = text.trim();

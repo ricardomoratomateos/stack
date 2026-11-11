@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { nameOf } from '@core/webview/derive';
-import { buildView, floatRows, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, stateWord, type Effect } from './model';
+import { buildView, floatRows, managerIndex, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, stateWord, type Effect } from './model';
 import { StartStackd } from './stackd/StartStackd';
 import { useStackd } from './stackd/useStackd';
 import { ManagerStrip, useTerminals, type StripHandle } from './terminals';
@@ -48,6 +48,7 @@ export function App() {
   const [repoRoot, setRepoRoot] = useState<string | undefined>();
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [remembered, setRemembered] = useState<Record<string, number>>({});
+  const [managerTabs, setManagerTabs] = useState<Record<string, number>>({});
   const [managerOpen, setManagerOpen] = useState(true);
   const [layout, setLayout] = useState<LayoutState>(initialLayoutState);
   const [maximized, setMaximized] = useState<Maximized>(null);
@@ -158,9 +159,10 @@ export function App() {
     [selected?.wt.id, selectedIndex], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const mgr = managerSession(view?.control?.wt);
+  const managerIdx = managerIndex(view?.control?.wt, view ? managerTabs[view.repoRoot] : undefined);
   const managerTarget = useMemo(
-    () => (view?.control && mgr ? { worktreeId: view.control.wt.id, index: mgr.index } : null),
-    [view?.control?.wt.id, mgr?.index], // eslint-disable-line react-hooks/exhaustive-deps
+    () => (view?.control && managerIdx !== undefined ? { worktreeId: view.control.wt.id, index: managerIdx } : null),
+    [view?.control?.wt.id, managerIdx], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const onSession = useCallback((id: string, session: string) => setSessionOf((m) => (m[id] === session ? m : { ...m, [id]: session })), []);
   const centre = useSessionPane(centreTarget, onSession);
@@ -350,6 +352,7 @@ export function App() {
   }
 
   const rows = selected ? sessionRows(selected.wt, commands(selected.wt.id)) : [];
+  const managerRows = view.control ? sessionRows(view.control.wt, commands(view.control.wt.id)) : [];
   const resizeTo = (key: 'sidebar' | 'manager' | 'lines', v: number) => setLayout((l) => resize(l, l.mode, key, v));
   const resetTo = (key: 'sidebar' | 'manager' | 'lines') => setLayout((l) => resetSize(l, l.mode, key));
   const allow = (worktreeId: string, windowIndex: number) => void runCommand('respondPermission', { worktreeId, windowIndex, answer: 'allow' });
@@ -448,7 +451,7 @@ export function App() {
             <section className="manager-dock" data-expanded={bigManager || undefined} aria-label="Manager">
               {!bigManager && <Splitter orientation="row" invert label="Resize Manager strip" value={stripPx} min={heightFromLines(limits(mode, 'lines').min)} max={heightFromLines(limits(mode, 'lines').max)} reset={heightFromLines(DEFAULT_SIZES[mode].lines)} onChange={(px) => resizeTo('lines', linesFromHeight(px))} />}
               <header className="strip-head" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧M toggle">
-                <span className="strip-title">◆ Manager{!bigManager && <> · last {sizes.lines} lines</>}</span>
+                <span className="strip-title">◆ {view.control?.name || 'Manager'}{!bigManager && <> · last {sizes.lines} lines</>}</span>
                 {maximized === 'manager' && <span className="max-badge" title={maxTitle}>maximized</span>}
               </header>
               {bigManager ? <div className="term-host">{managerView}</div> : showStrip && <ManagerStrip ref={stripRef} pane={manager.pane} lines={sizes.lines} />}
@@ -460,10 +463,17 @@ export function App() {
           <>
             {maximized === null && <Splitter orientation="col" invert label="Resize Manager" value={sizes.manager} min={managerLimits.min} max={Math.max(managerLimits.min, managerMax)} reset={DEFAULT_SIZES[mode].manager} onChange={(v) => v === DEFAULT_SIZES[mode].manager ? resetTo('manager') : resizeTo('manager', v)} />}
             <section className="manager" aria-label="Manager" style={maximized === 'manager' ? { flex: 1 } : { width: sizes.manager }}>
-              <header className="manager-head" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧M toggle">
-                <span className="manager-title">Manager</span>
+              <nav className="tabs" aria-label="Manager sessions" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧M toggle">
+                <span className="tabs-title">{view.control?.name || 'Manager'}</span>
+                {managerRows.map((r) => (
+                  <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === managerIdx || undefined} onClick={() => setManagerTabs((m) => ({ ...m, [view.repoRoot]: r.index }))}>
+                    <span className="dot" aria-hidden="true" />
+                    {r.name}
+                    <span className="tab-state">{r.kind === 'agent' ? stateWord(r.state) : r.detail}</span>
+                  </button>
+                ))}
                 {maximized === 'manager' && <span className="max-badge" title={maxTitle}>maximized</span>}
-              </header>
+              </nav>
               <div className="term-host">{managerView}</div>
             </section>
           </>

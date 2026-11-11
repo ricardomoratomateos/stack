@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionItem, StackState, WorktreeItem } from '@core/webview/types';
-import { floatRows, buildView, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, taskFromText, type KeyLike } from './model';
+import { floatRows, buildView, managerIndex, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, taskFromText, type KeyLike } from './model';
 import type { Snapshot } from './stackd/api';
 
 const session = (o: Partial<SessionItem> & { index: number }): SessionItem => ({ name: 'claude', kind: 'agent', provider: 'claude', state: 'idle', ...o });
@@ -79,6 +79,12 @@ describe('pickSession / managerSession', () => {
   it('finds the manager window', () => {
     expect(managerSession(w)?.index).toBe(2);
     expect(managerSession(undefined)).toBeUndefined();
+  });
+  it('keeps the remembered manager tab while it exists', () => {
+    expect(managerIndex(w, 3)).toBe(3);
+    expect(managerIndex(w, 9)).toBe(2);
+    expect(managerIndex(w)).toBe(2);
+    expect(managerIndex(undefined, 1)).toBeUndefined();
   });
 });
 
