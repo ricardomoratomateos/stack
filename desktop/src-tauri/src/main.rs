@@ -15,6 +15,7 @@ fn main() {
         .manage(commands::StackdLatest::default())
         .manage(shell::Shell::default())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(shell::global_shortcut_plugin())
         .setup(|app| {
             commands::start_stackd_watch(app.handle().clone());

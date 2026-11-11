@@ -14,6 +14,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { NewTaskExtMessage, NewTaskInit, NewTaskMessage } from '@core/newtask/types';
 import type { ProviderId } from '@core/ports/IAgentProvider';
 import { loadSidebarStyle, resolveSidebarStyle } from './sidebar/settings';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { SettingsHost } from './settings/SettingsHost';
 import { Dialog, type DialogSpec } from './ui/Dialog';
 import type { SidebarStyle } from '@core/sidebarStyle';
@@ -37,6 +38,8 @@ const initialLayoutState = (): LayoutState => {
   const q = modeFromQuery(location.search);
   return q ? setMode(l, q) : l;
 };
+
+const ADD_REPO = '\0add-repository';
 
 export const NOT_RUNNING = 'stackd not running — start it from the app (Start stackd now / at login), or enable stack.useDaemon in VS Code.';
 
@@ -229,6 +232,19 @@ export function App() {
     }
   }, [api]);
 
+  /** Native folder picker, then stackd's `addRepo`; selects the repository it manages. */
+  const addRepository = useCallback(async () => {
+    try {
+      const picked = await openDialog({ directory: true, multiple: false, title: 'Add repository' });
+      if (typeof picked !== 'string') return;
+      const added = await api.command<{ repoRoot?: string }>('addRepo', { repo: picked });
+      setRepoRoot(added?.repoRoot ?? picked);
+      setSelectedId(undefined);
+    } catch (e) {
+      setNotice(String(e instanceof Error ? e.message : e));
+    }
+  }, [api]);
+
   const onMessage = useCallback((msg: WebMessage) => {
     if (!view) return;
     const ctx = { repoRoot: view.repoRoot, worktrees: [...view.items.map((d) => d.wt), ...(view.control ? [view.control.wt] : [])] };
@@ -328,7 +344,7 @@ export function App() {
   if (!view) {
     return (
       <div className="fullscreen">
-        <div className="empty"><h1>No repository yet</h1><p>stackd is running but manages no repository. Open one in VS Code (stack.useDaemon) or add it with the <code>addRepo</code> command.</p></div>
+        <div className="empty"><h1>No repository yet</h1><p>stackd is running but manages no repository.</p><button type="button" onClick={() => void addRepository()}>Add repository</button>{notice && <div className="notice" role="status">{notice}</div>}</div>
       </div>
     );
   }
@@ -384,11 +400,13 @@ export function App() {
           <>
             <aside className="sidebar" aria-label="Worktrees" style={{ width: sizes.sidebar }}>
               <ViewTitle counts={sidebarState ? describeCounts(sidebarState) : ''} onAdd={() => onMessage({ type: 'openNewTask' })}>
-                {view.repos.length > 1 && (
-                  <select className="repo-select" value={view.repoRoot} onChange={(e) => { setRepoRoot(e.target.value); setSelectedId(undefined); }}>
-                    {view.repos.map((r) => <option key={r.repoRoot} value={r.repoRoot}>{r.name}</option>)}
-                  </select>
-                )}
+                <select className="repo-select" value={view.repoRoot} onChange={(e) => {
+                  if (e.target.value === ADD_REPO) { void addRepository(); return; }
+                  setRepoRoot(e.target.value); setSelectedId(undefined);
+                }}>
+                  {view.repos.map((r) => <option key={r.repoRoot} value={r.repoRoot}>{r.name}</option>)}
+                  <option value={ADD_REPO}>Add repository…</option>
+                </select>
               </ViewTitle>
               <div className="sidebar-body"><SidebarHost state={sidebarState} onMessage={onMessage} /></div>
               {notice && <div className="notice" role="status">{notice}</div>}
