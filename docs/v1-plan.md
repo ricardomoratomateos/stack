@@ -74,23 +74,25 @@ VS Code-only; they are not part of the core.
 
 **Checkpoint A** — user reviews before Phase 1.
 
-## Phase 1 — Rust prototype to measure
+## Phase 1 — Desktop prototype (Tauri v2 + xterm.js)
 
-- [ ] **T4 · tmux control-mode client.** `desktop/` cargo workspace, crate
-  `tmux-cc`: spawn `tmux -CC attach`/`new`, parse `%begin/%end/%error`,
-  `%output`, `%extended-output`, `%window-add/close`, `%layout-change`,
-  `%exit`; send commands; enable `pause-after` flow control. Tests over
-  recorded fixtures.
-- [ ] **T5 · Terminal engine per pane.** `alacritty_terminal::Term` fed from
-  `%output`; resize; `last_lines(n)` (for the Manager strip); bounded
-  scrollback (~2000 lines, older history via `capture-pane` on demand).
-  Headless tests.
-- [ ] **T6 · GPUI window.** One session rendered + Manager strip (last 6
-  lines) + typing into the focused pane (`send-keys`). If GPUI is too
-  painful, stop and report — fallback is Tauri + xterm.js with the same
-  `tmux-cc` crate.
+- [ ] **T4 · tmux control-mode client.** `desktop/` with a Tauri v2 app
+  (`desktop/src-tauri`) and a Rust crate `tmux-cc` in the same cargo
+  workspace: spawn `tmux -CC` on a given `-L` socket, parse
+  `%begin/%end/%error`, `%output`, `%extended-output`, `%window-add/close`,
+  `%layout-change`, `%exit`; send commands; enable `pause-after` flow
+  control. Tests over recorded fixtures plus one against an isolated tmux.
+- [ ] **T5 · Terminals in the webview.** One xterm.js (WebGL addon) per pane,
+  fed from `tmux-cc` `%output` through Tauri events; keystrokes back via
+  `send-keys -H`; resize → `refresh-client -C`. Bounded scrollback
+  (~2000 lines), older history via `capture-pane` on demand. Manager strip
+  = last N lines of the Manager pane's xterm buffer.
+- [ ] **T6 · Full layout.** React UI reusing `src/webview` pieces where
+  possible: worktree sidebar with every session (state from `stackd`
+  `/state` + `/events` over its Unix socket, proxied by the Rust side),
+  active session in the centre, Manager column. Clicking a session shows it.
 - [ ] **T7 · Measure.** 8 live sessions, one flooding logs; record RSS/CPU of
-  the app and `stackd` here.
+  the app, its webview and `stackd` here.
 
 **Checkpoint B** — GPUI or Tauri; then plan windows (Full/Half/Float),
 notifications, shortcuts.
@@ -104,3 +106,5 @@ notifications, shortcuts.
 - 2026-11-11 · T3 hooks: no change to `HookRoutes`/`discovery`; `stackd` uses `<configDir>` as the storage path, so hook scripts read its `routes/` and `hook-url`, and the MCP bridge finds it through `<configDir>/windows/<pid>.json` (the daemon is one "window" for all repos; tool calls are routed to a repo with `resolveWindow`). The agents' global hooks point at whoever installed them last: extension and `stackd` must not run on the same repo at once until T3b.
 - 2026-11-11 · T3 composition: one `WorktreeApplicationService` per repo over a `HeadlessHost` (in-memory workspace folders, scripts to the log) with no-op tab/breakpoint managers; per-repo selection keys are prefixed `repo:<path>:` in `state.json`. `TmuxManager` takes an optional `-L` socket (`STACKD_TMUX_SOCKET`).
 - 2026-11-11 · T3 import: first start copies the extension's `stack.*` keys (read-only from VS Code's sqlite) into `state.json`, never overwriting, once (`stackd.imported`). `respondPermission` in v1: `answer` allow = Enter, deny = Escape, or explicit `keys`. `attachTarget` returns the `tmux [-L sock] attach -t =<session>` argv and selects the window.
+
+- 2026-11-11 · Desktop UI: Tauri v2 + xterm.js for now (GPUI later if needed); `tmux-cc` stays a standalone Rust crate.
