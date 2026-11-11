@@ -167,6 +167,24 @@ export function App() {
     if (repo) history.current[repo] = mruTouch(history.current[repo] ?? [], id);
   }, []);
   const closeReview = useCallback(() => setReviewId(undefined), []);
+  // The review takes the whole screen while it is open (Full, centre maximized), then puts the layout back.
+  const beforeReview = useRef<{ mode: Mode; maximized: Maximized } | null>(null);
+  const layoutNow = useRef({ mode, maximized });
+  layoutNow.current = { mode, maximized };
+  useEffect(() => {
+    if (reviewId && !beforeReview.current) {
+      beforeReview.current = { ...layoutNow.current };
+      if (layoutNow.current.mode !== 'full') setLayout((l) => setMode(l, 'full'));
+      setMaximized('session');
+    } else if (!reviewId && beforeReview.current) {
+      const b = beforeReview.current;
+      beforeReview.current = null;
+      if (b.mode !== 'full') setLayout((l) => setMode(l, b.mode));
+      setMaximized(b.maximized);
+    }
+  }, [reviewId]);
+  // Leaving the reviewed worktree (⌃Tab, ⌘N…) closes its review.
+  useEffect(() => { if (reviewId && selected && selected.wt.id !== reviewId) setReviewId(undefined); }, [selected?.wt.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const select = useCallback((id: string, index?: number) => {
     touch(id);
     setSelectedId(id);
