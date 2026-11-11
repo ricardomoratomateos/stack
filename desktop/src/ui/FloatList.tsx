@@ -12,7 +12,9 @@ export function FloatList({ rows, selectedId, onSelect, onAllow }: {
     <ul className="float-list" aria-label="Worktrees">
       {rows.map((r) => (
         <li key={r.id} className="float-row" data-selected={r.id === selectedId || undefined} data-group={r.group}>
-          <button type="button" className="float-name" onClick={() => onSelect(r.id)}>{r.name}</button>
+          <button type="button" className="float-name" onClick={() => onSelect(r.id)} title={r.name}>
+            <StatusDot group={r.group} /><span className="float-name-text">{r.name}</span>
+          </button>
           <span className="float-sessions">
             {r.sessions.map((s) => (
               <button key={s.index} type="button" className="float-session" data-state={s.state} title={`${s.name}: ${stateWord(s.state)}`} onClick={() => onSelect(r.id, s.index)}>

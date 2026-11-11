@@ -155,15 +155,19 @@ body[data-resizing] .term-host, body[data-resizing] .sidebar-body { pointer-even
 .max-badge { font-size: 11px; font-family: var(--vscode-editor-font-family); padding: 0 5px; border-radius: 8px; background: var(--app-surface-2); color: var(--app-text); }
 
 /* float: compact worktree list */
-.float-list { list-style: none; margin: 0; padding: 2px 0; flex: none; max-height: 30%; overflow-y: auto; background: var(--app-bg); border-bottom: 1px solid var(--app-border); }
-.float-row { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 8px; }
+.float-list { list-style: none; margin: 0; padding: 4px 6px; flex: none; max-height: 30%; overflow-y: auto; background: var(--app-bg); border-bottom: 1px solid var(--app-border); }
+.float-row { position: relative; display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 8px 0 10px; border-radius: 5px; color: var(--app-text-dim); }
+.float-row + .float-row { margin-top: 1px; }
 .float-row[data-selected] { background: var(--app-selected); color: var(--app-text); }
-.float-row:not([data-selected]):hover { background: var(--app-hover); }
-.float-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 45%; }
-.float-sessions { flex: 1; min-width: 0; display: flex; gap: 8px; overflow: hidden; }
-.float-session { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--app-text-dim); white-space: nowrap; }
-.float-allow { flex: none; padding: 1px 10px; font-size: 11px; border-radius: 3px; background: var(--app-primary-bg); color: var(--app-primary-ink); }
-.float-allow:hover { background: var(--app-primary-hover); }
+.float-row[data-selected]::before { content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; border-radius: 2px; background: var(--app-accent); }
+.float-row:not([data-selected]):hover { background: var(--app-hover); color: var(--app-text); }
+.float-name { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; font-size: 12px; font-weight: 500; color: inherit; text-align: left; }
+.float-name-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.float-sessions { flex: none; max-width: 50%; display: flex; gap: 2px; overflow: hidden; }
+.float-session { display: flex; align-items: center; gap: 5px; height: 20px; padding: 0 6px; border-radius: 4px; font-size: 11px; color: var(--app-text-faint); white-space: nowrap; }
+.float-session:hover { background: var(--app-hover); color: var(--app-text-dim); }
+.float-allow { flex: none; height: 20px; padding: 0 10px; font-size: 11px; font-weight: 600; border-radius: 4px; border: 1px solid color-mix(in srgb, var(--fm-needs, #f5a524) 45%, transparent); background: color-mix(in srgb, var(--fm-needs, #f5a524) 16%, transparent); color: var(--fm-needs-text, var(--fm-needs, #f5a524)); }
+.float-allow:hover { background: color-mix(in srgb, var(--fm-needs, #f5a524) 28%, transparent); }
 
 /* Settings screen (VS Code's Settings editor look) */
 .settings-body { padding: 16px 24px 32px; }
