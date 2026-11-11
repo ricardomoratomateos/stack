@@ -52,6 +52,11 @@ kbd { font-size: 10px; color: var(--vscode-descriptionForeground); border: 1px s
 .empty { max-width: 460px; display: flex; flex-direction: column; gap: 12px; }
 .empty h1 { font-size: 15px; color: var(--vscode-foreground); }
 .empty code { background: var(--vscode-textPreformat-background); color: var(--vscode-textPreformat-foreground); padding: 1px 5px; border-radius: 4px; }
+.empty button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); padding: 6px 14px; border-radius: 2px; border: 1px solid var(--vscode-button-border, transparent); font-size: 13px; cursor: pointer; }
+.empty button:hover { background: var(--vscode-button-hoverBackground); }
+.empty button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+.empty button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
+.empty button:disabled { opacity: .5; cursor: default; }
 .empty .dim { color: var(--vscode-descriptionForeground); font-size: 11px; }
 
 /* dialogs: VS Code's quick-input look */

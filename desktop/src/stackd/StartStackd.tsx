@@ -10,6 +10,14 @@ export function StartStackd({ socket }: { socket: string }) {
   const [login, setLogin] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+
+  // This screen unmounts as soon as stackd answers; still here after a few seconds means it died.
+  useEffect(() => {
+    if (startedAt === null) return;
+    const t = setTimeout(() => setError('stackd did not come up. The reason is at the end of ~/.config/stack/stackd.log.'), 6000);
+    return () => clearTimeout(t);
+  }, [startedAt]);
 
   useEffect(() => {
     void invoke<boolean>('stackd_login_status').then(setLogin).catch(() => {});
@@ -28,8 +36,10 @@ export function StartStackd({ socket }: { socket: string }) {
       <h1>stackd is not running</h1>
       <p>stackd keeps your agents and worktrees going while the app is closed. It needs Node.js 20+ on this Mac.</p>
       <div style={{ display: 'flex', gap: 8 }}>
-        <button type="button" disabled={busy} onClick={() => void run(() => invoke('stackd_start_now'))}>Start stackd now</button>
-        <button type="button" disabled={busy} onClick={() => void run(() => invoke('stackd_set_login', { enabled: !login }))}>
+        <button type="button" disabled={busy} onClick={() => void run(async () => { await invoke('stackd_start_now'); setStartedAt(Date.now()); })}>
+          {startedAt !== null && !error ? 'Starting…' : 'Start stackd now'}
+        </button>
+        <button type="button" className="secondary" disabled={busy} onClick={() => void run(() => invoke('stackd_set_login', { enabled: !login }))}>
           {login ? 'Stop starting stackd at login' : 'Start stackd at login'}
         </button>
       </div>

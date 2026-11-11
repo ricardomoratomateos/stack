@@ -38,7 +38,8 @@
     ],
     "resources": {
       "../../dist/stackd.js": "stackd/stackd.js",
-      "../../dist/stack-mcp.js": "stackd/stack-mcp.js"
+      "../../dist/stack-mcp.js": "stackd/stack-mcp.js",
+      "resources/stackd-package.json": "stackd/package.json"
     },
     "macOS": {
       "signingIdentity": "-",
