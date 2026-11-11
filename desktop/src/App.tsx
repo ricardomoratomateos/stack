@@ -424,10 +424,9 @@ export function App() {
                   <nav className="tabs" aria-label={`Sessions of ${nameOf(selected.wt)}`} onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'session'))}>
                     <span className="tabs-title">{selected.name}</span>
                     {rows.map((r) => (
-                      <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === selectedIndex || undefined} onClick={() => select(selected.wt.id, r.index)} title={r.index === selectedIndex ? 'Double-click to maximize' : undefined}>
+                      <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === selectedIndex || undefined} onClick={() => select(selected.wt.id, r.index)} title={[r.kind === 'agent' ? stateWord(r.state) : r.detail, r.index === selectedIndex ? 'Double-click to maximize' : ''].filter(Boolean).join(' · ') || undefined}>
                         <span className="dot" aria-hidden="true" />
                         {r.name}
-                        <span className="tab-state">{r.kind === 'agent' ? stateWord(r.state) : r.detail}</span>
                         {maximized === 'session' && r.index === selectedIndex && <span className="max-badge" title={maxTitle}>maximized</span>}
                       </button>
                     ))}
@@ -466,10 +465,9 @@ export function App() {
               <nav className="tabs" aria-label="Manager sessions" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧M toggle">
                 <span className="tabs-title">{view.control?.name || 'Manager'}</span>
                 {managerRows.map((r) => (
-                  <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === managerIdx || undefined} onClick={() => setManagerTabs((m) => ({ ...m, [view.repoRoot]: r.index }))}>
+                  <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === managerIdx || undefined} onClick={() => setManagerTabs((m) => ({ ...m, [view.repoRoot]: r.index }))} title={(r.kind === 'agent' ? stateWord(r.state) : r.detail) || undefined}>
                     <span className="dot" aria-hidden="true" />
                     {r.name}
-                    <span className="tab-state">{r.kind === 'agent' ? stateWord(r.state) : r.detail}</span>
                   </button>
                 ))}
                 {maximized === 'manager' && <span className="max-badge" title={maxTitle}>maximized</span>}
