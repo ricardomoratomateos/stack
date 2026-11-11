@@ -325,6 +325,32 @@ pub async fn stackd_command(name: String, body: Option<Value>) -> Result<Value, 
     stackd::request(&stackd::socket_path(), "POST", &format!("/commands/{name}"), Some(&body)).await
 }
 
+// ── stackd as a launchd agent / one-off start (only on the user's explicit action) ──
+
+fn resource_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
+    use tauri::Manager;
+    app.path().resource_dir().ok()
+}
+
+/// Whether the "Start stackd at login" agent is installed.
+#[tauri::command]
+pub fn stackd_login_status() -> bool {
+    crate::launchd::home_dir().map(|h| crate::launchd::is_installed(&h)).unwrap_or(false)
+}
+
+/// Installs (and loads) or removes the launchd user agent.
+#[tauri::command]
+pub async fn stackd_set_login(app: AppHandle, enabled: bool) -> Result<bool, String> {
+    crate::shell::set_login(&app, enabled)
+}
+
+/// Starts a detached stackd with the user's node; the log goes to ~/.config/stack/stackd.log.
+#[tauri::command]
+pub async fn stackd_start_now(app: AppHandle) -> Result<(), String> {
+    let setup = crate::launchd::real_setup(resource_dir(&app).as_deref())?;
+    crate::launchd::start_now(&setup)
+}
+
 /// The user's VS Code `settings.json` (JSONC, parsed by the frontend), or `None` when there is none.
 /// Read-only: the app takes `stack.sidebarStyle` from it.
 #[tauri::command]

@@ -86,6 +86,7 @@ For the heavier setup — Docker per worktree, a debugger port per worktree, set
 | `stack.notifyOnAttention` | `true` | Native OS notification, with a chime on macOS, when an agent finishes or asks for permission while VS Code is backgrounded (the sidebar badge always shows) |
 | `stack.scopeSearchToActiveWorktree` | `true` | Hide non-active worktree folders from search and Quick Open |
 | `stack.sessionTabs` | `perSession` | `perSession`: every session opens in its own terminal tab, so an agent and a shell can sit side by side (see [Sessions side by side](#sessions-side-by-side)). `single`: one terminal per worktree that switches between them, as before |
+| `stack.useDaemon` | unset | Experimental. Run as a client of `stackd` (`dist/stackd.js`), which owns worktree state, hooks and the manager MCP, so agents keep running when VS Code closes. Left unset, it turns on by itself while a `stackd` is already running (e.g. started by the [desktop app](desktop/README.md)); set `false` to opt out, `true` to make the extension start one. Needs a window reload |
 | `stack.focusMode` | `false` | Clean-slate switching: close the other worktrees' editor tabs and agent terminals so only the active worktree is on screen (see [Switching worktrees](#switching-worktrees)) |
 | `stack.setupScript` / `stack.teardownScript` | `""` | Script run on worktree create / delete (e.g. `.stack/setup.sh`) |
 | `stack.setupInTerminal` | `false` | Run the setup script in a terminal you can type into, without holding the agent back — for scripts that ask questions |
@@ -153,6 +154,10 @@ Then ask, for example:
 **How it finds the window.** The server is a small Node script Stack keeps at a fixed path in its storage. Each VS Code window running Stack writes `windows/<pid>.json` (mode 0600) beside it with its port and a per-window token; on every call the server picks the window whose repository contains the `repo` argument, the task, or the agent's working directory (the most specific folder wins, then the most recently focused window), and calls it on `127.0.0.1` with that token. A window that reloads gets a new port and token and the next call simply finds it. Nothing matching is an error naming the open repositories — never a guess.
 
 **Security, kept minimal on purpose.** The window API listens on `127.0.0.1` only, wants the window's token, and refuses requests that carry an `Origin` or a `Host` other than `127.0.0.1:<port>`, so web pages (DNS rebinding included) cannot reach it. Beyond that, anything running as you can drive Stack — the manager creates tasks and sends messages without asking. The hook endpoint the agents report to stays tokenless, because changing the hook script would cost every Codex user a re-trust.
+
+### stackd and the desktop app
+
+`stackd` is the same core without VS Code: one background process per user that owns the worktrees, the agents' hooks and the manager MCP, and serves a local API on `~/.config/stack/stackd.sock`. The [Stack desktop app](desktop/README.md) (`Stack.app`) is a client of it, and so is this extension once `stack.useDaemon` is on: you can drive the same agents from VS Code and from the app. The app can start it for you and, if you opt in ("Start stackd at login"), keep it running through a launchd user agent (`~/Library/LaunchAgents/dev.stack.stackd.plist`, log in `~/.config/stack/stackd.log`).
 
 ## Switching worktrees
 

@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "bundle": "npm --prefix .. run compile && tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",

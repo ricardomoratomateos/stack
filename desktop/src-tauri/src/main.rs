@@ -3,6 +3,7 @@
 
 mod bridge;
 mod commands;
+mod launchd;
 mod shell;
 mod stackd;
 mod window;
@@ -31,6 +32,9 @@ fn main() {
             commands::capture,
             commands::stackd_latest,
             commands::stackd_command,
+            commands::stackd_login_status,
+            commands::stackd_set_login,
+            commands::stackd_start_now,
             commands::vscode_settings,
             commands::open_url,
             shell::set_tray,

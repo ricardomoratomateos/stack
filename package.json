@@ -283,7 +283,7 @@
         "stack.useDaemon": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Experimental. Let `stackd` (a background process, `dist/stackd.js`) own the worktree state, the agents' hooks and the manager MCP, and use this window as its client; agents keep running when VS Code closes. Needs a window reload. Falls back to the in-window mode if the daemon cannot start."
+          "markdownDescription": "Experimental. Let `stackd` (a background process, `dist/stackd.js`) own the worktree state, the agents' hooks and the manager MCP, and use this window as its client; agents keep running when VS Code closes. When unset, this is on automatically while a `stackd` is already running (the desktop app or its launch agent started it); an explicit `false` keeps the in-window mode. Needs a window reload. Falls back to the in-window mode if the daemon cannot start."
         },
         "stack.focusMode": {
           "type": "boolean",

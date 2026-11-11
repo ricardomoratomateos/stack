@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { nameOf } from '@core/webview/derive';
 import { buildView, floatRows, managerSession, pickSession, resolveShortcut, sessionRows, shortcutOf, stateWord, type Effect } from './model';
+import { StartStackd } from './stackd/StartStackd';
 import { useStackd } from './stackd/useStackd';
 import { ManagerStrip, useTerminals, type StripHandle } from './terminals';
 import { SidebarHost } from './sidebar/SidebarHost';
@@ -36,7 +37,7 @@ const initialLayoutState = (): LayoutState => {
   return q ? setMode(l, q) : l;
 };
 
-export const NOT_RUNNING = 'stackd not running — start it with `node dist/stackd.js serve`, or enable stack.useDaemon in VS Code.';
+export const NOT_RUNNING = 'stackd not running — start it from the app (Start stackd now / at login), or enable stack.useDaemon in VS Code.';
 
 export function App() {
   const { running, socket, snapshot, api } = useStackd();
@@ -306,11 +307,7 @@ export function App() {
   if (!running) {
     return (
       <div className="fullscreen">
-        <div className="empty">
-          <h1>stackd not running</h1>
-          <p>Start it with <code>node dist/stackd.js serve</code>, or enable <code>stack.useDaemon</code> in VS Code.</p>
-          <p className="dim">Looking for <code>{socket}</code></p>
-        </div>
+        <StartStackd socket={socket} />
       </div>
     );
   }

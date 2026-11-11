@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Stack desktop app (macOS, preview).** `Stack.app`, built from `desktop/` with Tauri: worktrees and agent terminals in one native window, a Manager strip, Full / Half / Float window modes, native notifications, a menu-bar item and global shortcuts. It is a client of `stackd`; see `desktop/README.md` for the build and the first-run steps (ad-hoc signed, so first open is right-click, Open).
+- **`stackd` as a launch agent.** The app's "Start stackd at login" (also in its menu-bar menu) writes `~/Library/LaunchAgents/dev.stack.stackd.plist` (runs at login, restarts after a crash, logs to `~/.config/stack/stackd.log`) and loads it with `launchctl`; turning it off unloads and removes it. Nothing is installed or started without that click.
+
+### Changed
+
+- **`stack.useDaemon` now defaults to on while a `stackd` is running.** If you never set it and a daemon answers on `~/.config/stack/stackd.sock` (the desktop app started it), the window becomes its client after a reload. An explicit `false` keeps the in-window mode; an explicit `true` still starts a daemon when none runs.
+
 ## [0.2.1] — 2026-11-04
 
 ### Fixed

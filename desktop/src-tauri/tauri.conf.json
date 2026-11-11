@@ -10,8 +10,39 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "Stack", "width": 1200, "height": 800 }],
-    "security": { "csp": null }
+    "windows": [
+      {
+        "title": "Stack",
+        "width": 1200,
+        "height": 800
+      }
+    ],
+    "security": {
+      "csp": null
+    }
   },
-  "bundle": { "active": false, "icon": ["icons/icon.png"] }
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Stack desktop: run coding agents in parallel git worktrees",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.png"
+    ],
+    "resources": {
+      "../../dist/stackd.js": "stackd/stackd.js",
+      "../../dist/stack-mcp.js": "stackd/stack-mcp.js"
+    },
+    "macOS": {
+      "signingIdentity": "-",
+      "minimumSystemVersion": "12.0"
+    }
+  }
 }

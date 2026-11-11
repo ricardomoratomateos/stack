@@ -26,6 +26,7 @@ const CLICK_WINDOW: Duration = Duration::from_secs(30);
 #[derive(Default)]
 pub struct Shell {
     last_notice: Mutex<Option<(String, Instant)>>,
+    last_model: Mutex<Option<TrayModel>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -42,6 +43,9 @@ pub struct TrayModel {
     pub needs: Vec<TrayEntry>,
     pub review: Vec<TrayEntry>,
     pub dnd: bool,
+    /// "Start stackd at login" is on (filled in here from the plist, not sent by the webview).
+    #[serde(default)]
+    pub login: bool,
 }
 
 /// One line of the tray menu, before it becomes a native item.
@@ -77,6 +81,7 @@ pub fn menu_rows(m: &TrayModel) -> Vec<Row> {
     rows.push(Row::Item { id: "show".into(), text: SHOW_LABEL.into() });
     rows.push(Row::Item { id: "manager".into(), text: MANAGER_LABEL.into() });
     rows.push(Row::Check { id: "dnd".into(), text: "Do not disturb".into(), on: m.dnd });
+    rows.push(Row::Check { id: "login".into(), text: "Start stackd at login".into(), on: m.login });
     rows.push(Row::Separator);
     rows.push(Row::Item { id: "quit".into(), text: "Quit".into() });
     rows
@@ -89,6 +94,7 @@ pub enum MenuAction {
     Show,
     Manager,
     Dnd,
+    Login,
     Quit,
 }
 
@@ -97,6 +103,7 @@ pub fn parse_menu_id(id: &str) -> Option<MenuAction> {
         "show" => Some(MenuAction::Show),
         "manager" => Some(MenuAction::Manager),
         "dnd" => Some(MenuAction::Dnd),
+        "login" => Some(MenuAction::Login),
         "quit" => Some(MenuAction::Quit),
         _ => {
             if let Some(rest) = id.strip_prefix("go:") {
@@ -175,13 +182,20 @@ fn on_menu(app: &AppHandle, id: &str) {
         Some(MenuAction::Dnd) => {
             let _ = app.emit("tray://dnd", ());
         }
+        Some(MenuAction::Login) => {
+            let on = crate::launchd::home_dir().map(|h| crate::launchd::is_installed(&h)).unwrap_or(false);
+            if let Err(e) = set_login(app, !on) {
+                eprintln!("tray: start stackd at login failed: {e}");
+                let _ = app.emit("stackd://login-error", e);
+            }
+        }
         Some(MenuAction::Quit) => app.exit(0),
         None => {}
     }
 }
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<TrayIcon> {
-    let model = TrayModel { title: "◆ 0  ◇ 0".into(), needs: vec![], review: vec![], dnd: false };
+    let model = TrayModel { title: "◆ 0  ◇ 0".into(), needs: vec![], review: vec![], dnd: false, login: false };
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon())
         .icon_as_template(false)
@@ -259,11 +273,35 @@ fn take_click(app: &AppHandle) {
     }
 }
 
-#[tauri::command]
-pub fn set_tray(app: AppHandle, model: TrayModel) -> Result<(), String> {
+/// Turns the launchd agent on or off (the real `launchctl`), then refreshes the tray's check mark.
+pub fn set_login(app: &AppHandle, enabled: bool) -> Result<bool, String> {
+    let home = crate::launchd::home_dir()?;
+    if enabled {
+        let rd = app.path().resource_dir().ok();
+        let setup = crate::launchd::real_setup(rd.as_deref())?;
+        crate::launchd::enable(&crate::launchd::RealRunner, &setup)?;
+    } else {
+        crate::launchd::disable(&crate::launchd::RealRunner, &home, crate::launchd::current_uid())?;
+    }
+    let model = app.state::<Shell>().last_model.lock().unwrap().clone();
+    if let Some(m) = model {
+        let _ = apply_tray(app, m);
+    }
+    let _ = app.emit("stackd://login", enabled);
+    Ok(enabled)
+}
+
+fn apply_tray(app: &AppHandle, mut model: TrayModel) -> Result<(), String> {
+    model.login = crate::launchd::home_dir().map(|h| crate::launchd::is_installed(&h)).unwrap_or(false);
+    *app.state::<Shell>().last_model.lock().unwrap() = Some(model.clone());
     let tray = app.tray_by_id(TRAY_ID).ok_or("no menu-bar item")?;
     tray.set_title(Some(&model.title)).map_err(|e| e.to_string())?;
-    tray.set_menu(Some(build_menu(&app, &model).map_err(|e| e.to_string())?)).map_err(|e| e.to_string())
+    tray.set_menu(Some(build_menu(app, &model).map_err(|e| e.to_string())?)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_tray(app: AppHandle, model: TrayModel) -> Result<(), String> {
+    apply_tray(&app, model)
 }
 
 /// Shows a notification about worktree `id`. Err(why) when the system would not take it.
@@ -287,18 +325,18 @@ mod tests {
 
     #[test]
     fn menu_lists_needs_with_allow_then_review_then_fixed_items() {
-        let m = TrayModel { title: String::new(), needs: vec![entry("a", Some(2)), entry("b", None)], review: vec![entry("c", None)], dnd: true };
+        let m = TrayModel { title: String::new(), needs: vec![entry("a", Some(2)), entry("b", None)], review: vec![entry("c", None)], dnd: true, login: false };
         let rows = menu_rows(&m);
         let ids: Vec<&str> = rows.iter().filter_map(|r| match r { Row::Item { id, .. } | Row::Check { id, .. } => Some(id.as_str()), _ => None }).collect();
-        assert_eq!(ids, ["go:a", "allow:2:a", "go:b", "go:c", "show", "manager", "dnd", "quit"]);
+        assert_eq!(ids, ["go:a", "allow:2:a", "go:b", "go:c", "show", "manager", "dnd", "login", "quit"]);
         assert!(rows.contains(&Row::Check { id: "dnd".into(), text: "Do not disturb".into(), on: true }));
     }
 
     #[test]
     fn empty_menu_has_only_the_fixed_items() {
-        let m = TrayModel { title: String::new(), needs: vec![], review: vec![], dnd: false };
+        let m = TrayModel { title: String::new(), needs: vec![], review: vec![], dnd: false, login: false };
         assert!(!menu_rows(&m).iter().any(|r| matches!(r, Row::Header(_))));
-        assert_eq!(menu_rows(&m).len(), 5);
+        assert_eq!(menu_rows(&m).len(), 6);
     }
 
     #[test]

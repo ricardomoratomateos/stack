@@ -59,7 +59,8 @@ import { bridgeCommand, installBridge, type BridgeCommand } from './mcp/workerMc
 import { claudeBinary, disableManager, enableManager, execRun, managerEnabled } from './mcp/registration';
 import { installClaudeAssets, removeClaudeAssets } from './mcp/claudeAssets';
 import { DaemonClient } from './daemon/client/DaemonClient';
-import { daemonConfigDir, ensureDaemon, spawnDaemon } from './daemon/client/launch';
+import { daemonConfigDir, daemonRunning, ensureDaemon, spawnDaemon } from './daemon/client/launch';
+import { explicitUseDaemon, shouldUseDaemon } from './daemon/client/mode';
 import { RemoteService } from './daemon/client/RemoteService';
 import { explicitUserSettings, stackKeys } from './daemon/client/settings';
 import { socketPathFor } from './daemon/api';
@@ -627,7 +628,9 @@ export async function activate(ctx: vscode.ExtensionContext) {
   };
 
   let backend: Backend | undefined;
-  if (vscode.workspace.getConfiguration('stack').get<boolean>('useDaemon', false)) {
+  // Not set by the user: a daemon that is already running (desktop app, launchd) is used; an explicit false keeps the old mode.
+  const daemonSetting = vscode.workspace.getConfiguration('stack').inspect<boolean>('useDaemon');
+  if (shouldUseDaemon(explicitUseDaemon(daemonSetting), await daemonRunning(socketPathFor(daemonConfigDir())))) {
     try {
       backend = await buildRemote();
     } catch (e) {
