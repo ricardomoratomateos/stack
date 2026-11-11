@@ -22,7 +22,7 @@ export interface Resolved {
  */
 export function useSessionPane(target: Target | null, onSession?: (worktreeId: string, session: string) => void): Resolved {
   const { api } = useStackd();
-  const { connect, panes } = useTerminals();
+  const { connect, panes, refresh } = useTerminals();
   const [attached, setAttached] = useState<{ key: string; session: string } | { key: string; error: string } | null>(null);
   const key = target ? `${target.worktreeId}:${target.index}` : null;
 
@@ -37,7 +37,13 @@ export function useSessionPane(target: Target | null, onSession?: (worktreeId: s
         log('info', 'attach', key);
         const t = await api.command<{ socket?: string; session: string }>('attachTarget', { worktreeId: target.worktreeId, windowIndex: target.index });
         log('info', 'attach target', key, t.session);
-        const list = await connect(t.socket ?? null, t.session);
+        let list = await connect(t.socket ?? null, t.session);
+        // tmux sometimes answers the first list-panes of a fresh connection with nothing: ask again.
+        for (let delay = 100; live && !list.some((p) => p.window_index === target.index) && delay <= 1600; delay *= 2) {
+          await new Promise((r) => setTimeout(r, delay));
+          list = await refresh(t.session);
+          log('info', 'relisted', key, list.length);
+        }
         log('info', 'connected', key, list.map((p) => `${p.id}@${p.window_index}`).join(','), live ? '' : '(stale)');
         if (!live) return;
         onSession?.(target.worktreeId, t.session);

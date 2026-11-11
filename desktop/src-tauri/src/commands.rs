@@ -50,6 +50,9 @@ impl Bridge {
         // `-s`: every pane of the session, not just the current window.
         let text = client.run(&format!("list-panes -s -F '{}'", bridge::LIST_FORMAT)).await.map_err(err)?;
         let mut panes = bridge::parse_panes(&text);
+        if panes.is_empty() {
+            log_line("warn".into(), format!("list-panes for {session} gave no panes; reply: {text:?}"));
+        }
         for p in &mut panes {
             p.session = session.to_string();
         }

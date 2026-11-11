@@ -14,6 +14,8 @@ export interface Terminals {
   error: string | null;
   /** Connect to a session (a no-op, besides re-listing, when it already is). Resolves to its panes. */
   connect(socket: string | null, session: string, create?: boolean): Promise<PaneInfo[]>;
+  /** List a connected session's panes again. */
+  refresh(session: string): Promise<PaneInfo[]>;
   /** Detach one session, or all of them. */
   disconnect(session?: string): Promise<void>;
 }
@@ -77,6 +79,11 @@ export function TerminalsProvider({ children, api = defaultApi }: { children: Re
         })();
         inflight.current.set(session, p);
         return p;
+      },
+      async refresh(session) {
+        const list = await api.listPanes(session);
+        applyList(session, list);
+        return list;
       },
       async disconnect(session) {
         await api.disconnect(session);
