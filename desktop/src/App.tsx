@@ -598,10 +598,16 @@ export function App() {
           {mode !== 'full' && maximized !== 'session' && (
             <section className="manager-dock" data-expanded={bigManager || undefined} aria-label="Manager">
               {!bigManager && <Splitter orientation="row" invert label="Resize Manager strip" value={stripPx} min={heightFromLines(limits(mode, 'lines').min)} max={heightFromLines(limits(mode, 'lines').max)} reset={heightFromLines(DEFAULT_SIZES[mode].lines)} onChange={(px) => resizeTo('lines', linesFromHeight(px))} />}
-              <header className="strip-head" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧M toggle">
-                <span className="strip-title">◆ {view.control?.name || 'Manager'}</span>
+              <nav className="tabs" aria-label="Manager sessions" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧M toggle">
+                <span className="tabs-title">{view.control?.name || 'Manager'}</span>
+                {managerRows.map((r) => (
+                  <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === managerIdx || undefined} onClick={() => setManagerTabs((m) => ({ ...m, [view.repoRoot]: r.index }))} title={(r.kind === 'agent' ? stateWord(r.state) : r.detail) || undefined}>
+                    <StatusDot state={r.state} size="sm" />
+                    {r.name}
+                  </button>
+                ))}
                 {maximized === 'manager' && <span className="max-badge" title={maxTitle}>maximized</span>}
-              </header>
+              </nav>
               <div className="term-host" style={bigManager ? undefined : { flex: 'none', height: stripPx }}>{managerView}</div>
             </section>
           )}
