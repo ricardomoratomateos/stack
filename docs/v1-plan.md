@@ -91,11 +91,46 @@ VS Code-only; they are not part of the core.
   possible: worktree sidebar with every session (state from `stackd`
   `/state` + `/events` over its Unix socket, proxied by the Rust side),
   active session in the centre, Manager column. Clicking a session shows it.
-- [ ] **T7 · Measure.** 8 live sessions, one flooding logs; record RSS/CPU of
+- [x] **T7 · Measure.** 8 live sessions, one flooding logs; record RSS/CPU of
   the app, its webview and `stackd` here.
 
 **Checkpoint B** — GPUI or Tauri; then plan windows (Full/Half/Float),
 notifications, shortcuts.
+
+## T7 results
+
+Release build, macOS (Apple silicon-class Mac, WKWebView), isolated stackd + `tmux -L stackbench`, 8 worktrees each with a fake bash agent (idle loop), sampled every 2 s (CPU % from CPU-time deltas, 100 = one core; RSS summed per group). Phases: 30 s idle, 60 s flood (`yes <160-char base64 line>`, ~unthrottled) in the last worktree (hidden), 60 s flood in the first worktree (the one the app shows by default; the GUI was not clicked). Rerun: `desktop/bench/run.sh [idle_s] [flood_s]`.
+
+| scenario | process | RSS MB min/avg/max | CPU % min/avg/max |
+|---|---|---|---|
+| a idle (8 sessions) | app | 101/101/101 | 0/0/0 |
+| a idle (8 sessions) | webcontent | 84/84/85 | 0/0/1 |
+| a idle (8 sessions) | gpu | 44/44/44 | 0/0/0 |
+| a idle (8 sessions) | networking | 16/16/16 | 0/0/0 |
+| a idle (8 sessions) | stackd | 61/62/63 | 1/1/2 |
+| a idle (8 sessions) | tmux-server | 4/4/4 | 0/0/1 |
+| a idle (8 sessions) | tmux-clients | 8/8/8 | 0/0/0 |
+| b flood (hidden pane) | app | 101/101/101 | 0/0/0 |
+| b flood (hidden pane) | webcontent | 85/86/87 | 0/0/0 |
+| b flood (hidden pane) | gpu | 44/44/44 | 0/0/0 |
+| b flood (hidden pane) | networking | 16/16/16 | 0/0/0 |
+| b flood (hidden pane) | stackd | 63/64/65 | 0/1/2 |
+| b flood (hidden pane) | tmux-server | 4/6/6 | 81/85/93 |
+| b flood (hidden pane) | tmux-clients | 8/8/8 | 0/0/0 |
+| c flood (visible pane) | app | 101/102/102 | 61/77/82 |
+| c flood (visible pane) | webcontent | 86/164/170 | 92/99/104 |
+| c flood (visible pane) | gpu | 44/48/48 | 4/5/5 |
+| c flood (visible pane) | networking | 16/16/16 | 0/0/0 |
+| c flood (visible pane) | stackd | 65/65/66 | 1/1/2 |
+| c flood (visible pane) | tmux-server | 6/7/7 | 56/70/73 |
+| c flood (visible pane) | tmux-clients | 8/8/8 | 0/0/0 |
+
+Interpretation:
+- Idle with 8 sessions is cheap: ~100 MB app + ~85 MB WebContent + ~45 MB GPU + ~62 MB stackd, all ~0 % CPU.
+- Hidden flood: pause-after works. App, WebContent, GPU and stackd stay at 0-1 % CPU and flat RSS; only the tmux server burns CPU (~85 %, one core) because it still reads the pty (and the flooder `yes` itself); that cost is tmux's, not the UI's.
+- Visible flood is where base64-over-events shows: app (Rust: parse, base64, emit) ~77 % and WebContent (xterm.js parse + WebGL) ~99 % of a core, i.e. the webview main thread saturates at this output rate, and its RSS grows 85 -> ~165 MB (event queue + scrollback). Fine for agent TUIs, a bottleneck only for raw log floods; the flow control (pause/continue) is what keeps it from running away.
+- stackd and the GPU process are irrelevant to the cost (<= 5 %). Not measured: output throughput (lines/s) or latency while flooded; footprint/vmmap only printed for the app at the end.
+- Helper processes are found as new `com.apple.WebKit.*` processes after the app starts, so other WebKit apps launched mid-run would be miscounted.
 
 ## Decisions log
 
