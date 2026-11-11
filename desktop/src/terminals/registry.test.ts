@@ -11,6 +11,8 @@ vi.mock('@xterm/xterm', () => ({
     onBinary() {}
     onResize() {}
     onScroll() {}
+    attachCustomKeyEventHandler() {}
+    reset() {}
     rows = 24;
     element?: { host?: unknown };
     opens = 0;
@@ -38,7 +40,7 @@ const acked = (api: TmuxApi) => (api.ackOutput as ReturnType<typeof vi.fn>).mock
 
 function setup() {
   const frames: (() => void)[] = [];
-  const api = { capture: vi.fn(async () => ''), resize: vi.fn(async () => {}), write: vi.fn(async () => {}), ackOutput: vi.fn(async () => {}) } as unknown as TmuxApi;
+  const api = { capture: vi.fn(async () => ''), paneCursor: vi.fn(async () => [0, 0, true]), clipboardPaste: vi.fn(async () => ({ image: false, text: '' })), resize: vi.fn(async () => {}), write: vi.fn(async () => {}), ackOutput: vi.fn(async () => {}) } as unknown as TmuxApi;
   const reg = new TerminalRegistry(api, { request: (cb) => void frames.push(cb) });
   writes.length = 0;
   return { reg, frames, api };

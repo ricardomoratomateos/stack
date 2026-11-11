@@ -255,6 +255,42 @@ pub async fn capture(state: State<'_, Bridge>, pane: String, start: i32, end: Op
     client.run(&bridge::capture_command(&pane, start, end)).await.map_err(err)
 }
 
+/// Where tmux has the pane's cursor and whether it shows it: `(x, y, visible)`. A capture
+/// leaves xterm's cursor after the last character written, and visible.
+#[tauri::command]
+pub async fn pane_cursor(state: State<'_, Bridge>, pane: String) -> Result<(u16, u16, bool), String> {
+    check(&pane, '%')?;
+    let client = state.client_for_pane(&pane).await?;
+    let out = client
+        .run(&format!("display-message -p -t {pane} '#{{cursor_x}} #{{cursor_y}} #{{cursor_flag}}'"))
+        .await
+        .map_err(err)?;
+    bridge::parse_cursor(&out).ok_or_else(|| format!("unexpected cursor reply {out:?}"))
+}
+
+/// What ⌘V should paste: `image` when the clipboard holds a picture (agents read it themselves
+/// on Ctrl+V), otherwise its text. WKWebView gives a paste event no image data, so ask macOS.
+#[derive(Serialize)]
+pub struct ClipboardPaste {
+    image: bool,
+    text: String,
+}
+
+#[tauri::command]
+pub async fn clipboard_paste() -> Result<ClipboardPaste, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let info = std::process::Command::new("osascript").args(["-e", "clipboard info"]).output().map_err(|e| e.to_string())?;
+        let info = String::from_utf8_lossy(&info.stdout);
+        if bridge::clipboard_has_image(&info) {
+            return Ok(ClipboardPaste { image: true, text: String::new() });
+        }
+        let text = std::process::Command::new("pbpaste").env("LANG", "en_US.UTF-8").output().map_err(|e| e.to_string())?;
+        Ok(ClipboardPaste { image: false, text: String::from_utf8_lossy(&text.stdout).into_owned() })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 fn check(id: &str, sigil: char) -> Result<(), String> {
     if bridge::valid_id(id, sigil) {
         Ok(())

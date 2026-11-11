@@ -13,7 +13,6 @@ interface Entry {
   webgl?: WebglAddon;
   fit: FitAddon;
   observer?: ResizeObserver;
-  offPaste?: () => void;
   el?: HTMLElement;
   /** Output queued until the initial capture is written. */
   pending: Uint8Array[] | null;
@@ -140,8 +139,6 @@ export class TerminalRegistry {
       else e.term.open(el);
       this.enableWebgl(e);
       e.term.refresh(0, e.term.rows - 1);
-      e.offPaste?.();
-      e.offPaste = this.watchImagePaste(pane, el);
       let raf = 0;
       e.observer = new ResizeObserver(() => {
         cancelAnimationFrame(raf);
@@ -152,24 +149,6 @@ export class TerminalRegistry {
     // Size the pane's own window to this element first, then fill it, so the capture matches.
     const sized = this.fit(pane, e, true);
     if (e.stale || e.loaded === 0) void sized.then(() => this.sync(pane));
-  }
-
-  /**
-   * ⌘V with an image (and no text) on the clipboard: xterm would paste nothing. Send Ctrl+V
-   * instead, which is how Claude Code and Codex read an image from the clipboard themselves.
-   */
-  private watchImagePaste(pane: string, el: HTMLElement): () => void {
-    const onPaste = (ev: ClipboardEvent) => {
-      const data = ev.clipboardData;
-      if (!data || data.getData('text/plain')) return;
-      const hasImage = [...data.items].some((i) => i.kind === 'file' && i.type.startsWith('image/'));
-      if (!hasImage) return;
-      ev.preventDefault();
-      ev.stopImmediatePropagation();
-      void this.api.write(pane, [0x16]);
-    };
-    el.addEventListener('paste', onPaste, true);
-    return () => el.removeEventListener('paste', onPaste, true);
   }
 
   /** Paste text into a pane the way the user's paste would (bracketed when the app asked for it). */
@@ -239,8 +218,6 @@ export class TerminalRegistry {
   }
 
   private detach(e: Entry): void {
-    e.offPaste?.();
-    e.offPaste = undefined;
     e.observer?.disconnect();
     e.observer = undefined;
     e.webgl?.dispose();
@@ -279,6 +256,17 @@ export class TerminalRegistry {
     term.onData((s) => void this.api.write(pane, [...new TextEncoder().encode(s)]));
     term.onBinary((s) => void this.api.write(pane, [...s].map((c) => c.charCodeAt(0) & 0xff)));
     term.onResize(({ cols, rows }) => void this.api.resize(pane, cols, rows));
+    // ⌘V: WKWebView hands a paste event no image data, so ask macOS what is on the clipboard.
+    // An image → Ctrl+V, which is how Claude Code and Codex attach one; text → a normal paste.
+    term.attachCustomKeyEventHandler((ev) => {
+      if (ev.type !== 'keydown' || !ev.metaKey || ev.ctrlKey || ev.altKey || ev.key.toLowerCase() !== 'v') return true;
+      ev.preventDefault();
+      void this.api.clipboardPaste().then(
+        (c) => (c.image ? this.api.write(pane, [0x16]) : c.text && term.paste(c.text)),
+        () => {},
+      );
+      return false;
+    });
     term.onScroll((top) => {
       if (top === 0 && entry.loaded > 0 && term.buffer.active.type === 'normal') void this.loadOlder(pane);
     });
@@ -297,8 +285,11 @@ export class TerminalRegistry {
     e.pending = [];
     try {
       const text = await this.api.capture(pane, -SCROLLBACK);
+      const cursor = await this.api.paneCursor(pane).catch(() => null);
       e.term.reset();
       e.term.write(toTerminalText(text));
+      // The capture leaves xterm's cursor after the last character and visible: put it where tmux has it.
+      if (cursor) e.term.write(`\x1b[${cursor[1] + 1};${cursor[0] + 1}H\x1b[?25${cursor[2] ? 'h' : 'l'}`);
       e.loaded = SCROLLBACK;
       e.count = text.split('\n').length;
     } catch {

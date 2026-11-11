@@ -93,6 +93,21 @@ pub const LIST_SEP: &str = "|~|";
 pub const LIST_FORMAT: &str =
     "#{pane_id}|~|#{window_id}|~|#{window_index}|~|#{pane_width}|~|#{pane_height}|~|#{pane_active}|~|#{pane_current_command}|~|#{window_name}";
 
+/// `display-message` reply `"<x> <y> <flag>"` → `(x, y, visible)`.
+pub fn parse_cursor(text: &str) -> Option<(u16, u16, bool)> {
+    let mut it = text.split_whitespace();
+    let x = it.next()?.parse().ok()?;
+    let y = it.next()?.parse().ok()?;
+    let visible = it.next()? == "1";
+    Some((x, y, visible))
+}
+
+/// `osascript -e 'clipboard info'` lists picture classes for an image (a screenshot, a copied
+/// image) but only file/text classes for a copied file.
+pub fn clipboard_has_image(info: &str) -> bool {
+    ["«class PNGf»", "«class TIFF»", "«class JPEG»", "«class GIFf»", "picture"].iter().any(|c| info.contains(c))
+}
+
 pub fn parse_panes(text: &str) -> Vec<PaneInfo> {
     text.lines()
         .filter_map(|l| {
@@ -303,6 +318,15 @@ mod tests {
         assert_eq!(f.on_notification(Notification::WindowAdd { window: "@1".into() }), vec![Action::LayoutChanged]);
         assert_eq!(f.on_notification(Notification::Exit { reason: None }), vec![Action::Exit]);
         assert!(f.on_notification(Notification::SessionsChanged).is_empty());
+    }
+
+    #[test]
+    fn parses_cursor_and_clipboard_info() {
+        assert_eq!(parse_cursor("3 41 0\n"), Some((3, 41, false)));
+        assert_eq!(parse_cursor("0 0 1"), Some((0, 0, true)));
+        assert_eq!(parse_cursor("x"), None);
+        assert!(clipboard_has_image("«class PNGf», 123456, «class 8BPS», 99"));
+        assert!(!clipboard_has_image("«class utf8», 12, string, 12"));
     }
 
     #[test]

@@ -33,6 +33,8 @@ fn main() {
             commands::write,
             commands::resize,
             commands::capture,
+            commands::pane_cursor,
+            commands::clipboard_paste,
             commands::stackd_latest,
             commands::stackd_command,
             commands::stackd_login_status,
