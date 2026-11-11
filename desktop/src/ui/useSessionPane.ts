@@ -1,0 +1,59 @@
+import { useEffect, useMemo, useState } from 'react';
+import { useStackd } from '../stackd/useStackd';
+import { useTerminals } from '../terminals';
+
+export interface Target {
+  worktreeId: string;
+  /** tmux window index of the session. */
+  index: number;
+}
+
+export interface Resolved {
+  pane: string | null;
+  session: string | null;
+  error: string | null;
+}
+
+/**
+ * Resolves a session to its tmux pane: asks stackd where it lives
+ * (`attachTarget`), connects to that tmux session (one connection per
+ * session, shared), and finds the pane of the window.
+ */
+export function useSessionPane(target: Target | null, onSession?: (worktreeId: string, session: string) => void): Resolved {
+  const { api } = useStackd();
+  const { connect, panes } = useTerminals();
+  const [attached, setAttached] = useState<{ key: string; session: string } | { key: string; error: string } | null>(null);
+  const key = target ? `${target.worktreeId}:${target.index}` : null;
+
+  useEffect(() => {
+    if (!target || !key) {
+      setAttached(null);
+      return;
+    }
+    let live = true;
+    void (async () => {
+      try {
+        const t = await api.command<{ socket?: string; session: string }>('attachTarget', { worktreeId: target.worktreeId, windowIndex: target.index });
+        await connect(t.socket ?? null, t.session);
+        if (!live) return;
+        onSession?.(target.worktreeId, t.session);
+        setAttached({ key, session: t.session });
+      } catch (e) {
+        if (live) setAttached({ key, error: String(e).replace(/^Error: /, '') });
+      }
+    })();
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, key]);
+
+  return useMemo(() => {
+    const mine = attached && attached.key === key ? attached : null;
+    if (!target || !mine) return { pane: null, session: null, error: null };
+    if ('error' in mine) return { pane: null, session: null, error: mine.error };
+    const inWindow = panes.filter((p) => p.session === mine.session && p.window_index === target.index);
+    const pane = inWindow.find((p) => p.active) ?? inWindow[0];
+    return { pane: pane?.id ?? null, session: mine.session, error: null };
+  }, [attached, key, panes, target]);
+}

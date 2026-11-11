@@ -8,7 +8,7 @@ const buf = (lines: string[]): LineBuffer => ({
   getLine: (y) => (lines[y] === undefined ? undefined : { translateToString: () => lines[y].replace(/\s+$/, '') }),
 });
 
-const pane = (id: string): PaneInfo => ({ id, window: '@0', window_index: 0, window_name: 'w', cols: 80, rows: 24, active: false, command: 'zsh' });
+const pane = (id: string): PaneInfo => ({ id, session: 's', window: '@0', window_index: 0, window_name: 'w', cols: 80, rows: 24, active: false, command: 'zsh' });
 
 describe('lastLines', () => {
   it('returns the last n lines', () => {
@@ -27,17 +27,27 @@ describe('lastLines', () => {
 describe('PaneBook', () => {
   it('reports added and removed panes', () => {
     const b = new PaneBook();
-    expect(b.update([pane('%0'), pane('%1')])).toEqual({ added: ['%0', '%1'], removed: [] });
-    expect(b.update([pane('%1'), pane('%2')])).toEqual({ added: ['%2'], removed: ['%0'] });
+    expect(b.update('s', [pane('%0'), pane('%1')])).toEqual({ added: ['%0', '%1'], removed: [] });
+    expect(b.update('s', [pane('%1'), pane('%2')])).toEqual({ added: ['%2'], removed: ['%0'] });
     expect(b.list().map((p) => p.id)).toEqual(['%1', '%2']);
   });
   it('tracks visibility and drops it with the pane', () => {
     const b = new PaneBook();
-    b.update([pane('%0'), pane('%1')]);
+    b.update('s', [pane('%0'), pane('%1')]);
     expect(b.setVisible(['%1', '%9'])).toEqual(['%1']);
     expect(b.isVisible('%1')).toBe(true);
-    b.update([pane('%0')]);
+    b.update('s', [pane('%0')]);
     expect(b.visible()).toEqual([]);
+  });
+  it('keeps sessions apart', () => {
+    const b = new PaneBook();
+    b.update('a', [{ ...pane('%0'), session: 'a' }]);
+    b.update('b', [{ ...pane('%1'), session: 'b' }]);
+    b.update('a', []);
+    expect(b.list().map((p) => p.id)).toEqual(['%1']);
+    expect(b.sessionPanes('b')).toHaveLength(1);
+    expect(b.removeSession('b')).toEqual(['%1']);
+    expect(b.list()).toEqual([]);
   });
 });
 

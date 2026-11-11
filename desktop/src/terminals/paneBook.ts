@@ -1,5 +1,7 @@
 export interface PaneInfo {
   id: string;
+  /** The tmux session the pane belongs to. */
+  session: string;
   window: string;
   window_index: number;
   window_name: string;
@@ -14,19 +16,32 @@ export interface PaneDiff {
   removed: string[];
 }
 
-/** Bookkeeping of known panes and which of them are visible. */
+/** Bookkeeping of known panes (of every connected session) and which of them are visible. */
 export class PaneBook {
   private panes = new Map<string, PaneInfo>();
   private visibleIds = new Set<string>();
 
-  /** Replace the pane list; reports what appeared and disappeared. */
-  update(list: PaneInfo[]): PaneDiff {
-    const next = new Map(list.map((p) => [p.id, p]));
+  /** Replace the panes of one session; reports what appeared and disappeared in it. */
+  update(session: string, list: PaneInfo[]): PaneDiff {
+    const mine = [...this.panes.values()].filter((p) => p.session === session);
+    const nextIds = new Set(list.map((p) => p.id));
     const added = list.filter((p) => !this.panes.has(p.id)).map((p) => p.id);
-    const removed = [...this.panes.keys()].filter((id) => !next.has(id));
-    this.panes = next;
-    for (const id of removed) this.visibleIds.delete(id);
+    const removed = mine.filter((p) => !nextIds.has(p.id)).map((p) => p.id);
+    for (const id of removed) {
+      this.panes.delete(id);
+      this.visibleIds.delete(id);
+    }
+    for (const p of list) this.panes.set(p.id, { ...p, session });
     return { added, removed };
+  }
+
+  /** Forget every pane of a session (its connection ended). */
+  removeSession(session: string): string[] {
+    return this.update(session, []).removed;
+  }
+
+  sessionPanes(session: string): PaneInfo[] {
+    return this.list().filter((p) => p.session === session);
   }
 
   list(): PaneInfo[] {

@@ -1,5 +1,6 @@
 import { Terminal } from '@xterm/xterm';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { FitAddon } from '@xterm/addon-fit';
 import type { TmuxApi } from './api';
 import { base64ToBytes, nextHistoryStart, toTerminalText } from './bytes';
 import { lastLines } from './lastLines';
@@ -9,6 +10,8 @@ export const SCROLLBACK = 2000;
 interface Entry {
   term: Terminal;
   webgl?: WebglAddon;
+  fit: FitAddon;
+  observer?: ResizeObserver;
   el?: HTMLElement;
   /** Output queued until the initial capture is written. */
   pending: Uint8Array[] | null;
@@ -77,8 +80,38 @@ export class TerminalRegistry {
       e.el = el;
       e.term.open(el);
       this.enableWebgl(e);
+      let raf = 0;
+      e.observer = new ResizeObserver(() => {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => this.fit(pane, e));
+      });
+      e.observer.observe(el);
     }
-    if (e.stale || e.loaded === 0) void this.sync(pane);
+    // Size the pane's own window to this element first, then fill it, so the capture matches.
+    const sized = this.fit(pane, e, true);
+    if (e.stale || e.loaded === 0) void sized.then(() => this.sync(pane));
+  }
+
+  /** Focus a pane's terminal (it must be shown). */
+  focus(pane: string): void {
+    this.entries.get(pane)?.term.focus();
+  }
+
+  /**
+   * Fit the terminal to its element. `term.onResize` already tells tmux when
+   * the size changes; `force` tells it anyway (the window may have been sized
+   * by another view since this one was last shown).
+   */
+  private async fit(pane: string, e: Entry, force = false): Promise<void> {
+    const before = [e.term.cols, e.term.rows];
+    try {
+      e.fit.fit();
+    } catch {
+      return; // not laid out yet
+    }
+    if (force && before[0] === e.term.cols && before[1] === e.term.rows) {
+      await this.api.resize(pane, e.term.cols, e.term.rows).catch(() => {});
+    }
   }
 
   /** Stop rendering `pane` (keeps its buffer). */
@@ -119,6 +152,8 @@ export class TerminalRegistry {
   }
 
   private detach(e: Entry): void {
+    e.observer?.disconnect();
+    e.observer = undefined;
     e.webgl?.dispose();
     e.webgl = undefined;
     e.el?.replaceChildren();
@@ -150,7 +185,9 @@ export class TerminalRegistry {
       cursorBlink: true,
       allowProposedApi: true,
     });
-    e = { term, pending: null, stale: false, loaded: 0, count: 0, loadingHistory: false };
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    e = { term, fit, pending: null, stale: false, loaded: 0, count: 0, loadingHistory: false };
     const entry = e;
     term.onData((s) => void this.api.write(pane, [...new TextEncoder().encode(s)]));
     term.onBinary((s) => void this.api.write(pane, [...s].map((c) => c.charCodeAt(0) & 0xff)));

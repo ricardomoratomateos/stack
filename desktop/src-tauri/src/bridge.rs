@@ -1,7 +1,7 @@
 //! Pieces of the tmux <-> webview bridge that need no window: flow-control
 //! bookkeeping, `list-panes` parsing and event payloads.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use base64::Engine;
 use serde::Serialize;
@@ -72,6 +72,8 @@ impl Flow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PaneInfo {
     pub id: String,
+    /// The tmux session the pane was listed from (filled by the caller).
+    pub session: String,
     pub window: String,
     pub window_index: u32,
     pub window_name: String,
@@ -94,6 +96,7 @@ pub fn parse_panes(text: &str) -> Vec<PaneInfo> {
             }
             Some(PaneInfo {
                 id: f[0].into(),
+                session: String::new(),
                 window: f[1].into(),
                 window_index: f[2].parse().ok()?,
                 window_name: f[3].into(),
@@ -104,6 +107,49 @@ pub fn parse_panes(text: &str) -> Vec<PaneInfo> {
             })
         })
         .collect()
+}
+
+/// Which connection (tmux session) owns which pane, so commands that only
+/// name a pane reach the right one. Pane ids are unique per tmux server, and
+/// every connection of the app goes to the same server.
+#[derive(Debug, Default)]
+pub struct PaneOwners {
+    by_pane: HashMap<String, String>,
+}
+
+impl PaneOwners {
+    /// Replace the panes `session` owns with `panes`.
+    pub fn set_session(&mut self, session: &str, panes: impl IntoIterator<Item = String>) {
+        self.remove_session(session);
+        for p in panes {
+            self.by_pane.insert(p, session.to_string());
+        }
+    }
+
+    pub fn remove_session(&mut self, session: &str) {
+        self.by_pane.retain(|_, s| s != session);
+    }
+
+    pub fn owner(&self, pane: &str) -> Option<&str> {
+        self.by_pane.get(pane).map(String::as_str)
+    }
+
+    /// Split the visible panes by owner. Every known session in `sessions`
+    /// appears (with an empty list when none of its panes is visible), so a
+    /// connection that lost its last visible pane learns about it.
+    pub fn partition<'a>(
+        &self,
+        sessions: impl IntoIterator<Item = &'a str>,
+        panes: &[String],
+    ) -> HashMap<String, Vec<String>> {
+        let mut out: HashMap<String, Vec<String>> = sessions.into_iter().map(|s| (s.to_string(), vec![])).collect();
+        for p in panes {
+            if let Some(s) = self.owner(p) {
+                out.entry(s.to_string()).or_default().push(p.clone());
+            }
+        }
+        out
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -179,9 +225,37 @@ mod tests {
         let text = "%0\t@0\t0\tzsh\t80\t24\t1\tzsh\n%1\t@0\t0\tzsh\t80\t24\t0\tvim\nbroken line";
         let p = parse_panes(text);
         assert_eq!(p.len(), 2);
-        assert_eq!(p[0], PaneInfo { id: "%0".into(), window: "@0".into(), window_index: 0, window_name: "zsh".into(), cols: 80, rows: 24, active: true, command: "zsh".into() });
+        assert_eq!(p[0], PaneInfo { id: "%0".into(), session: String::new(), window: "@0".into(), window_index: 0, window_name: "zsh".into(), cols: 80, rows: 24, active: true, command: "zsh".into() });
         assert!(!p[1].active);
         assert_eq!(p[1].command, "vim");
+    }
+
+    #[test]
+    fn owners_route_panes_to_their_session() {
+        let mut o = PaneOwners::default();
+        o.set_session("stack-a", ["%1".to_string(), "%2".to_string()]);
+        o.set_session("stack-b", ["%3".to_string()]);
+        assert_eq!(o.owner("%2"), Some("stack-a"));
+        assert_eq!(o.owner("%3"), Some("stack-b"));
+        assert_eq!(o.owner("%9"), None);
+        // re-listing a session replaces its panes
+        o.set_session("stack-a", ["%4".to_string()]);
+        assert_eq!(o.owner("%1"), None);
+        assert_eq!(o.owner("%4"), Some("stack-a"));
+        o.remove_session("stack-b");
+        assert_eq!(o.owner("%3"), None);
+    }
+
+    #[test]
+    fn visible_panes_are_partitioned_per_connection() {
+        let mut o = PaneOwners::default();
+        o.set_session("a", ["%1".to_string(), "%2".to_string()]);
+        o.set_session("b", ["%3".to_string()]);
+        let p = o.partition(["a", "b", "c"], &["%1".to_string(), "%3".to_string(), "%99".to_string()]);
+        assert_eq!(p["a"], vec!["%1".to_string()]);
+        assert_eq!(p["b"], vec!["%3".to_string()]);
+        assert!(p["c"].is_empty());
+        assert_eq!(p.len(), 3);
     }
 
     #[test]

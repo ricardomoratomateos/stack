@@ -1,19 +1,26 @@
-//! Tauri commands: the webview's view of a tmux control connection.
+//! Tauri commands: the webview's view of the tmux control connections (one
+//! per tmux session) and of stackd.
 //!
 //! Events emitted: `tmux://output` ({pane, data: base64}), `tmux://layout`
-//! (re-list panes), `tmux://exit`.
+//! ({session}: re-list that session's panes), `tmux://exit` ({session}),
+//! `stackd://status` ({running, socket}) and `stackd://state` (the snapshot).
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 
-use tauri::{AppHandle, Emitter, State};
+use serde::Serialize;
+use serde_json::Value;
+use tauri::{AppHandle, Emitter, Manager, State};
 use tmux_cc::{Client, Config, Event, Mode};
 use tokio::sync::Mutex;
 
-use crate::bridge::{self, Action, Flow, PaneInfo};
+use crate::bridge::{self, Action, Flow, PaneInfo, PaneOwners};
+use crate::stackd;
 
 #[derive(Default)]
 pub struct Bridge {
-    conn: Mutex<Option<Conn>>,
+    conns: Mutex<HashMap<String, Conn>>,
+    owners: StdMutex<PaneOwners>,
 }
 
 struct Conn {
@@ -21,8 +28,27 @@ struct Conn {
     flow: Arc<StdMutex<Flow>>,
 }
 
-async fn conn(state: &State<'_, Bridge>) -> Result<(Client, Arc<StdMutex<Flow>>), String> {
-    state.conn.lock().await.as_ref().map(|c| (c.client.clone(), c.flow.clone())).ok_or_else(|| "not connected".to_string())
+impl Bridge {
+    async fn client_for_pane(&self, pane: &str) -> Result<Client, String> {
+        let session = self.owners.lock().unwrap().owner(pane).map(str::to_string).ok_or_else(|| format!("pane {pane} is not in a connected session"))?;
+        self.conns.lock().await.get(&session).map(|c| c.client.clone()).ok_or_else(|| format!("not connected to {session}"))
+    }
+
+    async fn client_for_session(&self, session: &str) -> Result<Client, String> {
+        self.conns.lock().await.get(session).map(|c| c.client.clone()).ok_or_else(|| format!("not connected to {session}"))
+    }
+
+    async fn list(&self, session: &str) -> Result<Vec<PaneInfo>, String> {
+        let client = self.client_for_session(session).await?;
+        // `-s`: every pane of the session, not just the current window.
+        let text = client.run(&format!("list-panes -s -F '{}'", bridge::LIST_FORMAT)).await.map_err(err)?;
+        let mut panes = bridge::parse_panes(&text);
+        for p in &mut panes {
+            p.session = session.to_string();
+        }
+        self.owners.lock().unwrap().set_session(session, panes.iter().map(|p| p.id.clone()));
+        Ok(panes)
+    }
 }
 
 fn err(e: tmux_cc::Error) -> String {
@@ -30,7 +56,8 @@ fn err(e: tmux_cc::Error) -> String {
 }
 
 /// Attach to `session` on the tmux server `socket` (`-L`; `None` = the
-/// default server). With `create`, a missing session is created.
+/// default server). With `create`, a missing session is created. Connecting
+/// to a session that is already connected just lists its panes again.
 #[tauri::command]
 pub async fn connect(
     app: AppHandle,
@@ -39,17 +66,20 @@ pub async fn connect(
     session: String,
     create: Option<bool>,
 ) -> Result<Vec<PaneInfo>, String> {
+    if state.conns.lock().await.contains_key(&session) {
+        return state.list(&session).await;
+    }
     let mode = if create.unwrap_or(false) {
-        Mode::NewSession { name: Some(session), cwd: None, size: None, attach_if_exists: true }
+        Mode::NewSession { name: Some(session.clone()), cwd: None, size: None, attach_if_exists: true }
     } else {
-        Mode::Attach { target: session }
+        Mode::Attach { target: session.clone() }
     };
     let mut config = Config::new(socket.as_deref().filter(|s| !s.is_empty()), mode);
     config.pause_after = Some(1);
     let (client, mut rx) = Client::connect(config).await.map_err(err)?;
     let flow = Arc::new(StdMutex::new(Flow::default()));
 
-    let (task_client, task_flow, task_app) = (client.clone(), flow.clone(), app.clone());
+    let (task_client, task_flow, task_app, task_session) = (client.clone(), flow.clone(), app.clone(), session.clone());
     tokio::spawn(async move {
         while let Some(ev) = rx.recv().await {
             match ev {
@@ -64,53 +94,70 @@ pub async fn connect(
                                 let _ = task_client.continue_pane(&pane).await;
                             }
                             Action::LayoutChanged => {
-                                let _ = task_app.emit("tmux://layout", ());
+                                let _ = task_app.emit("tmux://layout", SessionPayload { session: task_session.clone() });
                             }
                             Action::Exit => {}
                         }
                     }
                 }
-                Event::Closed { .. } => {
-                    let _ = task_app.emit("tmux://exit", ());
-                    break;
-                }
+                Event::Closed { .. } => break,
             }
         }
+        let bridge = task_app.state::<Bridge>();
+        bridge.conns.lock().await.remove(&task_session);
+        bridge.owners.lock().unwrap().remove_session(&task_session);
+        let _ = task_app.emit("tmux://exit", SessionPayload { session: task_session });
     });
 
-    let panes = list(&client).await?;
-    *state.conn.lock().await = Some(Conn { client, flow });
-    Ok(panes)
+    state.conns.lock().await.insert(session.clone(), Conn { client, flow });
+    state.list(&session).await
 }
 
-async fn list(client: &Client) -> Result<Vec<PaneInfo>, String> {
-    // `-s`: every pane of the session, not just the current window.
-    let text = client.run(&format!("list-panes -s -F '{}'", bridge::LIST_FORMAT)).await.map_err(err)?;
-    Ok(bridge::parse_panes(&text))
+#[derive(Serialize, Clone)]
+struct SessionPayload {
+    session: String,
 }
 
+/// Detach one session, or every one when `session` is `None`.
 #[tauri::command]
-pub async fn disconnect(state: State<'_, Bridge>) -> Result<(), String> {
-    if let Some(c) = state.conn.lock().await.take() {
+pub async fn disconnect(state: State<'_, Bridge>, session: Option<String>) -> Result<(), String> {
+    let taken: Vec<(String, Conn)> = {
+        let mut conns = state.conns.lock().await;
+        match session {
+            Some(s) => conns.remove(&s).map(|c| (s, c)).into_iter().collect(),
+            None => conns.drain().collect(),
+        }
+    };
+    for (s, c) in taken {
+        state.owners.lock().unwrap().remove_session(&s);
         let _ = c.client.detach().await;
     }
     Ok(())
 }
 
 #[tauri::command]
-pub async fn list_panes(state: State<'_, Bridge>) -> Result<Vec<PaneInfo>, String> {
-    let (client, _) = conn(&state).await?;
-    list(&client).await
+pub async fn list_panes(state: State<'_, Bridge>, session: String) -> Result<Vec<PaneInfo>, String> {
+    state.list(&session).await
 }
 
-/// The panes the UI currently renders or reads. Paused ones among them are
-/// resumed; panes that are not listed stay paused when tmux pauses them.
+/// The panes the UI currently renders or reads (across all sessions). Paused
+/// ones among them are resumed; the others stay paused when tmux pauses them.
 #[tauri::command]
 pub async fn set_visible(state: State<'_, Bridge>, panes: Vec<String>) -> Result<(), String> {
-    let (client, flow) = conn(&state).await?;
     let panes: Vec<String> = panes.into_iter().filter(|p| bridge::valid_id(p, '%')).collect();
-    let resume = flow.lock().unwrap().set_visible(panes);
-    for p in resume {
+    let mut resume: Vec<(Client, String)> = vec![];
+    {
+        let conns = state.conns.lock().await;
+        let parts = state.owners.lock().unwrap().partition(conns.keys().map(String::as_str), &panes);
+        for (session, ids) in parts {
+            if let Some(c) = conns.get(&session) {
+                for p in c.flow.lock().unwrap().set_visible(ids) {
+                    resume.push((c.client.clone(), p));
+                }
+            }
+        }
+    }
+    for (client, p) in resume {
         client.continue_pane(&p).await.map_err(err)?;
     }
     Ok(())
@@ -119,7 +166,7 @@ pub async fn set_visible(state: State<'_, Bridge>, panes: Vec<String>) -> Result
 #[tauri::command]
 pub async fn write(state: State<'_, Bridge>, pane: String, data: Vec<u8>) -> Result<(), String> {
     check(&pane, '%')?;
-    let (client, _) = conn(&state).await?;
+    let client = state.client_for_pane(&pane).await?;
     client.send_bytes(&pane, &data).await.map_err(err)?.into_text().map(|_| ()).map_err(err)
 }
 
@@ -131,7 +178,7 @@ pub async fn resize(state: State<'_, Bridge>, pane: String, cols: u16, rows: u16
     if cols == 0 || rows == 0 {
         return Ok(());
     }
-    let (client, _) = conn(&state).await?;
+    let client = state.client_for_pane(&pane).await?;
     let window = client.run(&format!("display-message -p -t {pane} '#{{window_id}}'")).await.map_err(err)?;
     let window = window.trim();
     check(window, '@')?;
@@ -147,7 +194,7 @@ pub async fn resize(state: State<'_, Bridge>, pane: String, cols: u16, rows: u16
 #[tauri::command]
 pub async fn capture(state: State<'_, Bridge>, pane: String, start: i32, end: Option<i32>) -> Result<String, String> {
     check(&pane, '%')?;
-    let (client, _) = conn(&state).await?;
+    let client = state.client_for_pane(&pane).await?;
     client.run(&bridge::capture_command(&pane, start, end)).await.map_err(err)
 }
 
@@ -157,4 +204,69 @@ fn check(id: &str, sigil: char) -> Result<(), String> {
     } else {
         Err(format!("invalid id {id:?}"))
     }
+}
+
+// ── stackd ────────────────────────────────────────────────────────────────
+
+/// What the watcher last saw, for a webview that mounts after the events.
+#[derive(Default)]
+pub struct StackdLatest {
+    inner: StdMutex<(bool, Option<Value>)>,
+}
+
+#[derive(Serialize, Clone)]
+struct Status {
+    running: bool,
+    socket: String,
+}
+
+#[derive(Serialize)]
+pub struct Latest {
+    running: bool,
+    socket: String,
+    snapshot: Option<Value>,
+}
+
+/// Starts the watcher; it only ever connects to an existing socket.
+pub fn start_stackd_watch(app: AppHandle) {
+    let socket = stackd::socket_path();
+    tauri::async_runtime::spawn(async move {
+        let sink_app = app.clone();
+        let sock_name = socket.display().to_string();
+        stackd::watch(socket, std::time::Duration::from_secs(2), move |u| {
+            let latest = sink_app.state::<StackdLatest>();
+            match u {
+                stackd::Update::Status(running) => {
+                    let mut g = latest.inner.lock().unwrap();
+                    g.0 = running;
+                    if !running {
+                        g.1 = None;
+                    }
+                    drop(g);
+                    let _ = sink_app.emit("stackd://status", Status { running, socket: sock_name.clone() });
+                }
+                stackd::Update::State(snapshot) => {
+                    latest.inner.lock().unwrap().1 = Some(snapshot.clone());
+                    let _ = sink_app.emit("stackd://state", snapshot);
+                }
+            }
+        })
+        .await;
+    });
+}
+
+#[tauri::command]
+pub fn stackd_latest(state: State<'_, StackdLatest>) -> Latest {
+    let g = state.inner.lock().unwrap();
+    Latest { running: g.0, socket: stackd::socket_path().display().to_string(), snapshot: g.1.clone() }
+}
+
+/// `POST /commands/<name>`; the answer's `result`, or the daemon's error text.
+#[tauri::command]
+pub async fn stackd_command(name: String, body: Option<Value>) -> Result<Value, String> {
+    if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphabetic()) {
+        return Err(format!("invalid command name {name:?}"));
+    }
+    let body = body.unwrap_or_else(|| Value::Object(Default::default()));
+    stackd::request(&stackd::socket_path(), "POST", &format!("/commands/{name}"), Some(&body)).await
 }
