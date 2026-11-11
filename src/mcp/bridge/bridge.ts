@@ -8,6 +8,8 @@ import { INSTRUCTIONS, TOOLS } from './tools';
 export interface BridgeOptions {
   /** globalStorage: where `windows/` is. */
   storageDir: string;
+  /** More dirs holding a `windows/` (stackd's config dir), so either registration finds the daemon. */
+  extraDirs?: string[];
   env: NodeJS.ProcessEnv;
   cwd: string;
   version: string;
@@ -85,7 +87,8 @@ export async function forward(opts: BridgeOptions, tool: string, args: Record<st
     const named = typeof rest.task_id === 'string' && rest.task_id
       ? rest.task_id
       : Array.isArray(rest.task_ids) && typeof rest.task_ids[0] === 'string' ? rest.task_ids[0] : undefined;
-    const windows = readWindows(path.join(opts.storageDir, WINDOWS_DIR), opts.isAlive ?? isPidAlive);
+    const dirs = [...new Set([opts.storageDir, ...(opts.extraDirs ?? [])].map((d) => path.resolve(d)))];
+    const windows = dirs.flatMap((d) => readWindows(path.join(d, WINDOWS_DIR), opts.isAlive ?? isPidAlive));
     const resolved = resolveWindow(windows, {
       repo: typeof repo === 'string' && repo ? path.resolve(opts.cwd, repo) : undefined,
       taskId: named ?? ownTask,

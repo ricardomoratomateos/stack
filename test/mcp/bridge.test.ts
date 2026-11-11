@@ -136,6 +136,19 @@ describe('forward', () => {
     expect(stub.seen[0].body).toEqual({ args: {}, context: { cwd: '/code/a/src', taskId: 'ta' } });
   });
 
+  it('also finds a window registered in an extra dir (stackd, behind a bridge VS Code registered)', async () => {
+    stub = await stubWindow((_req, _body, res) => json(res, { ok: true, result: { daemon: true } }));
+    const daemonDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-fwd-d-'));
+    try {
+      fs.mkdirSync(path.join(daemonDir, 'windows'));
+      fs.writeFileSync(path.join(daemonDir, 'windows', '11.json'), JSON.stringify(win({ pid: 11, port: stub.port })));
+      const res = await forward(opts({ extraDirs: [daemonDir, dir] }), 'stack_status', {});
+      expect(res).toEqual({ content: [{ type: 'text', text: '{"daemon":true}' }] });
+    } finally {
+      fs.rmSync(daemonDir, { recursive: true, force: true });
+    }
+  });
+
   it('routes by repo (relative to the cwd), by task id, and by $CLAUDE_PROJECT_DIR', async () => {
     stub = await stubWindow((req, _body, res) => json(res, { ok: true, result: req.url }));
     const other = await stubWindow((req, _body, res) => json(res, { ok: true, result: `other${req.url}` }));

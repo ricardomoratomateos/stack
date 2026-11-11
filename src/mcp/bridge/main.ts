@@ -1,4 +1,5 @@
 /* v8 ignore start */
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createBridgeServer } from './bridge';
@@ -14,6 +15,8 @@ async function main(): Promise<void> {
   const storageDir = process.env[STORAGE_ENV] || path.dirname(process.argv[1] ?? __filename);
   const server = createBridgeServer({
     storageDir,
+    // stackd's own discovery files (~/.config/stack/windows), for a bridge registered by VS Code.
+    extraDirs: [process.env.STACKD_CONFIG_DIR || path.join(os.homedir(), '.config', 'stack')],
     env: process.env,
     cwd: process.cwd(),
     version: process.env.STACK_MCP_VERSION ?? '0.0.0',
