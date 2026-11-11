@@ -5,12 +5,12 @@ import { StartStackd } from './stackd/StartStackd';
 import { useStackd } from './stackd/useStackd';
 import { ManagerStrip, useTerminals, type StripHandle } from './terminals';
 import { SidebarHost } from './sidebar/SidebarHost';
-import { ViewTitle } from './sidebar/ViewTitle';
-import { describeCounts, installHint, toSidebarState, translate, type Action } from './sidebar/bridge';
+import { installHint, toSidebarState, translate, type Action } from './sidebar/bridge';
 import { loadDefaultProvider, saveDefaultProvider } from './sidebar/prefs';
 import { NewTaskHost } from './newtask/NewTaskHost';
 import { toNewTaskInit, translateNewTask } from './newtask/bridge';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import type { NewTaskExtMessage, NewTaskInit, NewTaskMessage } from '@core/newtask/types';
 import type { ProviderId } from '@core/ports/IAgentProvider';
 import { loadSidebarStyle, resolveSidebarStyle } from './sidebar/settings';
@@ -22,7 +22,6 @@ import type { WebMessage } from '@core/webview/types';
 import { SessionView } from './ui/Pane';
 import { useSessionPane } from './ui/useSessionPane';
 import { Splitter } from './ui/Splitter';
-import { ModeSwitch } from './ui/ModeSwitch';
 import { FloatList } from './ui/FloatList';
 import {
   LINE_H, cycleMaximized, heightFromLines, limits, linesFromHeight, loadLayout, maxPanelWidth, modeFromQuery, nextMode,
@@ -71,17 +70,18 @@ export function App() {
 
   useEffect(() => { void loadSidebarStyle().then(setStyle); }, []);
   useEffect(() => saveLayout(layout), [layout]);
-  // ⌘, opens the Settings screen (capture phase, so it wins over the focused terminal).
+  // The native menu (menu.rs): Settings… (⌘,) and the window modes.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === ',' && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        setSettingsOpen(true);
-      }
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
+    const offs = [
+      listen('menu://settings', () => setSettingsOpen(true)),
+      listen<string>('menu://mode', (e) => {
+        const m = e.payload;
+        if (m === 'cycle') setLayout((l) => setMode(l, nextMode(l.mode)));
+        else if (m === 'side') setLayout((l) => setMode(l, 'half', l.side === 'left' ? 'right' : 'left'));
+        else if (m === 'full' || m === 'half' || m === 'float') setLayout((l) => setMode(l, m));
+      }),
+    ];
+    return () => offs.forEach((p) => void p.then((off) => off()).catch(() => {}));
   }, []);
 
   // The OS window follows the mode. Frames of Full and Float are remembered; Half snaps to the screen.
@@ -385,30 +385,25 @@ export function App() {
 
   return (
     <div className="shell" data-mode={mode}>
-      <header className="titlebar" data-tauri-drag-region>
-        <span className="titlebar-name" data-tauri-drag-region>Stack</span>
-        <button type="button" className="icon-btn" title="Settings (⌘,)" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true"><circle cx="8" cy="8" r="2.2" /><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M12.6 3.4l-1.3 1.3M4.7 11.3l-1.3 1.3" strokeLinecap="round" /></svg>
-        </button>
-        <ModeSwitch mode={mode} onChange={(m) => setLayout((l) => setMode(l, m))} />
-        {mode === 'half' && (
-          <button type="button" className="icon-btn side-btn" title={`Snap to the ${side === 'left' ? 'right' : 'left'} half`} aria-label="Switch side" onClick={() => setLayout((l) => setMode(l, 'half', l.side === 'left' ? 'right' : 'left'))}>{side === 'left' ? '◧' : '◨'}</button>
-        )}
-      </header>
+      <header className="titlebar" data-tauri-drag-region />
       <div className="app" ref={appRef} data-mode={mode} data-maximized={maximized ?? undefined}>
         {showSidebar && (
           <>
             <aside className="sidebar" aria-label="Worktrees" style={{ width: sizes.sidebar }}>
-              <ViewTitle counts={sidebarState ? describeCounts(sidebarState) : ''} onAdd={() => onMessage({ type: 'openNewTask' })}>
-                <select className="repo-select" value={view.repoRoot} onChange={(e) => {
-                  if (e.target.value === ADD_REPO) { void addRepository(); return; }
-                  setRepoRoot(e.target.value); setSelectedId(undefined);
-                }}>
-                  {view.repos.map((r) => <option key={r.repoRoot} value={r.repoRoot}>{r.name}</option>)}
-                  <option value={ADD_REPO}>Add repository…</option>
-                </select>
-              </ViewTitle>
-              <div className="sidebar-body"><SidebarHost state={sidebarState} onMessage={onMessage} /></div>
+              <div className="sidebar-body">
+                <SidebarHost state={sidebarState} onMessage={onMessage} actions={(
+                  <>
+                    <select className="repo-select" value={view.repoRoot} aria-label="Repository" title="Repository" onChange={(e) => {
+                      if (e.target.value === ADD_REPO) { void addRepository(); return; }
+                      setRepoRoot(e.target.value); setSelectedId(undefined);
+                    }}>
+                      {view.repos.map((r) => <option key={r.repoRoot} value={r.repoRoot}>{r.name}</option>)}
+                      <option value={ADD_REPO}>Add repository…</option>
+                    </select>
+                    <button type="button" className="icon-btn" title="New task" aria-label="New task" onClick={() => onMessage({ type: 'openNewTask' })}><i className="codicon codicon-add" aria-hidden="true" /></button>
+                  </>
+                )} />
+              </div>
               {notice && <div className="notice" role="status">{notice}</div>}
             </aside>
             <Splitter orientation="col" label="Resize sidebar" value={sizes.sidebar} min={sidebarLimits.min} max={Math.max(sidebarLimits.min, sidebarMax)} reset={DEFAULT_SIZES[mode].sidebar} onChange={(v) => v === DEFAULT_SIZES[mode].sidebar ? resetTo('sidebar') : resizeTo('sidebar', v)} />
@@ -451,11 +446,9 @@ export function App() {
           {mode !== 'full' && maximized !== 'session' && (
             <section className="manager-dock" data-expanded={bigManager || undefined} aria-label="Manager">
               {!bigManager && <Splitter orientation="row" invert label="Resize Manager strip" value={stripPx} min={heightFromLines(limits(mode, 'lines').min)} max={heightFromLines(limits(mode, 'lines').max)} reset={heightFromLines(DEFAULT_SIZES[mode].lines)} onChange={(px) => resizeTo('lines', linesFromHeight(px))} />}
-              <header className="strip-head" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize">
+              <header className="strip-head" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧M toggle">
                 <span className="strip-title">◆ Manager{!bigManager && <> · last {sizes.lines} lines</>}</span>
                 {maximized === 'manager' && <span className="max-badge" title={maxTitle}>maximized</span>}
-                <kbd>⌘0</kbd>
-                <kbd>⌘⇧M</kbd>
               </header>
               {bigManager ? <div className="term-host">{managerView}</div> : showStrip && <ManagerStrip ref={stripRef} pane={manager.pane} lines={sizes.lines} />}
             </section>
@@ -466,11 +459,9 @@ export function App() {
           <>
             {maximized === null && <Splitter orientation="col" invert label="Resize Manager" value={sizes.manager} min={managerLimits.min} max={Math.max(managerLimits.min, managerMax)} reset={DEFAULT_SIZES[mode].manager} onChange={(v) => v === DEFAULT_SIZES[mode].manager ? resetTo('manager') : resizeTo('manager', v)} />}
             <section className="manager" aria-label="Manager" style={maximized === 'manager' ? { flex: 1 } : { width: sizes.manager }}>
-              <header className="manager-head" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize">
+              <header className="manager-head" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧M toggle">
                 <span className="manager-title">Manager</span>
                 {maximized === 'manager' && <span className="max-badge" title={maxTitle}>maximized</span>}
-                <kbd>⌘0</kbd>
-                <kbd>⌘⇧M</kbd>
               </header>
               <div className="term-host">{managerView}</div>
             </section>

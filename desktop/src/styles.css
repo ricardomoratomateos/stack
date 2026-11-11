@@ -10,6 +10,8 @@ kbd { font-size: 10px; color: var(--vscode-descriptionForeground); border: 1px s
 /* sidebar: VS Code's view header above the extension's own webview */
 .sidebar { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--vscode-sideBar-background); border-right: 1px solid var(--vscode-sideBar-border, transparent); position: relative; }
 .sidebar-body { flex: 1; min-height: 0; overflow: hidden; }
+.sidebar-webview { height: 100%; position: relative; }
+.host-actions { position: absolute; top: 8px; right: 8px; display: flex; align-items: center; gap: 4px; z-index: 1; }
 .view-title { display: flex; align-items: center; gap: 8px; height: 35px; padding: 0 8px 0 20px; flex: none; color: var(--vscode-sideBarTitle-foreground); }
 .view-title-name { font-size: 11px; font-weight: 700; text-transform: uppercase; white-space: nowrap; }
 .view-title-desc { flex: 1; min-width: 0; font-size: 11px; color: var(--vscode-descriptionForeground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -70,10 +72,14 @@ kbd { font-size: 10px; color: var(--vscode-descriptionForeground); border: 1px s
 .dialog-detail { white-space: pre-wrap; font-size: 12px; color: var(--vscode-descriptionForeground); }
 .dialog-buttons { display: flex; justify-content: flex-end; gap: 6px; }
 
-.newtask-host { position: fixed; inset: 0; z-index: 9; overflow: auto; background: var(--vscode-editor-background); }
-.newtask-bar { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; height: 32px; padding: 0 8px 0 78px; background: var(--vscode-titleBar-activeBackground, var(--vscode-editor-background)); border-bottom: 1px solid var(--vscode-titleBar-border, transparent); }
-.newtask-back { display: flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 5px; font-size: 12px; color: var(--vscode-descriptionForeground); }
-.newtask-back:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+/* sheets: new task and Settings, centred over a dimmed backdrop */
+.sheet-backdrop { position: fixed; inset: 0; z-index: 9; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(0, 0, 0, .35); }
+.sheet { width: 100%; max-height: 85vh; display: flex; flex-direction: column; background: var(--vscode-quickInput-background, var(--vscode-editor-background)); color: var(--vscode-quickInput-foreground, var(--vscode-foreground)); border: 1px solid var(--vscode-widget-border, transparent); border-radius: 10px; box-shadow: 0 0 8px 2px var(--vscode-widget-shadow); overflow: hidden; }
+.sheet-head { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 8px 16px; border-bottom: 1px solid var(--vscode-widget-border, transparent); }
+.sheet-title { font-size: 13px; font-weight: 600; }
+.sheet-body { flex: 1; min-height: 0; overflow-y: auto; }
+.newtask-sheet .sheet-body { min-height: 320px; }
+.newtask-sheet .sheet-body .nt { height: auto; min-height: 320px; overflow: visible; }
 
 /* dev page: /?dev=sidebar */
 .dev-sidebar { height: 100%; display: flex; flex-direction: column; background: var(--vscode-sideBar-background); border-right: 1px solid var(--vscode-sideBar-border, transparent); }
@@ -82,13 +88,7 @@ kbd { font-size: 10px; color: var(--vscode-descriptionForeground); border: 1px s
 /* shell: title area + panels */
 .shell { height: 100%; display: flex; flex-direction: column; }
 /* Overlay title bar: macOS draws the traffic lights over it (titleBarStyle Overlay), like VS Code's custom title bar. */
-.titlebar { flex: none; height: 32px; position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 0 8px 0 78px; background: var(--vscode-titleBar-activeBackground, var(--vscode-sideBar-background)); color: var(--vscode-titleBar-activeForeground, var(--vscode-foreground)); border-bottom: 1px solid var(--vscode-titleBar-border, var(--vscode-sideBar-border, transparent)); user-select: none; -webkit-user-select: none; }
-.titlebar-name { position: absolute; left: 50%; transform: translateX(-50%); font-size: 12px; color: var(--vscode-descriptionForeground); pointer-events: auto; }
-.side-btn { width: auto; padding: 0 6px; }
-.mode-switch { display: flex; gap: 1px; padding: 2px; border-radius: 6px; background: var(--vscode-input-background, rgba(255,255,255,.04)); }
-.mode-switch button { padding: 1px 9px; border-radius: 4px; font-size: 11px; line-height: 18px; color: var(--vscode-descriptionForeground); }
-.mode-switch button:hover { color: var(--vscode-foreground); }
-.mode-switch button[data-active] { background: var(--vscode-toolbar-activeBackground, rgba(255,255,255,.1)); color: var(--vscode-foreground); }
+.titlebar { flex: none; height: 32px; position: relative; display: flex; align-items: center; padding: 0 8px 0 78px; background: var(--vscode-titleBar-activeBackground, var(--vscode-sideBar-background)); color: var(--vscode-titleBar-activeForeground, var(--vscode-foreground)); border-bottom: 1px solid var(--vscode-titleBar-border, var(--vscode-sideBar-border, transparent)); user-select: none; -webkit-user-select: none; }
 
 .app { flex: 1; min-height: 0; display: flex; }
 .app > .sidebar, .app > .manager { flex: none; }
@@ -130,8 +130,7 @@ body[data-resizing] .term-host, body[data-resizing] .sidebar-body { pointer-even
 .float-allow:hover { background: var(--vscode-button-hoverBackground); }
 
 /* Settings screen (VS Code's Settings editor look) */
-.settings-body { max-width: 720px; margin: 0 auto; padding: 20px 24px 48px; }
-.settings-body h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+.settings-body { padding: 16px 24px 32px; }
 .settings-sub { margin: 0 0 18px; color: var(--vscode-descriptionForeground); font-size: 12px; }
 .settings-error { margin-bottom: 12px; padding: 6px 8px; border-radius: 4px; background: var(--vscode-inputValidation-errorBackground); border: 1px solid var(--vscode-inputValidation-errorBorder); font-size: 12px; }
 .setting-item { position: relative; padding: 12px 0 12px 14px; border-top: 1px solid var(--vscode-settings-rowHoverBackground, transparent); }

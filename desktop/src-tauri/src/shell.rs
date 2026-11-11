@@ -80,6 +80,10 @@ pub fn menu_rows(m: &TrayModel) -> Vec<Row> {
     }
     rows.push(Row::Item { id: "show".into(), text: SHOW_LABEL.into() });
     rows.push(Row::Item { id: "manager".into(), text: MANAGER_LABEL.into() });
+    rows.push(Row::Item { id: "settings".into(), text: "Settings…  ⌘,".into() });
+    for (id, text) in [("mode:full", "Full mode"), ("mode:half", "Half mode"), ("mode:float", "Float mode")] {
+        rows.push(Row::Item { id: id.into(), text: text.into() });
+    }
     rows.push(Row::Check { id: "dnd".into(), text: "Do not disturb".into(), on: m.dnd });
     rows.push(Row::Check { id: "login".into(), text: "Start stackd at login".into(), on: m.login });
     rows.push(Row::Separator);
@@ -93,6 +97,9 @@ pub enum MenuAction {
     Allow(String, u32),
     Show,
     Manager,
+    Settings,
+    /// "full" / "half" / "float".
+    Mode(String),
     Dnd,
     Login,
     Quit,
@@ -102,10 +109,14 @@ pub fn parse_menu_id(id: &str) -> Option<MenuAction> {
     match id {
         "show" => Some(MenuAction::Show),
         "manager" => Some(MenuAction::Manager),
+        "settings" => Some(MenuAction::Settings),
         "dnd" => Some(MenuAction::Dnd),
         "login" => Some(MenuAction::Login),
         "quit" => Some(MenuAction::Quit),
         _ => {
+            if let Some(mode) = id.strip_prefix("mode:") {
+                return Some(MenuAction::Mode(mode.to_string()));
+            }
             if let Some(rest) = id.strip_prefix("go:") {
                 return Some(MenuAction::Go(rest.to_string()));
             }
@@ -178,6 +189,14 @@ fn on_menu(app: &AppHandle, id: &str) {
         Some(MenuAction::Manager) => {
             show_app(app);
             let _ = app.emit("app://manager", ());
+        }
+        Some(MenuAction::Settings) => {
+            show_app(app);
+            let _ = app.emit("menu://settings", ());
+        }
+        Some(MenuAction::Mode(m)) => {
+            show_app(app);
+            let _ = app.emit("menu://mode", m);
         }
         Some(MenuAction::Dnd) => {
             let _ = app.emit("tray://dnd", ());
@@ -328,7 +347,7 @@ mod tests {
         let m = TrayModel { title: String::new(), needs: vec![entry("a", Some(2)), entry("b", None)], review: vec![entry("c", None)], dnd: true, login: false };
         let rows = menu_rows(&m);
         let ids: Vec<&str> = rows.iter().filter_map(|r| match r { Row::Item { id, .. } | Row::Check { id, .. } => Some(id.as_str()), _ => None }).collect();
-        assert_eq!(ids, ["go:a", "allow:2:a", "go:b", "go:c", "show", "manager", "dnd", "login", "quit"]);
+        assert_eq!(ids, ["go:a", "allow:2:a", "go:b", "go:c", "show", "manager", "settings", "mode:full", "mode:half", "mode:float", "dnd", "login", "quit"]);
         assert!(rows.contains(&Row::Check { id: "dnd".into(), text: "Do not disturb".into(), on: true }));
     }
 
@@ -336,7 +355,7 @@ mod tests {
     fn empty_menu_has_only_the_fixed_items() {
         let m = TrayModel { title: String::new(), needs: vec![], review: vec![], dnd: false, login: false };
         assert!(!menu_rows(&m).iter().any(|r| matches!(r, Row::Header(_))));
-        assert_eq!(menu_rows(&m).len(), 6);
+        assert_eq!(menu_rows(&m).len(), 10);
     }
 
     #[test]
@@ -344,6 +363,8 @@ mod tests {
         assert_eq!(parse_menu_id("allow:3:/a:b"), Some(MenuAction::Allow("/a:b".into(), 3)));
         assert_eq!(parse_menu_id("go:/a:b"), Some(MenuAction::Go("/a:b".into())));
         assert_eq!(parse_menu_id("quit"), Some(MenuAction::Quit));
+        assert_eq!(parse_menu_id("settings"), Some(MenuAction::Settings));
+        assert_eq!(parse_menu_id("mode:half"), Some(MenuAction::Mode("half".into())));
         assert_eq!(parse_menu_id("allow:x:y"), None);
         assert_eq!(parse_menu_id("header"), None);
     }

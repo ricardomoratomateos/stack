@@ -4,6 +4,7 @@
 mod bridge;
 mod commands;
 mod launchd;
+mod menu;
 mod shell;
 mod stackd;
 mod window;
@@ -20,6 +21,7 @@ fn main() {
         .setup(|app| {
             commands::start_stackd_watch(app.handle().clone());
             shell::setup(app.handle());
+            menu::setup(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
