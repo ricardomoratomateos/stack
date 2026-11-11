@@ -363,6 +363,111 @@ pub fn vscode_settings() -> Option<String> {
     std::fs::read_to_string(path).ok()
 }
 
+// ── ~/.config/stack/settings.json (what stackd reads; the Settings screen edits it) ──
+
+/// `$STACKD_CONFIG_DIR/settings.json`, else `~/.config/stack/settings.json`.
+fn settings_path() -> Result<std::path::PathBuf, String> {
+    let dir = match std::env::var_os("STACKD_CONFIG_DIR").filter(|d| !d.is_empty()) {
+        Some(d) => std::path::PathBuf::from(d),
+        None => std::path::Path::new(&std::env::var_os("HOME").ok_or("HOME is not set")?).join(".config/stack"),
+    };
+    Ok(dir.join("settings.json"))
+}
+
+/// The file's object; anything missing or malformed is `{}` (as stackd reads it).
+fn read_object(path: &std::path::Path) -> serde_json::Map<String, Value> {
+    match std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+        Some(Value::Object(m)) => m,
+        _ => serde_json::Map::new(),
+    }
+}
+
+/// Applies `changes` (key without the `stack.` prefix; `null` = reset to default) to `existing`.
+/// Unknown keys stay; a `stack.`-prefixed twin of a changed key is dropped.
+pub fn merge_settings(mut existing: serde_json::Map<String, Value>, changes: &serde_json::Map<String, Value>) -> serde_json::Map<String, Value> {
+    for (key, value) in changes {
+        let key = key.strip_prefix("stack.").unwrap_or(key);
+        existing.remove(&format!("stack.{key}"));
+        if value.is_null() {
+            existing.remove(key);
+        } else {
+            existing.insert(key.to_string(), value.clone());
+        }
+    }
+    existing
+}
+
+/// The user's stackd settings (`{}` when there are none).
+#[tauri::command]
+pub fn read_settings() -> Result<Value, String> {
+    Ok(Value::Object(read_object(&settings_path()?)))
+}
+
+/// Merges `changes` into settings.json (created if needed) and writes it atomically; returns the result.
+#[tauri::command]
+pub fn write_settings(changes: serde_json::Map<String, Value>) -> Result<Value, String> {
+    write_settings_at(&settings_path()?, &changes)
+}
+
+fn write_settings_at(path: &std::path::Path, changes: &serde_json::Map<String, Value>) -> Result<Value, String> {
+    let merged = Value::Object(merge_settings(read_object(path), changes));
+    let dir = path.parent().ok_or("bad settings path")?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let tmp = dir.join(format!(".settings.json.{}.tmp", std::process::id()));
+    let text = serde_json::to_string_pretty(&merged).map_err(|e| e.to_string())? + "\n";
+    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })?;
+    Ok(merged)
+}
+
+/// Opens settings.json (created empty if missing) in the default text editor, for the settings the screen does not cover.
+#[tauri::command]
+pub fn open_settings_file() -> Result<(), String> {
+    let path = settings_path()?;
+    if !path.exists() {
+        write_settings_at(&path, &serde_json::Map::new())?;
+    }
+    std::process::Command::new("open").arg("-t").arg(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn obj(v: Value) -> serde_json::Map<String, Value> {
+        v.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn merge_sets_keeps_unknown_and_drops_prefixed_twin() {
+        let out = merge_settings(obj(json!({"stack.sidebarStyle": "claude", "other": 1, "defaultBaseBranch": "main"})), &obj(json!({"sidebarStyle": "mission", "stack.defaultBaseBranch": "dev"})));
+        assert_eq!(Value::Object(out), json!({"sidebarStyle": "mission", "other": 1, "defaultBaseBranch": "dev"}));
+    }
+
+    #[test]
+    fn null_resets_both_spellings() {
+        let out = merge_settings(obj(json!({"stack.a": 1, "a": 2, "b": 3})), &obj(json!({"a": null})));
+        assert_eq!(Value::Object(out), json!({"b": 3}));
+    }
+
+    #[test]
+    fn writes_atomically_into_a_new_dir() {
+        let dir = std::env::temp_dir().join(format!("stack-settings-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let file = dir.join("nested/settings.json");
+        write_settings_at(&file, &obj(json!({"claudeCommand": "c"}))).unwrap();
+        let out = write_settings_at(&file, &obj(json!({"codexCommand": "x"}))).unwrap();
+        assert_eq!(out, json!({"claudeCommand": "c", "codexCommand": "x"}));
+        assert_eq!(read_object(&file).len(), 2);
+        assert_eq!(std::fs::read_dir(file.parent().unwrap()).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 /// Only these may reach the browser: https links and localhost ports (PR, ticket, dev servers).
 pub fn openable(url: &str) -> bool {
     let rest = if let Some(r) = url.strip_prefix("https://") {

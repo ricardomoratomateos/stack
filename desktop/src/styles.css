@@ -128,3 +128,23 @@ body[data-resizing] .term-host, body[data-resizing] .sidebar-body { pointer-even
 .float-session { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
 .float-allow { flex: none; padding: 1px 10px; font-size: 11px; border-radius: 3px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
 .float-allow:hover { background: var(--vscode-button-hoverBackground); }
+
+/* Settings screen (VS Code's Settings editor look) */
+.settings-body { max-width: 720px; margin: 0 auto; padding: 20px 24px 48px; }
+.settings-body h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+.settings-sub { margin: 0 0 18px; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.settings-error { margin-bottom: 12px; padding: 6px 8px; border-radius: 4px; background: var(--vscode-inputValidation-errorBackground); border: 1px solid var(--vscode-inputValidation-errorBorder); font-size: 12px; }
+.setting-item { position: relative; padding: 12px 0 12px 14px; border-top: 1px solid var(--vscode-settings-rowHoverBackground, transparent); }
+.setting-item[data-modified]::before { content: ''; position: absolute; left: 0; top: 12px; bottom: 12px; width: 2px; background: var(--vscode-settings-modifiedItemIndicator, var(--vscode-focusBorder)); }
+.setting-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.setting-modified { font-size: 11px; font-weight: 400; color: var(--vscode-descriptionForeground); }
+.setting-reset { font-size: 11px; font-weight: 400; padding: 0 4px; background: none; color: var(--vscode-textLink-foreground); }
+.setting-desc { font-size: 12px; line-height: 1.5; color: var(--vscode-descriptionForeground); margin-bottom: 6px; white-space: pre-wrap; }
+.setting-check { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 1.5; color: var(--vscode-descriptionForeground); }
+.setting-check input { margin-top: 3px; }
+.setting-item input:not([type=checkbox]), .setting-item select, .setting-item textarea { width: 100%; box-sizing: border-box; padding: 4px 6px; font: inherit; font-size: 13px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; }
+.setting-item select { background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border-color: var(--vscode-dropdown-border, transparent); }
+.setting-item input:focus, .setting-item select:focus, .setting-item textarea:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.setting-item textarea { resize: vertical; }
+.settings-host button.secondary { padding: 4px 10px; border-radius: 2px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+.settings-host button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
