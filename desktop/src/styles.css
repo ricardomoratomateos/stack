@@ -207,3 +207,27 @@ body[data-resizing] .term-host, body[data-resizing] .sidebar-body { pointer-even
 .switcher-foot { position: sticky; bottom: 0; padding: 6px 16px 2px; font-size: 0.85em; opacity: 0.6; background: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .switcher-hint { flex: none; opacity: 0.6; font-size: 0.9em; }
 .switcher-row[data-state='permission'] .switcher-name { font-weight: 600; }
+
+/* review: the extension's PR-style diff panel, painted from the app palette (its --vscode-* inputs resolve to --app-*) */
+.centre-body { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.review-host {
+  --vscode-editor-background: var(--app-bg);
+  --vscode-editor-foreground: var(--app-text);
+  --vscode-foreground: var(--app-text);
+  --vscode-descriptionForeground: var(--app-text-dim);
+  --vscode-sideBar-background: var(--app-surface);
+  --vscode-editorWidget-background: var(--app-surface-2);
+  --vscode-notifications-background: var(--app-surface);
+  --vscode-notifications-foreground: var(--app-text);
+  --vscode-input-background: var(--app-surface);
+  --vscode-input-foreground: var(--app-text);
+  --vscode-list-hoverBackground: var(--app-hover);
+  --vscode-focusBorder: var(--app-focus);
+  --vscode-button-background: var(--app-primary-bg);
+  --vscode-button-foreground: var(--app-primary-ink);
+  --vscode-textLink-foreground: var(--app-accent-text);
+  --vscode-errorForeground: var(--app-error);
+  position: absolute; inset: 0; z-index: 2; overflow: hidden; outline: none;
+  background: var(--app-bg); color: var(--app-text);
+}
+.tab-review i { font-size: 14px; }

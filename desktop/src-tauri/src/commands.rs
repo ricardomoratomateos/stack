@@ -678,6 +678,24 @@ pub fn open_url(url: String) -> Result<(), String> {
     std::process::Command::new("open").arg(&url).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// Opens `path` in VS Code at `line` (`code -g path:line`; falls back to macOS `open`, which ignores the line).
+/// Only absolute paths; the path is one argument, never a shell string.
+#[tauri::command]
+pub fn open_in_editor(path: String, line: Option<u32>) -> Result<(), String> {
+    if !path.starts_with('/') || path.contains('\0') {
+        return Err(format!("refusing to open {path}"));
+    }
+    let target = match line {
+        Some(l) if l > 0 => format!("{path}:{l}"),
+        _ => path.clone(),
+    };
+    let code = std::process::Command::new("code").arg("-g").arg(&target).spawn();
+    if code.is_ok() {
+        return Ok(());
+    }
+    std::process::Command::new("open").arg("--").arg(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::openable;

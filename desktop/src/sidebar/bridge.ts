@@ -54,6 +54,8 @@ export type Action =
   | { kind: 'pickProvider'; choices: ProviderId[] }
   /** Explain how to install an agent that is not on PATH (`installHint`). */
   | { kind: 'install'; provider: ProviderId }
+  /** The PR-style review of a worktree's changes, in the centre. */
+  | { kind: 'review'; worktreeId: string }
   /** Not available in the desktop app yet. */
   | { kind: 'unsupported'; what: string }
   | { kind: 'none' };
@@ -133,7 +135,7 @@ export function translate(msg: WebMessage, ctx: Context): Action {
     case 'forgetWorktree':
       return DAEMON_MESSAGES.includes(msg.type) ? { kind: 'command', name: 'message', body: { message: msg, repo: ctx.repoRoot } } : { kind: 'none' };
     case 'openDiff':
-      return { kind: 'unsupported', what: 'The review panel' };
+      return find(msg.worktreeId) ? { kind: 'review', worktreeId: msg.worktreeId } : { kind: 'none' };
     case 'openPr':
     case 'openTicket': {
       const wt = find(msg.worktreeId);

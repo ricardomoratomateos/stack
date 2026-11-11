@@ -61,8 +61,9 @@ describe('translate', () => {
     expect(translate({ type: 'openNewTask' }, ctx)).toEqual({ kind: 'newTask' });
     expect(translate({ type: 'createWorktree', branch: 'b', title: 't' }, ctx)).toMatchObject({ kind: 'command', name: 'createTask', body: { repo: '/r', branch: 'b', title: 't' } });
   });
-  it('the review panel is not in the desktop app', () => {
-    expect(translate({ type: 'openDiff', worktreeId: 'a' }, ctx).kind).toBe('unsupported');
+  it('openDiff opens the review of that worktree', () => {
+    expect(translate({ type: 'openDiff', worktreeId: 'rev' }, ctx)).toEqual({ kind: 'review', worktreeId: 'rev' });
+    expect(translate({ type: 'openDiff', worktreeId: 'nope' }, ctx).kind).toBe('none');
   });
   it('PR, ticket and port links open in the browser, https and localhost only', () => {
     const withLinks: Context = {

@@ -46,6 +46,7 @@ fn main() {
             commands::stackd_start_now,
             commands::vscode_settings,
             commands::open_url,
+            commands::open_in_editor,
             commands::read_settings,
             commands::write_settings,
             commands::open_settings_file,

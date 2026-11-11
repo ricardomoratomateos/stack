@@ -10,10 +10,13 @@ export interface Shim {
   /** Called with every message the webview posts. */
   onMessage: (msg: unknown) => void;
   state: unknown;
+  /** Called with every state the webview saves (`setState`). */
+  onState?: (state: unknown) => void;
 }
 
 export const shim: Shim = { onMessage: () => {}, state: undefined };
 export const newTaskShim: Shim = { onMessage: () => {}, state: undefined };
+export const reviewShim: Shim = { onMessage: () => {}, state: undefined };
 
 let current = shim;
 
@@ -22,7 +25,7 @@ let current = shim;
   return {
     postMessage: (msg: unknown) => channel.onMessage(msg),
     getState: () => channel.state,
-    setState: (s: unknown) => { channel.state = s; },
+    setState: (s: unknown) => { channel.state = s; channel.onState?.(s); },
   };
 };
 

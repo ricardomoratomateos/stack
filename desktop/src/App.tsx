@@ -9,6 +9,7 @@ import { SidebarHost } from './sidebar/SidebarHost';
 import { installHint, toSidebarState, translate, type Action } from './sidebar/bridge';
 import { loadDefaultProvider, saveDefaultProvider } from './sidebar/prefs';
 import { NewTaskHost } from './newtask/NewTaskHost';
+import { ReviewHost } from './review/ReviewHost';
 import { toNewTaskInit, translateNewTask } from './newtask/bridge';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -66,6 +67,8 @@ export function App() {
   const [notice, setNotice] = useState('');
   const [defaultProvider, setDefaultProvider] = useState<ProviderId | undefined>(loadDefaultProvider);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  /** The worktree whose Review tab is showing in the centre (instead of its terminal). */
+  const [reviewId, setReviewId] = useState<string | undefined>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const postToNewTask = useRef<((msg: NewTaskExtMessage) => void) | null>(null);
   const registerPost = useCallback((post: ((msg: NewTaskExtMessage) => void) | null) => { postToNewTask.current = post; }, []);
@@ -163,10 +166,14 @@ export function App() {
     const repo = latest.current.repoRoot;
     if (repo) history.current[repo] = mruTouch(history.current[repo] ?? [], id);
   }, []);
+  const closeReview = useCallback(() => setReviewId(undefined), []);
   const select = useCallback((id: string, index?: number) => {
     touch(id);
     setSelectedId(id);
-    if (index !== undefined) setRemembered((r) => ({ ...r, [id]: index }));
+    if (index !== undefined) {
+      setRemembered((r) => ({ ...r, [id]: index }));
+      setReviewId((r) => (r === id ? undefined : r)); // a session tab returns to the terminal
+    }
   }, [touch]);
   useEffect(() => { if (view && selected) { latest.current.repoRoot = view.repoRoot; touch(selected.wt.id); } }, [view?.repoRoot, selected?.wt.id, touch]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -420,6 +427,10 @@ export function App() {
         case 'newTask':
           setNewTaskOpen(true);
           break;
+        case 'review':
+          select(a.worktreeId);
+          setReviewId(a.worktreeId);
+          break;
         case 'open':
           invoke('open_url', { url: a.url }).catch((e) => setNotice(String(e)));
           break;
@@ -501,6 +512,7 @@ export function App() {
     );
   }
 
+  const reviewing = !!selected && reviewId === selected.wt.id;
   const rows = selected ? sessionRows(selected.wt, commands(selected.wt.id)) : [];
   const managerRows = view.control ? sessionRows(view.control.wt, commands(view.control.wt.id)) : [];
   const resizeTo = (key: 'sidebar' | 'manager' | 'lines', v: number) => setLayout((l) => resize(l, l.mode, key, v));
@@ -573,13 +585,18 @@ export function App() {
                   <nav className="tabs" aria-label={`Sessions of ${nameOf(selected.wt)}`} onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'session'))}>
                     <span className="tabs-title">{selected.name}</span>
                     {rows.map((r) => (
-                      <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === selectedIndex || undefined} onClick={() => select(selected.wt.id, r.index)} title={[r.kind === 'agent' ? stateWord(r.state) : r.detail, r.index === selectedIndex ? 'Double-click to maximize' : ''].filter(Boolean).join(' · ') || undefined}>
+                      <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={(!reviewing && r.index === selectedIndex) || undefined} onClick={() => select(selected.wt.id, r.index)} title={[r.kind === 'agent' ? stateWord(r.state) : r.detail, r.index === selectedIndex ? 'Double-click to maximize' : ''].filter(Boolean).join(' · ') || undefined}>
                         <StatusDot state={r.state} size="sm" />
                         {r.name}
                         {maximized === 'session' && r.index === selectedIndex && <span className="max-badge" title={maxTitle}>maximized</span>}
                       </button>
                     ))}
+                    <button type="button" className="tab tab-review" data-selected={reviewing || undefined} onClick={() => setReviewId(selected.wt.id)} title="Review the changes and comment">
+                      <i className="codicon codicon-git-compare" aria-hidden="true" />
+                      Review
+                    </button>
                   </nav>
+                  <div className="centre-body">
                   <div className="term-host">
                     <SessionView
                       resolved={centre}
@@ -587,6 +604,8 @@ export function App() {
                         ? <><p>No sessions in this worktree.</p><button type="button" onClick={() => void startAgent(selected.wt.id)}>Start an agent</button></>
                         : 'Connecting…'}
                     />
+                  </div>
+                  {reviewing && <ReviewHost key={selected.wt.id} worktree={selected.wt} style={style} api={api} onClose={closeReview} onNotice={setNotice} />}
                   </div>
                 </>
               ) : (
