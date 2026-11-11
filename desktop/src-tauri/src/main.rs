@@ -22,6 +22,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::log_line,
             commands::subscribe_output,
             commands::ack_output,
             commands::connect,

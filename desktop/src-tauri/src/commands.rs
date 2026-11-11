@@ -399,3 +399,25 @@ mod tests {
         assert!(!openable("-a Calculator"));
     }
 }
+
+/// One line from the webview into `~/Library/Logs/Stack/app.log` (the bundled app has no console).
+#[tauri::command]
+pub fn log_line(level: String, message: String) {
+    use std::io::Write;
+    let Some(home) = std::env::var_os("HOME") else { return };
+    let dir = std::path::Path::new(&home).join("Library/Logs/Stack");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join("app.log");
+    // keep it small: start over past 1 MiB
+    if std::fs::metadata(&path).map(|m| m.len() > 1 << 20).unwrap_or(false) {
+        let _ = std::fs::remove_file(&path);
+    }
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+    let level: String = level.chars().filter(|c| c.is_ascii_alphanumeric()).take(8).collect();
+    let message: String = message.chars().take(4000).collect();
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{secs:.3} {level} {message}");
+    }
+}

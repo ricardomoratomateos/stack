@@ -1,3 +1,4 @@
+import { log } from '../log';
 import { useEffect, useMemo, useState } from 'react';
 import { useStackd } from '../stackd/useStackd';
 import { useTerminals } from '../terminals';
@@ -33,12 +34,16 @@ export function useSessionPane(target: Target | null, onSession?: (worktreeId: s
     let live = true;
     void (async () => {
       try {
+        log('info', 'attach', key);
         const t = await api.command<{ socket?: string; session: string }>('attachTarget', { worktreeId: target.worktreeId, windowIndex: target.index });
-        await connect(t.socket ?? null, t.session);
+        log('info', 'attach target', key, t.session);
+        const list = await connect(t.socket ?? null, t.session);
+        log('info', 'connected', key, list.map((p) => `${p.id}@${p.window_index}`).join(','), live ? '' : '(stale)');
         if (!live) return;
         onSession?.(target.worktreeId, t.session);
         setAttached({ key, session: t.session });
       } catch (e) {
+        log('error', 'attach failed', key, e);
         if (live) setAttached({ key, error: String(e).replace(/^Error: /, '') });
       }
     })();
