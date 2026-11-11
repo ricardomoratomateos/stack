@@ -133,8 +133,11 @@ export class TerminalRegistry {
       el.replaceChildren();
       if (e.el) this.detach(e);
       e.el = el;
-      e.term.open(el);
+      // xterm ignores a second `open()`: move its existing element into the new host instead.
+      if (e.term.element) el.appendChild(e.term.element);
+      else e.term.open(el);
       this.enableWebgl(e);
+      e.term.refresh(0, e.term.rows - 1);
       let raf = 0;
       e.observer = new ResizeObserver(() => {
         cancelAnimationFrame(raf);

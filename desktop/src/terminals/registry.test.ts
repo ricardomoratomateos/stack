@@ -11,6 +11,15 @@ vi.mock('@xterm/xterm', () => ({
     onBinary() {}
     onResize() {}
     onScroll() {}
+    rows = 24;
+    element?: { host?: unknown };
+    opens = 0;
+    open(host: unknown) {
+      this.opens++;
+      this.element = { host };
+    }
+    refresh() {}
+    focus() {}
     write(data: Uint8Array, cb?: () => void) {
       writes.push({ id: this.id, data });
       cb?.();
@@ -71,5 +80,24 @@ describe('TerminalRegistry output', () => {
     (api.capture as ReturnType<typeof vi.fn>).mockClear();
     reg.feed('%1', new Uint8Array(MAX_QUEUED + 1));
     expect(api.capture).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('TerminalRegistry show/hide', () => {
+  it('moves the existing terminal element into a new host instead of reopening it', () => {
+    (globalThis as Record<string, unknown>).ResizeObserver ??= class { observe() {} disconnect() {} };
+    const { reg } = setup();
+    const host = () => {
+      const children: unknown[] = [];
+      return { children, replaceChildren: () => void children.splice(0), appendChild: (c: unknown) => void children.push(c) };
+    };
+    const a = host();
+    const b = host();
+    reg.show('%1', a as unknown as HTMLElement);
+    reg.hide('%1');
+    reg.show('%1', b as unknown as HTMLElement);
+    const term = (reg as unknown as { entries: Map<string, { term: { opens: number; element: unknown } }> }).entries.get('%1')!.term;
+    expect(term.opens).toBe(1);
+    expect(b.children).toEqual([term.element]);
   });
 });
