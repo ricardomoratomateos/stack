@@ -53,9 +53,24 @@ export interface LspDiagnostic {
 
 interface LspLocation { uri: string; range: LspDiagnostic['range'] }
 
-interface Running { proc: LspProcess; timer?: ReturnType<typeof setTimeout>; firstIndex: boolean }
+interface Running {
+  proc: LspProcess;
+  timer?: ReturnType<typeof setTimeout>;
+  firstIndex: boolean;
+  /** Files to re-index into a cloned index before the first answer (they differ from the base). */
+  overlay?: string[];
+  /** The main checkout's server: its finished index becomes the repo's base. */
+  main?: boolean;
+  baseRecorded?: boolean;
+  /** Building the repo's base from the main checkout on behalf of a task, which then gets its clone. */
+  baseFor?: boolean;
+}
+
+/** Past this many differing PHP files, a clone of the base is no shortcut: the task is indexed in full. */
+const MAX_OVERLAY = 1500;
 
 interface TaskState {
+  repoRoot: string;
   servers: Map<string, Running>;
   files?: Promise<string[]>;
   light: Map<string, { index: Promise<LightIndex>; done: number; total: number; ready: boolean }>;
@@ -105,7 +120,7 @@ export class CodeService {
 
   private state(task: CodeTask): TaskState {
     let s = this.tasks.get(task.id);
-    if (!s) { s = { servers: new Map(), light: new Map() }; this.tasks.set(task.id, s); }
+    if (!s) { s = { repoRoot: task.repoRoot, servers: new Map(), light: new Map() }; this.tasks.set(task.id, s); }
     return s;
   }
 
@@ -168,18 +183,24 @@ export class CodeService {
     return this.onPath('oxlint') ?? (fs.existsSync(local) ? local : undefined);
   }
 
-  private phpactorDir(taskId: string): string {
-    return path.join(this.opts.cacheDir, 'phpactor', taskId.replace(/[^A-Za-z0-9._-]/g, '_'));
+  /**
+   * Phpactor's files for a repository. Every task of the repo is served through the same `view` path, so
+   * one index fits them all: `base` is the main checkout's (built once, never written by a task), and each
+   * task gets `tasks/<id>`, an APFS clone of it (`cp -c`: instant, no disk until it diverges) where only
+   * the files that differ from the main checkout are re-indexed. One Phpactor per repo runs at a time.
+   */
+  private repoDirs(task: CodeTask): { view: string; base: string; task: string } {
+    const dir = path.join(this.opts.cacheDir, 'phpactor', phpactorRepoKey(task.repoRoot));
+    return { view: path.join(dir, 'view'), base: path.join(dir, 'base'), task: path.join(dir, 'tasks', task.id.replace(/[^A-Za-z0-9._-]/g, '_')) };
   }
 
-  private phpactorSpec(task: CodeTask): LspSpec {
+  private phpactorSpec(task: CodeTask, dir: string): LspSpec {
     const cmd = this.phpactorCommand();
     if (!cmd) throw new CodeError('PHP navigation needs Phpactor: set "phpactorPath" in ~/.config/stack/settings.json, or put phpactor.phar in ~/.config/stack/tools/.');
-    const dir = this.phpactorDir(task.id);
     const env = { XDG_CACHE_HOME: path.join(dir, 'cache'), XDG_CONFIG_HOME: path.join(dir, 'config'), XDG_DATA_HOME: path.join(dir, 'data') };
     for (const d of Object.values(env)) fs.mkdirSync(d, { recursive: true });
     const own = path.join(task.root, 'vendor', 'autoload.php');
-    const view = phpactorView(task.root, path.join(dir, 'root'));
+    const view = phpactorView(task.root, this.repoDirs(task).view);
     return {
       id: 'phpactor',
       ...cmd,
@@ -206,9 +227,8 @@ export class CodeService {
   }
 
   /** Whether this task's Phpactor index was built before (then a start only re-validates it, and it answers meanwhile). */
-  private hasPhpIndex(taskId: string): boolean {
-    const indexes = path.join(this.phpactorDir(taskId), 'cache', 'phpactor', 'index');
-    try { return fs.readdirSync(indexes).some((d) => fs.readdirSync(path.join(indexes, d)).some((f) => f.startsWith('timestamp'))); } catch { return false; }
+  private hasPhpIndex(dir: string): boolean {
+    return indexTimestamps(dir).length > 0;
   }
 
   private oxlintSpec(task: CodeTask): LspSpec | undefined {
@@ -270,15 +290,96 @@ export class CodeService {
     const existing = this.state(task).servers.get('phpactor');
     const running = existing && existing.proc.state !== 'dead'
       ? this.server(task, existing.proc.spec)
-      : this.server(task, this.phpactorSpec(task), !this.hasPhpIndex(task.id));
+      : await this.startPhpactor(task);
     const { proc } = running;
     await proc.ready;
     if (proc.state === 'dead') throw new CodeError(`Phpactor stopped: ${proc.message}`);
+    if (running.overlay) {
+      const files = running.overlay;
+      running.overlay = undefined;
+      for (const f of files) { try { proc.save(f, 'php', readTextFile(f).text); } catch { /* gone meanwhile */ } }
+      this.log(`[code] phpactor re-indexed ${files.length} changed file(s) for ${task.id}`);
+    }
+    if (running.main && proc.indexed && !running.baseRecorded) {
+      running.baseRecorded = true;
+      const head = await this.gitHead(task.repoRoot);
+      if (head) fs.writeFileSync(path.join(this.repoDirs(task).base, 'base.json'), JSON.stringify({ head }));
+    }
+    if (running.baseFor && running.baseRecorded) {
+      // The base this task was waiting for is built: switch to the task's own clone of it.
+      if (running.timer) clearTimeout(running.timer);
+      proc.stop();
+      this.state(task).servers.delete('phpactor');
+      return this.php(task, method, params, file);
+    }
+    if (running.baseFor) throw new CodeError(`Indexing PHP (once per repository)… ${proc.state === 'indexing' ? proc.message : 'starting'}`.trim());
     // The first index of a worktree takes a minute or more; until it is built there is nothing to answer from.
     if (running.firstIndex && !proc.indexed) throw new CodeError(`Indexing PHP… ${proc.state === 'indexing' ? proc.message : 'starting'}`.trim());
     running.firstIndex = false;
     if (file) proc.ensureOpen(file, 'php', readTextFile(file).text);
     return proc.request(method, params);
+  }
+
+  /** Starts the repo's Phpactor for `task`: the main checkout on the base index, a task on its clone of it. */
+  private async startPhpactor(task: CodeTask): Promise<Running> {
+    // One server per repo: they all see the same view path.
+    for (const [id, other] of this.tasks) {
+      const r = other.servers.get('phpactor');
+      if (id !== task.id && r && other.repoRoot === task.repoRoot && r.proc.state !== 'dead') {
+        if (r.timer) clearTimeout(r.timer);
+        r.proc.stop();
+        other.servers.delete('phpactor');
+        this.log(`[code] phpactor stopped for ${id} (switching to ${task.id})`);
+      }
+    }
+    const dirs = this.repoDirs(task);
+    const main = path.resolve(task.root) === path.resolve(task.repoRoot);
+    if (main) {
+      const r = this.server(task, this.phpactorSpec(task, dirs.base), !this.hasPhpIndex(dirs.base));
+      r.main = true;
+      return r;
+    }
+    const base = this.readJson<{ head?: string }>(path.join(dirs.base, 'base.json'));
+    if (!base?.head || !this.hasPhpIndex(dirs.base)) {
+      // No finished base yet: build it from the main checkout first (once per repo), then clone it for this task.
+      const r = this.server(task, this.phpactorSpec({ ...task, root: task.repoRoot }, dirs.base), true);
+      r.main = true;
+      r.baseFor = true;
+      return r;
+    }
+    const changed = await this.phpChanges(task, base.head);
+    if (changed === undefined || changed.length > MAX_OVERLAY) {
+      fs.rmSync(dirs.task, { recursive: true, force: true });
+      return this.server(task, this.phpactorSpec(task, dirs.task), true);
+    }
+    const mine = this.readJson<{ base?: string }>(path.join(dirs.task, 'clone.json'));
+    if (mine?.base !== base.head || !this.hasPhpIndex(dirs.task)) cloneIndex(dirs.base, dirs.task, base.head, this.now());
+    const r = this.server(task, this.phpactorSpec(task, dirs.task), false);
+    r.overlay = changed.map((f) => path.join(task.root, f)).filter((f) => fs.existsSync(f));
+    return r;
+  }
+
+  /** PHP files that may differ between the base index (main checkout at `baseHead`) and the task, relative to it. */
+  private async phpChanges(task: CodeTask, baseHead: string): Promise<string[] | undefined> {
+    const head = await this.gitHead(task.root);
+    if (!head) return undefined;
+    const diff = await this.run('git', ['-C', task.repoRoot, 'diff', '--name-only', '-z', baseHead, head, '--', '*.php'], task.repoRoot);
+    if (diff.code !== 0) return undefined;
+    const dirty = async (root: string) => {
+      const r = await this.run('git', ['-C', root, 'status', '--porcelain', '-z', '--untracked-files=all', '--', '*.php'], root);
+      return r.code === 0 ? r.stdout.split('\0').filter((l) => l.length > 3).map((l) => l.slice(3)) : [];
+    };
+    const files = new Set([...diff.stdout.split('\0').filter(Boolean), ...await dirty(task.root), ...await dirty(task.repoRoot)]);
+    return [...files].filter((f) => f.endsWith('.php'));
+  }
+
+  private async gitHead(root: string): Promise<string | undefined> {
+    const r = await this.run('git', ['-C', root, 'rev-parse', 'HEAD'], root);
+    return r.code === 0 ? r.stdout.trim() : undefined;
+  }
+
+  private readJson<T>(file: string): T | undefined {
+    try { return JSON.parse(fs.readFileSync(file, 'utf8')) as T; } catch { return undefined; }
   }
 
   private lightFor(task: CodeTask, file: string): Promise<LightIndex> {
@@ -370,7 +471,12 @@ export class CodeService {
   /** The task is gone: its servers and its index on disk. */
   forget(taskId: string): void {
     this.close(taskId);
-    fs.rmSync(this.phpactorDir(taskId), { recursive: true, force: true });
+    const root = path.join(this.opts.cacheDir, 'phpactor');
+    const safe = taskId.replace(/[^A-Za-z0-9._-]/g, '_');
+    let repos: string[] = [];
+    try { repos = fs.readdirSync(root); } catch { /* nothing cached */ }
+    for (const repo of repos) fs.rmSync(path.join(root, repo, 'tasks', safe), { recursive: true, force: true });
+    fs.rmSync(path.join(root, safe), { recursive: true, force: true }); // the per-task layout of before
   }
 
   dispose(): void {
@@ -429,4 +535,38 @@ function trackedPhp(root: string): string[] {
   } catch {
     return [];
   }
+}
+
+/** The directory name of a repository's Phpactor files under the cache. */
+export const phpactorRepoKey = (repoRoot: string): string =>
+  `${path.basename(repoRoot).replace(/[^A-Za-z0-9._-]/g, '_')}-${shortHash(path.resolve(repoRoot))}`;
+
+const shortHash = (s: string): string => {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return (h >>> 0).toString(16).padStart(8, '0');
+};
+
+/** The `timestamp*` files of the Phpactor indexes under an XDG dir (one per project id). */
+function indexTimestamps(dir: string): string[] {
+  const indexes = path.join(dir, 'cache', 'phpactor', 'index');
+  try {
+    return fs.readdirSync(indexes).flatMap((d) => fs.readdirSync(path.join(indexes, d)).filter((f) => f.startsWith('timestamp')).map((f) => path.join(indexes, d, f)));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The task's index as an APFS clone of the base (`cp -c`), stamped as built now: Phpactor re-indexes a file
+ * only when its ctime is past the index's timestamp, and a task's checkout is newer than the base, so
+ * without the stamp it would re-index everything. The files that really differ are re-indexed by hand.
+ */
+export function cloneIndex(base: string, task: string, baseHead: string, now: number): void {
+  fs.rmSync(task, { recursive: true, force: true });
+  fs.mkdirSync(task, { recursive: true });
+  execFileSync('cp', ['-c', '-R', path.join(base, 'cache'), path.join(task, 'cache')]);
+  for (const d of ['config', 'data']) fs.mkdirSync(path.join(task, d), { recursive: true });
+  for (const stamp of indexTimestamps(task)) fs.writeFileSync(stamp, String(Math.floor(now / 1000)));
+  fs.writeFileSync(path.join(task, 'clone.json'), JSON.stringify({ base: baseHead }));
 }

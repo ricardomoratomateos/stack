@@ -241,6 +241,12 @@ export class LspProcess {
     this.notify('textDocument/didOpen', { textDocument: { uri: pathToFileURL(file).href, languageId, version: 1, text } });
   }
 
+  /** Makes the server index `file` as it is now (Phpactor indexes a document on save). */
+  save(file: string, languageId: string, text: string): void {
+    this.ensureOpen(file, languageId, text);
+    this.notify('textDocument/didSave', { textDocument: { uri: pathToFileURL(file).href }, text });
+  }
+
   /**
    * The diagnostics for a document. Servers push them some time after `didOpen`; this waits for the first
    * batch, or gives up after `timeoutMs` with none.

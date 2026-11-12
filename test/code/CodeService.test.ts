@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { CodeError, CodeService, NAVIGATION_METHODS, type CodeOptions, type CodeTask } from '../../src/code/CodeService';
+import { CodeError, CodeService, phpactorRepoKey, NAVIGATION_METHODS, type CodeOptions, type CodeTask } from '../../src/code/CodeService';
 import { LspProcess } from '../../src/code/LspProcess';
 import { PathRefused } from '../../src/code/pathGuard';
 import { fakeSpawn, settle } from './fakeLsp';
@@ -103,6 +103,21 @@ describe('CodeService', () => {
     cacheDir: path.join(cfg, 'cache'), toolsDir: path.join(cfg, 'tools'), spawn: spawned.spawn, pathEnv: () => '', idleMs: 600_000, ...over,
   });
   const uri = (rel: string): string => pathToFileURL(path.join(wt, rel)).href;
+  const phpRepo = (): string => path.join(cfg, 'cache', 'phpactor', phpactorRepoKey(repo));
+  const baseIndex = (stamp = '100') => {
+    const index = path.join(phpRepo(), 'base', 'cache', 'phpactor', 'index', 'view-abc');
+    fs.mkdirSync(index, { recursive: true });
+    fs.writeFileSync(path.join(index, 'timestamp.v3'), stamp);
+    fs.writeFileSync(path.join(index, 'class_1'), 'record');
+    fs.writeFileSync(path.join(phpRepo(), 'base', 'base.json'), JSON.stringify({ head: 'base-sha' }));
+  };
+  const git = (diff: string, dirty = '') => vi.fn(async (_cmd: string, args: string[]) => {
+    if (args.includes('rev-parse')) return { code: 0, stdout: 'task-sha\n', stderr: '' };
+    if (args.includes('diff')) return { code: 0, stdout: diff, stderr: '' };
+    if (args.includes('status')) return { code: 0, stdout: dirty, stderr: '' };
+    return { code: 1, stdout: '', stderr: '' };
+  });
+
 
   beforeEach(() => {
     tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'stack-codesvc-')));
@@ -159,13 +174,14 @@ describe('CodeService', () => {
   it('starts Phpactor on the first PHP navigation, with its index outside the repository and auto-config off', async () => {
     const svc = make();
     await expect(svc.lsp(task, 'php', 'textDocument/definition', { textDocument: { uri: uri('src/A.php') }, position: { line: 1, character: 7 } }))
-      .rejects.toThrow('Indexing PHP… starting');
+      .rejects.toThrow('Indexing PHP (once per repository)… starting');
     expect(spawned.calls).toHaveLength(1);
     const call = spawned.calls[0];
     expect(call.command).toBe('php');
     expect(call.args).toEqual(['-d', 'memory_limit=-1', path.join(cfg, 'tools', 'phpactor.phar'), 'language-server']);
-    expect(call.cwd).toBe(path.join(cfg, 'cache', 'phpactor', 't1', 'root')); // a view of symlinks into the worktree
-    for (const key of ['XDG_CACHE_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME']) expect(call.env[key]).toContain(path.join(cfg, 'cache', 'phpactor', 't1'));
+    expect(call.cwd).toBe(path.join(phpRepo(), 'view')); // a view of symlinks into the worktree, shared by the repo's tasks
+    // No base index yet: it is built from the main checkout first, for every task of the repo to clone.
+    for (const key of ['XDG_CACHE_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME']) expect(call.env[key]).toContain(path.join(phpRepo(), 'base'));
     const init = (spawned.servers[0].sent('initialize')[0].params as { initializationOptions: Record<string, unknown> }).initializationOptions;
     expect(init['language_server_configuration.auto_config']).toBe(false);
     expect(init['language_server.enable_trust_check']).toBe(false);
@@ -176,30 +192,56 @@ describe('CodeService', () => {
   });
 
   it('says "indexing" until the first index is built, then answers', async () => {
-    const svc = make();
-    const ask = () => svc.lsp(task, 'php', 'textDocument/definition', { textDocument: { uri: uri('src/A.php') }, position: { line: 1, character: 7 } });
+    // The main checkout itself: its index is the repo's base.
+    fs.mkdirSync(path.join(repo, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'src', 'A.php'), '<?php\nclass A {}\n');
+    const main: CodeTask = { id: 'main', root: repo, repoRoot: repo };
+    const muri = pathToFileURL(path.join(repo, 'src', 'A.php')).href;
+    const svc = make({ run: git('') });
+    const ask = () => svc.lsp(main, 'php', 'textDocument/definition', { textDocument: { uri: muri }, position: { line: 1, character: 7 } });
     await expect(ask()).rejects.toThrow('Indexing PHP… starting');
     const server = spawned.servers[0];
     server.notify('$/progress', { token: 'i', value: { kind: 'begin', title: 'Indexing workspace' } });
     server.notify('$/progress', { token: 'i', value: { kind: 'report', message: '5/10' } });
     await expect(ask()).rejects.toThrow('Indexing PHP… 5/10');
-    expect(svc.status(task)).toEqual([expect.objectContaining({ server: 'phpactor', state: 'indexing', message: '5/10' })]);
+    expect(svc.status(main)).toEqual([expect.objectContaining({ server: 'phpactor', state: 'indexing', message: '5/10' })]);
     expect(server.sent('textDocument/definition')).toHaveLength(0);
     server.notify('$/progress', { token: 'i', value: { kind: 'end' } });
-    server.answer = () => ({ uri: uri('src/A.php'), range: {} });
-    expect(await ask()).toEqual({ uri: uri('src/A.php'), range: {} });
+    server.answer = () => ({ uri: muri, range: {} });
+    expect(await ask()).toEqual({ uri: muri, range: {} });
+    expect(JSON.parse(fs.readFileSync(path.join(phpRepo(), 'base', 'base.json'), 'utf8'))).toEqual({ head: 'task-sha' }); // recorded as the base
     expect(server.sent('textDocument/didOpen')).toHaveLength(1);
     expect((server.sent('textDocument/didOpen')[0].params as { textDocument: { text: string } }).textDocument.text).toContain('class A');
     expect(spawned.calls).toHaveLength(1); // the same server all along
   });
 
-  it('answers straight away when the task already has an index', async () => {
-    const index = path.join(cfg, 'cache', 'phpactor', 't1', 'cache', 'phpactor', 'index', 't1-abc');
+  it('builds the base from the main checkout for the first task, then switches the task to its clone', async () => {
+    const svc = make({ run: git('src/A.php\0') });
+    const ask = () => svc.lsp(task, 'php', 'workspace/symbol', { query: 'A' });
+    await expect(ask()).rejects.toThrow('Indexing PHP (once per repository)');
+    const builder = spawned.servers[0];
+    expect(spawned.calls[0].env.XDG_CACHE_HOME).toBe(path.join(phpRepo(), 'base', 'cache'));
+    // Phpactor writes its index; here it is faked.
+    const index = path.join(phpRepo(), 'base', 'cache', 'phpactor', 'index', 'view-abc');
     fs.mkdirSync(index, { recursive: true });
     fs.writeFileSync(path.join(index, 'timestamp.v3'), '1');
-    const svc = make();
+    builder.notify('$/progress', { token: 'i', value: { kind: 'begin', title: 'Indexing workspace' } });
+    builder.notify('$/progress', { token: 'i', value: { kind: 'end' } });
+    expect(await ask()).toBeNull();
+    expect(builder.killed).toBe(true);
+    expect(spawned.calls[1].env.XDG_CACHE_HOME).toBe(path.join(phpRepo(), 'tasks', 't1', 'cache'));
+    expect(spawned.servers[1].sent('textDocument/didSave')).toHaveLength(1);
+    svc.dispose();
+  });
+
+  it('answers straight away when the task already has its clone of the base', async () => {
+    baseIndex();
+    const svc = make({ run: git('') });
     expect(await svc.lsp(task, 'php', 'workspace/symbol', { query: 'A' })).toBeNull();
     svc.dispose();
+    const again = make({ run: git('') });
+    expect(await again.lsp(task, 'php', 'workspace/symbol', { query: 'A' })).toBeNull();
+    again.dispose();
   });
 
   it('finds Phpactor: the setting, then PATH, then Stack\'s tools; and says how to get it when there is none', async () => {
@@ -238,10 +280,50 @@ describe('CodeService', () => {
     expect(spawned.servers[1].killed).toBe(true);
   });
 
+  describe('one index per repo', () => {
+    it('clones the base for a task, stamps it as built now and re-indexes only what differs', async () => {
+      baseIndex();
+      fs.writeFileSync(path.join(wt, 'src', 'B.php'), '<?php\nclass B {}\n');
+      const run = git('src/A.php\0src/Gone.php\0', ' M src/B.php\0');
+      const svc = make({ run, now: () => 5_000_000 });
+      expect(await svc.lsp(task, 'php', 'workspace/symbol', { query: 'A' })).toBeNull(); // answers at once: no first index
+      const clone = path.join(phpRepo(), 'tasks', 't1');
+      expect(fs.readFileSync(path.join(clone, 'cache', 'phpactor', 'index', 'view-abc', 'class_1'), 'utf8')).toBe('record');
+      expect(fs.readFileSync(path.join(clone, 'cache', 'phpactor', 'index', 'view-abc', 'timestamp.v3'), 'utf8')).toBe('5000');
+      expect(fs.readFileSync(path.join(phpRepo(), 'base', 'cache', 'phpactor', 'index', 'view-abc', 'timestamp.v3'), 'utf8')).toBe('100'); // base untouched
+      const saved = spawned.servers[0].sent('textDocument/didSave').map((m) => (m.params as { textDocument: { uri: string } }).textDocument.uri);
+      expect(saved.sort()).toEqual([uri('src/A.php'), uri('src/B.php')]); // the deleted file is skipped
+      expect(spawned.calls[0].env.XDG_CACHE_HOME).toBe(path.join(clone, 'cache'));
+      svc.dispose();
+    });
+
+    it('runs one Phpactor per repo: opening another task stops the first', async () => {
+      baseIndex();
+      const other = path.join(repo, '.worktrees', 't2');
+      fs.mkdirSync(path.join(other, 'src'), { recursive: true });
+      const svc = make({ run: git('') });
+      await svc.lsp(task, 'php', 'workspace/symbol', { query: 'A' });
+      await svc.lsp({ id: 't2', root: other, repoRoot: repo }, 'php', 'workspace/symbol', { query: 'A' });
+      expect(spawned.servers[0].killed).toBe(true);
+      expect(spawned.servers).toHaveLength(2);
+      svc.dispose();
+    });
+
+    it('falls back to a full index when too much differs from the base', async () => {
+      baseIndex();
+      const many = Array.from({ length: 1600 }, (_, i) => `src/F${i}.php`).join('\0');
+      const svc = make({ run: git(many) });
+      await expect(svc.lsp(task, 'php', 'workspace/symbol', { query: 'A' })).rejects.toThrow('Indexing PHP');
+      expect(fs.existsSync(path.join(phpRepo(), 'tasks', 't1', 'clone.json'))).toBe(false);
+      svc.dispose();
+    });
+  });
+
   it('forgets a deleted task: its servers and its index on disk', async () => {
-    const svc = make();
-    await expect(svc.lsp(task, 'php', 'workspace/symbol', { query: 'A' })).rejects.toThrow('Indexing');
-    const dir = path.join(cfg, 'cache', 'phpactor', 't1');
+    baseIndex();
+    const svc = make({ run: git('') });
+    await svc.lsp(task, 'php', 'workspace/symbol', { query: 'A' });
+    const dir = path.join(phpRepo(), 'tasks', 't1');
     expect(fs.existsSync(dir)).toBe(true);
     svc.forget('t1');
     expect(spawned.servers[0].killed).toBe(true);
@@ -251,10 +333,11 @@ describe('CodeService', () => {
   });
 
   it('keeps a task id from naming a directory outside the cache', async () => {
-    const svc = make();
+    baseIndex();
+    const svc = make({ run: git('') });
     const odd: CodeTask = { ...task, id: '../../escape' };
-    await expect(svc.lsp(odd, 'php', 'workspace/symbol', {})).rejects.toThrow('Indexing');
-    expect(spawned.calls[0].env.XDG_CACHE_HOME).toContain(path.join(cfg, 'cache', 'phpactor', '.._.._escape'));
+    await svc.lsp(odd, 'php', 'workspace/symbol', {});
+    expect(spawned.calls[0].env.XDG_CACHE_HOME).toContain(path.join(phpRepo(), 'tasks', '.._.._escape'));
     svc.forget(odd.id);
     expect(fs.existsSync(cfg)).toBe(true);
   });
