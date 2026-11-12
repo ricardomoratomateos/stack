@@ -6,7 +6,7 @@ import { claudeMcpArgs, type BridgeCommand } from '../../mcp/workerMcp';
 /** The Stack MCP bridge to hand each worker, once it is installed; undefined until then. */
 export type WorkerMcpSource = () => BridgeCommand | undefined;
 
-/** Anything exposing the extension configuration (structural ConfigManager). */
+/** Anything exposing Stack's configuration (stackd's NodeConfig, or a test double). */
 export interface ConfigSource {
   get(): StackConfig;
 }

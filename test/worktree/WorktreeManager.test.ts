@@ -9,7 +9,7 @@ import { IFileSystem } from '../../src/ports/IFileSystem';
 import { IWorktreeRepository } from '../../src/ports/IWorktreeRepository';
 import { Worktree, DebugTemplate, StackConfig } from '../../src/types';
 import type { PortAllocator } from '../../src/worktree/portAllocator';
-import type { ConfigManager } from '../../src/config/ConfigManager';
+import type { ConfigSource } from '../../src/config/ConfigSource';
 import type { AgentSessionManager } from '../../src/session/AgentSessionManager';
 
 // ---------- test doubles ----------
@@ -102,7 +102,7 @@ function makeGitStub(entries: GitWorktreeEntry[] = []): IGitPort & {
   };
 }
 
-function makeConfigStub(overrides: Partial<StackConfig> = {}): ConfigManager {
+function makeConfigStub(overrides: Partial<StackConfig> = {}): ConfigSource {
   return {
     get: (): StackConfig => ({
       worktreesDirectory: './zer',
@@ -123,7 +123,7 @@ function makeConfigStub(overrides: Partial<StackConfig> = {}): ConfigManager {
         ? { debugTemplate: JSON.parse(JSON.stringify(overrides.debugTemplate)) }
         : {}),
     }),
-  } as ConfigManager;
+  } as ConfigSource;
 }
 
 function makePortAllocatorStub(port = 9899): PortAllocator {

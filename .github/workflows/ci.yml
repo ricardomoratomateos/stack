@@ -25,10 +25,8 @@ jobs:
 
       - run: npm ci
 
-      # Both configs: tsconfig.json covers the extension host, and
-      # tsconfig.webview.json the React views. The webview one already existed
-      # but no script or job had ever invoked it, so every line of it was
-      # effectively unchecked.
+      # Both configs: tsconfig.json covers stackd and the MCP bridge, and
+      # tsconfig.webview.json the React views the desktop app shares.
       - run: npm run typecheck
 
       # No lint step: `npm run lint` has never been runnable — there is no

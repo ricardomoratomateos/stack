@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFS, PROJECT_DEFS, USER_DEFS, repoValueOf, SHOWN, isModified, titleOf, valueOf } from './schema';
 
 describe('settings schema', () => {
-  it('has every shown setting, from package.json', () => {
+  it('has every shown setting, from settings.json', () => {
     expect(DEFS.map((d) => d.key)).toEqual([...SHOWN]);
     const p = DEFS.find((d) => d.key === 'defaultProvider')!;
     expect(p.enum).toContain('claude');

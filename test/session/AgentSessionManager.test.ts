@@ -1,13 +1,34 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as vscode from 'vscode';
-import { window, resetVscodeMock, makeTerminal, FakeMemento, TerminalLocation } from '../__mocks__/vscode';
-import type { MockTerminal } from '../__mocks__/vscode';
-import { VsCodeAgentSessionManager as AgentSessionManager } from '../../src/session/VsCodeAgentSessionManager';
+import { resetVscodeMock, makeTerminal, FakeMemento } from '../__mocks__/vscode';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import { AgentSessionManager as CoreAgentSessionManager } from '../../src/session/AgentSessionManager';
+import { TmuxManager } from '../../src/session/TmuxManager';
+import type { SessionTabsMode } from '../../src/session/terminalHost';
+import type { KeyValueStore } from '../../src/core/KeyValueStore';
+import { headlessTerminals } from '../../src/daemon/headless';
 import { ProviderFactory } from '../../src/providers/ProviderFactory';
 import type { ConfigSource } from '../../src/providers/claude/ClaudeProvider';
 import type { ISessionManager } from '../../src/ports/ISessionManager';
 import type { AgentSessionState, Worktree } from '../../src/types';
 import type { ProviderId } from '../../src/ports/IAgentProvider';
+
+/** The session model as stackd hosts it: nothing drawn, the tmux windows are the real thing. */
+class AgentSessionManager extends CoreAgentSessionManager<{ show(): void }> {
+  constructor(
+    providers: ProviderFactory,
+    store: KeyValueStore,
+    tmux: ISessionManager = new TmuxManager(),
+    pathExists: (p: string) => boolean = (p) => fs.existsSync(p),
+    hostname: string = os.hostname(),
+    sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+    sessionTabs: () => SessionTabsMode = () => 'single',
+    promptPrefix: () => string = () => '',
+  ) {
+    super(providers, store, tmux, pathExists, hostname, sleep, sessionTabs, promptPrefix, headlessTerminals());
+  }
+}
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -500,14 +521,6 @@ describe('launch', () => {
     await mgr.launch(wt);
     expect(getTerminalsChanges()).toBe(1);
   });
-
-  it('creates and shows the viewer terminal', async () => {
-    const { mgr } = create();
-    const viewer = await mgr.launch(wt) as unknown as MockTerminal;
-    expect(window.createTerminal).toHaveBeenCalledTimes(1);
-    expect(viewer.show).toHaveBeenCalled();
-    expect(mgr.getViewer('wt-1')).toBe(viewer);
-  });
 });
 
 describe('launch command line', () => {
@@ -551,17 +564,6 @@ describe('launch command line', () => {
     ]);
     await mgr.launch(wt);
     expectSubmitted(stub, `${SESSION}:1`, 'Check the skill first.');
-  });
-
-  it('shows the viewer before waiting on the agent, so its boot is watched rather than waited out', async () => {
-    const { mgr, stub } = create();
-    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
-      { index: 1, name: 'claude', command: 'node' },
-    ]);
-    await mgr.launch(wt, { prompt: 'go' });
-    const shown = window.createTerminal.mock.invocationCallOrder[0];
-    const pasted = (stub.paste as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
-    expect(shown).toBeLessThan(pasted);
   });
 
   it('waits while the pane is still the shell that launches the agent', async () => {
@@ -782,188 +784,9 @@ describe('launch command line', () => {
 
 // ── openTerminal ──────────────────────────────────────────────────────────────
 
-describe('openTerminal', () => {
-  it('creates a shell window, selects it, shows the viewer, fires terminalsChange only', async () => {
-    const { mgr, stub, stateEvents, getTerminalsChanges } = create();
-    (stub.newWindow as ReturnType<typeof vi.fn>).mockResolvedValue(2);
-    const viewer = await mgr.openTerminal(wt) as unknown as MockTerminal;
-    expect(stub.ensureSession).toHaveBeenCalledWith(SESSION, wt.path);
-    expect(stub.newWindow).toHaveBeenCalledWith(SESSION, 'shell', wt.path);
-    expect(stub.selectWindow).toHaveBeenCalledWith(SESSION, 2);
-    expect(stub.respawnWindow).not.toHaveBeenCalled();
-    expect(mgr.getSessions('wt-1')).toEqual([{ name: 'shell', kind: 'shell', state: 'idle', index: 2 }]);
-    expect(viewer.show).toHaveBeenCalled();
-    expect(stateEvents).toEqual([]);
-    expect(getTerminalsChanges()).toBe(1);
-  });
-});
-
 // ── viewer lifecycle ──────────────────────────────────────────────────────────
 
-describe('viewer lifecycle', () => {
-  it('getOrCreateViewer reuses a live viewer, recreates an exited one', async () => {
-    const { mgr } = create();
-    const first = await mgr.getOrCreateViewer(wt) as unknown as MockTerminal;
-    const again = await mgr.getOrCreateViewer(wt);
-    expect(again).toBe(first);
-    expect(window.createTerminal).toHaveBeenCalledTimes(1);
-
-    first.exitStatus = { code: 0 };
-    const recreated = await mgr.getOrCreateViewer(wt);
-    expect(recreated).not.toBe(first);
-    expect(window.createTerminal).toHaveBeenCalledTimes(2);
-  });
-
-  it('getWorktreeIdForTerminal reverse-maps a viewer to its worktree, undefined for strangers', async () => {
-    const { mgr } = create();
-    const viewer = await mgr.getOrCreateViewer(wt);
-    expect(mgr.getWorktreeIdForTerminal(viewer)).toBe(wt.id);
-    expect(mgr.getWorktreeIdForTerminal({} as never)).toBeUndefined();
-  });
-
-  it('getWorktreeIdForTerminalName reverse-maps by the label VS Code shows', async () => {
-    // The image-drop catcher only ever sees a tab label, never the terminal.
-    const { mgr } = create();
-    await mgr.launch(wt);
-    const viewer = mgr.getViewer('wt-1')!;
-    expect(mgr.getWorktreeIdForTerminalName(viewer.name)).toBe('wt-1');
-    expect(mgr.getWorktreeIdForTerminalName('some other tab')).toBeUndefined();
-  });
-
-  it('viewer terminal runs tmux attach directly, no shell, in the Editor area (no exec $SHELL fallback)', async () => {
-    const { mgr } = create();
-    const viewer = await mgr.getOrCreateViewer(wt) as unknown as MockTerminal;
-    expect(viewer.creationOptions).toEqual({
-      name: 'feat/login',
-      cwd: wt.path,
-      location: TerminalLocation.Editor,
-      shellPath: 'tmux',
-      // Exact target: a bare name would also match a view session by prefix.
-      shellArgs: ['attach-session', '-t', `=${SESSION}`],
-    });
-    expect(JSON.stringify(viewer.creationOptions)).not.toContain('exec $SHELL');
-  });
-
-  it('viewer name uses alias over branch and appends the window name when given', async () => {
-    const { mgr } = create();
-    const aliased = { ...wt, alias: 'login-work' };
-    const viewer = await mgr.getOrCreateViewer(aliased, 'claude') as unknown as MockTerminal;
-    expect(viewer.name).toBe('login-work — claude');
-  });
-
-  it('caps a sentence-long alias so the tab cannot swallow the tab bar', async () => {
-    const { mgr } = create();
-    const essay = { ...wt, alias: '[Shop] Al marcar un pedido como enviado, el descuento se pierde al recalcular el total.' };
-    const viewer = await mgr.getOrCreateViewer(essay) as unknown as MockTerminal;
-    expect(viewer.name).toBe('[Shop] Al marcar un pedido como…');
-    expect(viewer.name.length).toBeLessThan(essay.alias.length);
-  });
-
-  it('leaves an alias that already fits untouched (no stray ellipsis)', async () => {
-    const { mgr } = create();
-    const exact = { ...wt, alias: 'x'.repeat(32) };
-    const viewer = await mgr.getOrCreateViewer(exact) as unknown as MockTerminal;
-    expect(viewer.name).toBe('x'.repeat(32));
-  });
-
-  it('reconnect reclaims a viewer named with the CAPPED label (they must agree)', async () => {
-    const stub = makeStub();
-    (stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValue(true);
-    (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
-      { index: 1, name: 'claude', title: '' },
-    ]);
-    const mgr = new AgentSessionManager(makeFactory(), new FakeMemento() as unknown as vscode.Memento, stub, () => true, 'Test-Host.local');
-    const essay = { ...wt, alias: '[Shop] Al marcar un pedido como enviado, el descuento se pierde al recalcular el total.' };
-    // A viewer VSCode restored after a reload, carrying the capped name.
-    const restored = makeTerminal({ name: '[Shop] Al marcar un pedido como…' });
-    window.terminals = [restored as never];
-    await mgr.reconnect([essay]);
-    expect(mgr.getViewer(essay.id)).toBe(restored as never);
-  });
-
-  it('attaches WITHOUT a cwd when the worktree directory is missing (avoids the does-not-exist launch error)', async () => {
-    const stub = makeStub();
-    // pathExists → false: the worktree dir is gone but its tmux session may still be alive.
-    const mgr = new AgentSessionManager(makeFactory(), new FakeMemento() as unknown as vscode.Memento, stub, () => false);
-    const viewer = await mgr.getOrCreateViewer(wt) as unknown as MockTerminal;
-    expect(viewer.creationOptions.cwd).toBeUndefined();
-    expect(viewer.creationOptions.shellArgs).toEqual(['attach-session', '-t', `=${SESSION}`]);
-  });
-
-  it('uses fs.existsSync by default (no injected pathExists) — falls back for a missing dir', async () => {
-    const stub = makeStub();
-    const mgr = new AgentSessionManager(makeFactory(), new FakeMemento() as unknown as vscode.Memento, stub);
-    // wt.path is a fixture path that does not exist on disk → default fs.existsSync is false.
-    const viewer = await mgr.getOrCreateViewer(wt) as unknown as MockTerminal;
-    expect(viewer.creationOptions.cwd).toBeUndefined();
-  });
-
-  it('onDidCloseTerminal removes the viewer from the map', async () => {
-    const { mgr } = create();
-    const onClose = (window.onDidCloseTerminal as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0];
-    const viewer = await mgr.getOrCreateViewer(wt);
-    onClose(viewer);
-    // Even though exitStatus is still undefined, the viewer was dropped
-    expect(mgr.getViewer('wt-1')).toBeUndefined();
-    const recreated = await mgr.getOrCreateViewer(wt);
-    expect(recreated).not.toBe(viewer);
-  });
-
-  it('onDidCloseTerminal ignores unrelated terminals', async () => {
-    const { mgr } = create();
-    const onClose = (window.onDidCloseTerminal as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0];
-    const viewer = await mgr.getOrCreateViewer(wt);
-    onClose(makeTerminal({ name: 'unrelated' }));
-    expect(mgr.getViewer('wt-1')).toBe(viewer);
-  });
-
-  it('getViewer returns undefined for exited terminals', async () => {
-    const { mgr } = create();
-    const viewer = await mgr.getOrCreateViewer(wt) as unknown as MockTerminal;
-    expect(mgr.getViewer('wt-1')).toBe(viewer);
-    viewer.exitStatus = { code: 0 };
-    expect(mgr.getViewer('wt-1')).toBeUndefined();
-  });
-
-  it('getPlainTerminal is an alias of getViewer', async () => {
-    const { mgr } = create();
-    const viewer = await mgr.getOrCreateViewer(wt);
-    expect(mgr.getPlainTerminal('wt-1')).toBe(viewer);
-  });
-
-  it('focus shows the viewer and no-ops for unknown worktrees', async () => {
-    const { mgr } = create();
-    const viewer = await mgr.getOrCreateViewer(wt) as unknown as MockTerminal;
-    viewer.show.mockClear();
-    mgr.focus('wt-1');
-    expect(viewer.show).toHaveBeenCalledTimes(1);
-    expect(() => mgr.focus('unknown')).not.toThrow();
-  });
-});
-
 // ── focusWindow ───────────────────────────────────────────────────────────────
-
-describe('focusWindow', () => {
-  it('selects the tmux window and REUSES the live viewer (never disposes it)', async () => {
-    const { mgr, stub } = create();
-    (stub.newWindow as ReturnType<typeof vi.fn>).mockResolvedValue(1);
-    const existing = await mgr.launch(wt) as unknown as MockTerminal;
-    await mgr.focusWindow(wt, 1);
-    expect(stub.selectWindow).toHaveBeenLastCalledWith(SESSION, 1);
-    // Disposing an editor-area terminal makes VSCode activate a neighbouring tab
-    // in the group, flashing a file the user never opened into view.
-    expect(existing.dispose).not.toHaveBeenCalled();
-    expect(mgr.getViewer('wt-1')).toBe(existing as unknown as vscode.Terminal);
-    expect(existing.show).toHaveBeenCalled();
-  });
-
-  it('creates a viewer without a window suffix when the window is untracked', async () => {
-    const { mgr } = create();
-    await mgr.focusWindow(wt, 9);
-    const viewer = mgr.getViewer('wt-1') as unknown as MockTerminal;
-    expect(viewer.name).toBe('feat/login');
-  });
-});
 
 // ── killWindow ────────────────────────────────────────────────────────────────
 
@@ -1021,80 +844,16 @@ describe('killWindow', () => {
 // ── closeViewer ───────────────────────────────────────────────────────────────
 
 describe('closeViewer', () => {
-  it('calls sessionManager.detachClients, then disposes once sh exits', async () => {
-    const { mgr, stub } = create();
-    const viewer = await mgr.getOrCreateViewer(wt) as unknown as MockTerminal;
-    // Simulate the sh process exiting right after the detach
-    (stub.detachClients as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-      viewer.exitStatus = { code: 0 };
-    });
-    await mgr.closeViewer('wt-1');
-    expect(stub.detachClients).toHaveBeenCalledWith(SESSION);
-    expect(viewer.dispose).toHaveBeenCalledTimes(1);
-    expect(mgr.getViewer('wt-1')).toBeUndefined();
-  });
-
-  it('polls every 30ms until the sh process exits', async () => {
-    vi.useFakeTimers();
-    const { mgr, stub } = create();
-    const viewer = await mgr.getOrCreateViewer(wt) as unknown as MockTerminal;
-    const done = mgr.closeViewer('wt-1');
-    await vi.advanceTimersByTimeAsync(30);
-    expect(viewer.dispose).not.toHaveBeenCalled();
-    viewer.exitStatus = { code: 0 };
-    await vi.advanceTimersByTimeAsync(30);
-    await done;
-    expect(stub.detachClients).toHaveBeenCalledWith(SESSION);
-    expect(viewer.dispose).toHaveBeenCalledTimes(1);
-  });
-
-  it('gives up after the ~400ms deadline and disposes anyway', async () => {
-    vi.useFakeTimers();
-    const { mgr } = create();
-    const viewer = await mgr.getOrCreateViewer(wt) as unknown as MockTerminal;
-    const done = mgr.closeViewer('wt-1');
-    await vi.advanceTimersByTimeAsync(300);
-    expect(viewer.dispose).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(200);
-    await done;
-    expect(viewer.dispose).toHaveBeenCalledTimes(1);
-    expect(mgr.getViewer('wt-1')).toBeUndefined();
-  });
-
   it('no-ops when viewer missing', async () => {
     const { mgr, stub } = create();
     await mgr.closeViewer('wt-1');
     expect(stub.detachClients).not.toHaveBeenCalled();
-  });
-
-  it('no-ops when viewer already exited', async () => {
-    const { mgr, stub } = create();
-    const viewer = await mgr.getOrCreateViewer(wt) as unknown as MockTerminal;
-    viewer.exitStatus = { code: 0 };
-    viewer.dispose.mockClear();
-    await mgr.closeViewer('wt-1');
-    expect(stub.detachClients).not.toHaveBeenCalled();
-    expect(viewer.dispose).not.toHaveBeenCalled();
   });
 });
 
 // ── killWorktreeSession / terminateSession ────────────────────────────────────
 
 describe('killWorktreeSession', () => {
-  it('kills the tmux session, disposes the viewer, clears state, fires idle', async () => {
-    const { mgr, stub, stateEvents, getTerminalsChanges } = create();
-    const viewer = await mgr.launch(wt) as unknown as MockTerminal;
-    stateEvents.length = 0;
-    const before = getTerminalsChanges();
-    await mgr.killWorktreeSession('wt-1');
-    expect(stub.killSession).toHaveBeenCalledWith(SESSION);
-    expect(viewer.dispose).toHaveBeenCalled();
-    expect(mgr.hasTerminals('wt-1')).toBe(false);
-    expect(mgr.getViewer('wt-1')).toBeUndefined();
-    expect(stateEvents).toEqual([{ worktreeId: 'wt-1', state: 'idle' }]);
-    expect(getTerminalsChanges()).toBe(before + 1);
-  });
-
   it('terminateSession swallows errors (fire-and-forget)', async () => {
     const { mgr, stub } = create();
     (stub.killSession as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('tmux gone'));
@@ -1163,16 +922,6 @@ describe('sendPromptToAgent', () => {
     live(stub, 4, 5);
     await mgr.sendPromptToAgent(wt, 'x');
     expect(stub.paste).toHaveBeenCalledWith(`${SESSION}:4`, 'x');
-  });
-
-  it('shows the viewer before submitting, which can take a few seconds of confirmation', async () => {
-    const { mgr, stub } = create();
-    seed(mgr, 'wt-1', [[3, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
-    live(stub, 3);
-    await mgr.sendPromptToAgent(wt, 'x');
-    const shown = window.createTerminal.mock.invocationCallOrder[0];
-    const pasted = (stub.paste as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
-    expect(shown).toBeLessThan(pasted);
   });
 
   it('prefers an agent at its prompt over one asking for permission', async () => {
@@ -1528,46 +1277,6 @@ describe('reconnect', () => {
       { name: 'vim', kind: 'shell', state: 'idle', index: 2 },
     ]);
     expect(stateEvents).toEqual([{ worktreeId: 'wt-1', state: 'waiting' }]);
-  });
-
-  it('claims existing VSCode terminals by label prefix (alias/branch, emoji empty by default)', async () => {
-    const { mgr } = create();
-    const restored = makeTerminal({ name: 'feat/login — claude' });
-    window.terminals.push(makeTerminal({ name: 'no-match' }), restored);
-    await mgr.reconnect([wt]);
-    expect(mgr.getViewer('wt-1')).toBe(restored);
-  });
-
-  it('does not claim exited terminals or double-claim', async () => {
-    const { mgr } = create();
-    const exited = makeTerminal({ name: 'feat/login — claude' });
-    exited.exitStatus = { code: 0 };
-    const live1 = makeTerminal({ name: 'feat/login — claude' });
-    const live2 = makeTerminal({ name: 'feat/login' });
-    window.terminals.push(exited, live1, live2);
-    await mgr.reconnect([wt]);
-    // first live match wins; the second matching terminal is left unclaimed
-    expect(mgr.getViewer('wt-1')).toBe(live1);
-  });
-
-  it('skips worktrees with no tmux session (but still claims viewers and fires terminalsChange)', async () => {
-    const { mgr, stub, getTerminalsChanges } = create();
-    (stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValue(false);
-    const restored = makeTerminal({ name: 'feat/login' });
-    window.terminals.push(restored);
-    await mgr.reconnect([wt]);
-    expect(stub.listWindows).not.toHaveBeenCalled();
-    expect(mgr.getSessions('wt-1')).toEqual([]);
-    expect(mgr.getViewer('wt-1')).toBe(restored);
-    expect(getTerminalsChanges()).toBe(1);
-  });
-
-  it('does not steal a viewer already tracked for the worktree', async () => {
-    const { mgr } = create();
-    const original = await mgr.getOrCreateViewer(wt);
-    window.terminals.push(makeTerminal({ name: 'feat/login — other' }));
-    await mgr.reconnect([wt]);
-    expect(mgr.getViewer('wt-1')).toBe(original);
   });
 
   it('restores the persisted claude state (e.g. permission) across a reload instead of waiting', async () => {
@@ -1974,14 +1683,6 @@ describe('compat API', () => {
     mgr.updateState('wt-1', 'active');
     expect(stateEvents).toEqual([]);
   });
-
-  it('dispose drops its onDidCloseTerminal listener', () => {
-    const { mgr } = create();
-    const subscription = window.onDidCloseTerminal.mock.results.at(-1)?.value as { dispose: ReturnType<typeof vi.fn> };
-    expect(subscription.dispose).not.toHaveBeenCalled();
-    mgr.dispose();
-    expect(subscription.dispose).toHaveBeenCalledTimes(1);
-  });
 });
 
 // ── shell rows labelled with what they are running ───────────────────────────
@@ -2320,7 +2021,6 @@ describe('session aliases', () => {
     expect(getTerminalsChanges()).toBe(before + 1);
   });
 });
-
 
 // ── capturePane ─────────────────────────────────────────────────────────────
 

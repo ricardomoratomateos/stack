@@ -1,4 +1,7 @@
-import pkg from '../../../package.json';
+// The settings' titles, descriptions, defaults and choices. They used to be read from the VS Code
+// extension's `contributes.configuration` in the root package.json; the extension is gone, so
+// they live here now.
+import schema from './settings.json';
 
 /** The settings the desktop app and stackd care about, in display order. */
 export const SHOWN = [
@@ -53,7 +56,7 @@ export function buildDefs(props: Record<string, Prop>): SettingDef[] {
   return out;
 }
 
-export const DEFS: SettingDef[] = buildDefs((pkg as { contributes: { configuration: { properties: Record<string, Prop> } } }).contributes.configuration.properties);
+export const DEFS: SettingDef[] = buildDefs((schema as { properties: Record<string, Prop> }).properties);
 
 /** The value in settings.json, accepting the `stack.` spelling too (as stackd does); undefined when unset or of the wrong type. */
 export function valueOf(def: SettingDef, file: Record<string, unknown>): SettingValue | undefined {

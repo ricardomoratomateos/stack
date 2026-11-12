@@ -21,10 +21,4 @@ describe('test harness smoke', () => {
     expect(m.get('k')).toEqual({ a: 1 });
   });
 
-  it('src modules importing vscode load under the mock', async () => {
-    const { ConfigManager } = await import('../src/config/ConfigManager');
-    const cfg = new ConfigManager().get();
-    expect(cfg.debugBasePort).toBe(9898);
-    expect(cfg.claudeCommand).toBe('claude');
-  });
 });

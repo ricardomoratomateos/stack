@@ -1,8 +1,6 @@
-/** `<publisher>.<name>` from package.json: what VS Code keys this extension's storage and walkthrough on. */
+/** The retired VS Code extension's `<publisher>.<name>`: what VS Code keyed its storage on (stackd's one-time import reads it). */
 export const EXTENSION_ID = 'ricardomoratomateos.stack-agents';
 export const STORE_KEY = 'stack.store';
-export const COMMENTS_KEY_PREFIX = 'stack.comments.';
-export const SIDEBAR_VIEW_ID = 'stack-sidebar';
 
 export const NOTIFY_HOOK_SCRIPT = 'notify.sh';
 export const CLAUDE_SETTINGS_PATH = '.claude/settings.json';

@@ -1,81 +1,10 @@
 const esbuild = require('esbuild');
-const fs = require('fs');
-const path = require('path');
 
 const isWatch = process.argv.includes('--watch');
 
-function copyCodeicons() {
-  const src = path.join(__dirname, 'node_modules', '@vscode', 'codicons', 'dist');
-  const dst = path.join(__dirname, 'dist');
-  fs.mkdirSync(dst, { recursive: true });
-  fs.copyFileSync(path.join(src, 'codicon.css'), path.join(dst, 'codicon.css'));
-  fs.copyFileSync(path.join(src, 'codicon.ttf'), path.join(dst, 'codicon.ttf'));
-}
+// The two Node programs the desktop app bundles (desktop/src-tauri/tauri.conf.json).
+// The desktop UI itself is built by Vite from source (desktop/vite.config.ts).
 
-const extensionConfig = {
-  entryPoints: ['src/extension.ts'],
-  bundle: true,
-  outfile: 'dist/extension.js',
-  external: ['vscode'],
-  format: 'cjs',
-  platform: 'node',
-  target: 'node20',
-  sourcemap: true,
-  minify: !isWatch,
-};
-
-const webviewConfig = {
-  entryPoints: ['src/webview/index.tsx'],
-  bundle: true,
-  outfile: 'dist/webview.js',
-  format: 'iife',
-  platform: 'browser',
-  target: 'es2020',
-  sourcemap: true,
-  minify: !isWatch,
-  jsx: 'automatic',
-};
-
-const diffPanelConfig = {
-  entryPoints: ['src/diff/webview/index.tsx'],
-  bundle: true,
-  outfile: 'dist/diffPanel.js',
-  format: 'iife',
-  platform: 'browser',
-  target: 'es2020',
-  sourcemap: true,
-  minify: !isWatch,
-  jsx: 'automatic',
-};
-
-const settingsPanelConfig = {
-  entryPoints: ['src/settings/webview/index.tsx'],
-  bundle: true,
-  outfile: 'dist/settingsPanel.js',
-  format: 'iife',
-  platform: 'browser',
-  target: 'es2020',
-  sourcemap: true,
-  minify: !isWatch,
-  jsx: 'automatic',
-};
-
-const newTaskPanelConfig = {
-  entryPoints: ['src/newtask/webview/index.tsx'],
-  bundle: true,
-  outfile: 'dist/newTaskPanel.js',
-  format: 'iife',
-  platform: 'browser',
-  target: 'es2020',
-  sourcemap: true,
-  minify: !isWatch,
-  jsx: 'automatic',
-};
-
-// The Stack MCP bridge: a standalone Node program (no vscode), copied into
-// globalStorage at activation and run by Claude Code / Codex as an MCP server.
-// node18 so whatever `node` the user has can run it; no sourcemap, since it
-// ships as one file that is copied by content.
 const bridgeConfig = {
   entryPoints: ['src/mcp/bridge/main.ts'],
   bundle: true,
@@ -88,7 +17,6 @@ const bridgeConfig = {
   define: { 'process.env.STACK_MCP_VERSION': JSON.stringify(require('./package.json').version) },
 };
 
-// stackd: the Stack core without VS Code (see docs/v1-plan.md).
 const stackdConfig = {
   entryPoints: ['src/daemon/main.ts'],
   bundle: true,
@@ -101,30 +29,13 @@ const stackdConfig = {
 };
 
 async function build() {
+  const configs = [bridgeConfig, stackdConfig];
   if (isWatch) {
-    const [extCtx, webCtx, diffCtx, newTaskCtx, settingsCtx, bridgeCtx, stackdCtx] = await Promise.all([
-      esbuild.context(extensionConfig),
-      esbuild.context(webviewConfig),
-      esbuild.context(diffPanelConfig),
-      esbuild.context(newTaskPanelConfig),
-      esbuild.context(settingsPanelConfig),
-      esbuild.context(bridgeConfig),
-      esbuild.context(stackdConfig),
-    ]);
-    await Promise.all([extCtx.watch(), webCtx.watch(), diffCtx.watch(), newTaskCtx.watch(), settingsCtx.watch(), bridgeCtx.watch(), stackdCtx.watch()]);
-    copyCodeicons();
+    const contexts = await Promise.all(configs.map((c) => esbuild.context(c)));
+    await Promise.all(contexts.map((ctx) => ctx.watch()));
     console.log('Watching for changes...');
   } else {
-    await Promise.all([
-      esbuild.build(extensionConfig),
-      esbuild.build(webviewConfig),
-      esbuild.build(diffPanelConfig),
-      esbuild.build(newTaskPanelConfig),
-      esbuild.build(settingsPanelConfig),
-      esbuild.build(bridgeConfig),
-      esbuild.build(stackdConfig),
-    ]);
-    copyCodeicons();
+    await Promise.all(configs.map((c) => esbuild.build(c)));
     console.log('Build complete.');
   }
 }

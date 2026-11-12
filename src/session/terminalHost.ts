@@ -35,8 +35,8 @@ export interface ParkedTab {
 
 /**
  * What AgentSessionManager needs from whatever shows sessions on screen. `T` is
- * the host's terminal handle (a `vscode.Terminal` inside the extension). The
- * VS Code implementation is SessionTerminals; a headless host (stackd) has none.
+ * the host's terminal handle. stackd draws nothing: its implementation is
+ * headlessTerminals (daemon/headless.ts).
  */
 export interface SessionTerminalHost<T extends { show(): void }> {
   openViewer(worktree: Worktree, name: string): T;

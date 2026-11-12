@@ -27,7 +27,6 @@ import { PortReservationFile } from '../worktree/portReservations';
 import { worktreesInRepo, canonicalPath } from '../worktree/worktreesInRepo';
 import { buildControlSession } from '../worktree/controlSession';
 import { WorktreeApplicationService } from '../application/WorktreeApplicationService';
-import type { ConfigManager } from '../config/ConfigManager';
 import { ManagerTools } from '../mcp/ManagerTools';
 import { WindowRegistry } from '../mcp/WindowRegistry';
 import { resolveWindow } from '../mcp/discovery';
@@ -282,15 +281,14 @@ export class StackDaemon {
       config: () => config.get(),
       shared: new PortReservationFile(this.opts.configDir),
     });
-    const asConfigManager = config as unknown as ConfigManager;
-    const manager = new WorktreeManager(this.worktreeStore, portAllocator, asConfigManager, this.agents, new GitCliAdapter(), new NodeFileSystem());
+    const manager = new WorktreeManager(this.worktreeStore, portAllocator, config, this.agents, new GitCliAdapter(), new NodeFileSystem());
     const service = new WorktreeApplicationService({
       manager,
       agentManager: this.agents,
-      tabManager: NO_TABS as never,
-      breakpointManager: NO_BREAKPOINTS as never,
+      tabManager: NO_TABS,
+      breakpointManager: NO_BREAKPOINTS,
       store: this.worktreeStore,
-      config: asConfigManager,
+      config: config,
       notify: new LogNotify(this.log),
       host: new HeadlessHost(repoRoot, this.log),
       git: new GitCliAdapter(),

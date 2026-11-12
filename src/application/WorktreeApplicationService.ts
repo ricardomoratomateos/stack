@@ -3,9 +3,7 @@ import type { StackConfig, Worktree, WorktreeTicket } from '../types';
 import type { StackState, WorktreeItem, WebMessage, PortMapping } from '../webview/types';
 import type { WorktreeManager } from '../worktree/WorktreeManager';
 import type { AgentSessionManager } from '../session/AgentSessionManager';
-import type { TabManager } from '../worktree/TabManager';
-import type { BreakpointManager } from '../worktree/BreakpointManager';
-import type { ConfigManager } from '../config/ConfigManager';
+import type { ConfigSource } from '../config/ConfigSource';
 import { DEFAULT_STATUS, type GitWatcher } from '../git/GitWatcher';
 import type { DockerMonitor } from '../docker/DockerMonitor';
 import type { PrMonitor } from '../pr/PrMonitor';
@@ -16,7 +14,6 @@ import { composeArgv, composeProject, computeDockerPorts, dockerConfigured, port
 import { DockerStacks, type DockerOutput } from '../docker/DockerStacks';
 import type { IGitPort, DiffBase } from '../ports/IGitPort';
 import type { INotifyPort } from '../ports/INotifyPort';
-import type { DiffPanelHost } from '../diff/DiffPanelManager';
 import type { SendDestination, DiffComment } from '../diff/types';
 import { buildCommentPrompt } from '../diff/commentPrompt';
 import { displayLabel, truncateLabel } from '../worktree/displayLabel';
@@ -156,6 +153,32 @@ export interface WorkspaceNamingPort {
   open(repoRoot: string, folders: Array<{ path: string; name: string }>): Promise<boolean>;
 }
 
+interface WorktreeRef { id: string; path: string }
+
+/** Per-worktree editor tabs, stashed and restored by a focusMode switch. */
+export interface TabStash {
+  prune(liveIds: ReadonlySet<string>): void;
+  updateViewerState(worktrees: WorktreeRef[], viewerOpenIds: Set<string>): void;
+  closeOtherTabs(targetId: string, worktrees: WorktreeRef[]): Promise<void>;
+  restoreTabs(worktreeId: string): Promise<void>;
+}
+
+/** Breakpoints scoped to the active worktree. */
+export interface BreakpointScope {
+  prune(liveIds: ReadonlySet<string>): void;
+  activate(targetId: string, worktrees: WorktreeRef[]): void;
+}
+
+/** What the diff review panel needs from the service. */
+export interface DiffPanelHost {
+  getDiff(worktreeId: string, base: DiffBase): Promise<string>;
+  getContext(worktreeId: string): { label: string; hasLiveAgent: boolean } | undefined;
+  /** Where the comments actually went (a vanished live agent falls back to `new`), or false when nothing was sent. */
+  send(worktreeId: string, destination: SendDestination, comments: DiffComment[]): Promise<SendDestination | false>;
+  /** Open a file (path relative to the worktree) in the editor at an optional line. */
+  openFile(worktreeId: string, relativePath: string, line?: number): Promise<void>;
+}
+
 interface GlobalStateLike {
   get<T>(key: string): T | undefined;
   update(key: string, value: unknown): unknown;
@@ -164,10 +187,10 @@ interface GlobalStateLike {
 export interface WorktreeAppDeps {
   manager: WorktreeManager;
   agentManager: AgentSessionManager;
-  tabManager: TabManager;
-  breakpointManager: BreakpointManager;
+  tabManager: TabStash;
+  breakpointManager: BreakpointScope;
   store: IWorktreeRepository;
-  config: ConfigManager;
+  config: ConfigSource;
   notify: INotifyPort;
   host: IWorkspaceHost;
   git: IGitPort;
@@ -631,7 +654,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       const choice = await this.deps.host.showQuickPick([...PROVIDER_IDS], {
         placeHolder: 'Agent launched by the main button',
       });
-      if (choice) await this.deps.config.setDefaultProvider(choice as ProviderId);
+      if (choice) await this.deps.config.setDefaultProvider?.(choice as ProviderId);
     },
     showProviderInstall: (msg) => this.showProviderInstall(msg.provider),
     openTerminal: (msg) => {

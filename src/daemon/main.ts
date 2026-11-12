@@ -19,9 +19,6 @@ Usage:
                          receives the agents' hooks, serves the local API on
                          ~/.config/stack/stackd.sock (GET /state, GET /events,
                          POST /commands/<name>). One per user, all repos.
-                         The VS Code extension uses it with the stack.useDaemon setting;
-                         without that setting, do not run it on a repo the
-                         extension has open: both would own its state.
   stackd status [repo]   Print the worktrees, sessions and states of a repo
                          (default: the repo containing the current directory).
                          Asks the daemon when it runs.

@@ -140,7 +140,7 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
     /**
      * Read on every use, so changing `stack.sessionTabs` applies to the next
      * terminal opened without a reload. Defaults to the one-terminal mode that
-     * predates the setting; extension.ts passes the setting itself.
+     * predates the setting.
      */
     private sessionTabs: () => SessionTabsMode = () => 'single',
     /**
@@ -1159,7 +1159,7 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
     this.killWorktreeSession(worktreeId).catch(() => {});
   }
 
-  /** Kept for extension.ts compat (setup/teardown scripts). No-op with tmux. */
+  /** No-op with tmux; kept for callers that still hand over a terminal. */
   register(_worktreeId: string, _terminal: T): void {}
 
   /**

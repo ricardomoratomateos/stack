@@ -12,17 +12,16 @@ import {
   SETUP_TIMEOUT_MS,
   type IWorkspaceHost,
   type WorkspaceNamingPort,
+  type TabStash,
+  type BreakpointScope,
 } from '../../src/application/WorktreeApplicationService';
-import { VsCodeNotifyAdapter } from '../../src/adapters/VsCodeNotifyAdapter';
-import { window, ProgressLocation, resetVscodeMock } from '../__mocks__/vscode';
 import type { Worktree, StackConfig } from '../../src/types';
 import type { SessionItem } from '../../src/webview/types';
 import type { ProviderId } from '../../src/ports/IAgentProvider';
 import type { WorktreeManager } from '../../src/worktree/WorktreeManager';
 import { buildControlSession } from '../../src/worktree/controlSession';
 import type { AgentSessionManager } from '../../src/session/AgentSessionManager';
-import type { TabManager } from '../../src/worktree/TabManager';
-import type { ConfigManager } from '../../src/config/ConfigManager';
+import type { ConfigSource } from '../../src/config/ConfigSource';
 import type { GitWatcher } from '../../src/git/GitWatcher';
 import type { DockerMonitor } from '../../src/docker/DockerMonitor';
 import type { PrMonitor } from '../../src/pr/PrMonitor';
@@ -358,10 +357,10 @@ function makeHarness(o: HarnessOpts = {}) {
   const service = new WorktreeApplicationService({
     manager: manager as unknown as WorktreeManager,
     agentManager: claude as unknown as AgentSessionManager,
-    tabManager: tabManager as unknown as TabManager,
-    breakpointManager: breakpointManager as unknown as import('../../src/worktree/BreakpointManager').BreakpointManager,
+    tabManager: tabManager as unknown as TabStash,
+    breakpointManager: breakpointManager as unknown as BreakpointScope,
     store: store as unknown as IWorktreeRepository,
-    config: config as unknown as ConfigManager,
+    config: config as unknown as ConfigSource,
     notify,
     host: host as unknown as IWorkspaceHost,
     git: git as unknown as IGitPort,
@@ -2916,70 +2915,6 @@ describe('focusNextWorktree / focusPrevWorktree', () => {
     const h = makeHarness({ worktrees: [a, b], viewerIds: ['a'] });
     h.setActiveTerminal(h.viewers.get('a'));
     expect(() => h.service.focusNextWorktree()).not.toThrow();
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// VsCodeNotifyAdapter (thin vscode.window adapter used by the service)
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('VsCodeNotifyAdapter', () => {
-  beforeEach(() => {
-    resetVscodeMock();
-  });
-
-  it('showError → vscode.window.showErrorMessage', () => {
-    new VsCodeNotifyAdapter().showError('bad');
-    expect(window.showErrorMessage).toHaveBeenCalledWith('bad');
-  });
-
-  it('showWarning → vscode.window.showWarningMessage', () => {
-    new VsCodeNotifyAdapter().showWarning('careful');
-    expect(window.showWarningMessage).toHaveBeenCalledWith('careful');
-  });
-
-  it('showInfo → vscode.window.showInformationMessage', () => {
-    new VsCodeNotifyAdapter().showInfo('fyi');
-    expect(window.showInformationMessage).toHaveBeenCalledWith('fyi');
-  });
-
-  it('confirm shows a modal warning with detail and items, returning the choice', async () => {
-    window.showWarningMessage.mockResolvedValue('Kill');
-    const res = await new VsCodeNotifyAdapter().confirm('Kill terminal?', 'details here', 'Kill');
-    expect(window.showWarningMessage).toHaveBeenCalledWith(
-      'Kill terminal?',
-      { modal: true, detail: 'details here' },
-      'Kill',
-    );
-    expect(res).toBe('Kill');
-  });
-
-  it('confirm passes an undefined detail through', async () => {
-    window.showWarningMessage.mockResolvedValue(undefined);
-    const res = await new VsCodeNotifyAdapter().confirm('Delete worktree "x"?', undefined, 'Delete', 'Delete + branch');
-    expect(window.showWarningMessage).toHaveBeenCalledWith(
-      'Delete worktree "x"?',
-      { modal: true, detail: undefined },
-      'Delete',
-      'Delete + branch',
-    );
-    expect(res).toBeUndefined();
-  });
-
-  it('withProgress uses a non-cancellable notification and maps report(message)', async () => {
-    const reportSpy = vi.fn();
-    window.withProgress.mockImplementation(async (_opts: unknown, task: (p: { report: (v: unknown) => void }) => Promise<unknown>) =>
-      task({ report: reportSpy }));
-    const result = await new VsCodeNotifyAdapter().withProgress('Doing things', async (report) => {
-      report('step 1');
-      return 42;
-    });
-    expect(result).toBe(42);
-    expect(window.withProgress).toHaveBeenCalledWith(
-      { location: ProgressLocation.Notification, title: 'Doing things', cancellable: false },
-      expect.any(Function),
-    );
-    expect(reportSpy).toHaveBeenCalledWith({ message: 'step 1' });
   });
 });
 

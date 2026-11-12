@@ -4,7 +4,7 @@ import { findMissingWorktrees, nodePathProbe, type PathProbe } from './missingWo
 import { randomUUID } from 'node:crypto';
 import { Worktree } from '../types';
 import { PortAllocator } from './portAllocator';
-import { ConfigManager } from '../config/ConfigManager';
+import type { ConfigSource } from '../config/ConfigSource';
 import { AgentSessionManager } from '../session/AgentSessionManager';
 import { IGitPort, GitWorktreeEntry } from '../ports/IGitPort';
 import { IFileSystem } from '../ports/IFileSystem';
@@ -18,7 +18,7 @@ export class WorktreeManager {
   constructor(
     private store: IWorktreeRepository,
     private portAllocator: PortAllocator,
-    private config: ConfigManager,
+    private config: ConfigSource,
     private agentManager?: AgentSessionManager,
     private git: IGitPort = new GitCliAdapter(),
     private fs: IFileSystem = new NodeFileSystem(),

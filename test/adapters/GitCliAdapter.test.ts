@@ -6,7 +6,6 @@ import * as path from 'node:path';
 import { GitCliAdapter, parseWorktreePaths, reasonOf } from '../../src/adapters/GitCliAdapter';
 import { DiffError } from '../../src/ports/IGitPort';
 import { NodeFileSystem } from '../../src/adapters/NodeFileSystem';
-import { NodeProcessRunner } from '../../src/adapters/NodeProcessRunner';
 
 let tmp: string;
 let repo: string;
@@ -499,29 +498,6 @@ describe('NodeFileSystem (integration, temp dir)', () => {
 
   it('readFile throws for a missing file', () => {
     expect(() => nfs.readFile(path.join(tmp, 'nope.txt'))).toThrow();
-  });
-});
-
-describe('NodeProcessRunner (integration)', () => {
-  const runner = new NodeProcessRunner();
-
-  it('resolves with trimmed stdout', async () => {
-    await expect(runner.exec("printf 'hi\\n'")).resolves.toBe('hi');
-  });
-
-  it('respects cwd', async () => {
-    await expect(runner.exec('pwd', { cwd: repo })).resolves.toBe(repo);
-  });
-
-  it('passes env vars', async () => {
-    const out = await runner.exec('echo "$STACK_TEST_VAR"', {
-      env: { ...process.env, STACK_TEST_VAR: 'val-42' },
-    });
-    expect(out).toBe('val-42');
-  });
-
-  it('rejects on non-zero exit', async () => {
-    await expect(runner.exec('exit 3')).rejects.toThrow();
   });
 });
 

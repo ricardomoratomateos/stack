@@ -1,7 +1,8 @@
 name: Release
 
-# Cutting a release is pushing a tag: `npm version minor && git push --follow-tags`
-# (see RELEASING.md). Everything below is what that tag sets off.
+# Cutting a release is pushing a tag: `npm version minor && git push --follow-tags`.
+# Everything below is what that tag sets off. (The desktop app is bundled by hand:
+# `cd desktop && npm run bundle`.)
 on:
   push:
     tags: ['v*']
@@ -13,8 +14,6 @@ jobs:
   release:
     runs-on: ubuntu-latest
     env:
-      VSCE_PAT: ${{ secrets.VSCE_PAT }}
-      OVSX_PAT: ${{ secrets.OVSX_PAT }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
@@ -38,11 +37,9 @@ jobs:
           echo "VERSION=$PKG" >> "$GITHUB_ENV"
 
       # The same gate as CI, run again here: a tag can be pushed from a branch
-      # CI never saw, and nothing should reach a marketplace without it.
+      # CI never saw, and nothing should be released without it.
       - run: npm run typecheck
       - run: npm run test:coverage
-
-      - run: npx vsce package --no-dependencies --out "stack-${VERSION}.vsix"
 
       - name: Release notes are the CHANGELOG entry for this version
         run: |
@@ -56,20 +53,8 @@ jobs:
             exit 1
           fi
 
-      - name: GitHub release with the .vsix attached
+      - name: GitHub release
         run: |
           PRE=""; case "$VERSION" in *-*) PRE="--prerelease" ;; esac
-          gh release create "v$VERSION" "stack-$VERSION.vsix" \
+          gh release create "v$VERSION" \
             --title "v$VERSION" --notes-file RELEASE_NOTES.md $PRE
-
-      # Both publishes are skipped, not failed, while the token is absent — so
-      # GitHub releases work from day one and the marketplaces join when the
-      # secrets exist. VSCE_PAT: Azure DevOps token, Marketplace (Manage) scope.
-      # OVSX_PAT: open-vsx.org access token, after signing the publisher agreement.
-      - name: Publish to the VS Code Marketplace
-        if: env.VSCE_PAT != ''
-        run: npx vsce publish --no-dependencies --packagePath "stack-${VERSION}.vsix" -p "$VSCE_PAT"
-
-      - name: Publish to Open VSX
-        if: env.OVSX_PAT != ''
-        run: npx ovsx publish "stack-${VERSION}.vsix" -p "$OVSX_PAT"

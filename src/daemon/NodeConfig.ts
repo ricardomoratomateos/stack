@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { StackConfig } from '../types';
+import type { ConfigSource } from '../config/ConfigSource';
 import { PROVIDER_IDS, type ProviderId } from '../ports/IAgentProvider';
 import { normalizeSidebarStyle } from '../sidebarStyle';
 import { PROJECT_DEFAULTS, DOCKER_DEFAULTS } from '../config/defaults';
@@ -24,12 +25,11 @@ const str = (v: unknown, d: string): string => (typeof v === 'string' ? v : d);
 const bool = (v: unknown, d: boolean): boolean => (typeof v === 'boolean' ? v : d);
 
 /**
- * The configuration `stackd` runs on: ConfigManager's layering without
- * `vscode`. An explicit user value (settings.json, keys without the `stack.`
+ * The configuration `stackd` runs on (a ConfigSource). An explicit user value (settings.json, keys without the `stack.`
  * prefix, which is accepted too) beats `.stack/config.json`, which beats the
  * shipped defaults. Re-read on every `get()`; the files are tiny.
  */
-export class NodeConfig {
+export class NodeConfig implements ConfigSource {
   constructor(
     private readonly repoRoot: () => string | undefined,
     private readonly settingsPath: string = DEFAULT_SETTINGS_PATH,

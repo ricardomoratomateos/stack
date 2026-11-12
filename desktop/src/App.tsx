@@ -43,7 +43,7 @@ const initialLayoutState = (): LayoutState => {
 
 const ADD_REPO = '\0add-repository';
 
-export const NOT_RUNNING = 'stackd not running — start it from the app (Start stackd now / at login), or enable stack.useDaemon in VS Code.';
+export const NOT_RUNNING = 'stackd not running — start it from the app (Start stackd now / at login).';
 
 export function App() {
   const { running, socket, snapshot, api } = useStackd();

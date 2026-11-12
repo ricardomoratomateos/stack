@@ -1,0 +1,80 @@
+{
+  "properties": {
+    "stack.worktreesDirectory": {
+      "type": "string",
+      "default": ".worktrees",
+      "description": "Directory where worktrees are created (relative to the workspace root) Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+    },
+    "stack.defaultBaseBranch": {
+      "type": "string",
+      "default": "develop",
+      "description": "Branch new worktrees start from, preselected in the New Task form. When this branch does not exist, Stack uses the repository's own main line (the first of main/master/develop it finds, locally or on a remote), and only then the current branch. Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+    },
+    "stack.setupScript": {
+      "type": "string",
+      "default": "",
+      "description": "Script to run after creating a worktree Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+    },
+    "stack.setupInTerminal": {
+      "type": "boolean",
+      "default": false,
+      "description": "Run the setup script in a visible terminal you can type into, and start the agent without waiting for it — for setup scripts that ask questions. Off (default): it runs in the background, its output in the Stack output channel, and the agent starts once it has finished. Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+    },
+    "stack.teardownScript": {
+      "type": "string",
+      "default": "",
+      "description": "Script to run before deleting a worktree Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+    },
+    "stack.promptPrefix": {
+      "type": "string",
+      "default": "",
+      "editPresentation": "multilineText",
+      "description": "Text prepended to the first prompt of every agent you launch (new tasks, the control session, waking an idle one) — sent on its own when there is no prompt otherwise. A personal setting, not meant for .stack/config.json: put reminders here that a fresh agent would not otherwise pick up, e.g. which skill to check first."
+    },
+    "stack.defaultProvider": {
+      "type": "string",
+      "enum": [
+        "claude",
+        "codex",
+        "opencode"
+      ],
+      "default": "claude",
+      "description": "Primary agent: the one the big launch button on each worktree card starts. The chevron next to it opens the rest."
+    },
+    "stack.claudeCommand": {
+      "type": "string",
+      "default": "claude",
+      "description": "Command to launch Claude Code"
+    },
+    "stack.codexCommand": {
+      "type": "string",
+      "default": "codex",
+      "description": "Command to launch Codex CLI"
+    },
+    "stack.opencodeCommand": {
+      "type": "string",
+      "default": "opencode",
+      "description": "Command to launch opencode"
+    },
+    "stack.sidebarStyle": {
+      "type": "string",
+      "enum": [
+        "aside",
+        "claude",
+        "mission"
+      ],
+      "enumDescriptions": [
+        "Aside: monochrome with a single lime accent, a composer, filter chips, worktrees grouped by state and a health strip.",
+        "Claude: warm terracotta accent, a prompt composer at the top and worktrees grouped by what they need from you. Follows the VS Code theme.",
+        "Mission control: state counters that filter, an attention queue and cards with a metadata grid. Follows the VS Code theme."
+      ],
+      "default": "aside",
+      "description": "How the Stack sidebar looks. Switches live, without a reload. The same worktrees and actions are in every style; only the layout and colours differ. Also under \"Stack: Switch Sidebar Style\"."
+    },
+    "stack.notifyOnAttention": {
+      "type": "boolean",
+      "default": true,
+      "description": "Show a native OS notification, with a chime on macOS, when an agent finishes or asks for permission while VS Code is in the background. Off means no notification and no sound. The sidebar attention badge is always shown regardless."
+    }
+  }
+}
