@@ -545,7 +545,8 @@ export function App() {
   const managerRows = view.control ? sessionRows(view.control.wt, commands(view.control.wt.id)) : [];
   const resizeTo = (key: 'sidebar' | 'manager' | 'lines', v: number) => setLayout((l) => resize(l, l.mode, key, v));
   const resetTo = (key: 'sidebar' | 'manager' | 'lines') => setLayout((l) => resetSize(l, l.mode, key));
-  const allow = (worktreeId: string, windowIndex: number) => void runCommand('respondPermission', { worktreeId, windowIndex, answer: 'allow' });
+  // `expect`: what the row showed; stackd refuses when the agent is no longer asking exactly that.
+  const allow = (worktreeId: string, windowIndex: number, expect?: string) => void runCommand('respondPermission', { worktreeId, windowIndex, answer: 'allow', ...(expect ? { expect } : {}) });
   const startAgent = async (worktreeId: string) => {
     try {
       await api.command('spawnAgent', { worktreeId });

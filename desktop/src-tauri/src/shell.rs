@@ -35,6 +35,19 @@ pub struct TrayEntry {
     pub worktree_id: String,
     pub label: String,
     pub allow: Option<u32>,
+    /// What that session asks ("Bash: npm test"): the Allow item names it and sends it back as `expect`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask: Option<String>,
+}
+
+/// The Allow item's text: the request itself, cut to fit a menu.
+fn allow_text(e: &TrayEntry) -> String {
+    let what = e.ask.as_deref().map(|a| a.lines().next().unwrap_or("").trim()).filter(|a| !a.is_empty());
+    match what {
+        Some(a) if a.chars().count() > 60 => format!("    Allow · {}…", a.chars().take(59).collect::<String>()),
+        Some(a) => format!("    Allow · {a}"),
+        None => format!("    Allow · {}", e.label),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -68,7 +81,7 @@ pub fn menu_rows(m: &TrayModel) -> Vec<Row> {
         for e in &m.needs {
             rows.push(Row::Item { id: format!("go:{}", e.worktree_id), text: e.label.clone() });
             if let Some(i) = e.allow {
-                rows.push(Row::Item { id: format!("allow:{i}:{}", e.worktree_id), text: format!("    Allow · {}", e.label) });
+                rows.push(Row::Item { id: format!("allow:{i}:{}", e.worktree_id), text: allow_text(e) });
             }
         }
         rows.push(Row::Separator);
@@ -178,10 +191,19 @@ fn on_menu(app: &AppHandle, id: &str) {
             let _ = app.emit("app://select", wt);
         }
         Some(MenuAction::Allow(wt, idx)) => {
-            let body = serde_json::json!({ "worktreeId": wt, "windowIndex": idx, "answer": "allow" });
+            // The request the menu named: stackd refuses when the agent is no longer asking exactly that.
+            let ask = app.state::<Shell>().last_model.lock().unwrap().as_ref()
+                .and_then(|m| m.needs.iter().find(|e| e.worktree_id == wt && e.allow == Some(idx)))
+                .and_then(|e| e.ask.clone());
+            let mut body = serde_json::json!({ "worktreeId": wt, "windowIndex": idx, "answer": "allow" });
+            if let Some(a) = ask {
+                body["expect"] = serde_json::Value::String(a);
+            }
+            let app = app.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = crate::stackd::request(&crate::stackd::socket_path(), "POST", "/commands/respondPermission", Some(&body)).await {
                     eprintln!("tray: Allow failed: {e}");
+                    let _ = app.notification().builder().title("Allow not sent").body(e).show();
                 }
             });
         }
@@ -352,7 +374,18 @@ mod tests {
     use super::*;
 
     fn entry(id: &str, allow: Option<u32>) -> TrayEntry {
-        TrayEntry { worktree_id: id.into(), label: format!("repo · {id}"), allow }
+        TrayEntry { worktree_id: id.into(), label: format!("repo · {id}"), allow, ask: None }
+    }
+
+    #[test]
+    fn allow_names_the_request_cut_to_fit() {
+        let mut e = entry("a", Some(1));
+        assert_eq!(allow_text(&e), "    Allow · repo · a");
+        e.ask = Some("Bash: npm test".into());
+        assert_eq!(allow_text(&e), "    Allow · Bash: npm test");
+        e.ask = Some(format!("Bash: {}", "x".repeat(80)));
+        assert!(allow_text(&e).ends_with('…'));
+        assert_eq!(allow_text(&e).chars().count(), "    Allow · ".chars().count() + 60);
     }
 
     #[test]

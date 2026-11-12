@@ -18,7 +18,7 @@ describe('tray', () => {
     const s = snap([asking('a', 2), wt('b', { review: { summary: 'x', at: 1 }, sessions: [{ name: 'claude', kind: 'agent', state: 'waiting', index: 0 }] }), wt('c')]);
     const m = trayModel(s, false);
     expect(m.title).toBe('◆ 1  ◇ 1');
-    expect(m.needs).toEqual([{ worktreeId: 'a', label: 'stack · a', allow: 2 }]);
+    expect(m.needs).toEqual([{ worktreeId: 'a', label: 'stack · a', allow: 2, ask: 'Bash: npm test' }]);
     expect(m.review.map((r) => r.worktreeId)).toEqual(['b']);
   });
 

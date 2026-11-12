@@ -6,7 +6,7 @@ export function FloatList({ rows, selectedId, onSelect, onAllow }: {
   rows: FloatRow[];
   selectedId: string | undefined;
   onSelect: (id: string, index?: number) => void;
-  onAllow: (id: string, index: number) => void;
+  onAllow: (id: string, index: number, attention?: string) => void;
 }) {
   return (
     <ul className="float-list" aria-label="Tasks">
@@ -22,7 +22,8 @@ export function FloatList({ rows, selectedId, onSelect, onAllow }: {
               </button>
             ))}
           </span>
-          {r.asking && <button type="button" className="float-allow" title={r.asking.label} onClick={() => onAllow(r.id, r.asking!.index)}>Allow</button>}
+          {r.asking && <span className="float-ask" title={r.asking.label}>{r.asking.label}</span>}
+          {r.asking && <button type="button" className="float-allow" title={`Allow ${r.asking.label}`} onClick={() => onAllow(r.id, r.asking!.index, r.asking!.attention)}>Allow</button>}
         </li>
       ))}
     </ul>

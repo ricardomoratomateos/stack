@@ -8,6 +8,8 @@ export interface TrayEntry {
   label: string;
   /** The session asking for permission: the menu offers Allow for it. */
   allow?: number;
+  /** What it asks (its `attention`): the Allow item names it, and sends it back as `expect`. */
+  ask?: string;
 }
 
 export interface TrayModel {
@@ -48,7 +50,7 @@ export function trayModel(snapshot: Snapshot | null, dnd: boolean): TrayModel {
   const all = rows(snapshot);
   const entry = (r: Row): TrayEntry => {
     const ask = r.d.group === 'needs' ? r.d.wt.sessions.find((s) => s.kind === 'agent' && s.state === 'permission') : undefined;
-    return { worktreeId: r.d.wt.id, label: `${r.repo} · ${nameOf(r.d.wt)}`, allow: ask?.index };
+    return { worktreeId: r.d.wt.id, label: `${r.repo} · ${nameOf(r.d.wt)}`, allow: ask?.index, ...(ask?.attention ? { ask: ask.attention } : {}) };
   };
   const needs = all.filter((r) => r.d.group === 'needs').map(entry);
   const review = all.filter((r) => r.d.group === 'review').map(entry);

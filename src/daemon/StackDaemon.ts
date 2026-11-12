@@ -11,6 +11,7 @@ import type { Worktree, WorktreeTicket } from '../types';
 import { AgentSessionManager } from '../session/AgentSessionManager';
 import { AttentionNotifier } from '../session/AttentionNotifier';
 import { TmuxManager } from '../session/TmuxManager';
+import { permissionPromptOnScreen } from '../session/permissionPrompt';
 import { ProviderFactory } from '../providers/ProviderFactory';
 import { HookRoutes } from '../providers/shared/HookRoutes';
 import { ConfigFileError } from '../providers/shared/configFile';
@@ -521,7 +522,8 @@ export class StackDaemon {
         return {};
       }
       case 'respondPermission': {
-        // v1: keys to the pane. `allow` is Enter (the default choice of the agents' prompts), `deny` is Escape.
+        // Keys to the pane: `allow` is Enter (the default choice of the agents' prompts), `deny` is Escape.
+        // Only while that prompt is up: Enter in an agent that moved on submits its input box, Escape interrupts it.
         const { wt } = this.findWorktree(need(b, 'worktreeId'));
         const index = windowIndex(b);
         if (index === undefined) throw new CommandError('"windowIndex" is required.');
@@ -529,7 +531,20 @@ export class StackDaemon {
         const keys = Array.isArray(b['keys']) ? (b['keys'] as unknown[]).map(String)
           : answer === 'allow' ? ['Enter'] : answer === 'deny' ? ['Escape'] : undefined;
         if (!keys || keys.length === 0) throw new CommandError('Give "answer" (allow|deny) or "keys".');
+        const session = this.agents.getSessions(wt.id).find((s) => s.index === index);
+        if (session?.kind !== 'agent' || session.state !== 'permission') {
+          throw new CommandError(`That agent is not asking for permission${session ? ` (it is ${session.state})` : ''}. Nothing was sent.`, 409);
+        }
+        // `expect`: the request the client showed. Another one since then is not what the user agreed to.
+        const expected = str(b, 'expect');
+        if (expected !== undefined && session.attention !== expected) {
+          throw new CommandError(`The agent is asking something else now${session.attention ? `: ${session.attention}` : ''}. Nothing was sent.`, 409);
+        }
         const target = `${TmuxManager.sessionName(wt.id)}:${index}`;
+        const screen = await this.tmux.capturePane(target, 1).catch(() => '');
+        if (!permissionPromptOnScreen(screen)) {
+          throw new CommandError('No permission prompt on the agent\'s screen (answered in the terminal, or it moved on). Nothing was sent.', 409);
+        }
         for (const key of keys) await this.tmux.sendKey(target, key);
         return {};
       }

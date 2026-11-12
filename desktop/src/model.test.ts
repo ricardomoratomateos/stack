@@ -192,7 +192,7 @@ describe('mode shortcuts and the float list', () => {
     ]))!;
     const rows = floatRows(v.items);
     expect(rows.map((r) => r.id)).toEqual(['a', 'b']);
-    expect(rows[0].asking).toEqual({ index: 1, label: 'Bash: ls' });
+    expect(rows[0].asking).toEqual({ index: 1, label: 'Bash: ls', attention: 'Bash: ls' });
     expect(rows[0].sessions).toHaveLength(2);
     expect(rows[1].asking).toBeUndefined();
   });

@@ -232,8 +232,11 @@ export interface FloatRow {
   name: string;
   group: Described['group'];
   sessions: SessionRow[];
-  /** The session that needs you; the row shows an Allow button for it. */
-  asking?: { index: number; label: string };
+  /**
+   * The session that needs you; the row shows what it asks (`label`) and an Allow button for it.
+   * `attention` is the request as stackd has it, sent back with Allow so a newer one is not allowed blind.
+   */
+  asking?: { index: number; label: string; attention?: string };
 }
 
 export function floatRows(items: Described[]): FloatRow[] {
@@ -244,7 +247,7 @@ export function floatRows(items: Described[]): FloatRow[] {
       name: d.name,
       group: d.group,
       sessions: sessionRows(d.wt),
-      asking: ask ? { index: ask.index, label: ask.attention ?? 'needs you' } : undefined,
+      asking: ask ? { index: ask.index, label: ask.attention ?? 'needs you', attention: ask.attention } : undefined,
     };
   });
 }

@@ -136,7 +136,12 @@ describe.skipIf(!hasTmux)('stackd serve (real tmux on an isolated socket)', () =
     expect((await state()).worktrees.find((w) => w.id === id)!.agent).toBe('permission');
     sse.destroy();
 
-    // respondPermission sends keys to the pane (cat echoes them).
+    // respondPermission refuses while no prompt is on the screen, or when the request is not the one the client showed.
+    await expect(cmd('respondPermission', { worktreeId: id, windowIndex: agent.index, answer: 'allow' })).rejects.toThrow(/No permission prompt/);
+    tmuxOut('send-keys', '-t', `stack-${id}:${agent.index}`, 'Do you want to proceed?', 'Enter');
+    await until(async () => (await daemon.agents.capturePane(id, agent.index, 10)).includes('Do you want to proceed?'));
+    await expect(cmd('respondPermission', { worktreeId: id, windowIndex: agent.index, answer: 'allow', expect: 'Bash: rm -rf /' })).rejects.toThrow(/something else/);
+    // With the prompt up, it sends the keys to the pane (cat echoes them).
     await cmd('respondPermission', { worktreeId: id, windowIndex: agent.index, keys: ['q', 'w'] });
     await until(async () => (await daemon.agents.capturePane(id, agent.index, 10)).includes('qw'));
     await expect(cmd('respondPermission', { worktreeId: id, windowIndex: agent.index })).rejects.toThrow(/answer/);
