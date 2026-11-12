@@ -168,6 +168,10 @@ function lineFor(wt: WorktreeItem, group: WorktreeGroup, agent: SessionItem | un
       return title ?? 'Working…';
     case 'review':
       if (wt.review?.summary) return wt.review.summary;
+      // Only an agent that took a turn and waits: it may be asking you something, not done.
+      if (!wt.review && wt.sessions.some((s) => isAgent(s) && s.state === 'waiting' && s.turned)) {
+        return title ? `Your turn · ${title}` : 'Your turn';
+      }
       return title ? `Done · ${title}` : 'Done — ready for review';
     case 'idle':
       return agent ? (title ?? 'Waiting for a task') : 'No agent running';

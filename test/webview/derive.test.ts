@@ -128,6 +128,11 @@ describe('describe', () => {
     expect(describeWt(wt({ sessions: [session('active')] })).line).toBe('Working…');
     expect(describeWt(wt({ sessions: [session('waiting', { title: 'CSV export' })], git: dirty })).line).toBe('Done · CSV export');
     expect(describeWt(wt({ sessions: [session('waiting')], git: dirty })).line).toBe('Done — ready for review');
+    // Its turn is over and it waits on you, perhaps with a question: your turn, not done.
+    expect(describeWt(wt({ sessions: [session('waiting', { turned: true, title: 'CSV export' })] })).line).toBe('Your turn · CSV export');
+    expect(describeWt(wt({ sessions: [session('waiting', { turned: true })], git: dirty })).line).toBe('Your turn');
+    // An explicit review request keeps the review wording.
+    expect(describeWt(wt({ sessions: [session('waiting', { turned: true, title: 'CSV export' })], review: { summary: '', at: 1 } })).line).toBe('Done · CSV export');
     expect(describeWt(wt({ sessions: [session('waiting', { title: 'Hi' })] })).line).toBe('Hi');
     expect(describeWt(wt({ sessions: [session('waiting')] })).line).toBe('Waiting for a task');
     expect(describeWt(wt()).line).toBe('No agent running');
