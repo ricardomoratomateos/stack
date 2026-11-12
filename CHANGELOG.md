@@ -4,16 +4,28 @@ All notable changes to Stack are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased] — v1
+
+Stack is now a macOS desktop app over a background daemon, `stackd`. Migration steps are in the README ("Migrating from the VS Code extension").
+
+### Removed (breaking)
+
+- **The VS Code extension.** The desktop app (`Stack.app`) and `stackd` are the only clients. Features that only existed in VS Code are gone with it: editor tab scoping, search scoping, focus mode, session tabs, the walkthrough, and the `Stack:` commands.
+- **Docker support.** Compose up/down, container badges, `STACK_COMPOSE_PROJECT`/`COMPOSE_*` env and the compose block of `stack_env` are removed. The per-worktree ports move from the `docker` block to the top-level keys `ports`, `basePort` and `portStride` (same meaning, same defaults). A `docker` key is ignored, but its port keys are still read while the top-level ones are unset.
+- **Sidebar styles.** Aside is the only style. `sidebarStyle` is ignored.
 
 ### Added
 
-- **Stack desktop app (macOS, preview).** `Stack.app`, built from `desktop/` with Tauri: worktrees and agent terminals in one native window, a Manager strip, Full / Half / Float window modes, native notifications, a menu-bar item and global shortcuts. It is a client of `stackd`; see `desktop/README.md` for the build and the first-run steps (ad-hoc signed, so first open is right-click, Open).
-- **`stackd` as a launch agent.** The app's "Start stackd at login" (also in its menu-bar menu) writes `~/Library/LaunchAgents/dev.stack.stackd.plist` (runs at login, restarts after a crash, logs to `~/.config/stack/stackd.log`) and loads it with `launchctl`; turning it off unloads and removes it. Nothing is installed or started without that click.
+- **Stack desktop app (macOS).** `Stack.app`, built from `desktop/` with Tauri. It has tasks and agent terminals in one window, the Manager, Full / Half / Float modes, notifications, a menu-bar item and global shortcuts. It starts stackd when it opens. It shows a banner with **Restart** when the running stackd is from another build. "Start stackd at login" installs a launchd user agent.
+- **stackd replaces the extension's hooks.** Hook entries pointing at the extension's `notify.sh` in `~/.claude/settings.json` and `~/.codex/hooks.json` are replaced, not left behind. The extension's tasks are imported once.
+- **Settings → "Stack tools in Claude Code".** Shows whether Claude Code's `stack` MCP server is this stackd's, and registers it at user scope, together with the `/stack` skill and commands.
+- **Resume.** A task whose tmux session did not survive a reboot reopens its agent's conversation (`claude --resume`, `codex resume`, `opencode --session`).
+- **Diagnostics.** Settings → Diagnostics and `node dist/stackd.js doctor` check tmux, Node ≥ 20, the stackd version and socket, the hooks, the MCP registration and the agent CLIs. **Copy** gives the results as text for an issue.
 
 ### Changed
 
-- **`stack.useDaemon` now defaults to on while a `stackd` is running.** If you never set it and a daemon answers on `~/.config/stack/stackd.sock` (the desktop app started it), the window becomes its client after a reload. An explicit `false` keeps the in-window mode; an explicit `true` still starts a daemon when none runs.
+- **Allow checks before it answers.** `respondPermission` sends nothing unless the agent is still asking, its request is the one shown (`expect`), and a permission prompt is on its screen. The Float list and the menu-bar item show the command being allowed.
+- **Agent state survives stackd restarts.** A working agent comes back working, and the "took a turn" flag is persisted.
 
 ## [0.2.1] — 2026-11-04
 

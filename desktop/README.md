@@ -1,6 +1,6 @@
 # Stack desktop
 
-A native macOS window for Stack: worktrees, agent terminals, a Manager strip, notifications, a menu-bar item. It is a client of `stackd` (the Stack core without VS Code); the VS Code extension talks to the same daemon.
+A native macOS window for Stack: worktrees, agent terminals, a Manager strip, notifications, a menu-bar item. It is a client of `stackd`, the Stack core (see the [root README](../README.md)).
 
 ## Prerequisites (fresh Mac)
 
@@ -9,27 +9,19 @@ A native macOS window for Stack: worktrees, agent terminals, a Manager strip, no
 - Node 20+ (stackd is built for node20; it runs on your own Node, it is not bundled).
 - Rust via rustup: `curl https://sh.rustup.rs -sSf | sh`, then `. "$HOME/.cargo/env"` (cargo is not on the default PATH).
 - tmux (`brew install tmux`).
-- Agent CLIs on your login shell's PATH: `claude` and/or `codex`.
-- Optional: the VS Code `code` CLI, only to install the `.vsix`.
+- Agent CLIs on your login shell's PATH: `claude`, `codex` and/or `opencode`.
 
 ## Build from a fresh clone
 
 ```sh
 git clone https://github.com/ricardomoratomateos/stack.git && cd stack
 git checkout v1
-npm install                    # root: extension, stackd, MCP bridge
+npm install                    # root: stackd, MCP bridge
 npm --prefix desktop install   # desktop: Vite/React UI + Tauri CLI
 . "$HOME/.cargo/env"
 ```
 
-Root `npm run compile` (esbuild.js) writes `dist/`: `extension.js`, the webview panels, `stack-mcp.js` (MCP bridge) and `stackd.js` (daemon). Use `npm run watch` while developing.
-
-VS Code extension (optional):
-
-```sh
-npm run package                               # stack-agents-<version>.vsix in the repo root
-code --install-extension stack-agents-*.vsix  # or Extensions > ... > Install from VSIX
-```
+Root `npm run compile` (esbuild.js) writes `dist/`: `stack-mcp.js` (MCP bridge) and `stackd.js` (daemon). Use `npm run watch` while developing.
 
 ### Desktop
 
