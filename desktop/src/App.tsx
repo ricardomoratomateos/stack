@@ -410,6 +410,13 @@ export function App() {
       return undefined;
     }
   }, [api]);
+  /** Middle click closes a tab, as in a browser: a session tab kills its window (the sidebar's ✕), the Review tab closes the review. */
+  const onMiddleClick = (close: () => void) => ({
+    onMouseDown: (e: React.MouseEvent) => { if (e.button === 1) e.preventDefault(); },
+    // mouseup, not auxclick: WKWebView on macOS 14 does not fire auxclick.
+    onMouseUp: (e: React.MouseEvent) => { if (e.button !== 1) return; e.preventDefault(); e.stopPropagation(); close(); },
+  });
+  const closeSessionTab = (worktreeId: string, index: number) => void runCommand('killWindow', { worktreeId, windowIndex: index });
 
   /** Native folder picker, then stackd's `addRepo`; selects the repository it manages. */
   const addRepository = useCallback(async () => {
@@ -605,17 +612,20 @@ export function App() {
                   <nav className="tabs" aria-label={`Sessions of ${nameOf(selected.wt)}`} onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'session'))}>
                     <span className="tabs-title">{selected.name}</span>
                     {rows.map((r) => (
-                      <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={(!reviewing && r.index === selectedIndex) || undefined} onClick={() => select(selected.wt.id, r.index)} title={[r.kind === 'agent' ? stateWord(r.state) : r.detail, r.index === selectedIndex ? 'Double-click to maximize' : ''].filter(Boolean).join(' · ') || undefined}>
+                      <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={(!reviewing && r.index === selectedIndex) || undefined} {...onMiddleClick(() => closeSessionTab(selected.wt.id, r.index))} onClick={() => select(selected.wt.id, r.index)} title={[r.kind === 'agent' ? stateWord(r.state) : r.detail, r.index === selectedIndex ? 'Double-click to maximize' : ''].filter(Boolean).join(' · ') || undefined}>
                         <StatusDot state={r.state} size="sm" />
                         {r.name}
                         {maximized === 'session' && r.index === selectedIndex && <span className="max-badge" title={maxTitle}>maximized</span>}
                       </button>
                     ))}
-                    <button type="button" className="tab tab-review" data-selected={reviewing || undefined} onClick={() => setReviewId(selected.wt.id)} title="Review the changes and comment">
-                      <i className="codicon codicon-git-compare" aria-hidden="true" />
-                      Review
-                      {reviewing && <span className="tab-close" role="button" aria-label="Close review" title="Close review (Esc)" onClick={(e) => { e.stopPropagation(); closeReview(); }}><i className="codicon codicon-close" aria-hidden="true" /></span>}
-                    </button>
+                    {/* Only while a review is open: it is opened from the card's review button, and closing it removes the tab. */}
+                    {reviewing && (
+                      <button type="button" className="tab tab-review" data-selected {...onMiddleClick(closeReview)} title="Review the changes and comment">
+                        <i className="codicon codicon-git-compare" aria-hidden="true" />
+                        Review
+                        <span className="tab-close" role="button" aria-label="Close review" title="Close review (Esc)" onClick={(e) => { e.stopPropagation(); closeReview(); }}><i className="codicon codicon-close" aria-hidden="true" /></span>
+                      </button>
+                    )}
                   </nav>
                   <div className="centre-body">
                   <div className="term-host">
@@ -641,7 +651,7 @@ export function App() {
               <nav className="tabs" aria-label="Manager sessions" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧M toggle">
                 <span className="tabs-title">{view.control?.name || 'Manager'}</span>
                 {managerRows.map((r) => (
-                  <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === managerIdx || undefined} onClick={() => setManagerTabs((m) => ({ ...m, [view.repoRoot]: r.index }))} title={(r.kind === 'agent' ? stateWord(r.state) : r.detail) || undefined}>
+                  <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === managerIdx || undefined} {...onMiddleClick(() => view.control && closeSessionTab(view.control.wt.id, r.index))} onClick={() => setManagerTabs((m) => ({ ...m, [view.repoRoot]: r.index }))} title={(r.kind === 'agent' ? stateWord(r.state) : r.detail) || undefined}>
                     <StatusDot state={r.state} size="sm" />
                     {r.name}
                   </button>
@@ -660,7 +670,7 @@ export function App() {
               <nav className="tabs" aria-label="Manager sessions" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧M toggle">
                 <span className="tabs-title">{view.control?.name || 'Manager'}</span>
                 {managerRows.map((r) => (
-                  <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === managerIdx || undefined} onClick={() => setManagerTabs((m) => ({ ...m, [view.repoRoot]: r.index }))} title={(r.kind === 'agent' ? stateWord(r.state) : r.detail) || undefined}>
+                  <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === managerIdx || undefined} {...onMiddleClick(() => view.control && closeSessionTab(view.control.wt.id, r.index))} onClick={() => setManagerTabs((m) => ({ ...m, [view.repoRoot]: r.index }))} title={(r.kind === 'agent' ? stateWord(r.state) : r.detail) || undefined}>
                     <StatusDot state={r.state} size="sm" />
                     {r.name}
                   </button>
