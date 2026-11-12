@@ -77,6 +77,17 @@ export function pickSession(wt: WorktreeItem, remembered?: number): number | und
   return sessionToOpen(wt)?.index ?? wt.sessions[0]?.index;
 }
 
+/**
+ * The session "Send to agent" in the review delivers to: the live agent the daemon picks
+ * (AgentSessionManager.sendPromptToAgent) — one waiting or idle first, then one asking, then any.
+ */
+export function liveAgentIndex(wt: WorktreeItem): number | undefined {
+  const rank = (s: AgentState) => (s === 'waiting' || s === 'idle' ? 0 : s === 'permission' ? 1 : 2);
+  return wt.sessions
+    .filter((s) => s.kind === 'agent' && s.state !== 'terminated')
+    .sort((a, b) => rank(a.state) - rank(b.state))[0]?.index;
+}
+
 /** The Manager's window: its agent, else the first window. */
 export function managerSession(control: WorktreeItem | undefined): SessionItem | undefined {
   return control && (primaryAgent(control) ?? control.sessions[0]);

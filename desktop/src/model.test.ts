@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionItem, StackState, WorktreeItem } from '@core/webview/types';
-import { mruOrder, mruTouch, stepWrap, floatRows, buildView, managerIndex, managerSession, pickSession, resolveShortcut, stepSessionIndex, sessionRows, shortcutOf, taskFromText, type KeyLike } from './model';
+import { mruOrder, mruTouch, stepWrap, floatRows, buildView, liveAgentIndex, managerIndex, managerSession, pickSession, resolveShortcut, stepSessionIndex, sessionRows, shortcutOf, taskFromText, type KeyLike } from './model';
 import type { Snapshot } from './stackd/api';
 
 const session = (o: Partial<SessionItem> & { index: number }): SessionItem => ({ name: 'claude', kind: 'agent', provider: 'claude', state: 'idle', ...o });
@@ -62,6 +62,16 @@ describe('sessionRows', () => {
   });
   it('falls back to the window name for a shell with no known command', () => {
     expect(sessionRows(wt('a', [session({ index: 1, name: 'zsh', kind: 'shell' })]))[0].detail).toBe('zsh');
+  });
+});
+
+describe('liveAgentIndex', () => {
+  it('picks the agent the daemon sends review comments to', () => {
+    expect(liveAgentIndex(wt('a', [session({ index: 1, state: 'active' }), session({ index: 2, state: 'permission' }), session({ index: 3, state: 'waiting' })]))).toBe(3);
+    expect(liveAgentIndex(wt('b', [session({ index: 1, state: 'active' }), session({ index: 2, state: 'permission' })]))).toBe(2);
+  });
+  it('skips shells and exited agents', () => {
+    expect(liveAgentIndex(wt('c', [session({ index: 1, kind: 'shell', name: 'shell' }), session({ index: 2, state: 'terminated' })]))).toBeUndefined();
   });
 });
 

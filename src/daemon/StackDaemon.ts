@@ -592,7 +592,10 @@ export class StackDaemon {
         const destination = str(b, 'destination');
         if (destination !== 'live' && destination !== 'new') throw new CommandError('"destination" must be live or new.');
         const comments = Array.isArray(b['comments']) ? (b['comments'] as never[]) : [];
-        return { went: await ctx.service.send(wt.id, destination, comments) };
+        const before = new Set(this.agents.getSessions(wt.id).map((s) => s.index));
+        const went = await ctx.service.send(wt.id, destination, comments);
+        // A fresh agent: its window, so the app can show it picking the comments up.
+        return { went, ...(went === 'new' ? { index: this.newWindow(wt.id, before) } : {}) };
       }
       case 'paste': {
         const { wt } = this.findWorktree(need(b, 'worktreeId'));

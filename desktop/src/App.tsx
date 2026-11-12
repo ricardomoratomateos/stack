@@ -367,6 +367,14 @@ export function App() {
   useEffect(() => {
     if (centreFocusTick > 0 && centre.pane) registry.focus(centre.pane);
   }, [centreFocusTick, centre.pane, registry]);
+  // "Send to agent" in the review: leave the now-stale diff for the session the comments went to.
+  const reviewSent = useCallback((index: number | undefined, fellBack: boolean) => {
+    const id = latest.current.selectedId; // the reviewed task: leaving it closes the review
+    setReviewId(undefined);
+    if (id) select(id, index);
+    setCentreFocusTick((t) => t + 1);
+    if (fellBack) setNotice('The agent had exited, so a new one was launched with your comments.');
+  }, [select]);
 
   // Notifications, menu-bar item and global shortcuts (⌃⌥⌘J / M / S): they may point at a worktree of another repo.
   const selectAnywhere = useCallback((id: string) => {
@@ -629,7 +637,7 @@ export function App() {
                         : 'Connecting…'}
                     />
                   </div>
-                  {reviewing && <ReviewHost key={selected.wt.id} worktree={selected.wt} api={api} onClose={closeReview} onNotice={setNotice} />}
+                  {reviewing && <ReviewHost key={selected.wt.id} worktree={selected.wt} api={api} onClose={closeReview} onSent={reviewSent} onNotice={setNotice} />}
                   </div>
                 </>
               ) : (

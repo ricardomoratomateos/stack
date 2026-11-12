@@ -7,6 +7,7 @@ import { buildCommentPrompt } from '@core/diff/commentPrompt';
 import type { DiffPanelExtMessage, DiffPanelMessage } from '@core/diff/types';
 import type { WorktreeItem } from '@core/webview/types';
 import { nameOf } from '@core/webview/derive';
+import { liveAgentIndex } from '../model';
 import type { StackdApi } from '../stackd/api';
 import { reviewCss } from './css';
 
@@ -31,11 +32,13 @@ const reason = (e: unknown): string => {
  * clipboard destination is built and written locally, and `openFile` opens VS Code at the line.
  * The panel and its stylesheet are loaded on first use.
  */
-export function ReviewHost({ worktree, api, onClose, onNotice }: {
+export function ReviewHost({ worktree, api, onClose, onSent, onNotice }: {
   worktree: WorktreeItem;
   api: StackdApi;
   /** Esc in the review: back to the terminal. */
   onClose: () => void;
+  /** The comments went to an agent: the session they went to (when known), to go and watch it. */
+  onSent: (index: number | undefined, fellBack: boolean) => void;
   onNotice: (text: string) => void;
 }) {
   const [Panel, setPanel] = useState<ComponentType | null>(null);
@@ -91,17 +94,23 @@ export function ReviewHost({ worktree, api, onClose, onNotice }: {
         case 'send':
           void (async () => {
             let went: typeof msg.destination | false = false;
+            let index: number | undefined;
+            // The live agent is picked from the sessions as they were when the user sent.
+            const liveIndex = liveAgentIndex(wtRef.current);
             try {
               const prompt = buildCommentPrompt(msg.comments);
               if (!prompt) went = false;
               else if (msg.destination === 'clipboard') { await navigator.clipboard.writeText(prompt); went = 'clipboard'; }
-              else went = (await api.command<{ went: typeof msg.destination | false }>('sendComments', { worktreeId: id, destination: msg.destination, comments: msg.comments })).went;
+              else ({ went, index } = await api.command<{ went: typeof msg.destination | false; index?: number }>('sendComments', { worktreeId: id, destination: msg.destination, comments: msg.comments }));
             } catch { went = false; }
             if (!live) return;
+            const fellBack = went !== false && went !== msg.destination;
             post({
               type: 'sent', destination: went || msg.destination, ok: went !== false,
-              ...(went && went !== msg.destination ? { fellBack: true as const } : {}),
+              ...(fellBack ? { fellBack: true as const } : {}),
             });
+            if (went === 'live') onSent(liveIndex, false);
+            else if (went === 'new') onSent(index, fellBack);
           })();
           break;
         case 'openFile':
@@ -111,7 +120,7 @@ export function ReviewHost({ worktree, api, onClose, onNotice }: {
       }
     };
     return () => { live = false; reviewShim.onMessage = () => {}; reviewShim.onState = undefined; reviewShim.state = undefined; };
-  }, [id, api, onNotice]);
+  }, [id, api, onNotice, onSent]);
 
   // Esc goes back to the terminal unless the panel is using it for a dialog, popover or comment box.
   useEffect(() => {
