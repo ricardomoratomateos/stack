@@ -8,6 +8,22 @@ const SHIFT = 'transform 150ms ease';
 const ATTR = 'data-reorder';
 const FIXED = 'data-reorder-fixed';
 
+/**
+ * Where the row at `from`, moved by `dy`, would land among `rects`. The leading edge decides
+ * (the top going up, the bottom going down) as with browser tabs: a row passes another once
+ * that edge crosses the other's middle. Its centre would not do — a tall row (the selected,
+ * expanded card) clamped to the list could never bring its centre past the first rows.
+ */
+export function dropIndex(rects: readonly { top: number; bottom: number }[], from: number, dy: number): number {
+  const mid = (i: number) => (rects[i].top + rects[i].bottom) / 2;
+  const top = rects[from].top + dy;
+  const bottom = rects[from].bottom + dy;
+  let to = from;
+  for (let i = from + 1; i < rects.length; i++) if (bottom > mid(i)) to = i;
+  for (let i = from - 1; i >= 0; i--) if (top < mid(i)) to = i;
+  return to;
+}
+
 export interface ReorderProps {
   'data-reorder': string;
   'data-reorder-fixed'?: '';
@@ -93,10 +109,7 @@ export function usePointerReorder<K extends string | number>(ns: string, onCommi
           const max = rects[rects.length - 1].bottom - rects[from].bottom;
           const dy = Math.min(max, Math.max(min, ev.clientY - startY));
           row.style.transform = `translateY(${dy}px)`;
-          const centre = rects[from].top + dy + rects[from].height / 2;
-          to = from;
-          for (let i = from + 1; i < rects.length; i++) if (centre > rects[i].top + rects[i].height / 2) to = i;
-          for (let i = from - 1; i >= 0; i--) if (centre < rects[i].top + rects[i].height / 2) to = i;
+          to = dropIndex(rects, from, dy);
           rows.forEach((r, i) => {
             if (i === from) return;
             const shift = from < i && i <= to ? -step : to <= i && i < from ? step : 0;
