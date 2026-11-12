@@ -27,6 +27,19 @@ export interface LspSpec {
   init?: unknown;
   /** Answers `workspace/configuration` for one section. */
   config?: (section: string | undefined) => unknown;
+  /**
+   * The root the server is started on, when it is not the task's own: a view of it (see `phpactorView`).
+   * `map` pairs each real path prefix with its place in the view; URIs are rewritten both ways on the wire,
+   * so the server only ever sees the view and the client only ever sees the real files.
+   */
+  view?: { root: string; map: Array<[real: string, view: string]> };
+}
+
+/** Rewrites `"file:///from…` to `"file:///to…` inside a serialized JSON message (only at the start of a string). */
+export function rewriteUris(json: string, pairs: Array<[from: string, to: string]>): string {
+  let out = json;
+  for (const [from, to] of pairs) out = out.split(`"${pathToFileURL(from).href}`).join(`"${pathToFileURL(to).href}`);
+  return out;
 }
 
 export type LspState = 'starting' | 'indexing' | 'ready' | 'dead';
@@ -72,6 +85,9 @@ export class LspProcess {
   private readonly progress = new Map<string, string>();
   /** A progress whose title speaks of indexing has run to its end: the server's index is built. */
   indexed = false;
+  private readonly serverRoot: string;
+  private readonly toServer: Array<[string, string]>;
+  private readonly fromServer: Array<[string, string]>;
 
   constructor(
     readonly spec: LspSpec,
@@ -81,7 +97,10 @@ export class LspProcess {
     private readonly onExit: () => void = () => {},
   ) {
     this.startedAt = now();
-    this.child = spawn(spec.command, spec.args, { cwd: root, env: { ...process.env, NODE_OPTIONS: '', ...spec.env } });
+    this.serverRoot = spec.view?.root ?? root;
+    this.toServer = (spec.view?.map ?? []).map(([real, view]) => [real, view]);
+    this.fromServer = (spec.view?.map ?? []).map(([real, view]) => [view, real]);
+    this.child = spawn(spec.command, spec.args, { cwd: this.serverRoot, env: { ...process.env, NODE_OPTIONS: '', ...spec.env } });
     this.child.stdout.on('data', (c) => this.onData(c));
     this.child.stderr.on('data', (c) => { this.stderr = (this.stderr + c.toString()).slice(-4000); });
     this.child.on('error', (e) => this.die(e.message));
@@ -103,12 +122,12 @@ export class LspProcess {
   }
 
   private async initialize(): Promise<void> {
-    const uri = pathToFileURL(this.root).href;
+    const uri = pathToFileURL(this.serverRoot).href;
     await this.request('initialize', {
       processId: process.pid,
       clientInfo: { name: 'stackd' },
       rootUri: uri,
-      rootPath: this.root,
+      rootPath: this.serverRoot,
       workspaceFolders: [{ uri, name: path.basename(this.root) }],
       initializationOptions: this.spec.init,
       capabilities: {
@@ -137,7 +156,8 @@ export class LspProcess {
       const m = /Content-Length: (\d+)/i.exec(this.buf.subarray(0, head).toString('ascii'));
       const len = m ? Number(m[1]) : 0;
       if (this.buf.length < head + 4 + len) return;
-      const body = this.buf.subarray(head + 4, head + 4 + len).toString('utf8');
+      const raw = this.buf.subarray(head + 4, head + 4 + len).toString('utf8');
+      const body = this.fromServer.length ? rewriteUris(raw, this.fromServer) : raw;
       this.buf = this.buf.subarray(head + 4 + len);
       let msg: Message;
       try { msg = JSON.parse(body) as Message; } catch { continue; }
@@ -156,7 +176,7 @@ export class LspProcess {
     if (msg.id !== undefined) { // the server asks its client
       let result: unknown = null;
       if (msg.method === 'workspace/configuration') result = (msg.params?.items ?? []).map((i) => this.spec.config?.(i.section) ?? null);
-      else if (msg.method === 'workspace/workspaceFolders') result = [{ uri: pathToFileURL(this.root).href, name: path.basename(this.root) }];
+      else if (msg.method === 'workspace/workspaceFolders') result = [{ uri: pathToFileURL(this.serverRoot).href, name: path.basename(this.root) }];
       this.write({ jsonrpc: '2.0', id: msg.id, result });
       return;
     }
@@ -197,7 +217,8 @@ export class LspProcess {
 
   private write(msg: unknown): void {
     if (this.state === 'dead') return;
-    const body = Buffer.from(JSON.stringify(msg), 'utf8');
+    const json = JSON.stringify(msg);
+    const body = Buffer.from(this.toServer.length ? rewriteUris(json, this.toServer) : json, 'utf8');
     this.child.stdin.write(`Content-Length: ${body.length}\r\n\r\n`);
     this.child.stdin.write(body);
   }

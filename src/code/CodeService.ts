@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -179,11 +179,15 @@ export class CodeService {
     const env = { XDG_CACHE_HOME: path.join(dir, 'cache'), XDG_CONFIG_HOME: path.join(dir, 'config'), XDG_DATA_HOME: path.join(dir, 'data') };
     for (const d of Object.values(env)) fs.mkdirSync(d, { recursive: true });
     const own = path.join(task.root, 'vendor', 'autoload.php');
+    const view = phpactorView(task.root, path.join(dir, 'root'));
     return {
       id: 'phpactor',
       ...cmd,
       env,
+      view,
       init: {
+        // The view is symlinks into the worktree (see phpactorView): the indexer must follow them.
+        'indexer.follow_symlinks': true,
         // MUST stay off: left on, Phpactor writes `<project>/.phpactor.json` at start. Nothing is written in a worktree.
         'language_server_configuration.auto_config': false,
         'language_server.enable_trust_check': false, // and never load the worktree's own .phpactor.json
@@ -389,3 +393,40 @@ function outline(decls: Declaration[]): unknown[] {
 }
 
 export { PathRefused };
+
+/**
+ * What Phpactor is started on: a directory of symlinks to the worktree's top-level entries that hold
+ * tracked PHP files, rebuilt at every start. Its indexer walks every directory under its root before
+ * applying exclude patterns, so on a checkout with real node_modules, vendor or other worktrees nested
+ * inside (the main checkout keeps them in .worktrees/), walking the worktree itself takes forever and
+ * indexes every nested copy. vendor/ stays out (Composer's class maps still find a vendor class).
+ */
+export function phpactorView(root: string, viewDir: string, listPhp: (root: string) => string[] = trackedPhp): { root: string; map: Array<[string, string]> } {
+  const tops = new Set<string>();
+  for (const file of listPhp(root)) {
+    const top = file.split('/')[0];
+    if (top && !['vendor', 'node_modules', '.worktrees', '.git'].includes(top)) tops.add(top);
+  }
+  for (const extra of ['composer.json', 'composer.lock']) if (fs.existsSync(path.join(root, extra))) tops.add(extra);
+  fs.rmSync(viewDir, { recursive: true, force: true });
+  fs.mkdirSync(viewDir, { recursive: true });
+  const map: Array<[string, string]> = [];
+  for (const top of [...tops].sort()) {
+    const real = path.join(root, top);
+    if (!fs.existsSync(real)) continue;
+    fs.symlinkSync(real, path.join(viewDir, top));
+    const dir = fs.statSync(real).isDirectory();
+    map.push(dir ? [`${real}/`, `${path.join(viewDir, top)}/`] : [real, path.join(viewDir, top)]);
+  }
+  return { root: viewDir, map };
+}
+
+/** Tracked PHP files, relative to `root` (git's index, so nested worktrees and untracked trees are not walked). */
+function trackedPhp(root: string): string[] {
+  try {
+    const out = execFileSync('git', ['-C', root, 'ls-files', '-z', '--', '*.php'], { maxBuffer: 256 * 1024 * 1024, timeout: 20_000 });
+    return out.toString('utf8').split('\0').filter(Boolean);
+  } catch {
+    return [];
+  }
+}

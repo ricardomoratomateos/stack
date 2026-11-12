@@ -164,7 +164,7 @@ describe('CodeService', () => {
     const call = spawned.calls[0];
     expect(call.command).toBe('php');
     expect(call.args).toEqual(['-d', 'memory_limit=-1', path.join(cfg, 'tools', 'phpactor.phar'), 'language-server']);
-    expect(call.cwd).toBe(wt);
+    expect(call.cwd).toBe(path.join(cfg, 'cache', 'phpactor', 't1', 'root')); // a view of symlinks into the worktree
     for (const key of ['XDG_CACHE_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME']) expect(call.env[key]).toContain(path.join(cfg, 'cache', 'phpactor', 't1'));
     const init = (spawned.servers[0].sent('initialize')[0].params as { initializationOptions: Record<string, unknown> }).initializationOptions;
     expect(init['language_server_configuration.auto_config']).toBe(false);
