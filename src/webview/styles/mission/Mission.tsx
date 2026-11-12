@@ -139,7 +139,6 @@ function Card({ d, selected, now, state, select, drag }: {
       data-group={d.group}
       data-selected={selected || undefined}
       data-dragging={drag.dragging || undefined}
-      data-over={drag.over || undefined}
       {...drag.props}
     >
       <button type="button" className="ms-card-main" aria-current={selected || undefined} onClick={pick}>

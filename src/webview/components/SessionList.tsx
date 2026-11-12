@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { send } from '../vscode';
+import { usePointerReorder } from '../usePointerReorder';
 import type { AgentState, SessionItem, WorktreeItem } from '../types';
 import { StatusDot } from './StatusDot';
 import { ProviderMark } from './providers';
@@ -34,26 +35,26 @@ function Mark({ session }: { session: SessionItem; variant: SessionVariant }) {
  * focus. One implementation for all three layouts; only the marker differs.
  */
 export function SessionList({ wt, variant, onSelect }: { wt: WorktreeItem; variant: SessionVariant; onSelect: () => void }) {
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [overIndex, setOverIndex] = useState<number | null>(null);
-  if (wt.sessions.length === 0) return null;
-
   // Move window `from` to the slot occupied by window `to`, and persist the
   // resulting order of tmux window indexes.
   const commitReorder = (from: number, to: number) => {
-    const indexes = wt.sessions.map((s) => s.index);
+    const indexes = sessions.map((s) => s.index);
     const fromPos = indexes.indexOf(from);
     const toPos = indexes.indexOf(to);
-    if (fromPos === -1 || toPos === -1 || fromPos === toPos) return;
+    if (fromPos === -1 || toPos === -1 || fromPos === toPos) return undefined;
     const next = [...indexes];
     next.splice(toPos, 0, next.splice(fromPos, 1)[0]);
     send({ type: 'reorderSessions', worktreeId: wt.id, orderedIndexes: next });
+    return next;
   };
-  const end = () => { setDragIndex(null); setOverIndex(null); };
+  const { bind, dragKey: dragIndex, order } = usePointerReorder<number>(`sess-${wt.id.replace(/[^A-Za-z0-9-]/g, '_')}`, commitReorder);
+  // A drop's order at once, until the host's own arrives.
+  const sessions = order(wt.sessions, (s) => s.index);
+  if (sessions.length === 0) return null;
 
   return (
     <ul className="fm-sessions" aria-label="Sessions">
-      {wt.sessions.map((s) => {
+      {sessions.map((s) => {
         const name = s.alias ?? s.name;
         const isAgent = s.kind === 'agent';
         return (
@@ -62,19 +63,7 @@ export function SessionList({ wt, variant, onSelect }: { wt: WorktreeItem; varia
             className="fm-sess"
             data-state={isAgent ? s.state : 'shell'}
             data-dragging={dragIndex === s.index || undefined}
-            data-over={(overIndex === s.index && dragIndex !== null && dragIndex !== s.index) || undefined}
-            draggable
-            // These stop propagation: the worktree row around them is draggable too.
-            onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; setDragIndex(s.index); }}
-            onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setOverIndex(s.index); }}
-            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; }}
-            onDrop={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              if (dragIndex !== null) commitReorder(dragIndex, s.index);
-              end();
-            }}
-            onDragEnd={(e) => { e.stopPropagation(); end(); }}
+            {...bind(s.index, true)}
           >
             <button
               type="button"

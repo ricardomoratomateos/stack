@@ -115,7 +115,6 @@ function Row({ d, selected, now, state, select, drag }: {
       data-selected={selected || undefined}
       data-group={d.group}
       data-dragging={drag.dragging || undefined}
-      data-over={drag.over || undefined}
       {...drag.props}
     >
       <button type="button" className="cl-row-main" aria-current={selected || undefined} onClick={pick}>

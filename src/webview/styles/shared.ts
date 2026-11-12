@@ -117,8 +117,6 @@ body.vscode-high-contrast .fm .fm-split-solid .fm-split-chev, body.vscode-high-c
 /* ── sessions ── */
 .fm-sessions { display: flex; flex-direction: column; border-top: 1px solid var(--fm-border); padding-top: 6px; }
 .fm-sess { position: relative; border-radius: var(--fm-radius-sm); }
-.fm-sess[data-dragging] { opacity: .4; }
-.fm-sess[data-over] { box-shadow: inset 0 2px 0 var(--vscode-focusBorder); }
 .fm-sess-main {
   width: 100%; display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: center;
   padding: 5px 4px; border: 0; border-radius: var(--fm-radius-sm); background: transparent; text-align: left;
@@ -256,8 +254,7 @@ button.fm-port:hover { background: var(--fm-hover); border-color: var(--fm-accen
 .fm-health-dot[data-tone='bad'] { background: var(--fm-bad); }
 
 /* ── drag ── */
-.fm-drag[data-dragging] { opacity: .4; }
-.fm-drag[data-over] { box-shadow: inset 0 2px 0 var(--vscode-focusBorder); }
+[data-stack-reordering] [data-reorder] { animation: none !important; }
 .fm-deleting { opacity: .45; pointer-events: none; }
 
 @media (prefers-reduced-motion: reduce) {

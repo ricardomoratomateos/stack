@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { getState, send, setState } from './vscode';
+import { usePointerReorder, type ReorderProps } from './usePointerReorder';
 import { normalizeSidebarStyle } from '../sidebarStyle';
 import { describe, describeAll, type Described } from './derive';
 import type { ExtMessage, StackState, WorktreeItem } from './types';
@@ -28,18 +29,10 @@ export function useNow(everyMs = 30_000): number {
 }
 
 export interface DragBinding {
-  /** Spread on the element that should be draggable and accept drops. */
-  props: {
-    draggable: boolean;
-    onDragStart?: (e: React.DragEvent) => void;
-    onDragEnter: (e: React.DragEvent) => void;
-    onDragOver: (e: React.DragEvent) => void;
-    onDrop: (e: React.DragEvent) => void;
-    onDragEnd: () => void;
-  };
+  /** Spread on the row: it can be dragged (when allowed) and the rows around it make way. */
+  props: ReorderProps;
+  /** This row is the one being dragged. */
   dragging: boolean;
-  /** Something is being dragged over this one: it is where the drop would land. */
-  over: boolean;
 }
 
 /**
@@ -47,36 +40,26 @@ export interface DragBinding {
  * extension, so it cannot be dragged (it can still be dropped onto), and
  * neither can a worktree that is being deleted or is gone.
  */
-export function useWorktreeDrag(worktrees: WorktreeItem[]): (wt: WorktreeItem) => DragBinding {
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [overId, setOverId] = useState<string | null>(null);
-
+export function useWorktreeDrag(worktrees: WorktreeItem[]) {
+  const ids = useRef<string[]>([]);
   const commit = useCallback((fromId: string, toId: string) => {
-    const ids = worktrees.map((w) => w.id);
-    const from = ids.indexOf(fromId);
-    const to = ids.indexOf(toId);
-    if (from === -1 || to === -1 || from === to) return;
-    const next = [...ids];
+    const from = ids.current.indexOf(fromId);
+    const to = ids.current.indexOf(toId);
+    if (from === -1 || to === -1 || from === to) return undefined;
+    const next = [...ids.current];
     next.splice(to, 0, next.splice(from, 1)[0]);
     send({ type: 'reorderWorktrees', orderedIds: next });
-  }, [worktrees]);
+    return next;
+  }, []);
+  const { bind, dragKey, order } = usePointerReorder<string>('wt', commit);
+  // The order on screen (a drop's, until the host confirms it), so a second drag starts from it.
+  ids.current = order(worktrees, (w) => w.id).map((w) => w.id);
 
-  return useCallback((wt) => {
+  const dragFor = useCallback((wt: WorktreeItem): DragBinding => {
     const draggable = !wt.isMain && !wt.isControl && !wt.deleting && !wt.missing;
-    const end = () => { setDragId(null); setOverId(null); };
-    return {
-      props: {
-        draggable,
-        onDragStart: draggable ? (e) => { e.dataTransfer.effectAllowed = 'move'; setDragId(wt.id); } : undefined,
-        onDragEnter: (e) => { e.preventDefault(); setOverId(wt.id); },
-        onDragOver: (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; },
-        onDrop: (e) => { e.preventDefault(); if (dragId) commit(dragId, wt.id); end(); },
-        onDragEnd: end,
-      },
-      dragging: dragId === wt.id,
-      over: overId === wt.id && dragId !== null && dragId !== wt.id,
-    };
-  }, [dragId, overId, commit]);
+    return { props: bind(wt.id, draggable), dragging: dragKey === wt.id };
+  }, [bind, dragKey]);
+  return { dragFor, order };
 }
 
 export interface Sidebar {
@@ -134,12 +117,12 @@ export function useSidebar(): Sidebar {
     send({ type: 'selectWorktree', worktreeId: id });
   }, []);
 
-  const items = useMemo(() => describeAll(state), [state]);
+  const { dragFor, order } = useWorktreeDrag(state.worktrees);
+  const items = useMemo(() => order(describeAll(state), (d) => d.wt.id), [state, order]);
   const controlItem = useMemo(
     () => (state.controlSession ? describe(state.controlSession, state.dockerUnavailable) : undefined),
     [state.controlSession, state.dockerUnavailable],
   );
-  const dragFor = useWorktreeDrag(state.worktrees);
 
   return { state, loaded, items, controlItem, selectedId: selected, select, dragFor, now };
 }
