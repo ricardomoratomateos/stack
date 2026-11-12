@@ -11,6 +11,12 @@ export interface LspStatus {
   initMs?: number; indexMs?: number; indexingForMs?: number; rssMb: number;
 }
 
+/** An LSP diagnostic as the linter publishes it (0-based positions). */
+export interface LintDiagnostic {
+  range: { start: { line: number; character: number }; end: { line: number; character: number } };
+  severity?: number; code?: string | number; source?: string; message: string;
+}
+
 export interface CodeBackend {
   roots(): Promise<Array<{ root: string; name: string }>>;
   tree(dir: string): Promise<TreeEntry[]>;
@@ -19,6 +25,8 @@ export interface CodeBackend {
   /** One navigation request to the language server of `languageId` for `root` (started on first use). */
   lsp<T = unknown>(root: string, languageId: string, method: string, params: unknown): Promise<T>;
   lspStatus(): Promise<LspStatus[]>;
+  /** Lint findings for one JS/TS file (oxlint); empty when the backend has no linter. */
+  lint(root: string, path: string): Promise<{ ms: number; diagnostics: LintDiagnostic[] }>;
 }
 
 export function httpBackend(base: string): CodeBackend {
@@ -37,5 +45,6 @@ export function httpBackend(base: string): CodeBackend {
     lsp: async <T,>(root: string, languageId: string, method: string, params: unknown) =>
       (await call<{ result: T; ms: number }>('/lsp', { root, languageId, method, params })).result,
     lspStatus: () => call('/lsp/status'),
+    lint: (root, path) => call(`/lint?${q({ root, path })}`),
   };
 }

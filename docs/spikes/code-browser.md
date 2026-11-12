@@ -17,16 +17,20 @@ Decisiones tomadas durante el spike:
 
 ## Respuesta corta
 
-**Sí, y con poca memoria en PHP.** Sobre un worktree real de `big-app` (33 223 ficheros PHP propios,
-10 412 TS/TSX en `frontend/apps/v2/src`):
+**Sí, y con poca memoria.** Sobre un worktree real de `big-app` (33 223 ficheros PHP propios, 10 412 TS/TSX
+en `frontend/apps/v2/src`):
 
-- **PHP con Phpactor** (MIT), sin indexar `vendor/`: **~100 MB** de memoria estable, respuestas en 1–50 ms,
-  y aun así salta a las clases de `vendor/` (las encuentra por el mapa PSR-4 de Composer, sin indexarlas).
-  El precio: el primer indexado tarda **~2,8 min** por worktree y el índice ocupa **750 MB en disco**.
-- **JS/TS con el LSP nativo de TypeScript 7**: es lo caro. El proyecto entero sin `node_modules` son
-  **1,6 GB**; acotado a los ficheros que se miran y lo que importan, **0,5 GB**. Sin `node_modules` la
-  navegación por código propio funciona; los tipos que vienen de librerías pasan a `any`.
-- En los dos casos: un servidor por (worktree, lenguaje), arrancado al primer uso y apagado por inactividad.
+- **PHP con Phpactor** (MIT), sin indexar `vendor/`: **~100 MB** estables, respuestas en 1–50 ms, y salta a
+  las clases de `vendor/` por el mapa PSR-4 de Composer. El precio: el primer indexado tarda **1–3 min** por
+  worktree y el índice ocupa **~750 MB en disco**. Indexar solo el diff (un servidor sobre el checkout base
+  con los ficheros cambiados encima) funciona en 14 de 17 casos y arranca en segundos, pero ensucia el
+  índice compartido: se queda como optimización posterior, no para empezar.
+- **JS/TS sin servidor**: un índice sintáctico propio (qué declara y exporta cada fichero, imports resueltos
+  por los `paths` del tsconfig) más `git grep`. Se construye en **8 s**, ocupa **4 MB**, y acierta 13 de 16
+  definiciones en código propio (y una más a medias) frente a TypeScript 7; las referencias coinciden casi línea a línea. No da
+  tipos en el hover. El servidor de TypeScript 7 (0,5–2,2 GB) queda como "modo preciso" bajo demanda.
+- **Diagnósticos**: `oxlint --lsp` (46 MB) pinta subrayados en Monaco a través del mismo puente.
+- SCIP (`scip-typescript`) no termina de indexar este proyecto: descartado.
 
 ## Qué enseña el prototipo
 
@@ -40,6 +44,8 @@ Decisiones tomadas durante el spike:
 - PHP sin indexar `vendor/`: F12 sobre `Request` de Symfony abre `vendor/symfony/http-foundation/Request.php`.
 - ⌘P: ficheros por nombre difuso. `#texto`: símbolos del proyecto, de los servidores ya arrancados.
 - Atrás / adelante con los botones, como "Go Back" de VS Code.
+- **Subrayados de oxlint** en ficheros JS/TS (`--oxlint`): el backend convierte el `publishDiagnostics` del
+  servidor en una respuesta a `GET /lint`, y Monaco los pinta como marcadores.
 - Píldoras de estado por servidor (arrancando / indexando N de M / listo).
 - Apertura directa en un fichero y línea: `&file=…&line=…` (lo que haría el clic desde Review).
 - Backend con la forma que tendría en stackd: lecturas solo dentro de raíces permitidas (con `realpath`),
@@ -49,7 +55,8 @@ Probado en Chrome contra el worktree `big-app/team/feat-1234-stock-sync`. Sin pr
 
 - **Dentro de la app Tauri (WKWebView)**: no se podía reiniciar la app en uso. Primera verificación pendiente.
 - La UI del outline (⌘⇧O) y los atajos ⌘T / ⌃-: cableados; solo probé el proveedor y los botones.
-- El modo TS "acotado / sin `node_modules`" está medido con scripts aparte, **no** cableado en el prototipo.
+- El modo TS "acotado / sin `node_modules`" y el índice ligero (`code-light-index.mjs`) están medidos con
+  scripts aparte, **no** cableados en la UI del prototipo. El solapado del diff sobre un checkout base, tampoco.
 
 ## Medidas
 
@@ -203,6 +210,156 @@ entendido. Ese "todo" es lo que ocupa.
   candidatos de ramas distintas. Así que el coste se multiplica por el número de worktrees **abiertos**, y
   la única defensa es no tenerlos abiertos a la vez.
 
+## Indexar solo el diff (PHP)
+
+Diff real de la tarea: `git merge-base HEAD origin/develop` = `d5f1e2c`, y `git diff --name-status` contra él:
+**16 ficheros PHP** (9 nuevos, 7 modificados), ninguno de TS. Checkout base: `git archive d5f1e2c lib apps www
+src` a un directorio fuera del repo (30 310 ficheros PHP); su índice: 69 s, 724 MB. Verdad de referencia:
+Phpactor sobre el worktree de la tarea con su índice completo. 17 casos: definiciones desde ficheros nuevos y
+modificados hacia código nuevo y hacia código sin cambios, desde código sin cambios hacia una clase
+modificada, hover, referencias que deben incluir llamadas añadidas por el diff, y símbolos de clases nuevas.
+
+### Diseño A: un Phpactor sobre el checkout base + los ficheros cambiados como documentos abiertos
+
+Los 16 ficheros de la tarea se envían con `didOpen` bajo las rutas del checkout base (con el texto de la
+tarea), y las respuestas se traducen base → tarea cambiando el prefijo.
+
+| Variante | Aciertos (de 17) | Nota |
+|---|---|---|
+| Solo el checkout base | 3 | Lo esperado: no conoce nada del diff |
+| `didOpen` de los cambiados | 2 | Abrir no indexa |
+| `didOpen` + **`didSave`** | 13 | Con `didSave`, Phpactor indexa el documento **en memoria**, exista o no en disco |
+| `didOpen` + `didSave` + mapa de Composer de la tarea | **14** | Arregla el salto desde `www/` (código sin namespace) a una clase nueva |
+
+- Bien: todas las definiciones (clase, método y método de trait nuevos; desde fichero nuevo, modificado y sin
+  cambios), el hover, y las cuatro búsquedas de referencias, **incluidas las llamadas añadidas por el diff**.
+- Mal: los tres casos de símbolos del proyecto para clases nuevas (no aparecen). Se tapa sin servidor: las
+  clases nuevas están en los ficheros del diff, basta pedir los símbolos de esos 16 ficheros o un `git grep`.
+- Coste: superponer los 16 ficheros, 3–13 s. Memoria: **un servidor, ~125 MB, para todas las tareas**.
+- Problemas de fondo:
+  - **Escribe en el índice compartido.** Tras cerrar y volver a abrir sin superponer nada, las referencias
+    seguían incluyendo llamadas de la tarea. Intenté deshacerlo con eventos de fichero (cambiado → releer,
+    añadido → borrado) y no quedó limpio. Con dos tareas a la vez, una vería llamadas de la otra.
+  - Cada tarea sale de un punto distinto de `develop`: hace falta un checkout base (y su índice) por
+    merge-base, o tratar como "cambiado" todo lo que difiera del base, que en una rama vieja son miles.
+  - Depende de un detalle interno (que `didSave` indexe el documento en memoria) y de una capa de traducción
+    de rutas en cada petición y respuesta.
+
+### Diseño B: copiar el índice base a un índice por tarea y reindexar solo lo cambiado
+
+- **Cómo decide Phpactor qué está obsoleto**: por fecha, no por hash. Un fichero se reindexa si su `mtime`
+  es posterior a una única marca de tiempo del índice (`timestamp.v3`). Un índice copiado nunca ve como
+  obsoletos los ficheros de la tarea. `index:build <fichero>` sí indexa ese fichero sin condiciones.
+- **Rutas**: van como `file:///ruta/absoluta` dentro de registros serializados de PHP (`s:<bytes>:"…"`), y los
+  registros de fichero se guardan en `md5(ruta)`. Reescribirlas es tocar los 124 737 ficheros del índice,
+  corregir longitudes y recolocar 29 835 registros: **61 s**. Solo copiar (`cp -c`) ya son 44 s.
+- Reindexar los 16 ficheros con `index:build <fichero>`: **157 s** (unos 10 s por proceso).
+- Resultado: 13 de 17. Definiciones y hover bien; falta una referencia en un caso y los símbolos de clases
+  nuevas salen incompletos.
+- Total ≈ 220 s, más que indexar el worktree desde cero (69–170 s), con la misma memoria y el mismo disco.
+
+**Entre A y B: A.** B no gana nada. Pero A tampoco sustituye todavía al índice completo por tarea, que es
+17 de 17 con ~100 MB y sin capas raras; su único coste real es el tiempo hasta estar listo, que se esconde
+indexando en segundo plano al crear la tarea. A pasa a ser la mejora a estudiar si el disco (0,7 GB por
+tarea) o la espera molestan, y entonces con una copia privada del índice o resolviendo antes la limpieza.
+
+## JS/TS sin servidor vivo
+
+Casos: 18 definiciones y 6 búsquedas de referencias en un componente real (`Progress.tsx`), puntuados contra
+TypeScript 7 nativo con el proyecto entero (2,2 GB, primera respuesta a los 4–7 s). La tarea medida no toca
+TS, así que no hay "ficheros TS del diff": los casos son de un módulo cualquiera.
+
+### SCIP (`scip-typescript` 0.6.2)
+
+- **No termina.** Dos intentos sobre `frontend/apps/v2` (con y sin `--no-global-caches`): el proceso muere
+  sin memoria a los 4,5–7 min con **4,8 GB** de pico, habiendo escrito 767 de ~10 450 documentos (134 MB).
+  Con más heap quizá acabe; el índice completo rondaría 1,7 GB.
+- Consultar un `.scip` desde Node es fácil (`@scip-code/scip` + `@bufbuild/protobuf`: una lista de
+  documentos con ocurrencias `rango → símbolo` y un bit de "definición"). Con el índice parcial: 0,36 s en
+  leerlo y **440 MB** en memoria para 767 documentos. El completo no cabe en memoria de forma razonable; haría
+  falta volcarlo a SQLite o similar.
+- Construirlo una vez para `develop` y superponer el diff: el formato lo permite (símbolos con nombre
+  estable, un documento por fichero), pero generar los documentos de los ficheros cambiados exige el programa
+  TypeScript entero, o sea el mismo coste que el servidor.
+- Descartado. La precisión no llegó a medirse (el fichero de prueba no estaba entre los 767).
+
+### Índice ligero + `git grep` (`desktop/scripts/code-light-index.mjs`)
+
+Solo el parser de TypeScript, sin programa ni `node_modules`: por fichero, qué declara (funciones, clases y
+sus miembros, tipos, enums, constantes y las claves de los objetos literales) y qué exporta o re-exporta.
+"Ir a definición" busca el identificador bajo el cursor: si viene de un import, lo resuelve con los `paths`
+del tsconfig y sigue re-exportaciones hasta la declaración; si no, la declaración local más cercana; si no,
+por nombre. "Referencias" es `git grep -w` filtrado a los ficheros que importan ese nombre de ese módulo.
+
+| | Índice ligero | TypeScript 7 nativo |
+|---|---|---|
+| Construir | **7,9 s**, 270 MB de pico | 4–7 s cada arranque |
+| Tamaño | **4,3 MB** (10 450 ficheros, 55 680 declaraciones) | — |
+| Memoria al consultar | 130–180 MB el proceso (casi todo, el parser); cabe dentro de stackd | 2,2 GB (0,5 GB acotado) |
+| Definición | 3–27 ms | 0–1 ms |
+| Referencias | ~3,3 s (`git grep` + leer los candidatos) | 90–200 ms |
+| Definiciones acertadas, código propio | **13 de 16**, y una a medias | 16 de 16 (es la referencia) |
+| Definiciones acertadas, librerías | 0 de 2 (no indexa `node_modules`) | 2 de 2 |
+| Hover con tipos | no | sí |
+
+- Acierta: import con nombre y por defecto, llamada a un import, tipos importados, función del mismo
+  fichero, componente JSX propio, variable desestructurada, parámetro, miembro de un "enum" hecho con
+  `const … as const`.
+- Falla: miembro de un valor con tipo (`algo().gray`: da una coincidencia local equivocada donde TS no da
+  nada), propiedad del resultado de un hook (`setTrue`: necesita tipos), y devuelve una de las dos
+  declaraciones cuando un nombre es a la vez constante y tipo.
+- Referencias frente a TS 7: 29/28, 18/16, 2/2, 8/7, 74/73, y las mismas líneas en el caso de 314 (TS cuenta
+  varias por línea). Lo que sobra son la propia declaración y menciones en mocks de tests.
+- Mantenerlo al día es reparsear los ficheros cambiados: milisegundos.
+
+## Diagnósticos: oxlint
+
+oxlint 1.93.0 (instalación local). La tarea no cambia ficheros JS/TS, así que "los cambiados" se midió con un
+directorio de 29 ficheros.
+
+| Qué | Configuración del repo | Solo reglas nativas (config fuera del repo) |
+|---|---|---|
+| `frontend/apps/v2/src` entero (10 000 ficheros) | 35,5 s · 1,1 GB · 4 054 avisos | 11 s · 0,58 GB · 1 186 avisos |
+| Un directorio de 29 ficheros | 2,6 s · 199 MB | 2,1 s · 88 MB |
+| `oxlint --lsp`, primer diagnóstico de un fichero | 4,8 s | 0,9 s |
+| `oxlint --lsp`, memoria | 43–46 MB | 41–46 MB |
+
+- **`oxlint --lsp` sirve con un cliente LSP normal**: tras `didOpen` envía `textDocument/publishDiagnostics`.
+  El puente del prototipo espera ese aviso y lo devuelve como respuesta (`GET /lint`); la UI lo convierte en
+  marcadores de Monaco. Comprobado en el navegador: subrayado amarillo en una variable sin usar. Detalle:
+  Monaco no pinta subrayados en editores de solo lectura salvo con `renderValidationDecorations: 'on'`.
+- **No escribe en el repo**: solo `--init` y `--fix` escriben, y no se usan. Comprobado con `git status`.
+- **La configuración del repo ejecuta código del repo**: su `.oxlintrc.json` carga plugins JS
+  (`eslint-plugin-*` de `node_modules` y `tools/oxlint-config/plugins/custom-rules.js`). Es el mismo nivel de
+  confianza que el agente, pero conviene saberlo. Alternativa: una configuración mínima de Stack con reglas
+  nativas, que además es 3–5 veces más rápida. Un worktree sin `node_modules` solo puede usar esta.
+- **PHP**: `php -l` (solo sintaxis) tarda 72 ms por fichero, 1,1 s los 16 del diff. Vale como comprobación
+  barata sobre los ficheros cambiados. Nada más allá de eso.
+
+## Comparación final
+
+Memoria con el servidor vivo; "listo" = tiempo desde que se crea la tarea hasta que se puede navegar.
+
+### PHP
+
+| Opción | Memoria | Listo para una tarea nueva | Disco por tarea | Aciertos |
+|---|---|---|---|---|
+| **Phpactor, índice completo por tarea** (sin `vendor/`) | ~100 MB por tarea abierta | 1–3 min (en segundo plano); después 5–8 s | ~750 MB | 17 de 17 |
+| Phpactor, A: checkout base + diff superpuesto | ~125 MB en total | 3–13 s (con el índice base ya hecho) | 0 (base: 724 MB una vez por merge-base) | 14 de 17; ensucia el índice compartido |
+| Phpactor, B: índice copiado y reescrito | ~100 MB por tarea abierta | ~220 s | ~700 MB | 13 de 17 |
+| Intelephense (descartado) | 0,7–1,3 GB por tarea abierta | 15 s | 55 MB | referencia de la ronda anterior |
+
+### JS/TS
+
+| Opción | Memoria | Listo para una tarea nueva | Aciertos (definición, código propio) | Referencias |
+|---|---|---|---|---|
+| **Índice ligero + `git grep`** | ~150 MB al consultar, 0 en reposo | 8 s (4 MB de índice) | 13 de 16, y una a medias | casi idénticas, ~3 s |
+| TS 7 acotado, sin `node_modules` | 0,5 GB | 1 s | 16 de 16 | parciales |
+| TS 7 proyecto entero, sin `node_modules` | 1,6 GB | 2,6 s | 16 de 16 | completas |
+| TS 7 proyecto entero | 2,2 GB | 4–7 s | 16 de 16, y librerías | completas |
+| SCIP | 4,8 GB al indexar | no termina | sin medir | — |
+| oxlint `--lsp` (diagnósticos, no navegación) | 46 MB | 1–5 s | — | — |
+
 ## Opciones comparadas
 
 ### Editor y cliente LSP
@@ -223,11 +380,13 @@ comparar (`--php-server intelephense`).
 
 ### JS/TS
 
-**LSP nativo de TypeScript 7** (`typescript@7`, 30 MB con el binario): arranca en 1–4 s, no da respuestas
-parciales, no ejecuta plugins JS del repo. Modo por defecto: **acotado y sin `node_modules`** (0,5 GB), con
-el proyecto generado a partir de los ficheros TS del diff de la tarea. "Buscar usos" completo se cubre con
-búsqueda de texto (`git grep`), marcando que las referencias del servidor son parciales. Un botón "cargar
-proyecto completo" sube a 1,6 GB (sin librerías) cuando haga falta.
+**Por defecto, el índice ligero** (sin servidor): definición por imports y `git grep` para los usos. Cubre
+"de dónde viene esto y quién lo usa" en código propio con 4 MB.
+
+**Modo preciso, bajo demanda: LSP nativo de TypeScript 7** (`typescript@7`, 30 MB con el binario). Para
+cuando hagan falta tipos en el hover o saltar por un valor con tipo. Acotado a los ficheros que se miran y
+sin `node_modules` son 0,5 GB; el proyecto entero, 1,6–2,2 GB. Arranca en 1–4 s, no da respuestas parciales
+y no ejecuta plugins JS del repo. Se apaga solo.
 
 ### Quién ejecuta los servidores
 
@@ -240,7 +399,8 @@ ir en el snapshot que ya se emite por SSE.
 
 - Arrancar solo al primer "ir a definición / hover" en un fichero de ese lenguaje, no al abrir la pestaña.
 - Apagar a los 5–10 min sin peticiones o al cerrar la pestaña Code. Phpactor vuelve en 5–8 s; TS acotado en 1 s.
-- Como mucho un servidor TS vivo a la vez (el caro); Phpactor puede haber varios (100 MB cada uno).
+- Como mucho un servidor TS vivo a la vez (el caro), y solo si se pide el modo preciso; Phpactor puede haber
+  varios (100 MB cada uno); oxlint, uno por worktree abierto (46 MB).
 - Phpactor: lanzar el primer indexado en segundo plano al crear la tarea o al abrir Code por primera vez, con
   progreso visible; hasta que acabe, la navegación PHP avisa de que está indexando.
 
@@ -253,12 +413,15 @@ ir en el snapshot que ya se emite por SSE.
 | 3 | Review → Code | El `openFile {path, line}` que Review ya emite (hoy abre VS Code) abre la pestaña Code en esa línea. Marcas de líneas cambiadas en el margen | S |
 | 4 | Gestor LSP en stackd (`src/lsp/`) | Arranque bajo demanda por (worktree, lenguaje), apagado por inactividad, tope de servidores, estado en el snapshot, reinicio si muere. Es el `LspServer` del prototipo con tests | M |
 | 5 | PHP con Phpactor | Detectar PHP 8.2+, instalar Phpactor bajo demanda en `~/.config/stack/lsp/`, perfil de arriba, índice por worktree fuera del repo, borrarlo con la tarea | S–M |
-| 6 | Buscar en el proyecto | `git grep` desde stackd y lista de resultados. Cubre también "usos" en TS acotado | S–M |
-| 7 | TS/JS con TS 7 acotado | Generar el proyecto espejo (symlinks + tsconfig) a partir de los ficheros TS del diff; regenerar cuando cambie el diff; botón "proyecto completo" | M |
+| 6 | Buscar en el proyecto | `git grep` desde stackd y lista de resultados | S–M |
+| 7 | TS/JS con el índice ligero | `code-light-index.mjs` dentro de stackd: construir al abrir Code, reparsear lo cambiado, definición y usos | M |
+| 7b | Diagnósticos | `oxlint --lsp` por worktree con config nativa de Stack (o la del repo, a elegir) y `php -l` sobre los ficheros del diff | S |
+| 7c | TS 7 "modo preciso" | Bajo demanda: proyecto espejo (symlinks + tsconfig) acotado a los ficheros que se miran; botón "proyecto completo" | M |
 | 8 | Cambios en disco | El agente edita mientras se navega: `fs.watch` en stackd → recargar los modelos abiertos y avisar al servidor (`workspace/didChangeWatchedFiles`, que es el watcher `lsp` de Phpactor) | M |
 
 1–3 dan un navegador útil sin ningún servidor de lenguaje (≈ una semana). 4–6 añaden PHP con navegación
-completa y búsqueda (≈ otra). 7–8 después; TS es la pieza con más incógnitas.
+completa y búsqueda (≈ otra). 7 y 7b, unos días más. 7c y 8 después. Indexar solo el diff en PHP (diseño A)
+queda fuera hasta que el disco o la espera lo pidan.
 
 No construir: edición y guardado, completado, diagnósticos, rename, formateo, depurador, extensiones, varias
 raíces, terminal en el editor, UI de git, temas, ajustes, indexado de `vendor/` o `node_modules`.
@@ -283,6 +446,11 @@ raíces, terminal en el editor, UI de git, temas, ajustes, indexado de `vendor/`
 - **WKWebView sin probar.** Media jornada: worker bajo `tauri://`, portapapeles, ⌘-clic, atajos, scroll.
 - **Primer indexado de Phpactor: ~2,8 min y 750 MB por worktree.** Con diez tareas son 7,5 GB de disco. Hay
   que borrar índices de tareas eliminadas y quizá caducar los que lleven semanas sin uso.
+- **Índice ligero**: 13 de 16 en un componente React; sin medir en otros estilos de código (clases con
+  herencia, módulos con `export =`, JS sin tipos). Cuando falla puede dar un destino equivocado en vez de
+  ninguno: marcar en la UI que es una navegación aproximada.
+- **Diseño A de PHP**: descansa en que `didSave` indexe el documento en memoria; ensucia el índice compartido.
+- **oxlint con la config del repo** ejecuta plugins JS del repo y tarda 3–5 veces más.
 - **TS acotado**: medido con un fichero (0,5 GB). Con los ficheros de un diff real el cierre de imports puede
   ser mayor; sin medir. Las referencias parciales hay que señalarlas en la UI o confunden.
 - **El espejo de TS** (symlinks + tsconfig generado) funciona con TS 7; sin probar con tsserver ni con
@@ -323,6 +491,7 @@ node desktop/scripts/code-dev-server.mjs --port 1431 \
   --cache ~/stack-code-spike/cache
 #   --composer-autoload /ruta/al/checkout-principal/vendor/autoload.php   worktree sin vendor/
 #   --exclude '/otra/carpeta/**/*'                                         exclusiones extra del índice PHP
+#   --oxlint <dir>/node_modules/.bin/oxlint [--oxlint-config <json>]      subrayados de oxlint (npm install oxlint)
 #   --php-server intelephense --servers <dir con node_modules/.bin>        solo para comparar
 
 # 3. Front (otro puerto que el de la app)
@@ -344,7 +513,9 @@ formato del escenario está en la cabecera del script.
 Ficheros del spike:
 
 - `desktop/scripts/code-dev-server.mjs` — backend: ficheros con guardia de rutas, ⌘P, gestor LSP por stdio.
-- `desktop/scripts/code-lsp-bench.mjs` — banco de pruebas de servidores de lenguaje.
+- `desktop/scripts/code-lsp-bench.mjs` — banco de pruebas de servidores de lenguaje (incluye superponer los
+  ficheros de otro árbol y volcar respuestas para compararlas).
+- `desktop/scripts/code-light-index.mjs` — índice ligero de JS/TS: `build`, `def`, `refs`.
 - `desktop/src/code/api.ts` — interfaz `CodeBackend` (la que implementaría stackd) y su versión HTTP.
 - `desktop/src/code/monaco.ts` — Monaco recortado, worker, tema desde los tokens, modelos bajo demanda.
 - `desktop/src/code/lsp.ts` — cliente LSP fino (proveedores de Monaco).

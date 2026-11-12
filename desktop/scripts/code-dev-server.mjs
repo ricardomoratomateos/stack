@@ -16,6 +16,9 @@
  *        [--exclude <glob>…]   extra PHP index excludes (Phpactor: root-relative, like `/zer/` + `**` + `/*`)
  *        [--include <dir>…]    read-only directories outside the roots that "go to definition" may open
  *                              (the main checkout's vendor/ and node_modules/)
+ *        [--oxlint <bin>]      diagnostics for JS/TS files through `oxlint --lsp` (GET /lint)
+ *        [--oxlint-config <f>] a config outside the repo (native rules only); default: the repo's own .oxlintrc.json,
+ *                              which may load JS plugins from the repo, i.e. run its code
  *        [--ts-native <tsc>]   TypeScript 7's own LSP (`<tsc> --lsp --stdio`) for JS/TS, to compare
  *        [--cache <dir>]       where the PHP server keeps its index (default: os tmp). Never inside a root.
  *
@@ -48,6 +51,8 @@ const PHP_SERVER = args('php-server')[0] ?? 'phpactor';
 /** `vendor/autoload.php` of the main checkout, for worktrees that have no vendor/ of their own. */
 const COMPOSER_AUTOLOAD = args('composer-autoload')[0] ? path.resolve(args('composer-autoload')[0]) : undefined;
 const PHPACTOR_WORKERS = Number(args('phpactor-workers')[0] ?? 0);
+const OXLINT = args('oxlint')[0];
+const OXLINT_CONFIG = args('oxlint-config')[0] ? path.resolve(args('oxlint-config')[0]) : undefined;
 const CACHE = path.resolve(args('cache')[0] ?? path.join(os.tmpdir(), 'stack-code-spike'));
 if (!ROOTS.length) { console.error('usage: code-dev-server.mjs --root <dir> [--root <dir>…] [--port N] [--servers <dir>]'); process.exit(2); }
 
@@ -216,6 +221,16 @@ const PHPACTOR_SPEC = {
   config: () => null,
 };
 
+/** Not a navigation server: it only publishes diagnostics for the documents it is shown. Never writes (no --fix). */
+/** @type {ServerSpec} */
+const OXLINT_SPEC = {
+  id: 'oxlint',
+  languages: [],
+  command: () => [OXLINT ?? 'oxlint', ['--lsp']],
+  init: (root) => (OXLINT_CONFIG ? [{ workspaceUri: pathToFileURL(root).href, options: { configPath: OXLINT_CONFIG, run: 'onType' } }] : undefined),
+  config: () => (OXLINT_CONFIG ? { configPath: OXLINT_CONFIG } : null),
+};
+
 /** @type {ServerSpec[]} */
 const SPECS = [
   ...(PHP_SERVER === 'intelephense' ? [] : [PHPACTOR_SPEC]),
@@ -274,6 +289,10 @@ class LspServer {
     /** @type {Map<number, { resolve: (v: unknown) => void, reject: (e: Error) => void }>} */
     this.pending = new Map();
     this.open = new Set();
+    /** Last diagnostics the server published, by document URI. @type {Map<string, any[]>} */
+    this.diagnostics = new Map();
+    /** @type {Map<string, Array<() => void>>} */
+    this.diagnosticWaiters = new Map();
     this.buf = Buffer.alloc(0);
     this.stderr = '';
     const [cmd, argv] = spec.command();
@@ -355,6 +374,12 @@ class LspServer {
       this.write({ jsonrpc: '2.0', id: msg.id, result });
       return;
     }
+    if (msg.method === 'textDocument/publishDiagnostics') {
+      this.diagnostics.set(msg.params.uri, msg.params.diagnostics ?? []);
+      for (const wake of this.diagnosticWaiters.get(msg.params.uri) ?? []) wake();
+      this.diagnosticWaiters.delete(msg.params.uri);
+      return;
+    }
     // Notifications: only indexing progress is of interest.
     if (msg.method === 'indexingStarted') { this.state = 'indexing'; this.indexStart = Date.now(); }
     else if (msg.method === 'indexingEnded') { this.state = 'ready'; this.indexMs = Date.now() - (this.indexStart ?? this.startedAt); }
@@ -425,9 +450,9 @@ class LspServer {
 /** @type {Map<string, LspServer>} */
 const servers = new Map();
 
-/** One server per (root, language family), started on first use. @param {string} root @param {string} languageId */
-function serverFor(root, languageId) {
-  const spec = SPECS.find((s) => s.languages.includes(languageId));
+/** One server per (root, language family), started on first use. @param {string} root @param {string} languageId @param {ServerSpec} [only] */
+function serverFor(root, languageId, only) {
+  const spec = only ?? SPECS.find((s) => s.languages.includes(languageId));
   if (!spec) throw new Refused(`No language server for ${languageId}.`);
   const key = `${spec.id}\n${root}`;
   let s = servers.get(key);
@@ -452,6 +477,29 @@ async function lsp(body) {
   const t0 = Date.now();
   const result = await server.request(String(body.method), body.params);
   return { result, ms: Date.now() - t0 };
+}
+
+/**
+ * Diagnostics for one file. LSP pushes them (`publishDiagnostics`) some time after the document is opened;
+ * this turns the push into an answer: open the document, wait for the first batch (or give up).
+ * @param {string} rootArg @param {string} fileArg
+ */
+async function lint(rootArg, fileArg) {
+  const root = rootOf(rootArg);
+  const file = inside(fileArg);
+  const server = serverFor(root, '', OXLINT_SPEC);
+  await server.ready;
+  const uri = pathToFileURL(file).href;
+  const t0 = Date.now();
+  if (!server.diagnostics.has(uri)) {
+    const arrived = new Promise((resolve) => {
+      server.diagnosticWaiters.set(uri, [...(server.diagnosticWaiters.get(uri) ?? []), () => resolve(undefined)]);
+      setTimeout(resolve, 15000);
+    });
+    server.ensureOpen(file, /\.tsx$/.test(file) ? 'typescriptreact' : /\.ts$/.test(file) ? 'typescript' : /\.jsx$/.test(file) ? 'javascriptreact' : 'javascript');
+    await arrived;
+  }
+  return { ms: Date.now() - t0, diagnostics: server.diagnostics.get(uri) ?? [] };
 }
 
 // ---------- http ----------
@@ -485,6 +533,7 @@ const server = http.createServer(async (req, res) => {
       return send(200, { ok: true, result: { total: files.length, walkMs: ms, files: fuzzy(files, q('q'), 60) } });
     }
     if (req.method === 'GET' && url.pathname === '/lsp/status') return send(200, { ok: true, result: [...servers.values()].map((s) => s.status()) });
+    if (req.method === 'GET' && url.pathname === '/lint') return send(200, { ok: true, result: OXLINT ? await lint(q('root'), q('path')) : { ms: 0, diagnostics: [] } });
     if (req.method === 'POST' && url.pathname === '/lsp') return send(200, { ok: true, result: await lsp(/** @type {any} */ (await readBody(req))) });
     send(404, { ok: false, error: 'Not found.' });
   } catch (e) {

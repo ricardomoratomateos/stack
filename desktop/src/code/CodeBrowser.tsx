@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CodeBackend, LspStatus, TreeEntry } from './api';
 import { defineStackTheme, modelLoader, monaco } from './monaco';
 import { registerNavigation, workspaceSymbols, type SymbolHit } from './lsp';
-import { canGo, emptyHistory, go, lspLanguage, monacoLanguage, pushPlace, relativeTo, type History, type Place } from './protocol';
+import { canGo, emptyHistory, go, lspLanguage, monacoLanguage, pushPlace, relativeTo, toMonacoRange, type History, type Place } from './protocol';
 import './code.css';
 
 interface Props {
@@ -25,6 +25,7 @@ export function CodeBrowser({ backend, root, initialFile, initialLine }: Props) 
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const models = useRef(new Map<string, Promise<monaco.editor.ITextModel>>());
   const viewStates = useRef(new Map<string, monaco.editor.ICodeEditorViewState | null>());
+  const linted = useRef(new WeakSet<monaco.editor.ITextModel>());
   const rootRef = useRef(root);
   rootRef.current = root;
 
@@ -76,6 +77,22 @@ export function CodeBrowser({ backend, root, initialFile, initialLine }: Props) 
       if (state) editor.restoreViewState(state);
     }
     editor.focus();
+    // Lint squiggles for JS/TS (oxlint through the backend). Once per model: the file is read-only here.
+    const lang = lspLanguage(path);
+    if (lang && !lang.startsWith('php') && !linted.current.has(model)) {
+      linted.current.add(model);
+      void backend.lint(rootRef.current, path).then(({ diagnostics }) => {
+        if (model.isDisposed()) return;
+        monaco.editor.setModelMarkers(model, 'oxlint', diagnostics.map((d) => ({
+          ...toMonacoRange(d.range),
+          message: d.message,
+          code: d.code === undefined ? undefined : String(d.code),
+          source: d.source ?? 'oxlint',
+          // LSP: 1 error, 2 warning, 3 info, 4 hint.
+          severity: d.severity === 1 ? monaco.MarkerSeverity.Error : d.severity === 2 ? monaco.MarkerSeverity.Warning : d.severity === 3 ? monaco.MarkerSeverity.Info : monaco.MarkerSeverity.Hint,
+        })));
+      }).catch(() => { linted.current.delete(model); });
+    }
     activeRef.current = path;
     setActive(path);
     setNotice('');
@@ -92,7 +109,7 @@ export function CodeBrowser({ backend, root, initialFile, initialLine }: Props) 
       setExpanded((s) => new Set([...s, ...ancestors]));
       for (const dir of ancestors) void loadDir(dir).catch(() => {});
     }
-  }, [ensureModel, loadDir]);
+  }, [backend, ensureModel, loadDir]);
 
   const travel = useCallback((delta: number) => {
     const h = historyRef.current;
@@ -111,6 +128,7 @@ export function CodeBrowser({ backend, root, initialFile, initialLine }: Props) 
     const editor = monaco.editor.create(hostRef.current, {
       readOnly: true,
       domReadOnly: true,
+      renderValidationDecorations: 'on', // Monaco hides squiggles in read-only editors unless told otherwise
       theme: 'stack',
       automaticLayout: true,
       fontFamily: css.getPropertyValue('--vscode-editor-font-family').trim() || 'Menlo, Monaco, monospace',

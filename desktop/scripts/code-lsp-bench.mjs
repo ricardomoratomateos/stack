@@ -1,6 +1,13 @@
-// lspbench.mjs <scenario.json> — spawn one language server over stdio, wait for its indexing, run timed requests.
-// scenario: { name, cwd, cmd: [bin, ...args], env?, init?, config?, waitProgress?: bool, settleMs?, map?: [from, to],
-//             requests: [{ label, method, file?, line?, ch?, query? }] }   (line/ch are 0-based)
+// SPIKE (docs/spikes/code-browser.md) — code-lsp-bench.mjs <scenario.json>
+// Spawns one language server over stdio, waits for its indexing, and times requests (first / repeated),
+// with its memory footprint. Scenario:
+//   { name, cwd, cmd: [bin, ...args], env?, init?, config?, waitProgress?, settleMs?, maxWaitMs?,
+//     map?: [from, to]            rewrite paths in the answers (a mirror or base checkout -> the task worktree)
+//     textRoot?, overlay?: [rel]  open (and "save") files of another tree under this root's URIs
+//     overlaySave?: false         open only
+//     watched?: [[rel, type]]     send workspace/didChangeWatchedFiles first (2 changed, 3 deleted)
+//     dump?: true                 write <scenario>.out.json with every answer as sorted `path:line`
+//     requests: [{ label, method, file?, line?, ch?, query?, repeat?, timeout? } | { sleep: ms }] }   (0-based line/ch)
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -88,13 +95,34 @@ if (sc.waitProgress) {
 }
 
 const opened = new Set();
+// Overlay: files of another tree (sc.textRoot, same relative layout) opened under THIS root's URIs, then "saved",
+// so the server sees and indexes the other tree's content without it being on disk here.
+const textOf = (f) => { const alt = sc.textRoot && path.join(sc.textRoot, path.relative(sc.cwd, f)); return fs.readFileSync(alt && fs.existsSync(alt) ? alt : f, 'utf8'); };
+if (sc.watched) {
+  // Tell the server these files changed (2) or were deleted (3) on disk: it re-reads them from its own root.
+  const s0 = Date.now();
+  notify('workspace/didChangeWatchedFiles', { changes: sc.watched.map(([rel, type]) => ({ uri: uri(path.join(sc.cwd, rel)), type })) });
+  await sleep(sc.watchedWaitMs ?? 6000);
+  console.log(`watched: ${sc.watched.length} file events sent, waited ${Date.now() - s0} ms`);
+}
+if (sc.overlay) {
+  const s0 = Date.now();
+  for (const rel of sc.overlay) {
+    const f = path.join(sc.cwd, rel);
+    opened.add(f);
+    notify('textDocument/didOpen', { textDocument: { uri: uri(f), languageId: 'php', version: 1, text: textOf(f) } });
+    if (sc.overlaySave !== false) notify('textDocument/didSave', { textDocument: { uri: uri(f) } });
+  }
+  await request('workspace/symbol', { query: 'zzzzNothing' }); // a round trip: the notifications above were processed
+  console.log(`overlay: ${sc.overlay.length} documents opened${sc.overlaySave !== false ? ' and saved' : ''} in ${Date.now() - s0} ms`);
+}
 for (const r of sc.requests) {
   if (r.sleep) { await sleep(r.sleep); console.log(`(idle ${r.sleep} ms) RSS ${tree().rss} MB footprint ${JSON.stringify(footprint())}`); continue; }
   if (r.file && !opened.has(r.file)) {
     opened.add(r.file);
     const ext = path.extname(r.file);
     const languageId = ext === '.php' ? 'php' : ext === '.tsx' ? 'typescriptreact' : 'typescript';
-    notify('textDocument/didOpen', { textDocument: { uri: uri(r.file), languageId, version: 1, text: fs.readFileSync(r.file, 'utf8') } });
+    notify('textDocument/didOpen', { textDocument: { uri: uri(r.file), languageId, version: 1, text: textOf(r.file) } });
   }
   const params = r.method === 'workspace/symbol' ? { query: r.query }
     : { textDocument: { uri: uri(r.file) }, position: { line: r.line ?? 0, character: r.ch ?? 0 }, context: { includeDeclaration: true } };
@@ -113,9 +141,16 @@ for (const r of sc.requests) {
     const rg = first.range ?? first.targetSelectionRange ?? first.location?.range;
     what = u ? `${unmap(decodeURIComponent(u)).replace('file://' + sc.cwd + '/', '').replace(/^file:\/\/.*\/(vendor|node_modules)\//, '…/$1/')}:${(rg?.start?.line ?? 0) + 1}` : first.name ? `${first.name}` : JSON.stringify(first.contents?.value ?? first.contents ?? first).replace(/\\n/g, ' ').slice(0, 110);
   }
+  if (sc.dump) {
+    (globalThis.__out ??= {})[r.label] = list.map((x) => {
+      const u = x.uri ?? x.targetUri ?? x.location?.uri; const rg = x.range ?? x.targetSelectionRange ?? x.location?.range;
+      return u ? `${sc.map ? (decodeURIComponent(u).includes(sc.map[0]) ? 'B ' : 'T ') : ''}${unmap(decodeURIComponent(u)).replace('file://', '').replace(sc.map ? sc.map[1] + '/' : sc.cwd + '/', '')}:${(rg?.start?.line ?? 0) + 1}` : (x.name ?? 'hover:' + JSON.stringify(x.contents?.value ?? '').length);
+    }).sort();
+  }
   console.log(`${r.label.padEnd(44)} cold ${String(times[0]).padStart(6)} ms  warm ${String(times.slice(1).join('/') || '-').padStart(6)} ms  ${String(list.length).padStart(4)} res  ${err ? 'ERROR ' + err : what}`);
 }
 console.log(`end: RSS ${tree().rss} MB (peak ${peak} MB); footprint ${JSON.stringify(footprint())}; elapsed ${Math.round((Date.now() - t0) / 1000)} s`);
+if (sc.dump) fs.writeFileSync(process.argv[2].replace(/\.json$/, '.out.json'), JSON.stringify(globalThis.__out, null, 1));
 clearInterval(sampler);
 proc.removeAllListeners('exit');
 proc.kill();
