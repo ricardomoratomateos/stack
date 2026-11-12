@@ -67,7 +67,7 @@ export function SessionList({ wt, onSelect }: { wt: WorktreeItem; onSelect: () =
             <button
               type="button"
               className="fm-sess-main"
-              title={`Open ${name} (⌥-click: beside the current editor)`}
+              title={`Open ${name}`}
               onClick={(e) => {
                 e.stopPropagation();
                 onSelect();
@@ -81,7 +81,7 @@ export function SessionList({ wt, onSelect }: { wt: WorktreeItem; onSelect: () =
                 <span className="fm-sess-name">{name}</span>
                 {s.title && <span className="fm-sess-sub" title={s.title}>{s.title}</span>}
               </span>
-              {isAgent && <span className="fm-sess-state">{STATE_LABEL[s.state]}</span>}
+              {isAgent && <span className="fm-sess-state">{s.state === 'waiting' && s.turned ? 'your turn' : STATE_LABEL[s.state]}</span>}
             </button>
             <span className="fm-sess-actions">
               <button

@@ -123,8 +123,8 @@ export function NewTaskPanel() {
             value={title}
             readOnly={busy}
             placeholder="New task"
-            aria-label="Task name — shown as the worktree's name in the sidebar"
-            title="Name the task. It becomes the worktree's name, and the branch is generated from it."
+            aria-label="Task name — shown in the sidebar"
+            title="Name the task. It is shown in the sidebar, and the branch is generated from it."
             spellCheck={false}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => {
@@ -190,7 +190,7 @@ export function NewTaskPanel() {
         )}
 
         <p className="nt-note">
-          {busy ? 'Creating the worktree…' : !installed ? (
+          {busy ? 'Creating the task…' : !installed ? (
             <>
               <span className="nt-warn">{providerName(provider)} is not on your PATH.</span>{' '}
               <button type="button" className="nt-link" onClick={() => send({ type: 'showProviderInstall', provider })}>How to install it</button>

@@ -60,6 +60,10 @@ describe('sessionRows', () => {
       [3, 'codex', 'needs you'],
     ]);
   });
+  it('says "your turn" for an agent that took a turn and waits, "waiting" for a fresh one', () => {
+    const rows = sessionRows(wt('a', [session({ index: 1, state: 'waiting', turned: true }), session({ index: 2, state: 'waiting' })]));
+    expect(rows.map((r) => r.detail)).toEqual(['your turn', 'waiting']);
+  });
   it('falls back to the window name for a shell with no known command', () => {
     expect(sessionRows(wt('a', [session({ index: 1, name: 'zsh', kind: 'shell' })]))[0].detail).toBe('zsh');
   });

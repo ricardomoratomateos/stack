@@ -34,7 +34,7 @@ export function StartStackd({ socket }: { socket: string }) {
   return (
     <div className="empty">
       <h1>stackd is not running</h1>
-      <p>stackd keeps your agents and worktrees going while the app is closed. It needs Node.js 20+ on this Mac.</p>
+      <p>stackd keeps your agents and tasks going while the app is closed. It needs Node.js 20+ on this Mac.</p>
       <div style={{ display: 'flex', gap: 8 }}>
         <button type="button" disabled={busy} onClick={() => void run(async () => { await invoke('stackd_start_now'); setStartedAt(Date.now()); })}>
           {startedAt !== null && !error ? 'Starting…' : 'Start stackd now'}

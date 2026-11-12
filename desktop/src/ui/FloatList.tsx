@@ -9,7 +9,7 @@ export function FloatList({ rows, selectedId, onSelect, onAllow }: {
   onAllow: (id: string, index: number) => void;
 }) {
   return (
-    <ul className="float-list" aria-label="Worktrees">
+    <ul className="float-list" aria-label="Tasks">
       {rows.map((r) => (
         <li key={r.id} className="float-row" data-selected={r.id === selectedId || undefined} data-group={r.group}>
           <button type="button" className="float-name" onClick={() => onSelect(r.id)} title={r.name}>
@@ -17,7 +17,7 @@ export function FloatList({ rows, selectedId, onSelect, onAllow }: {
           </button>
           <span className="float-sessions">
             {r.sessions.map((s) => (
-              <button key={s.index} type="button" className="float-session" data-state={s.state} title={`${s.name}: ${stateWord(s.state)}`} onClick={() => onSelect(r.id, s.index)}>
+              <button key={s.index} type="button" className="float-session" data-state={s.state} title={`${s.name}: ${stateWord(s.state, s.turned)}`} onClick={() => onSelect(r.id, s.index)}>
                 <StatusDot state={s.state} size="sm" />{s.name}
               </button>
             ))}

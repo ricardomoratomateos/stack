@@ -8,7 +8,7 @@ export function Switcher({ rows, index, onPick }: { rows: SwitcherRow[]; index: 
   useEffect(() => { ref.current?.children[index]?.scrollIntoView({ block: 'nearest' }); }, [index]);
   return (
     <div className="switcher-backdrop">
-      <ul className="switcher" ref={ref} role="listbox" aria-label="Switch worktree">
+      <ul className="switcher" ref={ref} role="listbox" aria-label="Switch task">
         {rows.map((r, i) => (
           <li key={r.id} className="switcher-row" role="option" aria-selected={i === index} data-selected={i === index || undefined} data-state={r.state}
             onMouseDown={(e) => { e.preventDefault(); onPick(r.id); }}>

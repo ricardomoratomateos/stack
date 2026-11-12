@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 export function ViewTitle({ counts, onAdd, children }: { counts: string; onAdd?: () => void; children?: ReactNode }) {
   return (
     <div className="view-title">
-      <span className="view-title-name">Worktrees</span>
+      <span className="view-title-name">Tasks</span>
       <span className="view-title-desc">{counts}</span>
       <span className="view-title-actions">
         {children}

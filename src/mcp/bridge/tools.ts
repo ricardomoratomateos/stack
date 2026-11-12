@@ -43,7 +43,7 @@ export const TOOLS: ToolDef[] = [
     title: 'Stack: create task',
     description:
       'Create a task: a new branch and git worktree with a coding agent started in it on `prompt`. '
-      + 'With `ticket`, the branch defaults to <KEY>-<slug of title>, the ticket shows on the task in VS Code, and its content (title, url, description) is handed to the worker as reference data below your prompt. '
+      + 'With `ticket`, the branch defaults to <KEY>-<slug of title>, the ticket shows on the task in Stack, and its content (title, url, description) is handed to the worker as reference data below your prompt. '
       + 'Idempotent per ticket: a task for the same ticket key (stored, or a branch starting with the key) is returned as "existing" instead of creating another. '
       + 'Returns task_id; follow up with stack_wait / stack_status. '
       + 'Use it when the user wants something worked on in parallel — "crea una tarea para AS-1234", "monta una tarea con este hilo de Slack", "que un agente arregle X", "start a task from this ticket". '
@@ -140,7 +140,7 @@ export const TOOLS: ToolDef[] = [
     name: 'stack_request_review',
     title: 'Stack: request review',
     description:
-      'Say the task is done: marks it ready for review in VS Code with your one-line summary and opens its Review panel for the user. task_id defaults to this agent\'s own task.',
+      'Say the task is done: marks it ready for review in Stack with your one-line summary and opens its Review panel for the user. task_id defaults to this agent\'s own task.',
     inputSchema: { task_id: taskId.optional(), summary: z.string().describe('One line: what changed.'), repo },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     timeoutMs: quick,
@@ -149,7 +149,7 @@ export const TOOLS: ToolDef[] = [
 
 /** What the bridge tells an MCP client about itself. */
 export const INSTRUCTIONS =
-  'Stack runs coding agents in parallel git worktrees ("tasks") inside VS Code. The user does not name these tools — map plain requests '
+  'Stack runs coding agents in parallel git worktrees ("tasks"). The user does not name these tools — map plain requests '
   + '("¿cómo van mis agentes?", "crea una tarea para AS-1234", "dile al de X que…") to them, and answer in the user\'s language. '
   + 'Typical manager loop: read the ticket elsewhere (Jira, Linear…), stack_create_task with the ticket, stack_wait on the task ids, '
   + 'then stack_status / stack_read_agent to see where they are and stack_send_to_agent to answer questions or give feedback. '

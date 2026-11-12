@@ -6,7 +6,7 @@ interface Option { id: SendDestination; icon: string; title: string; hint: (live
 
 const OPTIONS: Option[] = [
   { id: 'live', icon: 'terminal', title: 'Running agent', needsLive: true,
-    hint: (live) => (live ? 'Paste into the live session in this worktree' : 'No agent is running in this worktree') },
+    hint: (live) => (live ? 'Paste into the live session in this task' : 'No agent is running in this task') },
   { id: 'new', icon: 'rocket', title: 'New agent', hint: () => 'Launch a fresh agent seeded with the comments' },
   { id: 'clipboard', icon: 'copy', title: 'Clipboard', hint: () => 'Copy the prompt and paste it yourself' },
 ];

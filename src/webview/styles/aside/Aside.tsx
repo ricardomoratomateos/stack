@@ -19,7 +19,7 @@ const NONE: Record<WorktreeGroup, string> = {
   review: 'Nothing is ready for review',
   working: 'No agent is working',
   idle: 'Nothing is idle',
-  missing: 'No worktree is missing',
+  missing: 'No task is missing',
 };
 
 /**

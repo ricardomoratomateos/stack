@@ -4,7 +4,7 @@ import type { Described } from '../derive';
 
 export function LoadingState() {
   return (
-    <div className="fm-empty" role="status" aria-label="Loading worktrees">
+    <div className="fm-empty" role="status" aria-label="Loading tasks">
       <span className="u-dot-1 fm-loading-dot" />
       <span className="u-dot-2 fm-loading-dot" />
       <span className="u-dot-3 fm-loading-dot" />
@@ -15,7 +15,7 @@ export function LoadingState() {
 export function EmptyState() {
   return (
     <div className="fm-empty">
-      <span className="fm-empty-text">No worktrees yet</span>
+      <span className="fm-empty-text">No tasks yet</span>
       <button type="button" className="fm-btn" onClick={() => send({ type: 'openNewTask' })}>
         + New task
       </button>
@@ -47,7 +47,7 @@ export function HealthStrip({ items }: { items: Described[] }) {
       <span title={`${agents} live agent session${agents === 1 ? '' : 's'}`}>
         <i className="fm-health-dot" data-tone={asking > 0 ? 'warn' : 'ok'} aria-hidden="true" />agents {agents}
       </span>
-      <span title={`${tmux} worktree${tmux === 1 ? '' : 's'} with a tmux session`}>
+      <span title={`${tmux} task${tmux === 1 ? '' : 's'} with a tmux session`}>
         <i className="fm-health-dot" data-tone="ok" aria-hidden="true" />tmux {tmux}
       </span>
     </footer>

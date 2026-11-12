@@ -17,7 +17,7 @@ export function ForgetActions({ d }: { d: Described }) {
       <button
         type="button"
         className="fm-btn fm-btn-icon"
-        aria-label="Forget this worktree"
+        aria-label="Forget this task"
         title="Forget — drop this entry. Nothing on disk is touched."
         onClick={() => send({ type: 'forgetWorktree', worktreeId: d.wt.id })}
       >

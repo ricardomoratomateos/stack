@@ -33,7 +33,7 @@ export function worktreeActions(wt: WorktreeItem): Action[] {
   }
   actions.push(
     { id: 'rename', icon: 'edit', label: 'Rename / set title', run: () => send({ type: 'renameWorktree', worktreeId: wt.id }) },
-    { id: 'delete', icon: 'trash', label: 'Delete worktree', danger: true, run: () => send({ type: 'deleteWorktree', worktreeId: wt.id }) },
+    { id: 'delete', icon: 'trash', label: 'Delete task', danger: true, run: () => send({ type: 'deleteWorktree', worktreeId: wt.id }) },
   );
   return actions;
 }

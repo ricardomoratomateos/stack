@@ -3,17 +3,17 @@
     "stack.worktreesDirectory": {
       "type": "string",
       "default": ".worktrees",
-      "description": "Directory where worktrees are created (relative to the workspace root) Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+      "description": "Directory where worktrees are created (relative to the repository root). Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
     },
     "stack.defaultBaseBranch": {
       "type": "string",
       "default": "develop",
-      "description": "Branch new worktrees start from, preselected in the New Task form. When this branch does not exist, Stack uses the repository's own main line (the first of main/master/develop it finds, locally or on a remote), and only then the current branch. Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+      "description": "Branch new tasks start from, preselected in the New Task form. When this branch does not exist, Stack uses the repository's own main line (the first of main/master/develop it finds, locally or on a remote), and only then the current branch. Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
     },
     "stack.setupScript": {
       "type": "string",
       "default": "",
-      "description": "Script to run after creating a worktree Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+      "description": "Script to run after creating a task's worktree. Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
     },
     "stack.setupInTerminal": {
       "type": "boolean",
@@ -23,7 +23,7 @@
     "stack.teardownScript": {
       "type": "string",
       "default": "",
-      "description": "Script to run before deleting a worktree Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+      "description": "Script to run before deleting a task's worktree. Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
     },
     "stack.promptPrefix": {
       "type": "string",
@@ -39,7 +39,7 @@
         "opencode"
       ],
       "default": "claude",
-      "description": "Primary agent: the one the big launch button on each worktree card starts. The chevron next to it opens the rest."
+      "description": "Primary agent: the one the big launch button on each task card starts. The chevron next to it opens the rest."
     },
     "stack.claudeCommand": {
       "type": "string",
@@ -59,7 +59,7 @@
     "stack.notifyOnAttention": {
       "type": "boolean",
       "default": true,
-      "description": "Show a native OS notification, with a chime on macOS, when an agent finishes or asks for permission while VS Code is in the background. Off means no notification and no sound. The sidebar attention badge is always shown regardless."
+      "description": "Show a native OS notification, with a chime on macOS, when an agent finishes or asks for permission while Stack is in the background. Off means no notification and no sound. The sidebar attention badge is always shown regardless."
     }
   }
 }

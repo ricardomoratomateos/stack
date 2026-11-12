@@ -54,6 +54,8 @@ export interface SessionRow {
   /** Live title / state for an agent, the running command for a shell. */
   detail: string;
   state: AgentState;
+  /** It has taken a turn: `waiting` reads as "your turn" (see describe's line). */
+  turned?: boolean;
 }
 
 /** Every session of a worktree. `commands` maps window index to the pane's current command, when known. */
@@ -62,14 +64,15 @@ export function sessionRows(wt: WorktreeItem, commands: Record<number, string> =
     .sort((a, b) => a.index - b.index)
     .map((s) => {
       if (s.kind === 'agent') {
-        const state = STATE_WORD[s.state];
-        return { index: s.index, kind: 'agent', name: s.alias ?? s.provider ?? s.name, detail: s.title ? `${s.title}` : state, state: s.state };
+        const state = stateWord(s.state, s.turned);
+        return { index: s.index, kind: 'agent', name: s.alias ?? s.provider ?? s.name, detail: s.title ? `${s.title}` : state, state: s.state, ...(s.turned ? { turned: true } : {}) };
       }
       return { index: s.index, kind: 'shell', name: s.alias ?? 'shell', detail: commands[s.index] ?? s.title ?? s.name, state: s.state };
     });
 }
 
-export const stateWord = (s: AgentState): string => STATE_WORD[s];
+/** A session's state in words; a `waiting` agent that has taken a turn is waiting on you: "your turn". */
+export const stateWord = (s: AgentState, turned?: boolean): string => (s === 'waiting' && turned ? 'your turn' : STATE_WORD[s]);
 
 /** The session to show when a worktree is selected: the remembered one if it still exists, else the one asking, else the agent. */
 export function pickSession(wt: WorktreeItem, remembered?: number): number | undefined {

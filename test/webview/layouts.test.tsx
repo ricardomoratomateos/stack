@@ -101,14 +101,14 @@ describe('aside layout', () => {
     expect(html).toMatch(/Diff|Review diff/);
     // Unmeasured (no layout in SSR) everything fits, so every action is an
     // inline icon and there is no "⋯" — it only appears for what overflows.
-    expect(html).toContain('Delete worktree');
+    expect(html).toContain('Delete task');
     expect(html).not.toContain('More actions');
   });
 
   it('draws the loading and empty states', () => {
-    expect(render(props({ loaded: false, state: { worktrees: [] }, items: [] }))).toContain('Loading worktrees');
+    expect(render(props({ loaded: false, state: { worktrees: [] }, items: [] }))).toContain('Loading tasks');
     const empty = render(props({ state: { worktrees: [] }, items: [], selectedId: null }));
-    expect(empty).toContain('No worktrees yet');
+    expect(empty).toContain('No tasks yet');
   });
 
   it('copes with a selection that no longer exists', () => {
