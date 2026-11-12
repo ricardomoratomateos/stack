@@ -16,6 +16,14 @@ export interface Resolved {
 }
 
 /**
+ * Sessions already resolved this run, by `worktreeId:index`. Coming back to a
+ * tab shows its pane at once from here (its terminal kept its content); the
+ * round trip to stackd and tmux still runs, behind it, to catch a session that
+ * moved or went away.
+ */
+const resolved = new Map<string, string>();
+
+/**
  * Resolves a session to its tmux pane: asks stackd where it lives
  * (`attachTarget`), connects to that tmux session (one connection per
  * session, shared), and finds the pane of the window.
@@ -35,7 +43,9 @@ export function useSessionPane(target: Target | null, onSession?: (worktreeId: s
     void (async () => {
       try {
         log('info', 'attach', key);
-        const t = await api.command<{ socket?: string; session: string }>('attachTarget', { worktreeId: target.worktreeId, windowIndex: target.index });
+        const started = performance.now();
+        // select: false — the app picks the pane itself; tmux's current window is no business of ours.
+        const t = await api.command<{ socket?: string; session: string }>('attachTarget', { worktreeId: target.worktreeId, windowIndex: target.index, select: false });
         log('info', 'attach target', key, t.session);
         let list = await connect(t.socket ?? null, t.session);
         // tmux sometimes answers the first list-panes of a fresh connection with nothing: ask again.
@@ -44,12 +54,14 @@ export function useSessionPane(target: Target | null, onSession?: (worktreeId: s
           list = await refresh(t.session);
           log('info', 'relisted', key, list.length);
         }
-        log('info', 'connected', key, list.map((p) => `${p.id}@${p.window_index}`).join(','), live ? '' : '(stale)');
+        log('info', 'connected', key, list.map((p) => `${p.id}@${p.window_index}`).join(','), `${Math.round(performance.now() - started)}ms`, live ? '' : '(stale)');
         if (!live) return;
+        resolved.set(key, t.session);
         onSession?.(target.worktreeId, t.session);
         setAttached({ key, session: t.session });
       } catch (e) {
         log('error', 'attach failed', key, e);
+        resolved.delete(key);
         if (live) setAttached({ key, error: String(e).replace(/^Error: /, '') });
       }
     })();
@@ -60,7 +72,8 @@ export function useSessionPane(target: Target | null, onSession?: (worktreeId: s
   }, [api, key]);
 
   return useMemo(() => {
-    const mine = attached && attached.key === key ? attached : null;
+    const known = key ? resolved.get(key) : undefined;
+    const mine = attached && attached.key === key ? attached : known ? { key: key!, session: known } : null;
     if (!target || !mine) return { pane: null, session: null, error: null };
     if ('error' in mine) return { pane: null, session: null, error: mine.error };
     const inWindow = panes.filter((p) => p.session === mine.session && p.window_index === target.index);

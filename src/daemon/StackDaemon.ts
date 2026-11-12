@@ -511,7 +511,10 @@ export class StackDaemon {
         const session = TmuxManager.sessionName(wt.id);
         if (!(await this.tmux.hasSession(session))) throw new CommandError('That worktree has no tmux session yet.', 409);
         const index = windowIndex(b);
-        if (index !== undefined) await this.tmux.selectWindow(session, index);
+        // The extension attaches a plain tmux client, which shows the session's current window;
+        // the desktop app picks panes itself and passes `select: false` (one tmux exec less, and
+        // other clients' current window left alone).
+        if (index !== undefined && b['select'] !== false) await this.tmux.selectWindow(session, index);
         const socket = this.opts.tmuxSocket;
         return {
           socket, session, window: index,
