@@ -1319,13 +1319,17 @@ describe('reconnect', () => {
 
   describe('against what is actually running', () => {
     const WRAPPER = 'zsh -c STACK_WINDOW_INDEX="1" STACK_WORKSPACE_ID="wt-1" claude; exec "${SHELL:-/bin/sh}"';
-    async function reloadWith(persisted: Record<number, AgentSessionState>, args: Record<number, string>) {
+    async function reloadWith(
+      persisted: Record<number, unknown>,
+      args: Record<number, string>,
+      opts: { name?: string; title?: string } = {},
+    ) {
       const memento = new FakeMemento() as unknown as vscode.Memento;
       await memento.update('stack.claudeStates', { 'wt-1': persisted });
       const h = create('claude', memento);
       (h.stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValue(true);
       (h.stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue(
-        Object.keys(args).map((i) => ({ index: Number(i), name: 'claude', command: 'zsh', pid: 100 + Number(i) })),
+        Object.keys(args).map((i) => ({ index: Number(i), name: opts.name ?? 'claude', command: 'zsh', pid: 100 + Number(i), title: opts.title })),
       );
       (h.stub.processCommandLine as ReturnType<typeof vi.fn>).mockImplementation(async (pid: number) => args[pid - 100]);
       await h.mgr.reconnect([wt]);
@@ -1340,9 +1344,30 @@ describe('reconnect', () => {
       expect(mgr.getAgentCount('wt-1')).toBe(0);
     });
 
-    it('does not bring back "working" — the agent may well have finished since', async () => {
-      const { mgr } = await reloadWith({ 1: 'active' }, { 1: WRAPPER });
+    it('brings a working agent back working, not "waiting for you"', async () => {
+      const { mgr } = await reloadWith({ 1: { state: 'active' } }, { 1: WRAPPER }, { title: '⠂ Fixing the login flow' });
+      expect(stateOf(mgr, 1)).toBe('active');
+    });
+
+    it('keeps "working" for an agent with no idle mark of its own (Codex), until its next hook', async () => {
+      const { mgr } = await reloadWith({ 1: 'active' }, { 1: WRAPPER }, { name: 'codex', title: '✳ whatever' });
+      expect(stateOf(mgr, 1)).toBe('active');
+    });
+
+    it('brings a Claude that finished during the restart back waiting: its title says it is at its prompt', async () => {
+      const { mgr } = await reloadWith({ 1: { state: 'active', turned: true } }, { 1: WRAPPER }, { title: '✳ Fixing the login flow' });
       expect(stateOf(mgr, 1)).toBe('waiting');
+      expect(mgr.getSessions('wt-1')[0].turned).toBe(true);
+    });
+
+    it('keeps "turned", so a task waiting after its turn stays in review across the restart', async () => {
+      const { mgr } = await reloadWith({ 1: { state: 'waiting', turned: true }, 2: { state: 'waiting' } }, { 1: WRAPPER, 2: WRAPPER });
+      expect(mgr.getSessions('wt-1').map((s) => [s.index, s.turned])).toEqual([[1, true], [2, undefined]]);
+    });
+
+    it('still reads the per-window state strings older versions wrote', async () => {
+      const { mgr } = await reloadWith({ 1: 'permission' }, { 1: WRAPPER });
+      expect(stateOf(mgr, 1)).toBe('permission');
     });
 
     it('keeps a permission request, which nobody was there to answer', async () => {
@@ -1622,14 +1647,14 @@ describe('state persistence', () => {
       [2, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
     ]);
     mgr.updateState('wt-1', 'permission', 2);
-    expect(memento.get('stack.claudeStates')).toEqual({ 'wt-1': { 1: 'waiting', 2: 'permission' } });
+    expect(memento.get('stack.claudeStates')).toEqual({ 'wt-1': { 1: { state: 'waiting' }, 2: { state: 'permission', turned: true } } });
   });
 
   it('launch persists waiting for the new window; killWorktreeSession clears the worktree entry', async () => {
     const memento = new FakeMemento() as unknown as vscode.Memento;
     const { mgr } = create('claude', memento);
     await mgr.launch(wt);
-    expect((memento.get('stack.claudeStates') as Record<string, unknown>)['wt-1']).toEqual({ 1: 'waiting' });
+    expect((memento.get('stack.claudeStates') as Record<string, unknown>)['wt-1']).toEqual({ 1: { state: 'waiting' } });
     await mgr.killWorktreeSession('wt-1');
     expect((memento.get('stack.claudeStates') as Record<string, unknown>)['wt-1']).toEqual({});
   });

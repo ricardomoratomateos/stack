@@ -46,6 +46,9 @@ type WindowMeta = {
 /** A state only an agent that has taken a prompt reaches. */
 const tookTurn = (state: AgentSessionState): boolean => state === 'active' || state === 'permission';
 
+/** What survives a restart of one agent window; see persistState. */
+type PersistedWindow = { state: AgentSessionState; turned?: boolean };
+
 const SHELL_COMMANDS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'csh', 'tcsh']);
 
 /**
@@ -172,22 +175,25 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
   /** Persist the per-window agent states for a worktree (survives reload). */
   private persistState(worktreeId: string): void {
     const stored = this.globalState.get<Record<string, unknown>>(AgentSessionManager.STATE_KEY, {});
-    const states: Record<number, AgentSessionState> = {};
+    const states: Record<number, PersistedWindow> = {};
     for (const [idx, meta] of this.windows.get(worktreeId) ?? new Map<number, WindowMeta>()) {
-      if (meta.kind === 'agent') states[idx] = meta.state;
+      if (meta.kind === 'agent') states[idx] = { state: meta.state, ...(meta.turned ? { turned: true } : {}) };
     }
     stored[worktreeId] = states;
     this.globalState.update(AgentSessionManager.STATE_KEY, stored);
   }
 
   /**
-   * Read the persisted state for one window of a worktree. Pre-per-window
-   * versions stored a single aggregate string — apply it to every window.
+   * Read what was persisted for one window of a worktree. Older versions
+   * stored the bare state string per window, and before that a single
+   * aggregate string for the whole worktree — applied to every window.
    */
-  private persistedState(worktreeId: string, windowIndex: number): AgentSessionState | undefined {
+  private persistedWindow(worktreeId: string, windowIndex: number): PersistedWindow | undefined {
     const entry = this.globalState.get<Record<string, unknown>>(AgentSessionManager.STATE_KEY, {})[worktreeId];
-    if (typeof entry === 'string') return entry as AgentSessionState;
-    return (entry as Record<number, AgentSessionState> | undefined)?.[windowIndex];
+    if (typeof entry === 'string') return { state: entry as AgentSessionState };
+    const value = (entry as Record<number, unknown> | undefined)?.[windowIndex];
+    if (typeof value === 'string') return { state: value as AgentSessionState };
+    return value && typeof value === 'object' ? value as PersistedWindow : undefined;
   }
 
   /**
@@ -1162,24 +1168,34 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
   register(_worktreeId: string, _terminal: T): void {}
 
   /**
-   * The state an agent window comes back with after a reload.
+   * The state an agent window comes back with after stackd restarts.
    *
-   * The persisted state is from before the reload, and the agent did not
-   * stop in between: its hooks went to the previous window's HookServer,
-   * which is gone, so whatever happened meanwhile — it finished, it died — was
-   * never heard. So the process is asked first: gone is "terminated", which
-   * it really is. Running, the persisted state is kept only where it cannot
-   * have gone stale on its own: "permission" waits for the user, who was not
-   * there to answer. "active" may well have finished since, and restoring it
-   * left the session "working" until the next hook, which an agent sitting at
-   * its prompt never sends; "waiting" is the recoverable guess, and any hook
-   * corrects it. A persisted "terminated" on a running agent is likewise
-   * stale (or left by a past liveness-detection bug), and gets "waiting".
+   * The persisted state is from before the restart, and the agent did not
+   * stop in between: its hooks had nowhere to go while stackd was down, so
+   * whatever happened meanwhile — it finished, it died — was never heard. So
+   * the process is asked first: gone is "terminated", which it really is.
+   *
+   * Running, the persisted state is kept wherever nothing contradicts it:
+   * "permission" waits for the user, who was not there to answer, and
+   * "active" is the likeliest truth for a restart that took seconds — showing
+   * a working agent as "waiting for you" sent the user to a pane with nothing
+   * to answer. The one thing that can contradict "active" is the agent itself:
+   * Claude Code marks its terminal title with ✳ while it sits at its prompt
+   * (a spinner while it works), so a Claude that finished during the gap comes
+   * back "waiting". Other agents have no such mark, and stay "active" until
+   * their next hook, which a finished one only sends on the user's next
+   * prompt. A persisted "terminated" on a running agent is stale (or left by a
+   * past liveness-detection bug), and gets "waiting", as does no record at all.
    */
-  private async restoredState(worktreeId: string, window: TmuxWindow): Promise<AgentSessionState> {
+  private async restoredState(worktreeId: string, window: TmuxWindow, provider: ProviderId | undefined): Promise<AgentSessionState> {
     if ((await this.agentLiveness(window)) === 'dead') return 'terminated';
-    const persisted = this.persistedState(worktreeId, window.index);
-    return persisted === 'permission' || persisted === 'idle' ? persisted : 'waiting';
+    const persisted = this.persistedWindow(worktreeId, window.index)?.state;
+    if (persisted === 'permission' || persisted === 'idle') return persisted;
+    if (persisted === 'active') {
+      const idleMark = provider === 'claude' && /^\s*✳/u.test(window.title ?? '');
+      return idleMark ? 'waiting' : 'active';
+    }
+    return 'waiting';
   }
 
   /** On extension reload, scan tmux sessions to restore tracked windows. */
@@ -1202,8 +1218,11 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
         const provider = providerForWindowName(w.name);
         const kind: 'agent' | 'shell' = provider ? 'agent' : 'shell';
         const title = kind === 'agent' ? this.cleanTitle(w.title, w.name) : this.commandTitle(w.command);
-        const restoredState = kind === 'agent' ? await this.restoredState(wt.id, w) : 'idle';
-        wm.set(w.index, { kind, provider, state: restoredState, name: w.name, title });
+        const restoredState = kind === 'agent' ? await this.restoredState(wt.id, w, provider) : 'idle';
+        // "turned" puts a waiting agent's task in review; losing it on every
+        // restart sent finished work back to "waiting for you".
+        const turned = kind === 'agent' && this.persistedWindow(wt.id, w.index)?.turned === true;
+        wm.set(w.index, { kind, provider, state: restoredState, name: w.name, title, ...(turned ? { turned } : {}) });
         if (kind === 'agent') restoredAgents = true;
       }
       // One event per worktree, carrying the aggregate — what every other
