@@ -483,6 +483,12 @@ pub fn stackd_autostart(state: State<'_, StackdAutostart>) -> Autostart {
     state.0.lock().unwrap().clone()
 }
 
+/// The pid of the process listening on `socket` (`lsof -t`; the first one when several hold it).
+fn socket_owner(socket: &std::path::Path) -> Option<i32> {
+    let out = std::process::Command::new("/usr/sbin/lsof").arg("-t").arg(socket).output().ok()?;
+    String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| l.trim().parse::<i32>().ok()).find(|&p| p as u32 != std::process::id())
+}
+
 /// Stops the running stackd (its pid is in the snapshot) and starts the app's own build of it.
 /// Agents keep running: they live in tmux sessions, which outlive stackd.
 #[tauri::command]
@@ -491,6 +497,11 @@ pub async fn stackd_restart(app: AppHandle) -> Result<(), String> {
         let latest = app.state::<StackdLatest>();
         let g = latest.inner.lock().unwrap();
         g.1.as_ref().and_then(|s| s.get("pid")).and_then(Value::as_i64).map(|p| p as i32)
+    };
+    // A stackd from before the snapshot carried its pid: the process holding the socket is it.
+    let pid = match pid {
+        Some(p) => Some(p),
+        None => Some(socket_owner(&crate::stackd::socket_path()).ok_or("could not find stackd's process; quit it and reopen Stack")?),
     };
     let setup = crate::launchd::real_setup(resource_dir(&app).as_deref())?;
     tauri::async_runtime::spawn_blocking(move || crate::launchd::restart(&crate::launchd::RealRunner, &setup, pid))
