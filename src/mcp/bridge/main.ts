@@ -15,7 +15,7 @@ async function main(): Promise<void> {
   const storageDir = process.env[STORAGE_ENV] || path.dirname(process.argv[1] ?? __filename);
   const server = createBridgeServer({
     storageDir,
-    // stackd's own discovery files (~/.config/stack/windows), for a bridge registered by VS Code.
+    // stackd's own discovery files (~/.config/stack/windows), for a bridge copy that lives elsewhere (one registered by the old VS Code extension).
     extraDirs: [process.env.STACKD_CONFIG_DIR || path.join(os.homedir(), '.config', 'stack')],
     env: process.env,
     cwd: process.cwd(),

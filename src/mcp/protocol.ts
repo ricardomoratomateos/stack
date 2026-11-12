@@ -1,13 +1,12 @@
 /**
- * What the Stack MCP bridge and a VS Code window say to each other.
+ * What the Stack MCP bridge and stackd say to each other.
  *
- * The bridge (dist/stack-mcp.js, copied into globalStorage) is the MCP server
+ * The bridge (dist/stack-mcp.js, copied to ~/.config/stack) is the MCP server
  * an agent talks to over stdio. It holds no state of its own: on every tool
- * call it finds the window that owns the repository through a discovery file
- * (`windows/<pid>.json`) and forwards the call to that window's HookServer as
- * `POST /api/<tool>` with the window's token. Shared here so both ends agree
- * on names and shapes; everything in it is plain data — the bridge bundle
- * must not pull in `vscode`.
+ * call it finds stackd through its discovery file (`windows/<pid>.json`, a
+ * name from when each VS Code window had one) and forwards the call to
+ * stackd's HookServer as `POST /api/<tool>` with its token. Shared here so
+ * both ends agree on names and shapes; everything in it is plain data.
  */
 
 /** `<globalStorage>/windows/<pid>.json`, one per open window. */

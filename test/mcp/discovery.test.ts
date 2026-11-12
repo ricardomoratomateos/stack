@@ -87,17 +87,17 @@ describe('resolveWindow', () => {
   const repoB = win({ pid: 2, repoRoots: ['/code/b'], workspaceFolders: ['/code/b', '/code/b-wt/y'], worktreeIds: ['tb'], focusedAt: 2 });
   const repoA2 = win({ pid: 3, repoRoots: ['/code/a'], workspaceFolders: ['/code/a'], worktreeIds: [], focusedAt: 5 });
 
-  it('says to open Stack when no window is open at all', () => {
-    expect(resolveWindow([], { paths: ['/code/a'] })).toEqual({ error: expect.stringContaining('Open Stack on /code/a in VS Code') });
-    expect(resolveWindow([], { repo: '/code/z', paths: [] })).toEqual({ error: expect.stringContaining('on /code/z') });
-    expect(resolveWindow([], { paths: [] })).toEqual({ error: expect.stringContaining('Open Stack on the repository') });
+  it('says Stack is not running when there is no discovery file at all', () => {
+    const down = { error: "Stack isn't running: open Stack.app (or run `node dist/stackd.js serve`)." };
+    expect(resolveWindow([], { paths: ['/code/a'] })).toEqual(down);
+    expect(resolveWindow([], { repo: '/code/z', paths: [] })).toEqual(down);
   });
 
   it('matches the repo argument first, the most specific folder winning', () => {
     expect(resolveWindow([repoA, repoB], { repo: '/code/b/src', taskId: 'ta', paths: ['/code/a'] })).toEqual({ window: repoB });
     expect(resolveWindow([repoA, repoB], { repo: '/code/b-wt/y/z', paths: [] })).toEqual({ window: repoB });
     const res = resolveWindow([repoA, repoB], { repo: '/code/zzz', paths: [] });
-    expect(res).toEqual({ error: 'Open Stack on /code/zzz in VS Code. Open now: /code/a, /code/b.' });
+    expect(res).toEqual({ error: "/code/zzz isn't in Stack: add it in Stack.app. In Stack now: /code/a, /code/b." });
   });
 
   it('then the window showing the task, wherever the agent runs', () => {
@@ -118,12 +118,12 @@ describe('resolveWindow', () => {
   it('never guesses: nothing matching lists what is open', () => {
     const blank = win({ pid: 9 });
     expect(resolveWindow([repoA, blank], { paths: ['/elsewhere'] })).toEqual({
-      error: 'Open Stack on /elsewhere in VS Code, or pass "repo" with one of the open repositories: /code/a.',
+      error: `/elsewhere isn't in Stack: add it in Stack.app, or pass "repo" with one of the repositories in Stack: /code/a.`,
     });
     expect(resolveWindow([blank], { paths: [] })).toEqual({
-      error: 'Open Stack on this repository in VS Code, or pass "repo" with one of the open repositories: none.',
+      error: `This repository isn't in Stack: add it in Stack.app, or pass "repo" with one of the repositories in Stack: none.`,
     });
-    expect(resolveWindow([blank], { repo: '/x', paths: [] })).toEqual({ error: 'Open Stack on /x in VS Code. Open now: none.' });
+    expect(resolveWindow([blank], { repo: '/x', paths: [] })).toEqual({ error: "/x isn't in Stack: add it in Stack.app. In Stack now: none." });
   });
 
   it('accepts a folder given with a trailing separator, and the filesystem root', () => {

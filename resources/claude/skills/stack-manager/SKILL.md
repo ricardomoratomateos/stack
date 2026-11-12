@@ -6,7 +6,7 @@ description: Use when the user asks how their coding agents, Stack tasks or work
 
 # Stack manager
 
-Stack runs coding agents in parallel git worktrees ("tasks") in the user's VS Code. You manage them through the `stack_*` tools. The user never names the tools — map what they ask to them, and answer in their language, briefly.
+Stack runs coding agents in parallel git worktrees ("tasks") in the user's Stack app. You manage them through the `stack_*` tools. The user never names the tools — map what they ask to them, and answer in their language, briefly.
 
 ## How are things going
 - `stack_status` → summarise by urgency: first agents that need the user (say what they ask), then tasks ready for review (with their summary and PR/CI), then the ones working, then idle. One line each; skip the noise.

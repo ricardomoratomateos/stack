@@ -458,8 +458,8 @@ export class ManagerTools {
             status: 'failed',
             task_id: id,
             reason: outcome === 'setup-failed'
-              ? 'The setup script failed, so the agent was not started. The task in Stack has the log and a retry.'
-              : 'The agent could not be launched; Stack shows why.',
+              ? 'The setup script failed, so the agent was not started. The task in Stack.app has the log and a retry.'
+              : 'The agent could not be launched; Stack.app shows why (log: ~/.config/stack/stackd.log).',
             waited_s: waited(),
           });
         });

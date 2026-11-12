@@ -444,8 +444,10 @@ export class StackDaemon {
     const repo = typeof args.repo === 'string' ? args.repo : undefined;
     const taskId = typeof args.task_id === 'string' ? args.task_id : request.context?.taskId;
     const paths = [request.context?.cwd].filter((p): p is string => !!p);
+    // stackd is answering, so "none" means no repository has been added yet, not that Stack is down.
+    if (windows.length === 0) return { ok: false, error: 'No repository is in Stack yet: add one in Stack.app.' };
     const resolved = resolveWindow(windows, { repo, taskId, paths });
-    if ('error' in resolved) return { ok: false, error: resolved.error.replace(/in VS Code/g, 'in Stack') };
+    if ('error' in resolved) return { ok: false, error: resolved.error };
     const ctx = [...this.repos.values()][resolved.window.pid];
     return ctx.tools.handle(tool, request);
   }

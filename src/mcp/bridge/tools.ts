@@ -8,7 +8,7 @@ import { MAX_READ_LINES, MAX_WAIT_SECONDS, type ToolName } from '../protocol';
  */
 
 const repo = z.string().optional()
-  .describe('Path of the repository (or a folder inside it) whose Stack window to use. Defaults to where this agent runs.');
+  .describe('Path of the repository (or a folder inside it) whose Stack tasks to use. Defaults to where this agent runs.');
 const taskId = z.string().describe('Task id, from stack_status or stack_create_task.');
 const session = z.union([z.number().int(), z.string()]).optional()
   .describe('Session to use: its index or name from stack_status. Defaults to the task\'s main agent.');
@@ -30,7 +30,7 @@ export const TOOLS: ToolDef[] = [
     name: 'stack_status',
     title: 'Stack: status',
     description:
-      'Every task (git worktree) in the Stack window: id, name, branch, base, group (needs = an agent is asking you, review = done and ready for review, working, idle, missing), '
+      'Every task (git worktree) in Stack: id, name, branch, base, group (needs = an agent is asking you, review = done and ready for review, working, idle, missing), '
       + 'its sessions with state and any pending question, diff (+added −removed), PR with CI, ports, linked ticket and review summary. Pass task_id for one task. '
       + 'Use it whenever the user asks how their agents or tasks are doing, who needs them, what is ready to review, or what an agent is working on '
       + '("¿cómo van mis agentes?", "¿alguno me necesita?", "qué hay para revisar", "how are my agents doing").',
@@ -149,7 +149,7 @@ export const TOOLS: ToolDef[] = [
 
 /** What the bridge tells an MCP client about itself. */
 export const INSTRUCTIONS =
-  'Stack runs coding agents in parallel git worktrees ("tasks"). The user does not name these tools — map plain requests '
+  'Stack runs coding agents in parallel git worktrees ("tasks"), run by Stack.app and its daemon stackd. The user does not name these tools — map plain requests '
   + '("¿cómo van mis agentes?", "crea una tarea para AS-1234", "dile al de X que…") to them, and answer in the user\'s language. '
   + 'Typical manager loop: read the ticket elsewhere (Jira, Linear…), stack_create_task with the ticket, stack_wait on the task ids, '
   + 'then stack_status / stack_read_agent to see where they are and stack_send_to_agent to answer questions or give feedback. '

@@ -70,7 +70,7 @@ describe('stack-mcp bridge over stdio, against a real window', () => {
       command: process.execPath,
       args: [bundle],
       cwd: repo,
-      env: { PATH: process.env.PATH ?? '', STACK_STORAGE_DIR: storage },
+      env: { PATH: process.env.PATH ?? '', STACK_STORAGE_DIR: storage, STACKD_CONFIG_DIR: storage },
       stderr: 'pipe',
     }));
   }, 60_000);
@@ -118,6 +118,6 @@ describe('stack-mcp bridge over stdio, against a real window', () => {
     registry.dispose();
     const gone = await client.callTool({ name: 'stack_status', arguments: {} });
     expect(gone.isError).toBe(true);
-    expect((gone.content as Array<{ text: string }>)[0].text).toMatch(/Open Stack on .*repo in VS Code/);
+    expect((gone.content as Array<{ text: string }>)[0].text).toMatch(/Stack isn't running: open Stack.app/);
   });
 });

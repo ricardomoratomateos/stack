@@ -80,30 +80,30 @@ describe('callWindow', () => {
 
   it('turns an answer that is not an ApiResponse into an error naming the status', async () => {
     stub = await stubWindow((_req, _body, res) => { res.writeHead(502); res.end('<html>'); });
-    expect(await callWindow(win({ port: stub.port }), 't', {}, 5000)).toEqual({ ok: false, error: 'The Stack window for /code/a answered HTTP 502 without a result.' });
+    expect(await callWindow(win({ port: stub.port }), 't', {}, 5000)).toEqual({ ok: false, error: 'stackd (for /code/a) answered HTTP 502 without a result.' });
     await stub.close();
     stub = await stubWindow((_req, _body, res) => json(res, { nope: true }));
-    expect((await callWindow(win({ port: stub.port, repoRoots: [] }), 't', {}, 5000))).toEqual({ ok: false, error: 'The Stack window for /code/a answered HTTP 200 without a result.' });
+    expect((await callWindow(win({ port: stub.port, repoRoots: [] }), 't', {}, 5000))).toEqual({ ok: false, error: 'stackd (for /code/a) answered HTTP 200 without a result.' });
     await stub.close();
     stub = await stubWindow((_req, _body, res) => json(res, null));
     expect((await callWindow(win({ port: stub.port, repoRoots: [], workspaceFolders: [] }), 't', {}, 5000))).toEqual({
-      ok: false, error: `The Stack window for pid ${process.pid} answered HTTP 200 without a result.`,
+      ok: false, error: `stackd (for pid ${process.pid}) answered HTTP 200 without a result.`,
     });
   });
 
   it('gives up on a window that does not answer in time', async () => {
     stub = await stubWindow(() => { /* never answers */ });
-    expect(await callWindow(win({ port: stub.port }), 't', {}, 100)).toEqual({ ok: false, error: 'The Stack window for /code/a did not answer within 0s.' });
+    expect(await callWindow(win({ port: stub.port }), 't', {}, 100)).toEqual({ ok: false, error: 'stackd (for /code/a) did not answer within 0s.' });
   });
 
-  it('says a refused connection is a window that may be reloading, and passes other errors on', async () => {
+  it('says a refused connection is stackd that may be restarting, and passes other errors on', async () => {
     expect(await callWindow(win({ port: await deadPort() }), 't', {}, 5000)).toEqual({
-      ok: false, error: 'The Stack window for /code/a is not answering — it may be reloading. Try again in a moment.',
+      ok: false, error: 'stackd (for /code/a) is not answering — it may be restarting. Try again in a moment; if it stays down, open Stack.app.',
     });
     stub = await stubWindow((req) => { req.socket.destroy(); });
     const answer = await callWindow(win({ port: stub.port }), 't', {}, 5000);
     expect(answer.ok).toBe(false);
-    expect(!answer.ok && answer.error).toMatch(/^Could not reach the Stack window for \/code\/a: /);
+    expect(!answer.ok && answer.error).toMatch(/^Could not reach stackd \(for \/code\/a\): /);
   });
 });
 
@@ -122,10 +122,12 @@ describe('forward', () => {
     expect(await forward(opts(), 'nope', {})).toEqual({ content: [{ type: 'text', text: 'Unknown tool "nope".' }], isError: true });
   });
 
-  it('says to open Stack when no window has the repository', async () => {
+  it('says Stack is not running when there is no discovery file, and to add the repo when stackd lacks it', async () => {
     const res = await forward(opts(), 'stack_status', {});
     expect(res.isError).toBe(true);
-    expect(res.content[0].text).toMatch(/Open Stack on \/code\/a\/src in VS Code/);
+    expect(res.content[0].text).toMatch(/Stack isn't running: open Stack.app/);
+    writeWindow(win({ pid: 10, repoRoots: ['/code/b'], workspaceFolders: ['/code/b'] }));
+    expect((await forward(opts(), 'stack_status', {})).content[0].text).toMatch(/^\/code\/a\/src isn't in Stack: add it in Stack.app/);
   });
 
   it('forwards to the window of the cwd, with the cwd and $STACK_TASK_ID as context, minus the repo argument', async () => {
@@ -136,7 +138,7 @@ describe('forward', () => {
     expect(stub.seen[0].body).toEqual({ args: {}, context: { cwd: '/code/a/src', taskId: 'ta' } });
   });
 
-  it('also finds a window registered in an extra dir (stackd, behind a bridge VS Code registered)', async () => {
+  it('also finds a window registered in an extra dir (stackd, behind a bridge copy registered elsewhere)', async () => {
     stub = await stubWindow((_req, _body, res) => json(res, { ok: true, result: { daemon: true } }));
     const daemonDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-fwd-d-'));
     try {
@@ -187,7 +189,7 @@ describe('forward', () => {
   it('checks for real that the window\'s process is alive by default', async () => {
     writeWindow(win({ pid: 999_999_999 }));
     const res = await forward({ storageDir: dir, env: {}, cwd: '/code/a', version: 't' }, 'stack_status', {});
-    expect(res.content[0].text).toMatch(/No VS Code window with Stack is open/);
+    expect(res.content[0].text).toMatch(/Stack isn't running: open Stack.app/);
   });
 });
 

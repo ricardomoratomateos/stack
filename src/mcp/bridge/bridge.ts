@@ -55,19 +55,19 @@ export function callWindow(window: WindowFile, tool: string, request: ApiRequest
           const parsed = JSON.parse(text) as ApiResponse;
           if (parsed && typeof parsed === 'object' && typeof parsed.ok === 'boolean') return resolve(parsed);
         } catch { /* below */ }
-        resolve({ ok: false, error: `The Stack window for ${where} answered HTTP ${res.statusCode} without a result.` });
+        resolve({ ok: false, error: `stackd (for ${where}) answered HTTP ${res.statusCode} without a result.` });
       });
     });
     req.setTimeout(timeoutMs, () => {
       req.destroy();
-      resolve({ ok: false, error: `The Stack window for ${where} did not answer within ${Math.round(timeoutMs / 1000)}s.` });
+      resolve({ ok: false, error: `stackd (for ${where}) did not answer within ${Math.round(timeoutMs / 1000)}s.` });
     });
     req.on('error', (e: NodeJS.ErrnoException) => {
       resolve({
         ok: false,
         error: e.code === 'ECONNREFUSED'
-          ? `The Stack window for ${where} is not answering — it may be reloading. Try again in a moment.`
-          : `Could not reach the Stack window for ${where}: ${e.message}`,
+          ? `stackd (for ${where}) is not answering — it may be restarting. Try again in a moment; if it stays down, open Stack.app.`
+          : `Could not reach stackd (for ${where}): ${e.message}`,
       });
     });
     req.end(body);

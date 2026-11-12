@@ -3,11 +3,12 @@ import * as path from 'node:path';
 import type { WindowFile } from './protocol';
 
 /**
- * Finding the VS Code window a tool call is for.
+ * Finding the Stack (stackd) a tool call is for; each discovery file is a
+ * "window" for historical reasons, and stackd answers every repo it manages.
  *
- * Used by the bridge on every call — never cached, since windows come, go and
- * reload (new port, new token) while an agent session lasts for hours — and by
- * the extension to sweep the files dead windows left behind.
+ * Used by the bridge on every call — never cached, since stackd can restart
+ * (new port, new token) while an agent session lasts for hours — and by
+ * stackd to sweep the files dead processes left behind.
  */
 
 /**
@@ -114,13 +115,12 @@ function pick(scored: Array<{ w: WindowFile; score: number }>): WindowFile | und
  */
 export function resolveWindow(windows: WindowFile[], target: ResolveTarget): Resolution {
   if (windows.length === 0) {
-    const where = target.repo ?? target.paths[0];
-    return { error: `No VS Code window with Stack is open${where ? ` on ${where}` : ''}. Open Stack on ${where ?? 'the repository'} in VS Code.` };
+    return { error: 'Stack isn\'t running: open Stack.app (or run `node dist/stackd.js serve`).' };
   }
   const open = () => windows.map((w) => w.repoRoots[0] ?? w.workspaceFolders[0]).filter(Boolean).join(', ');
   if (target.repo) {
     const found = pick(windows.map((w) => ({ w, score: bestScore(w, target.repo!) })));
-    return found ? { window: found } : { error: `Open Stack on ${target.repo} in VS Code. Open now: ${open() || 'none'}.` };
+    return found ? { window: found } : { error: `${target.repo} isn't in Stack: add it in Stack.app. In Stack now: ${open() || 'none'}.` };
   }
   if (target.taskId) {
     const owner = pick(windows.filter((w) => w.worktreeIds.includes(target.taskId!)).map((w) => ({ w, score: 0 })));
@@ -132,6 +132,6 @@ export function resolveWindow(windows: WindowFile[], target: ResolveTarget): Res
   }
   const where = target.paths[0];
   return {
-    error: `Open Stack on ${where ?? 'this repository'} in VS Code, or pass "repo" with one of the open repositories: ${open() || 'none'}.`,
+    error: `${where ?? 'This repository'} isn't in Stack: add it in Stack.app, or pass "repo" with one of the repositories in Stack: ${open() || 'none'}.`,
   };
 }
