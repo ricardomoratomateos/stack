@@ -17,10 +17,14 @@ installLogging();
 // `/?dev=sidebar`: the sidebar alone on a fixed sample state (see sidebar/DevSidebar.tsx).
 const devMode = new URLSearchParams(location.search).get('dev');
 const dev = devMode === 'sidebar';
+// `/?dev=code`: the code-browser spike (docs/spikes/code-browser.md). Loaded on demand: Monaco stays out of the app's bundle.
+const DevCode = React.lazy(() => import('./code/DevCode'));
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    {devMode === 'boot' ? (
+    {devMode === 'code' ? (
+      <React.Suspense fallback={null}><DevCode /></React.Suspense>
+    ) : devMode === 'boot' ? (
       <DevBoot graph={graphOf({ seq: 0, tmux: {}, repos: [{ repoRoot: '/r/big-app', state: sampleState() }] })} />
     ) : dev ? (
       <DevSidebar />

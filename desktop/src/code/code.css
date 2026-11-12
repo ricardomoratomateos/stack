@@ -1,0 +1,33 @@
+/* SPIKE (docs/spikes/code-browser.md): the code browser, painted from the chrome's --app-* tokens. */
+.code { position: relative; display: grid; grid-template-columns: 260px minmax(0, 1fr); height: 100%; min-height: 0; background: var(--app-bg); color: var(--app-text); }
+.code-tree { overflow: auto; padding: 6px 0; border-right: 1px solid var(--app-border); font-size: 12px; }
+.code-row { display: flex; align-items: center; gap: 4px; width: 100%; height: 22px; padding-right: 8px; white-space: nowrap; color: var(--app-text-dim); }
+.code-row:hover { background: var(--app-hover); }
+.code-row.is-active { background: var(--app-selected); color: var(--app-text); }
+.code-row .codicon { font-size: 14px; flex: none; color: var(--app-text-faint); }
+.code-row-name { overflow: hidden; text-overflow: ellipsis; }
+.code-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.code-bar { display: flex; align-items: center; gap: 2px; height: 36px; padding: 0 8px; flex: none; border-bottom: 1px solid var(--app-border); }
+.code-bar .icon-btn:disabled { opacity: .35; cursor: default; }
+.code-path { flex: 1; min-width: 0; height: 24px; padding: 0 8px; border-radius: 6px; font-size: 12px; color: var(--app-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.code-path:hover { background: var(--app-hover); color: var(--app-text); }
+.code-status { display: flex; gap: 6px; flex: none; }
+.code-pill { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--app-border-strong); color: var(--app-text-dim); white-space: nowrap; }
+.code-pill.is-ready { color: var(--app-accent-text); }
+.code-pill.is-dead { color: var(--app-error); border-color: var(--app-error); }
+.code-notice { flex: none; padding: 4px 12px; font-size: 12px; color: var(--app-error); background: var(--app-error-bg); }
+.code-editor { flex: 1; min-height: 0; }
+.code-empty { position: absolute; inset: 36px 0 0 0; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; font-size: 12px; color: var(--app-text-faint); background: var(--app-bg); }
+.code-palette-scrim { position: absolute; inset: 0; z-index: 50; }
+.code-palette { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: min(640px, calc(100% - 32px)); background: var(--app-surface); border: 1px solid var(--app-border-strong); border-radius: 8px; box-shadow: 0 8px 28px rgba(0, 0, 0, .5); overflow: hidden; }
+.code-palette input { width: 100%; box-sizing: border-box; height: 34px; padding: 0 12px; background: transparent; border: 0; border-bottom: 1px solid var(--app-border); color: var(--app-text); font: inherit; outline: none; }
+.code-palette-list { max-height: 360px; overflow: auto; }
+.code-hit { display: flex; align-items: baseline; gap: 8px; width: 100%; height: 24px; padding: 0 12px; font-size: 12px; white-space: nowrap; }
+.code-hit.is-active { background: var(--app-selected); }
+.code-hit-name { flex: none; color: var(--app-text); }
+.code-hit-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--app-text-faint); font-size: 11px; }
+.code-palette-info { padding: 3px 12px; font-size: 11px; color: var(--app-text-faint); border-top: 1px solid var(--app-border); }
+.dev-code { display: flex; flex-direction: column; height: 100%; }
+.dev-code-head { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; flex: none; font-size: 11px; color: var(--app-text-dim); border-bottom: 1px solid var(--app-border); }
+.dev-code-head select { background: var(--app-surface); color: var(--app-text); border: 1px solid var(--app-border-strong); border-radius: 4px; font: inherit; }
+.dev-code-body { flex: 1; min-height: 0; }
