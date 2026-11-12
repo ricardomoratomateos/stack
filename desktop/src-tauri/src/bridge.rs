@@ -93,6 +93,11 @@ pub const LIST_SEP: &str = "|~|";
 pub const LIST_FORMAT: &str =
     "#{pane_id}|~|#{window_id}|~|#{window_index}|~|#{pane_width}|~|#{pane_height}|~|#{pane_active}|~|#{pane_current_command}|~|#{window_name}";
 
+/// tmux formats for the modes a resync must give xterm back; `desktop/src/terminals/paneModes.ts`
+/// reads the reply in this order.
+pub const PANE_MODES: &str =
+    "#{alternate_on} #{mouse_standard_flag} #{mouse_button_flag} #{mouse_all_flag} #{mouse_sgr_flag} #{mouse_utf8_flag} #{keypad_cursor_flag} #{keypad_flag}";
+
 /// `display-message` reply `"<x> <y> <flag>"` → `(x, y, visible)`.
 pub fn parse_cursor(text: &str) -> Option<(u16, u16, bool)> {
     let mut it = text.split_whitespace();

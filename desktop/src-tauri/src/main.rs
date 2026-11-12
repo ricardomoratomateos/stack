@@ -36,6 +36,7 @@ fn main() {
             commands::resize,
             commands::capture,
             commands::pane_cursor,
+            commands::pane_modes,
             commands::clipboard_paste,
             commands::paste_text,
             commands::stage_drops,

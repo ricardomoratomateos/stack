@@ -5,6 +5,8 @@ import { FitAddon } from '@xterm/addon-fit';
 import type { TmuxApi } from './api';
 import { concatChunks, nextHistoryStart, toTerminalText } from './bytes';
 import { lastLines } from './lastLines';
+import { modesSequence, parsePaneModes, screenSequence } from './paneModes';
+import { log } from '../log';
 
 export const SCROLLBACK = 2000;
 
@@ -291,12 +293,24 @@ export class TerminalRegistry {
     e.queued = 0;
     e.pending = [];
     try {
-      const text = await this.api.capture(pane, -SCROLLBACK);
-      const cursor = await this.api.paneCursor(pane).catch(() => null);
+      // reset() drops the modes the program set (alternate screen, mouse reporting…): read them first.
+      const started = performance.now();
+      // One round trip: capture, modes and cursor go to tmux together.
+      const [text, rawModes, cursor] = await Promise.all([
+        this.api.capture(pane, -SCROLLBACK),
+        this.api.paneModes(pane).catch(() => ''),
+        this.api.paneCursor(pane).catch(() => null),
+      ]);
+      const fetched = performance.now();
+      // On the alternate screen the history lines scroll straight off: what stays is its screen.
+      const modes = parsePaneModes(rawModes);
       e.term.reset();
+      if (modes) e.term.write(screenSequence(modes));
       e.term.write(toTerminalText(text));
       // The capture leaves xterm's cursor after the last character and visible: put it where tmux has it.
       if (cursor) e.term.write(`\x1b[${cursor[1] + 1};${cursor[0] + 1}H\x1b[?25${cursor[2] ? 'h' : 'l'}`);
+      e.term.write(modes ? modesSequence(modes) : '', () =>
+        log('info', 'sync', pane, `tmux ${Math.round(fetched - started)}ms`, `draw ${Math.round(performance.now() - fetched)}ms`, `${text.length}B`, modes?.alt ? 'alt' : ''));
       e.loaded = SCROLLBACK;
       e.count = text.split('\n').length;
     } catch {

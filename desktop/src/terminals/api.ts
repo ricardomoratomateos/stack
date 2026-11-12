@@ -15,6 +15,8 @@ export interface TmuxApi {
   capture(pane: string, start: number, end?: number): Promise<string>;
   /** tmux's cursor for the pane: `[x, y, visible]`. */
   paneCursor(pane: string): Promise<[number, number, boolean]>;
+  /** The pane's terminal modes as tmux reports them (see `paneModes.ts`). */
+  paneModes(pane: string): Promise<string>;
   /** What ⌘V should paste: an image (agents read it on Ctrl+V) or the clipboard's text. */
   clipboardPaste(): Promise<{ image: boolean; text: string }>;
   /** Paste through tmux, bracketed when the program asked for it. */
@@ -34,6 +36,7 @@ export const tmux: TmuxApi = {
   write: (pane, data) => invoke('write', { pane, data }),
   resize: (pane, cols, rows) => invoke('resize', { pane, cols, rows }),
   paneCursor: (pane) => invoke('pane_cursor', { pane }),
+  paneModes: (pane) => invoke('pane_modes', { pane }),
   clipboardPaste: () => invoke('clipboard_paste'),
   pasteText: (pane, text) => invoke('paste_text', { pane, text }),
   capture: (pane, start, end) => invoke('capture', { pane, start, end: end ?? null }),

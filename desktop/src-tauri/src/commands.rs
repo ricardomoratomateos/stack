@@ -268,6 +268,17 @@ pub async fn pane_cursor(state: State<'_, Bridge>, pane: String) -> Result<(u16,
     bridge::parse_cursor(&out).ok_or_else(|| format!("unexpected cursor reply {out:?}"))
 }
 
+/// The terminal modes the pane's program has set, as tmux reports them (space-separated 0/1, in
+/// `PANE_MODES` order; parsed by the frontend's `paneModes.ts`). A resync resets xterm, which
+/// would otherwise forget them: an agent on the alternate screen with mouse reporting stops
+/// getting wheel events and cannot be scrolled.
+#[tauri::command]
+pub async fn pane_modes(state: State<'_, Bridge>, pane: String) -> Result<String, String> {
+    check(&pane, '%')?;
+    let client = state.client_for_pane(&pane).await?;
+    client.run(&format!("display-message -p -t {pane} '{}'", bridge::PANE_MODES)).await.map_err(err)
+}
+
 /// Paste `text` into a pane through tmux (`paste-buffer -p`), so it arrives bracketed when the
 /// program asked for bracketed paste. xterm can't know that after a resync, and agents only turn a
 /// pasted image path into an attachment when it comes as a paste, not as typing.

@@ -40,7 +40,7 @@ const acked = (api: TmuxApi) => (api.ackOutput as ReturnType<typeof vi.fn>).mock
 
 function setup() {
   const frames: (() => void)[] = [];
-  const api = { capture: vi.fn(async () => ''), paneCursor: vi.fn(async () => [0, 0, true]), clipboardPaste: vi.fn(async () => ({ image: false, text: '' })), resize: vi.fn(async () => {}), write: vi.fn(async () => {}), ackOutput: vi.fn(async () => {}) } as unknown as TmuxApi;
+  const api = { capture: vi.fn(async () => ''), paneCursor: vi.fn(async () => [0, 0, true]), paneModes: vi.fn(async () => '0 0 0 0 0 0 0 0'), clipboardPaste: vi.fn(async () => ({ image: false, text: '' })), resize: vi.fn(async () => {}), write: vi.fn(async () => {}), ackOutput: vi.fn(async () => {}) } as unknown as TmuxApi;
   const reg = new TerminalRegistry(api, { request: (cb) => void frames.push(cb) });
   writes.length = 0;
   return { reg, frames, api };
@@ -53,7 +53,7 @@ describe('TerminalRegistry output', () => {
     reg.watch('%2');
     reg.terminal('%1');
     // `watch` kicks off a capture whose queue gets flushed asynchronously; start clean
-    return Promise.resolve().then(() => Promise.resolve()).then(() => {
+    return new Promise((r) => setTimeout(r, 0)).then(() => {
       writes.length = 0;
       reg.feed('%1', new Uint8Array([1, 2]));
       reg.feed('%1', new Uint8Array([3]));
