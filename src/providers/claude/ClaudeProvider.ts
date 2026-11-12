@@ -28,6 +28,11 @@ export class ClaudeProvider implements IAgentProvider {
     return bridge ? `${command} ${claudeMcpArgs(bridge, worktreeId)}` : command;
   }
 
+  /** `claude --resume <session-id>` (`-r`), per `claude --help`. */
+  resumeArgs(sessionId: string): string {
+    return `--resume ${sessionId}`;
+  }
+
   installHooks(hookUrl: string): void {
     this.hooks.install(hookUrl);
   }

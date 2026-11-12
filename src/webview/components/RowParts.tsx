@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { send } from '../vscode';
 import { formatElapsed, sessionToOpen, type Described } from '../derive';
+import { visualFor } from './providers';
 
 /** Brings up the session that is asking (or the worktree's terminal when none is). */
 export function openAsking(d: Described, select: () => void): void {
@@ -74,5 +75,28 @@ function SetupButton({ icon, label, onClick }: { icon: string; label: string; on
     <button type="button" className="fm-btn fm-btn-icon" aria-label={label} title={label} onClick={onClick}>
       <i className={`codicon codicon-${icon}`} aria-hidden="true" />
     </button>
+  );
+}
+
+/**
+ * The task's tmux session did not survive (the Mac restarted) but its agent's
+ * conversation is known: one button brings it back where it left off.
+ */
+export function ResumeActions({ d }: { d: Described }) {
+  const provider = d.wt.resume;
+  if (!provider) return null;
+  const label = `Resume ${visualFor(provider).label} where it left off`;
+  return (
+    <div className="fm-row-actions">
+      <button
+        type="button"
+        className="fm-btn fm-btn-primary"
+        aria-label={label}
+        title={label}
+        onClick={(e) => { e.stopPropagation(); send({ type: 'resumeAgent', worktreeId: d.wt.id }); }}
+      >
+        <i className="codicon codicon-debug-restart" aria-hidden="true" /><span>Resume</span>
+      </button>
+    </div>
   );
 }

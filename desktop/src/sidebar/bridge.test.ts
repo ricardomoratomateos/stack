@@ -32,6 +32,9 @@ describe('translate', () => {
     expect(translate({ type: 'launchAgent', worktreeId: 'rev' }, ctx)).toMatchObject({ body: { worktreeId: 'rev' } });
     expect(translate({ type: 'openTerminal', worktreeId: 'rev' }, ctx)).toEqual({ kind: 'command', name: 'spawnShell', body: { worktreeId: 'rev' }, selectNew: 'rev' });
   });
+  it('resuming a task is a stackd command that then shows its agent', () => {
+    expect(translate({ type: 'resumeAgent', worktreeId: 'rev' }, ctx)).toEqual({ kind: 'command', name: 'resumeAgent', body: { worktreeId: 'rev' }, selectNew: 'rev' });
+  });
   it('killSession names the window', () => {
     expect(translate({ type: 'killSession', worktreeId: 'rev', index: 2 }, ctx)).toEqual({ kind: 'command', name: 'killWindow', body: { worktreeId: 'rev', windowIndex: 2 } });
   });

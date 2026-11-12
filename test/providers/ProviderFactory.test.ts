@@ -87,6 +87,14 @@ describe('ProviderFactory', () => {
     });
   });
 
+  it("resumes each agent's conversation with its own CLI's syntax", () => {
+    const f = new ProviderFactory(makeConfig(), storageDir, homeDir);
+    expect(f.create('claude').resumeArgs?.('3f2a-uuid')).toBe('--resume 3f2a-uuid');
+    // A subcommand: last on the line, after the global -c overrides.
+    expect(f.create('codex').resumeArgs?.('3f2a-uuid')).toBe('resume 3f2a-uuid');
+    expect(f.create('opencode').resumeArgs?.('ses_abc')).toBe('--session ses_abc');
+  });
+
   describe('ClaudeProvider', () => {
     it('buildCommand prefixes STACK_WORKSPACE_ID and uses the configured command', () => {
       const provider = makeFactory(makeConfig({ claudeCommand: 'my-claude' })).create('claude');

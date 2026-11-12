@@ -107,6 +107,11 @@ export interface WorktreeItem {
   ticket?: TicketItem;
   /** The agent asked for review with this summary: the row's line, and the review group. */
   review?: { summary: string; at: number };
+  /**
+   * The task's tmux session is gone (the Mac restarted) but its agent's
+   * conversation is known: this agent can be resumed. The row offers "Resume".
+   */
+  resume?: ProviderId;
 }
 
 export interface TicketItem {
@@ -151,6 +156,8 @@ export type ExtMessage =
 // WebView → Extension
 export type WebMessage =
   | { type: 'launchAgent'; worktreeId: string; provider?: ProviderId }
+  /** Recreate a task's lost tmux session and resume its agent's conversation (see WorktreeItem.resume). */
+  | { type: 'resumeAgent'; worktreeId: string }
   /** Choose which agent the card's big launch button starts. */
   | { type: 'pickDefaultProvider' }
   /** The webview finished mounting and is listening. See the handshake below. */

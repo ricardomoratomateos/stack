@@ -7,7 +7,7 @@ import { StatusDot } from '../../components/StatusDot';
 import { LaunchSplit } from '../../components/LaunchSplit';
 import { ActionBar } from '../../components/ActionBar';
 import { visualFor } from '../../components/providers';
-import { ForgetActions, RowLine, SetupActions } from '../../components/RowParts';
+import { ForgetActions, ResumeActions, RowLine, SetupActions } from '../../components/RowParts';
 import { SessionList } from '../../components/SessionList';
 import { EmptyState, HealthStrip, LoadingState, NothingHere } from '../../components/Status';
 import type { LayoutProps } from '../types';
@@ -155,6 +155,7 @@ function Row({ d, selected, now, state, select, drag }: {
 
       {d.group === 'missing' && <ForgetActions d={d} />}
       {wt.setup && !wt.deleting && <SetupActions d={d} />}
+      {wt.resume && !wt.deleting && d.group !== 'missing' && <ResumeActions d={d} />}
 
       {selected && d.group !== 'missing' && (
         <div className="as-expand">

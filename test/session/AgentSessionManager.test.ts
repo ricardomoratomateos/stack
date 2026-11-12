@@ -2056,3 +2056,108 @@ describe('capturePane', () => {
     expect(stub.capturePane).toHaveBeenCalledWith(`${SESSION}:4`, 50);
   });
 });
+
+// ── resume after the tmux session is gone ───────────────────────────────────
+
+describe('resume', () => {
+  const ID = '0b6f7c1e-2d3a-4c5b-8e9f-1a2b3c4d5e6f';
+
+  /** A claude window that has reported its conversation id, then a Mac restart: same store, no tmux session. */
+  async function afterRestart(opts: { sessionId?: string; turned?: boolean; prefix?: string } = {}) {
+    const memento = new FakeMemento() as unknown as vscode.Memento;
+    const first = create('claude', memento);
+    seed(first.mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    if (opts.turned) first.mgr.updateState('wt-1', 'active', 1);
+    first.mgr.updateState('wt-1', 'waiting', 1);
+    first.mgr.noteSession({ workspaceId: 'wt-1', windowIndex: 1, sessionId: opts.sessionId ?? ID });
+    first.mgr.dispose();
+    const second = create('claude', memento, () => opts.prefix ?? '');
+    await second.mgr.reconnect([wt]); // hasSession: false — the tmux server did not survive
+    return second;
+  }
+
+  it('remembers the conversation id a window reports, with its provider', () => {
+    const memento = new FakeMemento() as unknown as vscode.Memento;
+    const { mgr } = create('claude', memento);
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    mgr.noteSession({ workspaceId: 'wt-1', windowIndex: 1, sessionId: ID });
+    expect(memento.get('stack.claudeStates')).toEqual({ 'wt-1': { 1: { state: 'waiting', provider: 'claude', sessionId: ID } } });
+  });
+
+  it('stores nothing that could not go on a command line safely, or that names no window', () => {
+    const memento = new FakeMemento() as unknown as vscode.Memento;
+    const { mgr } = create('claude', memento);
+    seed(mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    mgr.noteSession({ workspaceId: 'wt-1', windowIndex: 1, sessionId: 'x; rm -rf ~' });
+    mgr.noteSession({ workspaceId: 'wt-1', windowIndex: 1, sessionId: '$(whoami)' });
+    mgr.noteSession({ workspaceId: 'wt-1', sessionId: ID });
+    expect(memento.get('stack.claudeStates')).toBeUndefined();
+  });
+
+  it('offers a resume for a task whose session is gone, and recreates it on the same conversation', async () => {
+    const { mgr, stub } = await afterRestart();
+    expect(mgr.hasTerminals('wt-1')).toBe(false);
+    expect(mgr.resumableProvider('wt-1')).toBe('claude');
+
+    expect(await mgr.resume(wt)).toBe(1);
+    expect(stub.ensureSession).toHaveBeenCalledWith(SESSION, wt.path);
+    expect(stub.respawnWindow).toHaveBeenCalledWith(
+      SESSION, 1,
+      `STACK_WINDOW_INDEX="1" STACK_WORKSPACE_ID="wt-1" claude --resume ${ID}; exec "\${SHELL:-/bin/sh}"`,
+    );
+    expect(mgr.getSessions('wt-1').map((s) => [s.provider, s.state])).toEqual([['claude', 'waiting']]);
+    // Back: nothing left to resume.
+    expect(mgr.resumableProvider('wt-1')).toBeUndefined();
+  });
+
+  it('resumes once on a double click', async () => {
+    const { mgr, stub } = await afterRestart();
+    expect(await Promise.all([mgr.resume(wt), mgr.resume(wt)])).toEqual([1, 0]);
+    expect(stub.respawnWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the task in review if its agent had taken a turn', async () => {
+    const { mgr } = await afterRestart({ turned: true });
+    await mgr.resume(wt);
+    expect(mgr.getSessions('wt-1')[0].turned).toBe(true);
+  });
+
+  it('pastes no stack.promptPrefix into a resumed conversation', async () => {
+    const { mgr, stub } = await afterRestart({ prefix: 'Check the skill first.' });
+    await mgr.resume(wt);
+    expect(stub.paste).not.toHaveBeenCalled();
+  });
+
+  it('keeps the conversation id across a restart that the session survived', async () => {
+    const memento = new FakeMemento() as unknown as vscode.Memento;
+    const first = create('claude', memento);
+    seed(first.mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    first.mgr.noteSession({ workspaceId: 'wt-1', windowIndex: 1, sessionId: ID });
+    const second = create('claude', memento);
+    (second.stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    (second.stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([{ index: 1, name: 'claude' }]);
+    await second.mgr.reconnect([wt]);
+    second.mgr.updateState('wt-1', 'active', 1); // persists again, from memory
+    expect((memento.get('stack.claudeStates') as Record<string, Record<number, unknown>>)['wt-1'][1]).toMatchObject({ sessionId: ID });
+  });
+
+  it('offers nothing while the session is alive, without a conversation id, or after the task was torn down', async () => {
+    const live = create();
+    seed(live.mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    live.mgr.noteSession({ workspaceId: 'wt-1', windowIndex: 1, sessionId: ID });
+    expect(live.mgr.resumableProvider('wt-1')).toBeUndefined();
+
+    const memento = new FakeMemento() as unknown as vscode.Memento;
+    await memento.update('stack.claudeStates', { 'wt-1': { 1: { state: 'waiting' } }, 'wt-2': { 1: 'waiting' } });
+    const { mgr } = create('claude', memento);
+    expect(mgr.resumableProvider('wt-1')).toBeUndefined();
+    expect(mgr.resumableProvider('wt-2')).toBeUndefined();
+    expect(await mgr.resume(wt)).toBe(0);
+
+    const killed = create();
+    seed(killed.mgr, 'wt-1', [[1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }]]);
+    killed.mgr.noteSession({ workspaceId: 'wt-1', windowIndex: 1, sessionId: ID });
+    await killed.mgr.killWorktreeSession('wt-1');
+    expect(killed.mgr.resumableProvider('wt-1')).toBeUndefined();
+  });
+});

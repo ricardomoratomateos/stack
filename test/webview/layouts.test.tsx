@@ -105,6 +105,14 @@ describe('aside layout', () => {
     expect(html).not.toContain('More actions');
   });
 
+  it('offers "Resume" on a task whose session was lost, selected or not, and nowhere else', () => {
+    const lost = { ...state, worktrees: [...state.worktrees, wt({ id: 'lost', branch: 'feat/lost', resume: 'claude' })] };
+    const html = render(props({ state: lost, items: describeAll(lost), selectedId: null }));
+    expect(html.match(/>Resume</g)).toHaveLength(1);
+    expect(html).toContain('Resume claude where it left off');
+    expect(render(props())).not.toContain('>Resume<');
+  });
+
   it('draws the loading and empty states', () => {
     expect(render(props({ loaded: false, state: { worktrees: [] }, items: [] }))).toContain('Loading tasks');
     const empty = render(props({ state: { worktrees: [] }, items: [], selectedId: null }));

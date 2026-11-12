@@ -46,6 +46,13 @@ export interface IAgentProvider {
    * (see HookRoutes), because the launch waits on the agent's first hook.
    */
   buildCommand(worktreeId: string): string;
+  /**
+   * What to append to buildCommand() to continue the conversation `sessionId`
+   * (the `session_id` its hooks report) instead of starting a new one. Absent
+   * for an agent that cannot resume one, which is then not offered a resume.
+   * `sessionId` is validated by the caller (letters, digits, `._-`).
+   */
+  resumeArgs?(sessionId: string): string;
   /** Wire the provider's hook/plugin system to POST state events to hookUrl. */
   installHooks(hookUrl: string): void;
   uninstallHooks(): void;

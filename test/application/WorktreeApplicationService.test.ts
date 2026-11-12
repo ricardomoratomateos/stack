@@ -159,6 +159,7 @@ function makeHarness(o: HarnessOpts = {}) {
     getState: vi.fn(() => 'idle'),
     getAgentCount: vi.fn(() => 2),
     getShellCount: vi.fn(() => 1),
+    resumableProvider: vi.fn((_id: string): string | undefined => undefined),
     hasTerminals: vi.fn((id: string) => (o.terminalIds ?? []).includes(id)),
     closeViewer: vi.fn(async (id: string) => { calls.push(`claude.closeViewer:${id}`); }),
     killWorktreeSession: vi.fn(async (id: string) => { calls.push(`claude.killWorktreeSession:${id}`); }),
@@ -1149,6 +1150,14 @@ describe('buildState', () => {
     return h.service.start().then(() => {
       expect(h.service.buildState().worktrees[0].missing).toBe(true);
     });
+  });
+
+  it('offers "Resume" on a task whose agent can be picked up again, and only there', () => {
+    const h = makeHarness({ worktrees: [makeWorktree({ id: 'a' }), makeWorktree({ id: 'b' })] });
+    h.claude.resumableProvider.mockImplementation((id: string) => (id === 'a' ? 'claude' : undefined));
+    const [a, b] = h.service.buildState().worktrees;
+    expect(a.resume).toBe('claude');
+    expect(b).not.toHaveProperty('resume');
   });
 
   describe('since', () => {

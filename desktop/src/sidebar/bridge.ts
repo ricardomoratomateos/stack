@@ -86,6 +86,8 @@ export function translate(msg: WebMessage, ctx: Context): Action {
       return { kind: 'select', worktreeId: msg.worktreeId, index: msg.index };
     case 'launchAgent':
       return { kind: 'command', name: 'spawnAgent', body: { worktreeId: msg.worktreeId, ...(msg.provider ? { provider: msg.provider } : {}) }, selectNew: msg.worktreeId };
+    case 'resumeAgent':
+      return { kind: 'command', name: 'resumeAgent', body: { worktreeId: msg.worktreeId }, selectNew: msg.worktreeId };
     case 'openTerminal':
       return { kind: 'command', name: 'spawnShell', body: { worktreeId: msg.worktreeId }, selectNew: msg.worktreeId };
     case 'killSession':

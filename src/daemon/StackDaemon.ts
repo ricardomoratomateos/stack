@@ -209,6 +209,7 @@ export class StackDaemon {
       this.agents.onStateChange(() => this.changed()),
       this.agents.onTerminalsChange(() => { this.claimRoutes(); this.changed(); }),
       this.hooks.onHookEvent((e) => {
+        this.agents.noteSession(e);
         if (this.agents.noteHookEvent(e)) this.changed();
         if (e.event === 'UserPromptSubmit' && e.workspaceId) void this.contextOf(e.workspaceId)?.service.clearReview(e.workspaceId);
       }),
@@ -467,6 +468,12 @@ export class StackDaemon {
         const before = new Set(this.agents.getSessions(wt.id).map((s) => s.index));
         await this.agents.launch(wt, { provider: provider(b), prompt: str(b, 'prompt') });
         return { windowIndex: this.newWindow(wt.id, before) };
+      }
+      case 'resumeAgent': {
+        // The task's tmux session did not survive (a restart): its agents again, on their conversations.
+        const { wt } = this.findWorktree(need(b, 'worktreeId'));
+        if ((await this.agents.resume(wt)) === 0) throw new CommandError('Nothing to resume for that task.', 409);
+        return { windowIndex: this.agents.getSessions(wt.id)[0]?.index };
       }
       case 'spawnShell': {
         const { wt } = this.findWorktree(need(b, 'worktreeId'));

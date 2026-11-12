@@ -593,6 +593,13 @@ export class WorktreeApplicationService implements DiffPanelHost {
           .catch((e) => this.deps.notify.showError(`Failed to launch agent: ${String(e)}`));
       }
     },
+    resumeAgent: (msg) => {
+      const wt = this.findWorktree(msg.worktreeId);
+      if (wt) {
+        this.deps.agentManager.resume(wt)
+          .catch((e) => this.deps.notify.showError(`Failed to resume the agent: ${String(e)}`));
+      }
+    },
     ready: () => {
       // The first push happens in the same synchronous turn that sets the
       // webview HTML, long before the bundle has loaded and registered its
@@ -1075,6 +1082,12 @@ export class WorktreeApplicationService implements DiffPanelHost {
     }));
   }
 
+  /** `resume` for a task whose agent can be picked up again after its tmux session was lost. */
+  private resumeItem(worktreeId: string): Pick<WorktreeItem, 'resume'> {
+    const provider = this.deps.agentManager.resumableProvider(worktreeId);
+    return provider ? { resume: provider } : {};
+  }
+
   buildState(): StackState {
     const config = this.deps.config.get();
     const worktrees = this.orderWorktrees(this.worktreesInWindow());
@@ -1096,6 +1109,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       ...this.setupItem(wt.id),
       ...(wt.ticket ? { ticket: wt.ticket } : {}),
       ...(wt.review ? { review: wt.review } : {}),
+      ...this.resumeItem(wt.id),
     }));
     this.stampSince(items);
     const activeWorktreeId = worktrees.find((wt) => wt.id === this.currentWorktreeId)?.id;

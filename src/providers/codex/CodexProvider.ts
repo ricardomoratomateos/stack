@@ -20,6 +20,14 @@ export class CodexProvider implements IAgentProvider {
     return bridge ? `${command} ${codexMcpArgs(bridge, worktreeId)}` : command;
   }
 
+  /**
+   * `codex resume <SESSION_ID>`: a subcommand, so it goes last, after the
+   * global `-c` overrides buildCommand ends with, which apply to it too.
+   */
+  resumeArgs(sessionId: string): string {
+    return `resume ${sessionId}`;
+  }
+
   installHooks(hookUrl: string): void {
     this.hooks.install(hookUrl);
   }

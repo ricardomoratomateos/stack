@@ -29,6 +29,11 @@ type WindowMeta = {
    */
   turned?: boolean;
   /**
+   * The agent's own conversation id, from its hooks (`session_id`): what its
+   * resume command takes when the tmux session is gone — see resume().
+   */
+  sessionId?: string;
+  /**
    * What the agent said when it asked for the user (a notification's message,
    * or the command awaiting permission). Kept only while the window is in
    * `permission` or `waiting`; see updateState.
@@ -47,7 +52,14 @@ type WindowMeta = {
 const tookTurn = (state: AgentSessionState): boolean => state === 'active' || state === 'permission';
 
 /** What survives a restart of one agent window; see persistState. */
-type PersistedWindow = { state: AgentSessionState; turned?: boolean };
+type PersistedWindow = { state: AgentSessionState; turned?: boolean; provider?: ProviderId; sessionId?: string };
+
+/**
+ * What a session id may look like to be put on a command line: Claude and Codex
+ * use UUIDs, opencode `ses_…`. Anything else is not stored, so a hook payload
+ * can never smuggle shell syntax into a resume command.
+ */
+const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 const SHELL_COMMANDS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'csh', 'tcsh']);
 
@@ -177,7 +189,12 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
     const stored = this.globalState.get<Record<string, unknown>>(AgentSessionManager.STATE_KEY, {});
     const states: Record<number, PersistedWindow> = {};
     for (const [idx, meta] of this.windows.get(worktreeId) ?? new Map<number, WindowMeta>()) {
-      if (meta.kind === 'agent') states[idx] = { state: meta.state, ...(meta.turned ? { turned: true } : {}) };
+      if (meta.kind !== 'agent') continue;
+      states[idx] = {
+        state: meta.state,
+        ...(meta.turned ? { turned: true } : {}),
+        ...(meta.provider && meta.sessionId ? { provider: meta.provider, sessionId: meta.sessionId } : {}),
+      };
     }
     stored[worktreeId] = states;
     this.globalState.update(AgentSessionManager.STATE_KEY, stored);
@@ -568,11 +585,22 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
 
   // ── Public API ────────────────────────────────────────────────────────────
 
-  async launch(worktree: Worktree, opts?: { provider?: ProviderId; prompt?: string }): Promise<T> {
+  /**
+   * `resume` continues an earlier conversation of the agent instead of
+   * starting a new one (see resume()): the provider's resume arguments go on
+   * the same launch line, so everything else about a launch stays the same.
+   */
+  async launch(
+    worktree: Worktree,
+    opts?: { provider?: ProviderId; prompt?: string; resume?: { sessionId: string; turned?: boolean } },
+  ): Promise<T> {
     const provider = opts?.provider ? this.providers.create(opts.provider) : this.providers.defaultProvider();
     const sessionName = TmuxManager.sessionName(worktree.id);
     console.log(`[stack] launch id=${worktree.id} provider=${provider.id} path=${worktree.path} exists=${this.pathExists(worktree.path)}`);
     await this.tmux.ensureSession(sessionName, worktree.path);
+
+    const resumeArgs = opts?.resume && provider.resumeArgs?.(opts.resume.sessionId);
+    const command = resumeArgs ? `${provider.buildCommand(worktree.id)} ${resumeArgs}` : provider.buildCommand(worktree.id);
 
     // Window is named after the provider id so reconnect() can restore ownership.
     const windowIndex = await this.tmux.newWindow(sessionName, provider.id, worktree.path);
@@ -584,10 +612,13 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
     await this.tmux.respawnWindow(
       sessionName,
       windowIndex,
-      `STACK_WINDOW_INDEX="${windowIndex}" ${provider.buildCommand(worktree.id)}; exec "\${SHELL:-/bin/sh}"`,
+      `STACK_WINDOW_INDEX="${windowIndex}" ${command}; exec "\${SHELL:-/bin/sh}"`,
     );
 
-    this.windowMap(worktree.id).set(windowIndex, { kind: 'agent', provider: provider.id, state: 'waiting', name: provider.id });
+    this.windowMap(worktree.id).set(windowIndex, {
+      kind: 'agent', provider: provider.id, state: 'waiting', name: provider.id,
+      ...(resumeArgs ? { sessionId: opts!.resume!.sessionId, ...(opts!.resume!.turned ? { turned: true } : {}) } : {}),
+    });
 
     await this.tmux.selectWindow(sessionName, windowIndex);
 
@@ -619,7 +650,9 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
     // stack.promptPrefix goes first, and goes even alone: it is the one thing
     // a fresh agent has no other way to pick up (a skill reminder, say), so it
     // is not conditional on the caller having a prompt of its own to attach it to.
-    const prefix = this.promptPrefix().trim();
+    // A resumed agent is not fresh: its conversation had the prefix already,
+    // and pasting it again would submit a turn nobody asked for.
+    const prefix = resumeArgs ? '' : this.promptPrefix().trim();
     const prompt = [prefix, opts?.prompt].filter(Boolean).join('\n\n') || undefined;
     if (prompt) {
       const started = await this.waitForAgentProcess(sessionName, windowIndex);
@@ -974,6 +1007,68 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
   }
 
   /**
+   * Remembers the conversation id a window's hook carries, so the agent can
+   * be resumed if its tmux session does not survive (see resume()). Only for
+   * the window the hook names: an unaddressed event cannot say whose it is.
+   */
+  noteSession(e: { workspaceId: string; windowIndex?: number; sessionId?: string }): void {
+    if (e.windowIndex === undefined || !e.sessionId || !SESSION_ID.test(e.sessionId)) return;
+    const map = this.windows.get(e.workspaceId);
+    const meta = map?.get(e.windowIndex);
+    if (meta?.kind !== 'agent' || meta.sessionId === e.sessionId) return;
+    map!.set(e.windowIndex, { ...meta, sessionId: e.sessionId });
+    this.persistState(e.workspaceId);
+  }
+
+  /**
+   * The agents of a worktree whose tmux session is gone — the Mac restarted,
+   * the tmux server died — but whose conversation can be picked up again:
+   * the windows persisted with a provider that knows how, and an id to give
+   * it. Empty while the worktree has a session (or never had an agent).
+   */
+  private resumableAgents(worktreeId: string): Array<{ provider: ProviderId; sessionId: string; turned?: boolean }> {
+    if (this.windows.has(worktreeId)) return [];
+    const entry = this.globalState.get<Record<string, unknown>>(AgentSessionManager.STATE_KEY, {})[worktreeId];
+    if (!entry || typeof entry !== 'object') return [];
+    return Object.keys(entry)
+      .map((index) => this.persistedWindow(worktreeId, Number(index)))
+      .filter((w): w is PersistedWindow & { provider: ProviderId; sessionId: string } =>
+        !!w?.provider && !!w.sessionId && SESSION_ID.test(w.sessionId)
+        && this.providers.create(w.provider).resumeArgs !== undefined)
+      .map(({ provider, sessionId, turned }) => ({ provider, sessionId, ...(turned ? { turned } : {}) }));
+  }
+
+  /** The provider the sidebar's "Resume" names, when the worktree has an agent to resume. */
+  resumableProvider(worktreeId: string): ProviderId | undefined {
+    return this.resumableAgents(worktreeId)[0]?.provider;
+  }
+
+  /**
+   * Bring back the agents of a worktree whose tmux session is gone: a new
+   * session in the worktree, each agent relaunched with its provider's resume
+   * command on the conversation it had. Listed before the first launch, which
+   * persists the new window over what was recorded. Returns how many.
+   */
+  async resume(worktree: Worktree): Promise<number> {
+    // A second click while the first is still creating the session would
+    // otherwise find no windows yet, and resume every agent twice.
+    if (this.resuming.has(worktree.id)) return 0;
+    const agents = this.resumableAgents(worktree.id);
+    this.resuming.add(worktree.id);
+    try {
+      for (const a of agents) {
+        await this.launch(worktree, { provider: a.provider, resume: { sessionId: a.sessionId, turned: a.turned } });
+      }
+    } finally {
+      this.resuming.delete(worktree.id);
+    }
+    return agents.length;
+  }
+
+  /** Worktrees whose resume() is under way. */
+  private resuming = new Set<string>();
+
+  /**
    * Keeps what an agent said when it asked for the user, so the sidebar can
    * show the question instead of just "needs attention".
    *
@@ -1221,8 +1316,16 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
         const restoredState = kind === 'agent' ? await this.restoredState(wt.id, w, provider) : 'idle';
         // "turned" puts a waiting agent's task in review; losing it on every
         // restart sent finished work back to "waiting for you".
-        const turned = kind === 'agent' && this.persistedWindow(wt.id, w.index)?.turned === true;
-        wm.set(w.index, { kind, provider, state: restoredState, name: w.name, title, ...(turned ? { turned } : {}) });
+        const persisted = kind === 'agent' ? this.persistedWindow(wt.id, w.index) : undefined;
+        const turned = persisted?.turned === true;
+        // Kept for the next time the session does not survive; a different
+        // agent now in that window index has no claim to it.
+        const sessionId = persisted?.provider === provider ? persisted?.sessionId : undefined;
+        wm.set(w.index, {
+          kind, provider, state: restoredState, name: w.name, title,
+          ...(turned ? { turned } : {}),
+          ...(sessionId ? { sessionId } : {}),
+        });
         if (kind === 'agent') restoredAgents = true;
       }
       // One event per worktree, carrying the aggregate — what every other

@@ -15,6 +15,11 @@ export class OpenCodeProvider implements IAgentProvider {
     return `${this.hooks.launchEnv(worktreeId)} ${this.config.get().opencodeCommand}`;
   }
 
+  /** `opencode --session <id>` (`-s`): continue that session; the plugin reports its `ses_…` id. */
+  resumeArgs(sessionId: string): string {
+    return `--session ${sessionId}`;
+  }
+
   installHooks(hookUrl: string): void {
     this.hooks.install(hookUrl);
   }
