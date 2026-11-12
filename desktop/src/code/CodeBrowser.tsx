@@ -4,7 +4,7 @@
  * outline for PHP and JS/TS through the backend's language servers.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CodeBackend, LspStatus, TreeEntry } from './api';
+import type { ChangedFile, CodeBackend, LspStatus, TreeEntry } from './api';
 import { defineStackTheme, modelLoader, monaco } from './monaco';
 import { registerNavigation, workspaceSymbols, type SymbolHit } from './lsp';
 import { canGo, emptyHistory, go, lspLanguage, monacoLanguage, pushPlace, relativeTo, toMonacoRange, type History, type Place } from './protocol';
@@ -16,16 +16,21 @@ interface Props {
   root: string;
   initialFile?: string;
   initialLine?: number;
+  /** The files the task changed, listed above the tree. The browser opens on the first one. */
+  changed?: ChangedFile[];
+  /** "Show this place": a new `tick` jumps there (a click on a file or a line in the Review). */
+  target?: { path: string; line?: number; tick: number };
 }
 
 type Hit = { type: 'file'; path: string } | ({ type: 'symbol' } & SymbolHit);
 
-export function CodeBrowser({ backend, root, initialFile, initialLine }: Props) {
+export function CodeBrowser({ backend, root, initialFile, initialLine, changed, target }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const models = useRef(new Map<string, Promise<monaco.editor.ITextModel>>());
   const viewStates = useRef(new Map<string, monaco.editor.ICodeEditorViewState | null>());
   const linted = useRef(new WeakSet<monaco.editor.ITextModel>());
+  const consumedTick = useRef<number | undefined>(undefined);
   const rootRef = useRef(root);
   rootRef.current = root;
 
@@ -37,7 +42,10 @@ export function CodeBrowser({ backend, root, initialFile, initialLine }: Props) 
   const [dirs, setDirs] = useState<Record<string, TreeEntry[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<LspStatus[]>([]);
-  const [notice, setNotice] = useState('');
+  const [notice, setNoticeText] = useState('');
+  // "Indexing…" is not a failure: it is said quietly, and withdrawn when the indexing ends.
+  const setNotice = useCallback((text: string) => setNoticeText(text.replace(/^Error: /, '')), []);
+  const waiting = /indexing/i.test(notice);
   const [palette, setPalette] = useState<null | { query: string }>(null);
 
   const ensureModel = useCallback((path: string): Promise<monaco.editor.ITextModel> => {
@@ -79,7 +87,7 @@ export function CodeBrowser({ backend, root, initialFile, initialLine }: Props) 
     editor.focus();
     // Lint squiggles for JS/TS (oxlint through the backend). Once per model: the file is read-only here.
     const lang = lspLanguage(path);
-    if (lang && !lang.startsWith('php') && !linted.current.has(model)) {
+    if (lang && !linted.current.has(model)) {
       linted.current.add(model);
       void backend.lint(rootRef.current, path).then(({ diagnostics }) => {
         if (model.isDisposed()) return;
@@ -87,7 +95,7 @@ export function CodeBrowser({ backend, root, initialFile, initialLine }: Props) 
           ...toMonacoRange(d.range),
           message: d.message,
           code: d.code === undefined ? undefined : String(d.code),
-          source: d.source ?? 'oxlint',
+          source: d.source ?? (lang === 'php' ? 'php' : 'oxlint'),
           // LSP: 1 error, 2 warning, 3 info, 4 hint.
           severity: d.severity === 1 ? monaco.MarkerSeverity.Error : d.severity === 2 ? monaco.MarkerSeverity.Warning : d.severity === 3 ? monaco.MarkerSeverity.Info : monaco.MarkerSeverity.Hint,
         })));
@@ -168,13 +176,28 @@ export function CodeBrowser({ backend, root, initialFile, initialLine }: Props) 
     setDirs({});
     setExpanded(new Set());
     void loadDir(root).catch((e) => setNotice(String(e)));
-    if (initialFile) void show(initialFile.startsWith('/') ? initialFile : `${root}/${initialFile}`, initialLine);
-  }, [root, initialFile, initialLine, loadDir, show]);
+    // Opened from a place in the Review: there. Else the first file the task changed.
+    consumedTick.current = target?.tick;
+    const first = initialFile ?? target?.path ?? changed?.find((c) => c.status !== 'D')?.path;
+    if (first) void show(first.startsWith('/') ? first : `${root}/${first}`, initialFile ? initialLine : target?.line);
+  }, [root, initialFile, initialLine, loadDir, show]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A place asked for from outside (the Review): each new tick is one jump.
+  useEffect(() => {
+    if (!target || target.tick === consumedTick.current) return;
+    consumedTick.current = target.tick;
+    void show(target.path.startsWith('/') ? target.path : `${root}/${target.path}`, target.line);
+  }, [target?.tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Language servers' state, while the tab is visible.
   useEffect(() => {
     let alive = true;
-    const tick = () => void backend.lspStatus().then((s) => { if (alive) setStatus(s.filter((x) => x.root === root)); }).catch(() => {});
+    const tick = () => void backend.lspStatus().then((s) => {
+      if (!alive) return;
+      const mine = s.filter((x) => !x.root || x.root === root);
+      setStatus(mine);
+      if (!mine.some((x) => x.state === 'indexing' || x.state === 'starting')) setNoticeText((n) => (/indexing/i.test(n) ? '' : n));
+    }).catch(() => {});
     tick();
     const timer = setInterval(tick, 2000);
     return () => { alive = false; clearInterval(timer); };
@@ -214,7 +237,26 @@ export function CodeBrowser({ backend, root, initialFile, initialLine }: Props) 
 
   return (
     <div className="code">
-      <div className="code-tree" role="tree" aria-label="Files">{renderDir(root, 0)}</div>
+      <div className="code-side">
+        {!!changed?.length && (
+          <div className="code-changed" aria-label="Changed files">
+            <div className="code-side-title">Changed <span>{changed.length}</span></div>
+            {[...changed].sort((a, b) => Number(a.status === 'D') - Number(b.status === 'D')).map((c) => {
+              const path = `${root}/${c.path}`;
+              const cut = c.path.lastIndexOf('/');
+              return (
+                <button key={c.path} type="button" className={`code-row${path === active ? ' is-active' : ''}`} style={{ paddingLeft: 8 }} disabled={c.status === 'D'} title={c.path} onClick={() => void show(path)}>
+                  <span className={`code-status-letter is-${c.status}`} aria-label={c.status === 'A' ? 'added' : c.status === 'D' ? 'deleted' : c.status === 'R' ? 'renamed' : 'modified'}>{c.status}</span>
+                  <span className="code-row-name">{c.path.slice(cut + 1)}</span>
+                  <span className="code-row-dir">{c.path.slice(0, Math.max(0, cut))}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div className="code-side-title">Files</div>
+        <div className="code-tree" role="tree" aria-label="Files">{renderDir(root, 0)}</div>
+      </div>
       <div className="code-main">
         <div className="code-bar">
           <button type="button" className="icon-btn" title="Back (⌃-)" aria-label="Back" disabled={!canGo(history, -1)} onClick={() => travel(-1)}><i className="codicon codicon-arrow-left" aria-hidden="true" /></button>
@@ -224,13 +266,13 @@ export function CodeBrowser({ backend, root, initialFile, initialLine }: Props) 
           </button>
           <span className="code-status">
             {status.map((s) => (
-              <span key={s.server} className={`code-pill is-${s.state}`} title={`${s.server}: ${s.state}${s.message ? ` — ${s.message}` : ''} · ${s.rssMb} MB${s.indexMs ? ` · indexed in ${(s.indexMs / 1000).toFixed(1)} s` : ''}`}>
+              <span key={s.server} className={`code-pill is-${s.state}`} title={`${s.server}: ${s.state}${s.message ? ` — ${s.message}` : ''}${s.rssMb ? ` · ${s.rssMb} MB` : ''}${s.indexMs ? ` · indexed in ${(s.indexMs / 1000).toFixed(1)} s` : ''}`}>
                 {s.server}{s.state === 'indexing' ? ` · ${s.message || 'indexing…'}` : s.state === 'ready' ? '' : ` · ${s.state}`}
               </span>
             ))}
           </span>
         </div>
-        {notice && <div className="code-notice" role="status">{notice}</div>}
+        {notice && <div className={`code-notice${waiting ? ' is-waiting' : ''}`} role="status">{waiting ? `${notice} Navigation will work when it finishes.` : notice}</div>}
         <div className="code-editor" ref={hostRef} />
         {!active && <div className="code-empty">Pick a file, or press ⌘P. ⌘-click a symbol to go to its definition; ⇧F12 finds its references.</div>}
       </div>
@@ -239,7 +281,10 @@ export function CodeBrowser({ backend, root, initialFile, initialLine }: Props) 
           backend={backend} root={root} initial={palette.query}
           languages={[...new Set([
             ...(active && lspLanguage(active) ? [lspLanguage(active)!.startsWith('php') ? 'php' : 'typescript'] : []),
-            ...status.filter((s) => s.state !== 'dead').map((s) => (s.server === 'typescript' ? 'typescript' : 'php')),
+            // Only servers that navigate: a linter is not asked for symbols (and must not start Phpactor).
+            ...status.filter((s) => s.state !== 'dead').flatMap((s) => (
+              s.server === 'typescript' || s.server === 'js/ts' ? ['typescript'] : s.server === 'phpactor' || s.server === 'intelephense' ? ['php'] : []
+            )),
           ])]}
           onClose={() => { setPalette(null); editorRef.current?.focus(); }}
           onPick={(hit) => { setPalette(null); if (hit.type === 'file') void show(`${root}/${hit.path}`); else void show(hit.path, hit.line, hit.column); }}

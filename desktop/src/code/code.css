@@ -1,6 +1,19 @@
 /* SPIKE (docs/spikes/code-browser.md): the code browser, painted from the chrome's --app-* tokens. */
 .code { position: relative; display: grid; grid-template-columns: 260px minmax(0, 1fr); height: 100%; min-height: 0; background: var(--app-bg); color: var(--app-text); }
-.code-tree { overflow: auto; padding: 6px 0; border-right: 1px solid var(--app-border); font-size: 12px; }
+.code-side { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--app-border); font-size: 12px; }
+.code-side-title { flex: none; display: flex; gap: 6px; padding: 8px 12px 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--app-text-dim); }
+.code-side-title span { font-weight: 400; color: var(--app-text-faint); }
+.code-changed { flex: none; max-height: 40%; overflow: auto; padding-bottom: 6px; border-bottom: 1px solid var(--app-border); }
+.code-changed .code-side-title { position: sticky; top: 0; background: var(--app-bg); }
+.code-status-letter { flex: none; width: 14px; text-align: center; font-size: 11px; font-weight: 700; color: var(--app-text-faint); }
+.code-status-letter.is-A { color: var(--app-accent-text); }
+.code-status-letter.is-D { color: var(--app-error); }
+.code-row:disabled { opacity: .5; cursor: default; }
+.code-row-dir { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; color: var(--app-text-faint); font-size: 11px; }
+.code-changed .code-row-name { flex: none; max-width: 70%; }
+.code-tree { flex: 1; min-height: 0; overflow: auto; padding: 0 0 6px; }
+.code-host { position: absolute; inset: 0; z-index: 2; overflow: hidden; outline: none; background: var(--app-bg); color: var(--app-text); }
+.code-host[hidden] { display: none; }
 .code-row { display: flex; align-items: center; gap: 4px; width: 100%; height: 22px; padding-right: 8px; white-space: nowrap; color: var(--app-text-dim); }
 .code-row:hover { background: var(--app-hover); }
 .code-row.is-active { background: var(--app-selected); color: var(--app-text); }
@@ -16,6 +29,7 @@
 .code-pill.is-ready { color: var(--app-accent-text); }
 .code-pill.is-dead { color: var(--app-error); border-color: var(--app-error); }
 .code-notice { flex: none; padding: 4px 12px; font-size: 12px; color: var(--app-error); background: var(--app-error-bg); }
+.code-notice.is-waiting { color: var(--app-text-dim); background: var(--app-surface); }
 .code-editor { flex: 1; min-height: 0; }
 .code-empty { position: absolute; inset: 36px 0 0 0; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; font-size: 12px; color: var(--app-text-faint); background: var(--app-bg); }
 .code-palette-scrim { position: absolute; inset: 0; z-index: 50; }
@@ -27,7 +41,4 @@
 .code-hit-name { flex: none; color: var(--app-text); }
 .code-hit-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--app-text-faint); font-size: 11px; }
 .code-palette-info { padding: 3px 12px; font-size: 11px; color: var(--app-text-faint); border-top: 1px solid var(--app-border); }
-.dev-code { display: flex; flex-direction: column; height: 100%; }
-.dev-code-head { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; flex: none; font-size: 11px; color: var(--app-text-dim); border-bottom: 1px solid var(--app-border); }
-.dev-code-head select { background: var(--app-surface); color: var(--app-text); border: 1px solid var(--app-border-strong); border-radius: 4px; font: inherit; }
-.dev-code-body { flex: 1; min-height: 0; }
+.dev-code { position: relative; height: 100%; }

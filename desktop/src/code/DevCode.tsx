@@ -1,38 +1,32 @@
-import { useEffect, useMemo, useState } from 'react';
-import { httpBackend } from './api';
-import { CodeBrowser } from './CodeBrowser';
+import { useEffect, useMemo } from 'react';
+import type { WorktreeItem } from '@core/webview/types';
+import type { StackdApi } from '../stackd/api';
+import { CodeHost } from './CodeHost';
 
 /**
- * SPIKE (docs/spikes/code-browser.md). Dev-only page: the code browser against
- * `desktop/scripts/code-dev-server.mjs`, without the app or stackd.
- *   /?dev=code[&api=http://127.0.0.1:1431][&root=/abs/worktree][&file=src/a.ts][&line=12]
+ * Dev-only page: the Code tab on its own, without the app or stackd. The same `code*` commands, answered by
+ * `desktop/scripts/code-dev-backend.mjs` (stackd's CodeService over localhost) for one directory.
+ *   /?dev=code[&api=http://127.0.0.1:1431][&file=src/a.ts][&line=12]
  */
 export default function DevCode() {
   const params = useMemo(() => new URLSearchParams(location.search), []);
-  const backend = useMemo(() => httpBackend(params.get('api') ?? 'http://127.0.0.1:1431'), [params]);
-  const [roots, setRoots] = useState<Array<{ root: string; name: string }>>([]);
-  const [root, setRoot] = useState(params.get('root') ?? '');
-  const [error, setError] = useState('');
+  const base = params.get('api') ?? 'http://127.0.0.1:1431';
+  const api = useMemo(() => ({
+    command: async (name: string, body?: Record<string, unknown>) => {
+      const res = await fetch(`${base}/commands/${name}`, { method: 'POST', body: JSON.stringify(body ?? {}) });
+      const answer = (await res.json()) as { ok: boolean; result?: unknown; error?: string };
+      if (!answer.ok) throw new Error(answer.error ?? `HTTP ${res.status}`);
+      return answer.result;
+    },
+  }) as unknown as StackdApi, [base]);
+  const file = params.get('file');
+  const target = useMemo(() => (file ? { path: file, line: Number(params.get('line')) || undefined, tick: 1 } : undefined), [file, params]);
 
-  useEffect(() => {
-    document.documentElement.classList.add('fm-aside'); // the palette the app's chrome uses (App.tsx)
-    backend.roots()
-      .then((r) => { setRoots(r); setRoot((cur) => cur || r[0]?.root || ''); })
-      .catch(() => setError('The dev backend is not running: node desktop/scripts/code-dev-server.mjs --root <worktree>'));
-  }, [backend]);
+  useEffect(() => { document.documentElement.classList.add('fm-aside'); }, []); // the palette the app's chrome uses (App.tsx)
 
   return (
     <div className="dev-code">
-      <div className="dev-code-head">
-        <span>Code (spike)</span>
-        <select value={root} onChange={(e) => setRoot(e.target.value)} aria-label="Worktree">
-          {roots.map((r) => <option key={r.root} value={r.root}>{r.name}</option>)}
-        </select>
-        <span>{error || root}</span>
-      </div>
-      <div className="dev-code-body">
-        {root && <CodeBrowser backend={backend} root={root} initialFile={params.get('file') ?? undefined} initialLine={Number(params.get('line')) || undefined} />}
-      </div>
+      <CodeHost worktree={{ id: 'dev', name: 'dev' } as unknown as WorktreeItem} api={api} target={target} onClose={() => {}} />
     </div>
   );
 }

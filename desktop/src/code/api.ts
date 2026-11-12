@@ -1,14 +1,18 @@
 /**
- * SPIKE (docs/spikes/code-browser.md). What the code browser asks of its backend. In the prototype it is
- * `desktop/scripts/code-dev-server.mjs` over localhost HTTP; in the app it would be stackd commands
- * (`codeTree`, `codeFile`, `codeFiles`, `codeLsp`, `codeLspStatus`) through the existing Tauri bridge.
+ * What the code browser asks of its backend. In the app it is stackd (`code*` commands through the Tauri
+ * bridge, see src/code/CodeService.ts). `?dev=code` reaches the same service through
+ * `desktop/scripts/code-dev-backend.mjs`.
  */
+import type { StackdApi } from '../stackd/api';
+
 export interface TreeEntry { name: string; dir: boolean }
 export interface FileContent { path: string; size: number; text: string; binary?: boolean; tooLarge?: boolean }
-export interface FileMatches { total: number; walkMs: number; files: string[] }
+export interface FileMatches { total: number; walkMs?: number; files: string[] }
+/** A file of the task's diff against its base. */
+export interface ChangedFile { path: string; status: 'A' | 'M' | 'D' | 'R' }
 export interface LspStatus {
-  server: string; root: string; state: 'starting' | 'indexing' | 'ready' | 'dead'; message: string;
-  initMs?: number; indexMs?: number; indexingForMs?: number; rssMb: number;
+  server: string; root?: string; state: 'starting' | 'indexing' | 'ready' | 'dead'; message: string;
+  initMs?: number; indexMs?: number; indexingForMs?: number; rssMb?: number;
 }
 
 /** An LSP diagnostic as the linter publishes it (0-based positions). */
@@ -18,7 +22,6 @@ export interface LintDiagnostic {
 }
 
 export interface CodeBackend {
-  roots(): Promise<Array<{ root: string; name: string }>>;
   tree(dir: string): Promise<TreeEntry[]>;
   file(path: string): Promise<FileContent>;
   files(root: string, query: string): Promise<FileMatches>;
@@ -29,22 +32,20 @@ export interface CodeBackend {
   lint(root: string, path: string): Promise<{ ms: number; diagnostics: LintDiagnostic[] }>;
 }
 
-export function httpBackend(base: string): CodeBackend {
-  const call = async <T,>(route: string, body?: unknown): Promise<T> => {
-    const res = await fetch(base + route, body === undefined ? undefined : { method: 'POST', body: JSON.stringify(body) });
-    const answer = (await res.json()) as { ok: boolean; result?: T; error?: string };
-    if (!answer.ok) throw new Error(answer.error ?? `HTTP ${res.status}`);
-    return answer.result as T;
-  };
-  const q = (params: Record<string, string>) => new URLSearchParams(params).toString();
+/** The app's backend: stackd, for one task. Paths are absolute; stackd refuses what lies outside the task's worktree. */
+export function stackdBackend(api: StackdApi, worktreeId: string): CodeBackend {
+  const call = <T,>(name: string, body: Record<string, unknown> = {}) => api.command<T>(name, { worktreeId, ...body });
   return {
-    roots: () => call('/roots'),
-    tree: (dir) => call(`/tree?${q({ dir })}`),
-    file: (path) => call(`/file?${q({ path })}`),
-    files: (root, query) => call(`/files?${q({ root, q: query })}`),
-    lsp: async <T,>(root: string, languageId: string, method: string, params: unknown) =>
-      (await call<{ result: T; ms: number }>('/lsp', { root, languageId, method, params })).result,
-    lspStatus: () => call('/lsp/status'),
-    lint: (root, path) => call(`/lint?${q({ root, path })}`),
+    tree: (dir) => call('codeTree', { dir }),
+    file: (path) => call('codeRead', { path }),
+    files: (_root, query) => call('codeFiles', { query }),
+    lsp: async <T,>(_root: string, languageId: string, method: string, params: unknown) =>
+      (await call<{ result: T }>('codeLsp', { languageId, method, params })).result,
+    lspStatus: () => call('codeStatus'),
+    lint: async (_root, path) => ({ ms: 0, ...(await call<{ diagnostics: LintDiagnostic[] }>('codeDiagnostics', { path })) }),
   };
 }
+
+/** What `codeOpen` answers: the worktree's real path and the files the task changed. */
+export const openTask = (api: StackdApi, worktreeId: string): Promise<{ root: string; changed: ChangedFile[] }> =>
+  api.command('codeOpen', { worktreeId });

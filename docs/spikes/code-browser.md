@@ -1,7 +1,32 @@
 # Spike: navegador de código (Monaco + LSP) en la app de escritorio
 
-Rama `worktree-agent-a5e3a2420d3778b9a`, sobre `v1` (`0040827`). Es un spike: el prototipo vive aislado
-(`desktop/src/code/`, `desktop/scripts/code-dev-server.mjs`, ruta `?dev=code`) y no toca la app ni stackd.
+Rama `worktree-agent-a5e3a2420d3778b9a`, sobre `v1`. Empezó como spike aislado (`?dev=code`); el último commit
+lo lleva a la app: una pestaña **Code** por tarea, servida por stackd. Las medidas de abajo son las del spike.
+
+## Estado: en la app
+
+- **Entrada**: clic en el título de la tarea, a la izquierda de las pestañas de sesión. Abre la pestaña Code
+  de esa tarea, igual que Review: solo existe mientras está abierta, ✕ o clic central la cierran, Esc vuelve
+  al terminal (salvo que el editor lo esté usando para un peek o ⌘P), una pestaña de sesión vuelve a la sesión.
+- **Contenido**: a la izquierda "Changed" (los ficheros del diff de la tarea contra su base) sobre el árbol de
+  ficheros; Monaco en solo lectura; ⌘P; atrás/adelante. Se abre en el primer fichero cambiado.
+- **Review → Code**: clic en la cabecera de un fichero o en una línea del Review abre ese sitio en Code.
+- **Backend**: comandos de stackd (`codeOpen`, `codeTree`, `codeRead`, `codeFiles`, `codeLsp`,
+  `codeDiagnostics`, `codeStatus`) en `src/code/`, por el `stackd_command` de siempre.
+  - Lecturas: `realpath` dentro del worktree de la tarea; además, solo lectura, `vendor/` del checkout
+    principal y los `node_modules` a los que el worktree enlaza.
+  - PHP: Phpactor por tarea, arrancado en la primera navegación PHP, índice completo en
+    `~/.config/stack/cache/phpactor/<id de tarea>` (se borra con la tarea), apagado a los 10 min sin
+    peticiones. Binario: ajuste `phpactorPath`, si no `phpactor` en el PATH, si no
+    `~/.config/stack/tools/phpactor.phar`. Mientras se construye el primer índice, la pestaña enseña el
+    avance y la navegación dice "Indexing PHP…".
+  - JS/TS: el índice ligero (`src/code/lightIndex.ts`) + `git grep`, por proyecto (el `tsconfig.json` más
+    cercano), construido al primer uso y guardado en memoria.
+  - Diagnósticos: `oxlint --lsp` (del PATH o de `~/.config/stack/tools/node_modules/.bin/`) con una
+    configuración propia de reglas nativas en `~/.config/stack/cache/oxlint.json`; `php -l` en ficheros PHP.
+- **Sin hacer**: recargar ficheros que el agente cambia mientras se navega; buscar en el proyecto; marcas del
+  diff en el margen; modo preciso con TypeScript 7; ajuste `phpactorPath` en la pantalla de Settings (se
+  pone a mano en `settings.json`); verificación dentro de la app (hecha en navegador con `?dev=code`).
 
 ## Objetivo
 
@@ -32,7 +57,9 @@ en `frontend/apps/v2/src`):
 - **Diagnósticos**: `oxlint --lsp` (46 MB) pinta subrayados en Monaco a través del mismo puente.
 - SCIP (`scip-typescript`) no termina de indexar este proyecto: descartado.
 
-## Qué enseña el prototipo
+## Qué enseñaba el prototipo
+
+El prototipo del spike, con un servidor de desarrollo propio (`code-dev-server.mjs`, ya sustituido por stackd).
 
 `http://localhost:1430/?dev=code` (ver "Cómo ejecutarlo"):
 
@@ -55,8 +82,8 @@ Probado en Chrome contra el worktree `big-app/team/feat-1234-stock-sync`. Sin pr
 
 - **Dentro de la app Tauri (WKWebView)**: no se podía reiniciar la app en uso. Primera verificación pendiente.
 - La UI del outline (⌘⇧O) y los atajos ⌘T / ⌃-: cableados; solo probé el proveedor y los botones.
-- El modo TS "acotado / sin `node_modules`" y el índice ligero (`code-light-index.mjs`) están medidos con
-  scripts aparte, **no** cableados en la UI del prototipo. El solapado del diff sobre un checkout base, tampoco.
+- El modo TS "acotado / sin `node_modules`" y el solapado del diff sobre un checkout base están medidos con
+  scripts aparte, **no** construidos.
 
 ## Medidas
 
@@ -283,7 +310,7 @@ TS, así que no hay "ficheros TS del diff": los casos son de un módulo cualquie
   TypeScript entero, o sea el mismo coste que el servidor.
 - Descartado. La precisión no llegó a medirse (el fichero de prueba no estaba entre los 767).
 
-### Índice ligero + `git grep` (`desktop/scripts/code-light-index.mjs`)
+### Índice ligero + `git grep` (`src/code/lightIndex.ts`)
 
 Solo el parser de TypeScript, sin programa ni `node_modules`: por fichero, qué declara (funciones, clases y
 sus miembros, tipos, enums, constantes y las claves de los objetos literales) y qué exporta o re-exporta.
@@ -414,7 +441,7 @@ ir en el snapshot que ya se emite por SSE.
 | 4 | Gestor LSP en stackd (`src/lsp/`) | Arranque bajo demanda por (worktree, lenguaje), apagado por inactividad, tope de servidores, estado en el snapshot, reinicio si muere. Es el `LspServer` del prototipo con tests | M |
 | 5 | PHP con Phpactor | Detectar PHP 8.2+, instalar Phpactor bajo demanda en `~/.config/stack/lsp/`, perfil de arriba, índice por worktree fuera del repo, borrarlo con la tarea | S–M |
 | 6 | Buscar en el proyecto | `git grep` desde stackd y lista de resultados | S–M |
-| 7 | TS/JS con el índice ligero | `code-light-index.mjs` dentro de stackd: construir al abrir Code, reparsear lo cambiado, definición y usos | M |
+| 7 | TS/JS con el índice ligero | `lightIndex.ts` dentro de stackd: construir al abrir Code, reparsear lo cambiado, definición y usos | M |
 | 7b | Diagnósticos | `oxlint --lsp` por worktree con config nativa de Stack (o la del repo, a elegir) y `php -l` sobre los ficheros del diff | S |
 | 7c | TS 7 "modo preciso" | Bajo demanda: proyecto espejo (symlinks + tsconfig) acotado a los ficheros que se miran; botón "proyecto completo" | M |
 | 8 | Cambios en disco | El agente edita mientras se navega: `fs.watch` en stackd → recargar los modelos abiertos y avisar al servidor (`workspace/didChangeWatchedFiles`, que es el watcher `lsp` de Phpactor) | M |
@@ -470,55 +497,38 @@ raíces, terminal en el editor, UI de git, temas, ajustes, indexado de `vendor/`
 - **Colores de sintaxis**: Monarch es más pobre que TextMate; PHP y TSX se leen bien, no igual que en VS Code.
 - `other-repo` es Go: fuera de este alcance.
 
-## Cómo ejecutar el prototipo
+## Cómo ejecutarlo fuera de la app
 
-Nada de esto toca la app ni stackd en marcha (puertos 1430 y 1431), ni escribe en los repos.
+`?dev=code` es la misma pestaña Code sin la app ni stackd: `desktop/scripts/code-dev-backend.mjs` sirve el
+`CodeService` de stackd para un directorio por localhost. No escribe nada en ese directorio.
 
 ```sh
-# 1. Servidores de lenguaje, en un directorio cualquiera fuera del repo
-mkdir -p ~/stack-code-spike/phpactor && cd ~/stack-code-spike/phpactor
-echo '{"minimum-stability":"dev","prefer-stable":true,"require":{"phpactor/phpactor":"2026.10.07.0"}}' > composer.json
-composer update --no-dev                              # Phpactor (PHP 8.2+)
-npm install --prefix ~/stack-code-spike/ts7 typescript@7   # LSP nativo de TS 7
+# Herramientas (una vez): las mismas que usa stackd
+mkdir -p ~/.config/stack/tools && cd ~/.config/stack/tools
+curl -L -o phpactor.phar https://github.com/phpactor/phpactor/releases/download/2026.10.07.0/phpactor.phar
+npm install --prefix . oxlint
 
-# 2. Backend: una o varias raíces (worktrees)
-cd <este worktree de stack>
-node desktop/scripts/code-dev-server.mjs --port 1431 \
-  --root /ruta/al/worktree \
-  --phpactor ~/stack-code-spike/phpactor/vendor/bin/phpactor \
-  --ts-native ~/stack-code-spike/ts7/node_modules/.bin/tsc \
-  --include /ruta/al/checkout-principal/node_modules \
-  --cache ~/stack-code-spike/cache
-#   --composer-autoload /ruta/al/checkout-principal/vendor/autoload.php   worktree sin vendor/
-#   --exclude '/otra/carpeta/**/*'                                         exclusiones extra del índice PHP
-#   --oxlint <dir>/node_modules/.bin/oxlint [--oxlint-config <json>]      subrayados de oxlint (npm install oxlint)
-#   --php-server intelephense --servers <dir con node_modules/.bin>        solo para comparar
+# Backend para un worktree (y, opcional, la referencia contra la que calcular "Changed")
+cd <este repo>
+node desktop/scripts/code-dev-backend.mjs --root /ruta/al/worktree --repo /ruta/al/checkout-principal --base <ref>
 
-# 3. Front (otro puerto que el de la app)
-cd desktop && npm install && npx vite --port 1430 --strictPort
-
-# 4. Abrir
-open 'http://localhost:1430/?dev=code'
-#   &root=/ruta/al/worktree  &file=ruta/relativa.php  &line=42
+# Front, en otro puerto que el de la app
+cd desktop && npx vite --port 1430 --strictPort
+open 'http://localhost:1430/?dev=code'      #  &file=ruta/relativa.php&line=42
 ```
-
-La primera petición PHP arranca Phpactor y, si el worktree no tiene índice, lo construye (~3 min; la píldora
-enseña el avance). La primera TS arranca el servidor de TypeScript (proyecto entero, con `node_modules` si
-son alcanzables: el modo acotado no está en el prototipo). Parar: Ctrl-C en los dos procesos.
 
 Repetir las medidas: `node desktop/scripts/code-lsp-bench.mjs <escenario.json>` arranca un servidor por
 stdio, espera al indexado y cronometra peticiones (frío y repetida), con memoria (`footprint`) al final. El
 formato del escenario está en la cabecera del script.
 
-Ficheros del spike:
+Ficheros:
 
-- `desktop/scripts/code-dev-server.mjs` — backend: ficheros con guardia de rutas, ⌘P, gestor LSP por stdio.
-- `desktop/scripts/code-lsp-bench.mjs` — banco de pruebas de servidores de lenguaje (incluye superponer los
-  ficheros de otro árbol y volcar respuestas para compararlas).
-- `desktop/scripts/code-light-index.mjs` — índice ligero de JS/TS: `build`, `def`, `refs`.
-- `desktop/src/code/api.ts` — interfaz `CodeBackend` (la que implementaría stackd) y su versión HTTP.
-- `desktop/src/code/monaco.ts` — Monaco recortado, worker, tema desde los tokens, modelos bajo demanda.
-- `desktop/src/code/lsp.ts` — cliente LSP fino (proveedores de Monaco).
-- `desktop/src/code/protocol.ts` (+ test) — conversiones LSP ↔ Monaco, lenguajes, historial.
-- `desktop/src/code/CodeBrowser.tsx`, `code.css`, `DevCode.tsx` — la UI y la página `?dev=code`.
-- `desktop/src/main.tsx` — la ruta `?dev=code`, con carga perezosa.
+- `src/code/CodeService.ts` — lo que stackd hace por la pestaña Code: ficheros, navegación, diagnósticos,
+  ciclo de vida de los servidores.
+- `src/code/pathGuard.ts`, `files.ts` — qué se puede leer; listados, lectura, ⌘P, ficheros del diff.
+- `src/code/LspProcess.ts` — un servidor de lenguaje por stdio como cliente petición/respuesta.
+- `src/code/lightIndex.ts` — índice ligero de JS/TS.
+- `test/code/` — guardia de rutas, lista blanca de métodos, apagado por inactividad, índice ligero.
+- `desktop/src/code/CodeHost.tsx` — la pestaña en la app (y en `?dev=code`); `CodeBrowser.tsx`, `monaco.ts`,
+  `lsp.ts`, `protocol.ts`, `api.ts`, `code.css` — el navegador.
+- `desktop/scripts/code-dev-backend.mjs`, `code-lsp-bench.mjs` — desarrollo y medidas.

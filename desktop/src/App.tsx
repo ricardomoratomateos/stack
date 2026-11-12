@@ -10,6 +10,7 @@ import { installHint, toSidebarState, translate, type Action } from './sidebar/b
 import { loadDefaultProvider, saveDefaultProvider } from './sidebar/prefs';
 import { NewTaskHost } from './newtask/NewTaskHost';
 import { ReviewHost } from './review/ReviewHost';
+import { CodeHost, type CodeTarget } from './code/CodeHost';
 import { toNewTaskInit, translateNewTask } from './newtask/bridge';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -66,6 +67,11 @@ export function App() {
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   /** The worktree whose Review tab is showing in the centre (instead of its terminal). */
   const [reviewId, setReviewId] = useState<string | undefined>();
+  /** The worktree whose Code tab is open (its files, to read), and the place it was last asked to show. */
+  const [codeId, setCodeId] = useState<string | undefined>();
+  const [codeTarget, setCodeTarget] = useState<CodeTarget | undefined>();
+  /** With both tabs open, the one in front. */
+  const [frontPanel, setFrontPanel] = useState<'review' | 'code'>('review');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const postToNewTask = useRef<((msg: NewTaskExtMessage) => void) | null>(null);
   const registerPost = useCallback((post: ((msg: NewTaskExtMessage) => void) | null) => { postToNewTask.current = post; }, []);
@@ -160,32 +166,45 @@ export function App() {
     if (repo) history.current[repo] = mruTouch(history.current[repo] ?? [], id);
   }, []);
   const closeReview = useCallback(() => setReviewId(undefined), []);
+  const closeCode = useCallback(() => setCodeId(undefined), []);
+  /** The task's Code tab, in front; `path` (relative to the worktree) and `line` when a place was clicked in the Review. */
+  const openCode = useCallback((id: string, path?: string, line?: number) => {
+    setCodeTarget((t) => (path ? { path, line, tick: (t?.tick ?? 0) + 1 } : undefined));
+    setCodeId(id);
+    setFrontPanel('code');
+  }, []);
+  // A panel (Review or Code) is what takes the whole screen.
+  const panelId = reviewId ?? codeId;
   // The review takes the whole screen while it is open (Full, centre maximized), then puts the layout back.
   const beforeReview = useRef<{ mode: Mode; maximized: Maximized } | null>(null);
   const layoutNow = useRef({ mode, maximized });
   layoutNow.current = { mode, maximized };
   useEffect(() => {
-    if (reviewId && !beforeReview.current) {
+    if (panelId && !beforeReview.current) {
       beforeReview.current = { ...layoutNow.current };
       if (layoutNow.current.mode !== 'full') setLayout((l) => setMode(l, 'full'));
       setMaximized('session');
-    } else if (!reviewId && beforeReview.current) {
+    } else if (!panelId && beforeReview.current) {
       const b = beforeReview.current;
       beforeReview.current = null;
       if (b.mode !== 'full') setLayout((l) => setMode(l, b.mode));
       setMaximized(b.maximized);
     }
-  }, [reviewId]);
+  }, [panelId]);
   // Un-maximizing (double-click, ⌘⇧Enter) while reviewing means leaving the review: it only works full-screen.
-  useEffect(() => { if (reviewId && beforeReview.current && maximized !== 'session') setReviewId(undefined); }, [maximized]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (panelId && beforeReview.current && maximized !== 'session') { setReviewId(undefined); setCodeId(undefined); } }, [maximized]); // eslint-disable-line react-hooks/exhaustive-deps
   // Leaving the reviewed worktree (⌃Tab, ⌘N…) closes its review.
-  useEffect(() => { if (reviewId && selected && selected.wt.id !== reviewId) setReviewId(undefined); }, [selected?.wt.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (reviewId && selected && selected.wt.id !== reviewId) setReviewId(undefined);
+    if (codeId && selected && selected.wt.id !== codeId) setCodeId(undefined);
+  }, [selected?.wt.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const select = useCallback((id: string, index?: number) => {
     touch(id);
     setSelectedId(id);
     if (index !== undefined) {
       setRemembered((r) => ({ ...r, [id]: index }));
       setReviewId((r) => (r === id ? undefined : r)); // a session tab returns to the terminal
+      setCodeId((c) => (c === id ? undefined : c));
     }
   }, [touch]);
   useEffect(() => { if (view && selected) { latest.current.repoRoot = view.repoRoot; touch(selected.wt.id); } }, [view?.repoRoot, selected?.wt.id, touch]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -371,6 +390,7 @@ export function App() {
   const reviewSent = useCallback((index: number | undefined, fellBack: boolean) => {
     const id = latest.current.selectedId; // the reviewed task: leaving it closes the review
     setReviewId(undefined);
+    setCodeId(undefined);
     if (id) select(id, index);
     setCentreFocusTick((t) => t + 1);
     if (fellBack) setNotice('The agent had exited, so a new one was launched with your comments.');
@@ -458,6 +478,7 @@ export function App() {
         case 'review':
           select(a.worktreeId);
           setReviewId(a.worktreeId);
+          setFrontPanel('review');
           break;
         case 'open':
           invoke('open_url', { url: a.url }).catch((e) => setNotice(String(e)));
@@ -541,6 +562,8 @@ export function App() {
   }
 
   const reviewing = !!selected && reviewId === selected.wt.id;
+  const coding = !!selected && codeId === selected.wt.id;
+  const front: 'review' | 'code' | undefined = reviewing && coding ? frontPanel : reviewing ? 'review' : coding ? 'code' : undefined;
   const rows = selected ? sessionRows(selected.wt, commands(selected.wt.id)) : [];
   const managerRows = view.control ? sessionRows(view.control.wt, commands(view.control.wt.id)) : [];
   const resizeTo = (key: 'sidebar' | 'manager' | 'lines', v: number) => setLayout((l) => resize(l, l.mode, key, v));
@@ -612,9 +635,9 @@ export function App() {
               {selected ? (
                 <>
                   <nav className="tabs" aria-label={`Sessions of ${nameOf(selected.wt)}`} onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'session'))}>
-                    <span className="tabs-title" title={selected.name}>{selected.name}</span>
+                    <span className="tabs-title tabs-title-button" role="button" tabIndex={0} title={`${selected.name} · Browse the code`} onClick={() => openCode(selected.wt.id)} onDoubleClick={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openCode(selected.wt.id); } }}>{selected.name}</span>
                     {rows.map((r) => (
-                      <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={(!reviewing && r.index === selectedIndex) || undefined} {...onMiddleClick(() => closeSessionTab(selected.wt.id, r.index))} onClick={() => select(selected.wt.id, r.index)} title={[r.kind === 'agent' ? stateWord(r.state, r.turned) : r.detail, r.index === selectedIndex ? 'Double-click to maximize' : ''].filter(Boolean).join(' · ') || undefined}>
+                      <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={(!front && r.index === selectedIndex) || undefined} {...onMiddleClick(() => closeSessionTab(selected.wt.id, r.index))} onClick={() => select(selected.wt.id, r.index)} title={[r.kind === 'agent' ? stateWord(r.state, r.turned) : r.detail, r.index === selectedIndex ? 'Double-click to maximize' : ''].filter(Boolean).join(' · ') || undefined}>
                         <StatusDot state={r.state} size="sm" />
                         {r.name}
                         {maximized === 'session' && r.index === selectedIndex && <span className="max-badge" title={maxTitle}>maximized</span>}
@@ -622,10 +645,18 @@ export function App() {
                     ))}
                     {/* Only while a review is open: it is opened from the card's review button, and closing it removes the tab. */}
                     {reviewing && (
-                      <button type="button" className="tab tab-review" data-selected {...onMiddleClick(closeReview)} title="Review the changes and comment">
+                      <button type="button" className="tab tab-review" data-selected={front === 'review' || undefined} {...onMiddleClick(closeReview)} onClick={() => setFrontPanel('review')} title="Review the changes and comment">
                         <i className="codicon codicon-git-compare" aria-hidden="true" />
                         Review
                         <span className="tab-close" role="button" aria-label="Close review" title="Close review (Esc)" onClick={(e) => { e.stopPropagation(); closeReview(); }}><i className="codicon codicon-close" aria-hidden="true" /></span>
+                      </button>
+                    )}
+                    {/* Only while open too: the task's title opens it, and so does a file or a line clicked in the Review. */}
+                    {coding && (
+                      <button type="button" className="tab tab-review" data-selected={front === 'code' || undefined} {...onMiddleClick(closeCode)} onClick={() => setFrontPanel('code')} title="Browse the task's code">
+                        <i className="codicon codicon-code" aria-hidden="true" />
+                        Code
+                        <span className="tab-close" role="button" aria-label="Close code" title="Close code (Esc)" onClick={(e) => { e.stopPropagation(); closeCode(); }}><i className="codicon codicon-close" aria-hidden="true" /></span>
                       </button>
                     )}
                   </nav>
@@ -638,7 +669,8 @@ export function App() {
                         : 'Connecting…'}
                     />
                   </div>
-                  {reviewing && <ReviewHost key={selected.wt.id} worktree={selected.wt} api={api} onClose={closeReview} onSent={reviewSent} onNotice={setNotice} />}
+                  {reviewing && <ReviewHost key={selected.wt.id} worktree={selected.wt} api={api} hidden={front !== 'review'} onClose={closeReview} onSent={reviewSent} onNotice={setNotice} onOpenFile={(path, line) => openCode(selected.wt.id, path, line)} />}
+                  {coding && <CodeHost key={`code-${selected.wt.id}`} worktree={selected.wt} api={api} target={codeTarget} hidden={front !== 'code'} onClose={closeCode} />}
                   </div>
                 </>
               ) : (

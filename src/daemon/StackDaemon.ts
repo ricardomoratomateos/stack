@@ -40,6 +40,7 @@ import { NodeConfig } from './NodeConfig';
 import { HeadlessHost, headlessTerminals, LogNotify, NO_BREAKPOINTS, NO_TABS, stateLike } from './headless';
 import { readVsCodeGlobalState } from './vscodeState';
 import { runChecks } from './doctor';
+import { CodeError, CodeService, PathRefused, type CodeTask } from '../code/CodeService';
 
 /** Replaced by esbuild with package.json's version (see esbuild.js). */
 export const STACKD_VERSION = process.env.STACKD_VERSION ?? 'dev';
@@ -163,6 +164,8 @@ export class StackDaemon {
   /** Settings clients pushed with `setSettings`; see NodeConfig. */
   private pushed: Record<string, unknown> = {};
   private readonly subscriptions: Array<{ dispose(): void }> = [];
+  /** The Code tab's backend: files, navigation and diagnostics of a task's worktree. */
+  private readonly code: CodeService;
 
   /** How many clients follow `/events`; the API server keeps it current. */
   clients: () => number = () => 0;
@@ -175,6 +178,12 @@ export class StackDaemon {
     const dir = opts.configDir;
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     this.settingsPath = path.join(dir, 'settings.json');
+    this.code = new CodeService({
+      cacheDir: path.join(dir, 'cache'),
+      toolsDir: path.join(dir, 'tools'),
+      setting: (key) => this.userSetting(key),
+      log: this.log,
+    });
     this.store = new JsonFileStore(path.join(dir, 'state.json'));
     this.worktreeStore = new WorktreeStore({ globalState: this.store });
     this.tmux = new TmuxManager(opts.tmuxSocket);
@@ -257,6 +266,7 @@ export class StackDaemon {
   async stop(): Promise<void> {
     if (this.timer) clearTimeout(this.timer);
     for (const s of this.subscriptions) s.dispose();
+    this.code.dispose();
     this.attention.dispose();
     this.agents.dispose();
     this.git.dispose();
@@ -362,6 +372,30 @@ export class StackDaemon {
       if (ctx.service.windowWorktrees().some((w) => w.id === worktreeId)) return ctx;
     }
     return undefined;
+  }
+
+  /** A string the user set in settings.json (with or without the `stack.` prefix) or a client pushed. */
+  private userSetting(key: string): string | undefined {
+    let raw: Record<string, unknown> = {};
+    try { raw = JSON.parse(fs.readFileSync(this.settingsPath, 'utf8')) as Record<string, unknown>; } catch { /* no settings file */ }
+    const value = raw?.[key] ?? raw?.[`stack.${key}`] ?? this.pushed[key];
+    return typeof value === 'string' && value ? value : undefined;
+  }
+
+  /** The task a `code*` command is about. */
+  private codeTask(b: Body): { task: CodeTask; wt: Worktree; ctx: RepoContext } {
+    const { wt, ctx } = this.findWorktree(need(b, 'worktreeId'));
+    if (!fs.existsSync(wt.path)) throw new CommandError('The task\'s worktree is not on disk.');
+    return { task: { id: wt.id, root: wt.path, repoRoot: ctx.root }, wt, ctx };
+  }
+
+  /** Runs a Code command; what the browser should show as a message becomes a 4xx with that message. */
+  private async codeCommand<T>(run: () => T | Promise<T>): Promise<T> {
+    try { return await run(); } catch (e) {
+      if (e instanceof PathRefused) throw new CommandError(e.message, 403);
+      if (e instanceof CodeError) throw new CommandError(e.message, 409);
+      throw e;
+    }
   }
 
   private findWorktree(id: string): { wt: Worktree; ctx: RepoContext } {
@@ -487,6 +521,7 @@ export class StackDaemon {
         const { wt, ctx } = this.findWorktree(need(b, 'worktreeId'));
         const result = await ctx.service.deleteWorktreeById(wt.id, { deleteBranch: b['deleteBranch'] === true });
         if (!result.ok) throw new CommandError(result.error ?? 'Could not delete the task.');
+        this.code.forget(wt.id); // its language servers and its index
         this.claimRoutes();
         return {};
       }
@@ -634,6 +669,42 @@ export class StackDaemon {
         const { wt, ctx } = this.findWorktree(need(b, 'worktreeId'));
         const base = b['base'] === 'working' ? 'working' : 'branch';
         return { unified: await ctx.service.getDiff(wt.id, base) };
+      }
+      // ── The Code tab: a task's worktree, read-only ──
+      case 'codeOpen': {
+        const { task, wt, ctx } = this.codeTask(b);
+        this.code.refreshFiles(task);
+        let unified = '';
+        try { unified = await ctx.service.getDiff(wt.id, 'branch'); } catch { /* no base to compare with: nothing "changed" */ }
+        return this.codeCommand(() => this.code.open(task, unified));
+      }
+      case 'codeTree': {
+        const { task } = this.codeTask(b);
+        return this.codeCommand(() => this.code.tree(task, b['dir']));
+      }
+      case 'codeRead': {
+        const { task } = this.codeTask(b);
+        return this.codeCommand(() => this.code.read(task, b['path']));
+      }
+      case 'codeFiles': {
+        const { task } = this.codeTask(b);
+        return this.codeCommand(() => this.code.files(task, str(b, 'query') ?? ''));
+      }
+      case 'codeLsp': {
+        const { task } = this.codeTask(b);
+        return this.codeCommand(async () => ({ result: await this.code.lsp(task, need(b, 'languageId'), need(b, 'method'), b['params']) }));
+      }
+      case 'codeDiagnostics': {
+        const { task } = this.codeTask(b);
+        return this.codeCommand(async () => ({ diagnostics: await this.code.diagnostics(task, b['path']) }));
+      }
+      case 'codeStatus': {
+        const { task } = this.codeTask(b);
+        return this.code.status(task);
+      }
+      case 'codeClose': {
+        this.code.close(need(b, 'worktreeId'));
+        return {};
       }
       case 'sendComments': {
         const { wt, ctx } = this.findWorktree(need(b, 'worktreeId'));

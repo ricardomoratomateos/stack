@@ -61,6 +61,11 @@ kbd { font-size: 11px; color: var(--app-text-dim); border: 1px solid var(--app-b
 .tabs { display: flex; align-items: stretch; height: 36px; box-sizing: border-box; flex: none; background: color-mix(in srgb, var(--app-bg) 55%, #000); border-bottom: 1px solid var(--app-border); overflow-x: auto; overflow-y: hidden; }
 .tabs::-webkit-scrollbar { height: 3px; }
 .tabs-title { flex: none; display: block; line-height: 35px; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; padding: 0 12px 0 16px; font-weight: 500; color: var(--app-text); border-right: 1px solid var(--app-border); white-space: nowrap; -webkit-user-select: none; user-select: none; cursor: default; }
+/* The task's title opens its Code tab: same look, plus what says "you can click this". */
+.tabs-title-button { cursor: pointer; }
+.tabs-title-button:hover { background: var(--app-hover); }
+.tabs-title-button:focus-visible { outline: 1px solid var(--app-focus); outline-offset: -1px; }
+.review-host[hidden] { display: none; }
 .tab { display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--app-text-faint); background: transparent; border: 1px solid transparent; border-bottom: 0; margin-bottom: -1px; white-space: nowrap; }
 .tab:hover { color: var(--app-text-dim); }
 /* The selected tab is cut out of the strip: panel background, side borders, no bottom edge, so it joins the terminal below. */

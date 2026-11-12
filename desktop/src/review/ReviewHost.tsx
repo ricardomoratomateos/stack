@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from
 // Must come first: the webview modules call acquireVsCodeApi() when they are evaluated.
 import { loadWith, postToWebview, reviewShim } from '../sidebar/shim';
 import '../sidebar/webviewStyles';
-import { invoke } from '@tauri-apps/api/core';
 import { buildCommentPrompt } from '@core/diff/commentPrompt';
 import type { DiffPanelExtMessage, DiffPanelMessage } from '@core/diff/types';
 import type { WorktreeItem } from '@core/webview/types';
@@ -29,10 +28,10 @@ const reason = (e: unknown): string => {
 /**
  * The extension's PR-style review of one worktree (`DiffApp`), filling the centre. What `DiffPanelManager` +
  * `RemoteService` do for it in VS Code happens here: the diff and the comments go through stackd, the
- * clipboard destination is built and written locally, and `openFile` opens VS Code at the line.
+ * clipboard destination is built and written locally, and `openFile` shows the place in the task's Code tab.
  * The panel and its stylesheet are loaded on first use.
  */
-export function ReviewHost({ worktree, api, onClose, onSent, onNotice }: {
+export function ReviewHost({ worktree, api, hidden, onClose, onSent, onNotice, onOpenFile }: {
   worktree: WorktreeItem;
   api: StackdApi;
   /** Esc in the review: back to the terminal. */
@@ -40,10 +39,16 @@ export function ReviewHost({ worktree, api, onClose, onSent, onNotice }: {
   /** The comments went to an agent: the session they went to (when known), to go and watch it. */
   onSent: (index: number | undefined, fellBack: boolean) => void;
   onNotice: (text: string) => void;
+  /** A file header or a line was clicked: show it in the task's Code tab (path relative to the worktree). */
+  onOpenFile: (path: string, line?: number) => void;
+  /** The Code tab of this task is in front: stay mounted, out of sight, and leave Esc to it. */
+  hidden?: boolean;
 }) {
   const [Panel, setPanel] = useState<ComponentType | null>(null);
   const wtRef = useRef(worktree);
   wtRef.current = worktree;
+  const openFileRef = useRef(onOpenFile);
+  openFileRef.current = onOpenFile;
   const hostRef = useRef<HTMLDivElement>(null);
   const id = worktree.id;
 
@@ -114,8 +119,7 @@ export function ReviewHost({ worktree, api, onClose, onSent, onNotice }: {
           })();
           break;
         case 'openFile':
-          invoke('open_in_editor', { path: `${wtRef.current.path.replace(/\/+$/, '')}/${msg.path}`, line: msg.line ?? null })
-            .catch((e) => onNotice(String(e)));
+          openFileRef.current(msg.path, msg.line);
           break;
       }
     };
@@ -124,6 +128,7 @@ export function ReviewHost({ worktree, api, onClose, onSent, onNotice }: {
 
   // Esc goes back to the terminal unless the panel is using it for a dialog, popover or comment box.
   useEffect(() => {
+    if (hidden) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return;
       const t = e.target as HTMLElement | null;
@@ -133,10 +138,10 @@ export function ReviewHost({ worktree, api, onClose, onSent, onNotice }: {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, hidden]);
 
   return (
-    <div className="review-host" ref={hostRef} tabIndex={-1} aria-label={`Review of ${nameOf(worktree)}`}>
+    <div className="review-host" ref={hostRef} hidden={hidden} tabIndex={-1} aria-label={`Review of ${nameOf(worktree)}`}>
       {Panel ? <Panel /> : <div className="placeholder">Loading the review…</div>}
     </div>
   );
