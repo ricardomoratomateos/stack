@@ -612,7 +612,7 @@ export function App() {
               {selected ? (
                 <>
                   <nav className="tabs" aria-label={`Sessions of ${nameOf(selected.wt)}`} onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'session'))}>
-                    <span className="tabs-title">{selected.name}</span>
+                    <span className="tabs-title" title={selected.name}>{selected.name}</span>
                     {rows.map((r) => (
                       <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={(!reviewing && r.index === selectedIndex) || undefined} {...onMiddleClick(() => closeSessionTab(selected.wt.id, r.index))} onClick={() => select(selected.wt.id, r.index)} title={[r.name, r.kind === 'agent' ? stateWord(r.state, r.turned) : r.detail, r.index === selectedIndex ? 'Double-click to maximize' : ''].filter(Boolean).join(' · ')}>
                         <StatusDot state={r.state} size="sm" />

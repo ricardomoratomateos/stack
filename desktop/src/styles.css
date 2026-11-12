@@ -60,7 +60,7 @@ kbd { font-size: 11px; color: var(--app-text-dim); border: 1px solid var(--app-b
 .centre { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--app-bg); }
 .tabs { display: flex; align-items: stretch; height: 36px; box-sizing: border-box; flex: none; background: color-mix(in srgb, var(--app-bg) 55%, #000); border-bottom: 1px solid var(--app-border); overflow-x: auto; overflow-y: hidden; }
 .tabs::-webkit-scrollbar { height: 3px; }
-.tabs-title { display: flex; align-items: center; padding: 0 12px 0 16px; font-weight: 500; color: var(--app-text); border-right: 1px solid var(--app-border); white-space: nowrap; }
+.tabs-title { flex: none; display: block; line-height: 35px; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; padding: 0 12px 0 16px; font-weight: 500; color: var(--app-text); border-right: 1px solid var(--app-border); white-space: nowrap; -webkit-user-select: none; user-select: none; cursor: default; }
 .tab { display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--app-text-faint); background: transparent; border: 1px solid transparent; border-bottom: 0; margin-bottom: -1px; white-space: nowrap; }
 .tab:hover { color: var(--app-text-dim); }
 /* A tab is a control, not text: no selecting it, and a long name stops at 24 characters (the tooltip has it whole). */
