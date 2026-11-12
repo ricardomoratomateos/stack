@@ -64,7 +64,7 @@ kbd { font-size: 11px; color: var(--app-text-dim); border: 1px solid var(--app-b
 .tab { display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--app-text-faint); background: transparent; border: 1px solid transparent; border-bottom: 0; margin-bottom: -1px; white-space: nowrap; }
 .tab:hover { color: var(--app-text-dim); }
 /* A tab is a control, not text: no selecting it, and a long name stops at 24 characters (the tooltip has it whole). */
-.tab, .tab * { -webkit-user-select: none; user-select: none; cursor: default; }
+.tab { -webkit-user-select: none; user-select: none; }
 .tab-name { max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The selected tab is cut out of the strip: panel background, side borders, no bottom edge, so it joins the terminal below. */
 .tab[data-selected] { color: var(--app-text); background: var(--app-bg); border-color: var(--app-border); box-shadow: inset 0 1px 0 var(--app-accent); }
