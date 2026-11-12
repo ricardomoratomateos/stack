@@ -9,11 +9,15 @@
  *     (LSP navigation is request/response: no WebSocket needed, it fits stackd's `POST /commands/<name>`).
  *
  *   node desktop/scripts/code-dev-server.mjs --root <dir> [--root <dir>…] [--port 1431]
- *        [--servers <dir with node_modules/.bin/{intelephense,typescript-language-server}>]
- *        [--exclude <glob>…]   extra Intelephense excludes (a glob such as zer/ or .worktrees/, written `**` + `/zer/` + `**`)
- *        [--include <dir>…]    extra PHP sources outside the root (the main checkout's vendor/, for a worktree without one)
+ *        [--phpactor <path to bin/phpactor>]   the PHP server (default: `phpactor` on PATH). Needs PHP 8.1+.
+ *        [--composer-autoload <vendor/autoload.php>]  the main checkout's, when the worktree has no vendor/
+ *        [--php-server intelephense]           use Intelephense for PHP instead (proprietary; kept to compare)
+ *        [--servers <dir with node_modules/.bin/{typescript-language-server,intelephense}>]
+ *        [--exclude <glob>…]   extra PHP index excludes (Phpactor: root-relative, like `/zer/` + `**` + `/*`)
+ *        [--include <dir>…]    read-only directories outside the roots that "go to definition" may open
+ *                              (the main checkout's vendor/ and node_modules/)
  *        [--ts-native <tsc>]   TypeScript 7's own LSP (`<tsc> --lsp --stdio`) for JS/TS, to compare
- *        [--cache <dir>]       where Intelephense keeps its index (default: os tmp)
+ *        [--cache <dir>]       where the PHP server keeps its index (default: os tmp). Never inside a root.
  *
  * Nothing is ever written under a root.
  */
@@ -39,8 +43,23 @@ const EXCLUDES = args('exclude');
 const INCLUDES = args('include').map((r) => path.resolve(r));
 /** Experimental: TypeScript 7's native server (`tsc --lsp --stdio`) instead of typescript-language-server + tsserver. */
 const TS_NATIVE = args('ts-native')[0];
+const PHPACTOR = args('phpactor')[0] ?? 'phpactor';
+const PHP_SERVER = args('php-server')[0] ?? 'phpactor';
+/** `vendor/autoload.php` of the main checkout, for worktrees that have no vendor/ of their own. */
+const COMPOSER_AUTOLOAD = args('composer-autoload')[0] ? path.resolve(args('composer-autoload')[0]) : undefined;
+const PHPACTOR_WORKERS = Number(args('phpactor-workers')[0] ?? 0);
 const CACHE = path.resolve(args('cache')[0] ?? path.join(os.tmpdir(), 'stack-code-spike'));
 if (!ROOTS.length) { console.error('usage: code-dev-server.mjs --root <dir> [--root <dir>…] [--port N] [--servers <dir>]'); process.exit(2); }
+
+/** PHP's built-in functions and classes are declared in the stubs Phpactor ships: readable, like lib.d.ts. */
+const PHP_STUBS = (() => {
+  try {
+    for (let d = path.dirname(fs.realpathSync(PHPACTOR)), i = 0; i < 6; d = path.dirname(d), i++) {
+      for (const stubs of [path.join(d, 'vendor', 'jetbrains', 'phpstorm-stubs'), path.join(d, 'jetbrains', 'phpstorm-stubs')]) if (fs.existsSync(stubs)) return [fs.realpathSync(stubs)];
+    }
+  } catch { /* phpactor on PATH: its stubs stay unreadable, built-ins just do not open */ }
+  return [];
+})();
 
 // ---------- path safety ----------
 
@@ -55,7 +74,7 @@ function inside(p, opt) {
   if (typeof p !== 'string' || !path.isAbsolute(p)) throw new Refused('An absolute path is required.');
   let real;
   try { real = fs.realpathSync(p); } catch { throw new Refused('No such file.'); }
-  const allowed = opt?.extras ? [...ROOTS, ...INCLUDES, ...(SERVERS ? [SERVERS] : [])] : ROOTS;
+  const allowed = opt?.extras ? [...ROOTS, ...INCLUDES, ...(SERVERS ? [SERVERS] : []), ...PHP_STUBS] : ROOTS;
   if (!allowed.some((r) => real === r || real.startsWith(r + path.sep))) throw new Refused('Outside the worktree.');
   return real;
 }
@@ -158,11 +177,48 @@ function bin(name) {
 }
 
 /**
- * @typedef {{ id: string, languages: string[], command: () => [string, string[]],
+ * @typedef {{ id: string, languages: string[], command: () => [string, string[]], env?: () => Record<string, string>,
  *   init: (root: string) => unknown, config: (section: string | undefined) => unknown }} ServerSpec
  */
+/** @type {ServerSpec} */
+const PHPACTOR_SPEC = {
+  id: 'phpactor',
+  languages: ['php'],
+  command: () => ['php', ['-d', 'memory_limit=-1', PHPACTOR, 'language-server']],
+  // Phpactor keeps its index under XDG_CACHE_HOME (`phpactor/index/<project id>`), keyed by project root:
+  // pointing XDG at our cache keeps it out of the worktree and out of ~/.cache, ~/.config.
+  env: () => ({
+    XDG_CACHE_HOME: path.join(CACHE, 'phpactor', 'cache'),
+    XDG_CONFIG_HOME: path.join(CACHE, 'phpactor', 'config'),
+    XDG_DATA_HOME: path.join(CACHE, 'phpactor', 'data'),
+  }),
+  // Phpactor takes its configuration as initializationOptions. A browser's profile:
+  init: (root) => ({
+    'language_server.enable_trust_check': false, // never load the worktree's own .phpactor.json (it can name binaries to run)
+    // MUST stay off: on start Phpactor offers to enable PHPStan, php-cs-fixer… when the project uses them, and
+    // writes the answer (even "no") into `<project>/.phpactor.json`. A browser never writes in the worktree.
+    'language_server_configuration.auto_config': false,
+    'language_server.diagnostics_on_open': false,
+    'language_server.diagnostics_on_update': false,
+    'language_server.diagnostics_on_save': false,
+    'indexer.enabled_watchers': ['lsp'],         // no polling of the tree; changes arrive from the client
+    // vendor/ is NOT indexed (half the disk, and nobody asks "who uses Symfony's Request"). Jumping INTO a vendor
+    // class still works: Phpactor finds the file through Composer's class maps (PSR-4), read as data
+    // (`class_maps_only`: vendor/composer/autoload_{psr4,classmap}.php are included, the autoloader is not run).
+    'indexer.exclude_patterns': ['/vendor/**/*', '/node_modules/**/*', '/.worktrees/**/*', '/.php/**/*', ...EXCLUDES],
+    'composer.enable': true,
+    'composer.class_maps_only': true,
+    // A worktree without vendor/: the main checkout's autoloader does the same job.
+    'composer.autoloader_path': COMPOSER_AUTOLOAD ?? path.join(root, 'vendor', 'autoload.php'),
+    ...(PHPACTOR_WORKERS ? { 'indexer.parallel_workers': PHPACTOR_WORKERS } : {}),
+    'language_server_indexer.workspace_symbol_search_limit': 100,
+  }),
+  config: () => null,
+};
+
 /** @type {ServerSpec[]} */
 const SPECS = [
+  ...(PHP_SERVER === 'intelephense' ? [] : [PHPACTOR_SPEC]),
   {
     id: 'intelephense',
     languages: ['php'],
@@ -221,7 +277,8 @@ class LspServer {
     this.buf = Buffer.alloc(0);
     this.stderr = '';
     const [cmd, argv] = spec.command();
-    this.proc = spawn(cmd, argv, { cwd: root, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, NODE_OPTIONS: '' } });
+    for (const dir of Object.values(spec.env?.() ?? {})) fs.mkdirSync(dir, { recursive: true });
+    this.proc = spawn(cmd, argv, { cwd: root, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, NODE_OPTIONS: '', ...spec.env?.() } });
     this.proc.stdout.on('data', (c) => this.onData(c));
     this.proc.stderr.on('data', (c) => { this.stderr = (this.stderr + c.toString()).slice(-4000); });
     this.proc.on('error', (e) => this.die(e.message));

@@ -221,7 +221,7 @@ export function CodeBrowser({ backend, root, initialFile, initialLine }: Props) 
           backend={backend} root={root} initial={palette.query}
           languages={[...new Set([
             ...(active && lspLanguage(active) ? [lspLanguage(active)!.startsWith('php') ? 'php' : 'typescript'] : []),
-            ...status.filter((s) => s.state !== 'dead').map((s) => (s.server === 'intelephense' ? 'php' : 'typescript')),
+            ...status.filter((s) => s.state !== 'dead').map((s) => (s.server === 'typescript' ? 'typescript' : 'php')),
           ])]}
           onClose={() => { setPalette(null); editorRef.current?.focus(); }}
           onPick={(hit) => { setPalette(null); if (hit.type === 'file') void show(`${root}/${hit.path}`); else void show(hit.path, hit.line, hit.column); }}

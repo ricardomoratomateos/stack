@@ -79,8 +79,12 @@ export function registerNavigation(backend: CodeBackend, root: () => string, onE
 /** `workspace/symbol` for the quick-open box (`#query`). Monaco has no UI of its own for it. */
 export async function workspaceSymbols(backend: CodeBackend, root: string, languageId: string, query: string): Promise<SymbolHit[]> {
   const list = await backend.lsp<LspSymbolInformation[] | null>(root, languageId, 'workspace/symbol', { query });
-  return (list ?? []).slice(0, 80).map((s) => ({
-    name: s.name, container: s.containerName ?? '', kind: s.kind,
+  return (list ?? []).slice(0, 80).map((s) => {
+    // Phpactor names a class by its full name (`Vendor\Pkg\Thing`): show the short name, keep the namespace beside it.
+    const cut = s.name.lastIndexOf('\\');
+    return {
+    name: cut < 0 ? s.name : s.name.slice(cut + 1), container: s.containerName ?? (cut < 0 ? '' : s.name.slice(0, cut)), kind: s.kind,
     path: pathOfUri(s.location.uri), line: s.location.range.start.line + 1, column: s.location.range.start.character + 1,
-  }));
+    };
+  });
 }
