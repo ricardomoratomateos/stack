@@ -102,6 +102,7 @@ const location = (p: Place): LspLocation => ({
  */
 export class CodeService {
   private readonly tasks = new Map<string, TaskState>();
+  private readonly phpStarts = new Map<string, Promise<Running>>();
   private readonly spawn: SpawnLsp;
   private readonly run: Run;
   private readonly grep: Grep;
@@ -290,7 +291,7 @@ export class CodeService {
     const existing = this.state(task).servers.get('phpactor');
     const running = existing && existing.proc.state !== 'dead'
       ? this.server(task, existing.proc.spec)
-      : await this.startPhpactor(task);
+      : await this.phpStart(task);
     const { proc } = running;
     await proc.ready;
     if (proc.state === 'dead') throw new CodeError(`Phpactor stopped: ${proc.message}`);
@@ -318,6 +319,23 @@ export class CodeService {
     running.firstIndex = false;
     if (file) proc.ensureOpen(file, 'php', readTextFile(file).text);
     return proc.request(method, params);
+  }
+
+  /**
+   * One start at a time per repo. The Code tab asks several things at once (symbols, hover, diagnostics) and
+   * a start awaits git; without this each request started its own Phpactor on the same view and index.
+   */
+  private async phpStart(task: CodeTask): Promise<Running> {
+    const inflight = this.phpStarts.get(task.repoRoot);
+    if (inflight) {
+      await inflight.catch(() => undefined);
+      const now = this.state(task).servers.get('phpactor');
+      if (now && now.proc.state !== 'dead') return this.server(task, now.proc.spec);
+      return this.phpStart(task);
+    }
+    const p = this.startPhpactor(task);
+    this.phpStarts.set(task.repoRoot, p);
+    try { return await p; } finally { if (this.phpStarts.get(task.repoRoot) === p) this.phpStarts.delete(task.repoRoot); }
   }
 
   /** Starts the repo's Phpactor for `task`: the main checkout on the base index, a task on its clone of it. */

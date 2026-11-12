@@ -297,7 +297,17 @@ describe('CodeService', () => {
       svc.dispose();
     });
 
-    it('runs one Phpactor per repo: opening another task stops the first', async () => {
+    it('starts one Phpactor for requests that arrive together', async () => {
+    baseIndex();
+    const svc = make({ run: git('src/A.php\0') });
+    const asks = [1, 2, 3, 4].map(() => svc.lsp(task, 'php', 'workspace/symbol', { query: 'A' }));
+    await Promise.all(asks);
+    expect(spawned.calls).toHaveLength(1);
+    expect(spawned.servers[0].sent('textDocument/didSave')).toHaveLength(1);
+    svc.dispose();
+  });
+
+  it('runs one Phpactor per repo: opening another task stops the first', async () => {
       baseIndex();
       const other = path.join(repo, '.worktrees', 't2');
       fs.mkdirSync(path.join(other, 'src'), { recursive: true });
