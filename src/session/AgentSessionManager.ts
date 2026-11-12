@@ -23,6 +23,12 @@ type WindowMeta = {
   /** A hook event has arrived from this window: the agent is initialised and listening. */
   hookSeen?: boolean;
   /**
+   * The agent has taken a prompt (it went `active` or asked for `permission`), so a later
+   * `waiting` is it waiting on the user's reply — not a freshly launched agent, which starts
+   * in `waiting` too.
+   */
+  turned?: boolean;
+  /**
    * What the agent said when it asked for the user (a notification's message,
    * or the command awaiting permission). Kept only while the window is in
    * `permission` or `waiting`; see updateState.
@@ -37,6 +43,9 @@ type WindowMeta = {
  * agent: `sh` runs the launch line, and the trailing `exec $SHELL` takes over
  * again if the agent binary is missing or exits at once.
  */
+/** A state only an agent that has taken a prompt reaches. */
+const tookTurn = (state: AgentSessionState): boolean => state === 'active' || state === 'permission';
+
 const SHELL_COMMANDS = new Set(['sh', 'bash', 'zsh', 'fish', 'dash', 'ksh', 'csh', 'tcsh']);
 
 /**
@@ -924,14 +933,15 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
       // terminal Stack opened. Adopt it instead of dropping every event: the
       // provider stays unknown (nothing says which agent it is), which the card
       // renders with a neutral mark rather than guessing.
-      map.set(windowIndex, meta.kind === 'agent' ? { ...meta, state, hookSeen: true } : { ...meta, kind: 'agent', state, hookSeen: true });
+      const turned = meta.turned || tookTurn(state);
+      map.set(windowIndex, meta.kind === 'agent' ? { ...meta, state, hookSeen: true, turned } : { ...meta, kind: 'agent', state, hookSeen: true, turned });
       this.readyWaiters.get(`${workspaceId}:${windowIndex}`)?.();
       for (const waiter of this.submitWaiters.get(`${workspaceId}:${windowIndex}`) ?? []) waiter(state);
     } else {
       // Agents launched before STACK_WINDOW_INDEX existed: no way to know the
       // source window — apply to all agent windows (pre-per-session behavior).
       for (const [idx, meta] of map.entries()) {
-        if (meta.kind === 'agent') map.set(idx, { ...meta, state, hookSeen: true });
+        if (meta.kind === 'agent') map.set(idx, { ...meta, state, hookSeen: true, turned: meta.turned || tookTurn(state) });
       }
       for (const [key, release] of this.readyWaiters) {
         if (key.startsWith(`${workspaceId}:`)) release();
@@ -1005,6 +1015,7 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
       state: meta.state,
       title: meta.title,
       attention: meta.attention,
+      ...(meta.turned ? { turned: true } : {}),
       index,
     }));
     const order = this.orders.get(worktreeId);

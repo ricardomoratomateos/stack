@@ -51,10 +51,10 @@ export function hasOpenPr(wt: WorktreeItem): boolean {
  * - needs you: any session is asking (`permission`).
  * - working: any session is `active`. Wins over review, because an agent still
  *   typing is not ready to be reviewed whatever the diff says.
- * - ready for review: the agent asked for it (stack_request_review), or an
- *   agent is idle or waiting AND there is work to look at (changes, commits
- *   beyond the base, or an open PR). A freshly launched agent on a clean tree
- *   is just idle.
+ * - ready for review: the agent asked for it (stack_request_review), an agent
+ *   finished a turn and is waiting on your reply (`turned`), or an agent is
+ *   idle or waiting AND there is work to look at (changes, commits beyond the
+ *   base, or an open PR). A freshly launched agent on a clean tree is just idle.
  * - idle: everything else.
  */
 export function groupOf(wt: WorktreeItem): WorktreeGroup {
@@ -64,6 +64,8 @@ export function groupOf(wt: WorktreeItem): WorktreeGroup {
   if (wt.agent === 'active' || agents.some((s) => s.state === 'active')) return 'working';
   // The agent said so itself (stack_request_review): no diff needed to believe it.
   if (wt.review) return 'review';
+  // It answered and is waiting on you, even if it changed nothing.
+  if (agents.some((s) => s.state === 'waiting' && s.turned)) return 'review';
   const resting = agents.some((s) => s.state === 'waiting' || s.state === 'idle');
   if (resting && (hasWork(wt) || hasOpenPr(wt))) return 'review';
   return 'idle';

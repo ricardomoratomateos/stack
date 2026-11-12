@@ -54,6 +54,14 @@ describe('groupOf', () => {
     expect(groupOf(wt({ sessions: [session('waiting')], pr: { number: 4, state: 'OPEN' } }))).toBe('review');
   });
 
+  it('ready for review: an agent that answered and waits on you, with nothing changed yet', () => {
+    expect(groupOf(wt({ sessions: [session('waiting', { turned: true })] }))).toBe('review');
+    // A freshly launched agent waits too, but has not taken a prompt: still idle.
+    expect(groupOf(wt({ sessions: [session('waiting')] }))).toBe('idle');
+    // Busy again: working outranks it.
+    expect(groupOf(wt({ sessions: [session('active', { turned: true })] }))).toBe('working');
+  });
+
   it('idle: no agent, a clean agent, a shell only, a merged PR or a dead agent', () => {
     expect(groupOf(wt())).toBe('idle');
     expect(groupOf(wt({ git: dirty }))).toBe('idle');

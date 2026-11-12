@@ -185,6 +185,19 @@ describe('updateState', () => {
     expect(byIndex).toEqual({ 1: 'waiting', 2: 'active' });
   });
 
+  it('marks a window turned once it took a prompt, and keeps it when it waits again', () => {
+    const { mgr } = create();
+    seed(mgr, 'wt-1', [
+      [1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
+      [2, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
+    ]);
+    mgr.updateState('wt-1', 'waiting', 1); // SessionStart: launched, no prompt yet
+    mgr.updateState('wt-1', 'active', 2);
+    mgr.updateState('wt-1', 'waiting', 2); // Stop: answered, waiting on the user
+    const byIndex = Object.fromEntries(mgr.getSessions('wt-1').map(s => [s.index, s.turned ?? false]));
+    expect(byIndex).toEqual({ 1: false, 2: true });
+  });
+
   it('DROPS events for an untracked window (dying window race)', () => {
     // Killing a window removes it from the map BEFORE its SessionEnd hook
     // arrives — that stale event must not repaint the surviving sessions.

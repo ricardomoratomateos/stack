@@ -76,6 +76,8 @@ export interface SessionItem {
   /** Which agent runs in this window (only for kind 'agent'). */
   provider?: ProviderId;
   state: AgentState;
+  /** The agent has already taken a prompt: `waiting` means it is waiting on your reply, not freshly launched. */
+  turned?: boolean;
   /** Live task title from the agent's terminal title (falls back to `name` in the UI). */
   title?: string;
   /**
