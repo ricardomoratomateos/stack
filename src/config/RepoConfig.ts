@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { StackConfig, DockerConfig, DebugTemplate } from '../types';
+import { StackConfig, DebugTemplate } from '../types';
 
 /** Where a repository declares how Stack should treat it. */
 export const REPO_CONFIG_RELATIVE = path.join('.stack', 'config.json');
@@ -20,7 +20,7 @@ export const REPO_CONFIG_VERSION = 1;
  * whoever is sitting in front of it.
  *
  * The split is the whole point of the file. Where the worktrees go, which
- * compose files exist, which branch work starts from, what the setup script is
+ * ports each worktree gets, which branch work starts from, what the setup script is
  * called — those are facts about the project, identical for everyone who clones
  * it, and until now every one of them lived in one person's settings.json. A
  * new teammate cloned the repo and got an extension that did nothing useful
@@ -37,7 +37,9 @@ export type RepoScopedKey =
   | 'setupScript'
   | 'setupInTerminal'
   | 'teardownScript'
-  | 'docker'
+  | 'ports'
+  | 'basePort'
+  | 'portStride'
   | 'debugBasePort'
   | 'debugTemplate';
 
@@ -90,38 +92,6 @@ const asObject: Validator = (raw, problems, key) => {
   return undefined;
 };
 
-/**
- * Only the docker keys we know, each validated on its own.
- *
- * Partial on purpose: a repo that only needs to name its compose file should
- * not have to restate basePort and portStride to avoid resetting them.
- */
-const dockerValidators: Record<keyof DockerConfig, Validator> = {
-  composeFile: asString,
-  overrideFile: asString,
-  ports: asStringArray,
-  basePort: asPositiveInt,
-  portStride: asPositiveInt,
-};
-
-const asDocker: Validator = (raw, problems, key) => {
-  if (!isPlainObject(raw)) {
-    problems.push(`"${key}" must be an object, got ${describe(raw)}`);
-    return undefined;
-  }
-  const out: Partial<DockerConfig> = {};
-  for (const [name, value] of Object.entries(raw)) {
-    const validate = dockerValidators[name as keyof DockerConfig];
-    if (!validate) {
-      problems.push(`unknown key "${key}.${name}"`);
-      continue;
-    }
-    const clean = validate(value, problems, `${key}.${name}`);
-    if (clean !== undefined) (out as Record<string, unknown>)[name] = clean;
-  }
-  return Object.keys(out).length > 0 ? out : undefined;
-};
-
 const asDebugTemplate: Validator = (raw, problems, key) => {
   const obj = asObject(raw, problems, key);
   if (!obj) return undefined;
@@ -141,10 +111,38 @@ const validators: Record<RepoScopedKey, Validator> = {
   setupScript: asString,
   setupInTerminal: asBoolean,
   teardownScript: asString,
-  docker: asDocker,
+  ports: asStringArray,
+  basePort: asPositiveInt,
+  portStride: asPositiveInt,
   debugBasePort: asPositiveInt,
   debugTemplate: asDebugTemplate,
 };
+
+/**
+ * Keys an older Stack understood and this one does not: skipped without a
+ * complaint, since the file is shared with teammates who may still be on it.
+ * `docker` is the old compose integration; its port keys (ports, basePort,
+ * portStride) now live at the top level — see legacyPorts.
+ */
+const RETIRED = new Set(['docker']);
+
+/**
+ * The named-port keys out of a retired `docker` object, for a file written
+ * before they moved to the top level. Silent: whatever is wrong with the old
+ * block was already reported by the Stack that understood it.
+ */
+export function legacyPorts(docker: unknown): Partial<Pick<StackConfig, 'ports' | 'basePort' | 'portStride'>> {
+  if (!isPlainObject(docker)) return {};
+  const quiet: string[] = [];
+  const out: Partial<Pick<StackConfig, 'ports' | 'basePort' | 'portStride'>> = {};
+  const ports = docker['ports'] === undefined ? undefined : asStringArray(docker['ports'], quiet, 'ports');
+  const basePort = docker['basePort'] === undefined ? undefined : asPositiveInt(docker['basePort'], quiet, 'basePort');
+  const portStride = docker['portStride'] === undefined ? undefined : asPositiveInt(docker['portStride'], quiet, 'portStride');
+  if (ports !== undefined) out.ports = ports as string[];
+  if (basePort !== undefined) out.basePort = basePort as number;
+  if (portStride !== undefined) out.portStride = portStride as number;
+  return out;
+}
 
 /** Keys that exist in StackConfig but are the user's, not the repository's. */
 const USER_SCOPED = new Set([
@@ -204,9 +202,10 @@ export function readRepoConfig(
     }
   }
 
-  const values: RepoConfigValues = {};
+  // Top-level keys win over the retired block they were lifted out of.
+  const values: RepoConfigValues = { ...legacyPorts(parsed['docker']) };
   for (const [key, raw] of Object.entries(parsed)) {
-    if (key === 'version' || key === '$schema') continue;
+    if (key === 'version' || key === '$schema' || RETIRED.has(key)) continue;
     if (USER_SCOPED.has(key)) {
       problems.push(`"${key}" is a per-user setting and is ignored here — it belongs in your own VS Code settings`);
       continue;
@@ -238,7 +237,9 @@ export function renderRepoConfig(effective: StackConfig): string {
     setupScript: effective.setupScript,
     setupInTerminal: effective.setupInTerminal,
     teardownScript: effective.teardownScript,
-    docker: effective.docker,
+    ports: effective.ports,
+    basePort: effective.basePort,
+    portStride: effective.portStride,
     debugBasePort: effective.debugBasePort,
     debugTemplate: effective.debugTemplate,
   });
@@ -252,8 +253,8 @@ export function renderRepoConfig(effective: StackConfig): string {
  * quiet kinds of damage on every save from the settings panel: a key added by
  * a newer Stack (or one this build reports as unknown) vanished, and
  * `version` went back to 1 — telling every newer Stack the file is older
- * than it is. So: every existing key survives, in its place; docker is merged
- * key by key for the same reason; the version only ever goes up.
+ * than it is. So: every existing key survives, in its place; the version only
+ * ever goes up.
  *
  * A file that is not a JSON object cannot be updated, only replaced — which
  * is what the panel offers for it ("save from here to overwrite it").
@@ -275,9 +276,7 @@ export function updateRepoConfig(existing: string | undefined, values: RepoConfi
   body['version'] = version;
   for (const [key, value] of Object.entries(values)) {
     if (value === undefined) continue;
-    body[key] = key === 'docker' && isPlainObject(current['docker'])
-      ? { ...current['docker'], ...(value as object) }
-      : value;
+    body[key] = value;
   }
   return `${JSON.stringify(body, null, 2)}\n`;
 }

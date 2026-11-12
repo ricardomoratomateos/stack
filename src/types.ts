@@ -16,27 +16,6 @@ export type PrStatus = {
   ci?: PrCi;
 } | null;
 
-/**
- * Docker's own container state, lowercased: running, exited, created, paused,
- * restarting, dead, removing. Kept as docker reports it rather than folded into
- * running/stopped — "created" (never started, usually a port clash) and
- * "exited" (crashed) are different problems with different fixes.
- */
-export type DockerContainerState = string;
-
-export interface DockerContainer {
-  name: string;
-  state: DockerContainerState;
-  /** Compose service the container runs. */
-  service?: string;
-  /** Exit code of an exited container; non-zero is why the stack is down. */
-  exitCode?: number;
-  /** Docker's status line, e.g. "Exited (1) 2 minutes ago". */
-  status?: string;
-  /** Host ports it publishes — so its own stack's ports are not mistaken for a stranger's. */
-  ports?: number[];
-}
-
 export interface GitStatus {
   hasChanges: boolean;
   staged: number;
@@ -83,7 +62,6 @@ export interface Worktree {
   path: string;
   repoRoot: string;
   debugPort: number;
-  dockerProjectName: string;
   createdAt: number;
   isMain?: boolean;
   /**
@@ -124,7 +102,6 @@ export interface WorktreeTicket {
 export interface WorktreeState {
   worktree: Worktree;
   agent: AgentSessionState;
-  docker: DockerContainer[];
   git: GitStatus;
   pr?: PrStatus | null;
 }
@@ -141,19 +118,6 @@ export interface DebugTemplate {
   port: string | number;
   pathMappings?: Record<string, string>;
   [key: string]: unknown;
-}
-
-export interface DockerConfig {
-  /** Base compose file, relative to the worktree (default docker-compose.yml). */
-  composeFile: string;
-  /** Worktree-only override merged on top; carries the ${PORT} mappings. */
-  overrideFile: string;
-  /** Env var names to auto-generate a per-worktree port for (e.g. HTTP_PORT). */
-  ports: string[];
-  /** First port of the docker range (kept clear of the debug range). */
-  basePort: number;
-  /** Ports owned by each worktree = one contiguous block of this size. */
-  portStride: number;
 }
 
 export interface StackConfig {
@@ -201,8 +165,12 @@ export interface StackConfig {
    * switches between them (`single`, the behaviour before tabs).
    */
   sessionTabs: 'perSession' | 'single';
-  /** Per-worktree docker orchestration (compose files + auto-generated ports). */
-  docker: DockerConfig;
+  /** Env var names to allocate a per-worktree port for (e.g. HTTP_PORT); DEBUG_PORT is the debug port itself. */
+  ports: string[];
+  /** First port of the named-port range (kept clear of the debug range). */
+  basePort: number;
+  /** Ports owned by each worktree = one contiguous block of this size. */
+  portStride: number;
   debugBasePort: number;
   debugTemplate: DebugTemplate;
 }

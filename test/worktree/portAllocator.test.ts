@@ -13,18 +13,14 @@ function stubProbe(...busy: number[]) {
 }
 
 /** Config shaped like the aside one: WORKTREE_PORT 8081+slot, DEBUG_PORT 9898+1+slot. */
-function stubConfig(over: Partial<StackConfig['docker']> = {}): () => StackConfig {
+function stubConfig(over: Partial<Pick<StackConfig, 'ports' | 'basePort' | 'portStride'>> = {}): () => StackConfig {
   return () =>
     ({
       debugBasePort: 9898,
-      docker: {
-        composeFile: '.stack/docker-compose.worktree.yml',
-        overrideFile: '',
-        ports: ['WORKTREE_PORT', 'DEBUG_PORT'],
-        basePort: 8081,
-        portStride: 1,
-        ...over,
-      },
+      ports: ['WORKTREE_PORT', 'DEBUG_PORT'],
+      basePort: 8081,
+      portStride: 1,
+      ...over,
     }) as StackConfig;
 }
 
@@ -86,7 +82,7 @@ describe('PortAllocator', () => {
       await expect(allocator.allocate()).resolves.toBe(9900);
     });
 
-    it('skips a slot whose derived docker port is taken, even when its debug port is free', async () => {
+    it('skips a slot whose derived named port is taken, even when its debug port is free', async () => {
       // Slot 0 → WORKTREE_PORT 8081 (busy), DEBUG_PORT 9899 (free). The whole block
       // has to be free or the slot is unusable — this is the exact shape of the
       // "port is already allocated" failure: debug fine, http port stolen.
@@ -115,7 +111,7 @@ describe('PortAllocator', () => {
       await expect(allocator.allocate()).resolves.toBe(9903);
     });
 
-    it('probes the debug port even when no docker ports are configured', async () => {
+    it('probes the debug port even when no named ports are configured', async () => {
       const probe = stubProbe(9899);
       const allocator = new PortAllocator(stubStore({}), 9898, {
         config: stubConfig({ ports: [] }),
@@ -156,7 +152,7 @@ describe('PortAllocator', () => {
   });
 
   describe('blockFor', () => {
-    it('returns the debug port plus its derived docker ports, deduplicated', () => {
+    it('returns the debug port plus its derived named ports, deduplicated', () => {
       const allocator = new PortAllocator(stubStore({}), 9898, { config: stubConfig() });
       // DEBUG_PORT maps back onto the debug port itself — it must appear once.
       expect(allocator.blockFor(9901)).toEqual([9901, 8083]);
@@ -231,8 +227,8 @@ describe('concurrent allocation', () => {
     // allocate() reads the registry, probes, and returns — but the caller only
     // writes to the store afterwards. Two creations started together therefore
     // read the same registry, probed the same free ports, and were handed the
-    // same slot: two worktrees sharing one block of docker ports, which fails
-    // minutes later inside `compose up`.
+    // same slot: two worktrees sharing one block of ports, which fails
+    // minutes later when the second one binds them.
     const allocator = new PortAllocator(stubStore({}), 9898, { config: stubConfig(), isPortFree: stubProbe() });
 
     const [a, b, c] = await Promise.all([

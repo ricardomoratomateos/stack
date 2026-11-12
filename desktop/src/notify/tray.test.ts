@@ -5,7 +5,7 @@ import type { WorktreeItem } from '@core/webview/types';
 
 const wt = (id: string, over: Partial<WorktreeItem> = {}): WorktreeItem => ({
   id, branch: id, path: `/r/${id}`, isMain: false, deleting: false, agent: 'idle', agentCount: 1, terminalCount: 0, sessions: [],
-  git: {} as WorktreeItem['git'], docker: [], ports: [], ...over,
+  git: {} as WorktreeItem['git'], ports: [], ...over,
 });
 const snap = (worktrees: WorktreeItem[]): Snapshot => ({ seq: 1, tmux: {}, repos: [{ repoRoot: '/x/stack', state: { worktrees } as never }] });
 const asking = (id: string, since: number) => wt(id, {

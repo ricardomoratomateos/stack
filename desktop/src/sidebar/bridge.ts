@@ -59,7 +59,7 @@ export type Action =
   | { kind: 'none' };
 
 /** Messages stackd runs itself (`DAEMON_MESSAGES` in src/daemon/StackDaemon.ts). */
-const DAEMON_MESSAGES = ['dockerUp', 'dockerDown', 'reorderSessions', 'reorderWorktrees', 'setupAction', 'refreshDrift', 'forgetWorktree'];
+const DAEMON_MESSAGES = ['reorderSessions', 'reorderWorktrees', 'setupAction', 'refreshDrift', 'forgetWorktree'];
 
 /** What may be handed to the browser: https links (PR, ticket) and localhost ports. */
 export function safeUrl(url: string | undefined): string | undefined {
@@ -125,8 +125,6 @@ export function translate(msg: WebMessage, ctx: Context): Action {
         body: { repo: ctx.repoRoot, branch: msg.branch, title: msg.title, description: msg.description, baseBranch: msg.baseBranch, provider: msg.provider },
       };
     case 'refreshDrift':
-    case 'dockerUp':
-    case 'dockerDown':
     case 'setupAction':
     case 'reorderSessions':
     case 'reorderWorktrees':

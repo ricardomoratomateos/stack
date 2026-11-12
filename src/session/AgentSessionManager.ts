@@ -403,8 +403,7 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
 
   /**
    * Two seconds. Fast enough that starting a build labels the row while you are
-   * still looking at it, slow enough to stay far below the docker poller's
-   * 20s-per-project load. syncWindows only touches the UI when something
+   * still looking at it, slow enough to stay cheap. syncWindows only touches the UI when something
    * actually changed, so a quiet shell costs one exec and no re-render.
    */
   private static readonly SHELL_POLL_MS = 2_000;

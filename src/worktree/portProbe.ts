@@ -4,11 +4,11 @@ import * as net from 'node:net';
  * Whether a TCP port can actually be bound right now, asked the only way that
  * cannot lie: by binding it. The port registry only knows about worktrees
  * Stack created, so it happily hands out a port already taken by another
- * project's container, a leftover stack from a deleted worktree, or a plain
- * local process — and the failure surfaces minutes later as a cryptic
- * `Bind for 0.0.0.0:8083 failed: port is already allocated` from docker.
+ * project's server, a leftover process from a deleted worktree, or any other
+ * local listener — and the failure surfaces minutes later as a cryptic
+ * "address already in use".
  *
- * Probes `0.0.0.0` (what docker's port publishing binds) *and* `127.0.0.1`,
+ * Probes `0.0.0.0` (what a server listening on every interface binds) *and* `127.0.0.1`,
  * because on macOS/BSD a wildcard bind happily coexists with a loopback-only
  * one — so checking the wildcard alone would call a port free while a local dev
  * server already owns localhost on it. The asymmetry justifies the extra

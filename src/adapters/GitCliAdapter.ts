@@ -48,9 +48,9 @@ const SHELL_ACTIVE = /[$`"'\\;|&<>()!]/;
  * On top of it, shell-active characters are refused even though git allows
  * them. The worktree DIRECTORY is named after the branch, and that path goes on
  * to places that are command lines by nature — the tmux session's start
- * directory, the docker compose `-f` paths, the setup script typed into a
- * terminal. Those quote it, but a name like `fix$(id)` has no legitimate use,
- * and refusing it here closes the door on any command line that forgets to.
+ * directory, the setup script typed into a terminal. Those quote it, but a
+ * name like `fix$(id)` has no legitimate use, and refusing it here closes the
+ * door on any command line that forgets to.
  */
 export function assertCreatableBranchName(branch: string, repoRoot: string): void {
   if (SHELL_ACTIVE.test(branch)) {

@@ -1,13 +1,5 @@
-import type { StackConfig, DebugTemplate, DockerConfig } from '../types';
+import type { StackConfig, DebugTemplate } from '../types';
 import type { RepoScopedKey } from './RepoConfig';
-
-export const DOCKER_DEFAULTS: DockerConfig = {
-  composeFile: 'docker-compose.yml',
-  overrideFile: 'docker-compose.worktree.yml',
-  ports: [],
-  basePort: 20000,
-  portStride: 100,
-};
 
 /**
  * The launch configuration written into each worktree, with its own port in it.
@@ -36,7 +28,9 @@ export const PROJECT_DEFAULTS: Pick<StackConfig, RepoScopedKey> = {
   setupScript: '',
   setupInTerminal: false,
   teardownScript: '',
-  docker: DOCKER_DEFAULTS,
+  ports: [],
+  basePort: 20000,
+  portStride: 100,
   debugBasePort: 9898,
   debugTemplate: DEBUG_TEMPLATE_DEFAULT,
 };

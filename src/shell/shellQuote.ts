@@ -27,7 +27,7 @@ export function shellQuote(value: string): string {
 /**
  * Whether a name can stand on the left of `NAME=value` in a command prefix.
  *
- * Env var names reach the command line from config (`stack.docker.ports`), and
+ * Env var names reach the command line from config (`stack.ports`), and
  * a name is not something quoting can fix — `'A;B'=1` is not an assignment, it
  * is a command. A name that is not an identifier is dropped instead; no shell
  * could have exported it anyway.

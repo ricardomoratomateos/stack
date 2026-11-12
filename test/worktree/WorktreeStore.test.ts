@@ -17,7 +17,7 @@ function makeWorktree(overrides: Partial<Worktree> = {}): Worktree {
     path: '/tmp/stack-test/feature-foo',
     repoRoot: '/tmp/stack-test/repo',
     debugPort: 9004,
-    dockerProjectName: 'feature-foo',
+   
     createdAt: 1700000000000,
     ...overrides,
   };

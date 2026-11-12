@@ -46,13 +46,9 @@ describe('readRepoConfig', () => {
       setupScript: '.stack/setup.sh',
       setupInTerminal: true,
       teardownScript: '.stack/teardown.sh',
-      docker: {
-        composeFile: 'compose.yaml',
-        overrideFile: 'compose.wt.yaml',
-        ports: ['HTTP_PORT', 'DB_PORT'],
-        basePort: 31000,
-        portStride: 20,
-      },
+      ports: ['HTTP_PORT', 'DB_PORT'],
+      basePort: 31000,
+      portStride: 20,
       debugBasePort: 9001,
       debugTemplate: { type: 'php', request: 'launch', name: 'x', port: '{{PORT}}' },
     });
@@ -65,13 +61,9 @@ describe('readRepoConfig', () => {
       setupScript: '.stack/setup.sh',
       setupInTerminal: true,
       teardownScript: '.stack/teardown.sh',
-      docker: {
-        composeFile: 'compose.yaml',
-        overrideFile: 'compose.wt.yaml',
-        ports: ['HTTP_PORT', 'DB_PORT'],
-        basePort: 31000,
-        portStride: 20,
-      },
+      ports: ['HTTP_PORT', 'DB_PORT'],
+      basePort: 31000,
+      portStride: 20,
       debugBasePort: 9001,
       debugTemplate: { type: 'php', request: 'launch', name: 'x', port: '{{PORT}}' },
     });
@@ -143,38 +135,15 @@ describe('readRepoConfig', () => {
       expect(read({ debugBasePort: 9898 }).values.debugBasePort).toBe(9898);
     });
 
-    it('requires docker.ports to be strings all the way down', () => {
-      expect(read({ docker: { ports: ['HTTP_PORT', 8080] } }).problems[0])
-        .toBe('"docker.ports" must be an array of strings, got an array');
-      expect(read({ docker: { ports: 'HTTP_PORT' } }).problems[0]).toContain('must be an array of strings');
+    it('requires ports to be strings all the way down', () => {
+      expect(read({ ports: ['HTTP_PORT', 8080] }).problems[0])
+        .toBe('"ports" must be an array of strings, got an array');
+      expect(read({ ports: 'HTTP_PORT' }).problems[0]).toContain('must be an array of strings');
     });
 
-    it('rejects a non-object docker', () => {
-      expect(read({ docker: 'compose.yaml' }).problems[0]).toBe('"docker" must be an object, got string');
-    });
-
-    it('accepts a partial docker without resetting the rest', () => {
-      // Restating basePort just to set composeFile is how a config file becomes
-      // a copy of the defaults that silently rots.
-      expect(read({ docker: { composeFile: 'compose.yaml' } }).values.docker).toEqual({
-        composeFile: 'compose.yaml',
-      });
-    });
-
-    it('names unknown docker keys with their full path', () => {
-      expect(read({ docker: { composFile: 'x' } }).problems).toEqual(['unknown key "docker.composFile"']);
-    });
-
-    it('drops a docker object whose every key was rejected', () => {
-      const result = read({ docker: { basePort: 'high' } });
-      expect(result.values.docker).toBeUndefined();
-      expect(result.problems).toHaveLength(1);
-    });
-
-    it('keeps the good docker keys alongside a rejected one', () => {
-      const result = read({ docker: { composeFile: 'compose.yaml', portStride: -1 } });
-      expect(result.values.docker).toEqual({ composeFile: 'compose.yaml' });
-      expect(result.problems[0]).toContain('"docker.portStride"');
+    it('rejects a basePort or portStride outside 1..65535', () => {
+      expect(read({ basePort: 'high' }).problems[0]).toContain('"basePort"');
+      expect(read({ portStride: -1 }).problems[0]).toContain('"portStride"');
     });
 
     it('requires a debugTemplate to at least name a debugger', () => {
@@ -195,6 +164,30 @@ describe('readRepoConfig', () => {
         xdebugSettings: { max_children: 128 },
       };
       expect(read({ debugTemplate: template }).values.debugTemplate).toEqual(template);
+    });
+  });
+
+  describe('the retired docker block', () => {
+    it('is skipped without a complaint, compose keys and all', () => {
+      const result = read({ docker: { composeFile: 'compose.yaml', overrideFile: 'x.yml', networkName: 'n' } });
+      expect(result.problems).toEqual([]);
+      expect(result.values).toEqual({});
+    });
+
+    it('still lends its named-port keys to a file written before they moved to the top level', () => {
+      const result = read({ docker: { composeFile: 'compose.yaml', ports: ['HTTP_PORT'], basePort: 31000, portStride: 20 } });
+      expect(result.problems).toEqual([]);
+      expect(result.values).toEqual({ ports: ['HTTP_PORT'], basePort: 31000, portStride: 20 });
+    });
+
+    it('loses to the top-level keys, and drops what does not validate', () => {
+      const result = read({ ports: ['A'], docker: { ports: ['B'], basePort: 'high', portStride: 5 } });
+      expect(result.problems).toEqual([]);
+      expect(result.values).toEqual({ ports: ['A'], portStride: 5 });
+    });
+
+    it('is ignored when it is not an object', () => {
+      expect(read({ docker: 'compose.yaml' })).toMatchObject({ values: {}, problems: [] });
     });
   });
 
@@ -238,13 +231,9 @@ describe('renderRepoConfig', () => {
     notifyOnAttention: false,
     scopeSearchToActiveWorktree: false,
     focusMode: true,
-    docker: {
-      composeFile: 'compose.yaml',
-      overrideFile: 'compose.wt.yaml',
-      ports: ['HTTP_PORT'],
-      basePort: 31000,
-      portStride: 20,
-    },
+    ports: ['HTTP_PORT'],
+    basePort: 31000,
+    portStride: 20,
     debugBasePort: 9001,
     debugTemplate: { type: 'php', request: 'launch', name: 'x', port: '{{PORT}}' },
   };
@@ -258,7 +247,9 @@ describe('renderRepoConfig', () => {
       setupScript: '.stack/setup.sh',
       setupInTerminal: false,
       teardownScript: '.stack/teardown.sh',
-      docker: effective.docker,
+      ports: ['HTTP_PORT'],
+      basePort: 31000,
+      portStride: 20,
       debugBasePort: 9001,
       debugTemplate: effective.debugTemplate,
     });
@@ -276,7 +267,7 @@ describe('renderRepoConfig', () => {
     const result = readRepoConfig(ROOT, fsWith({ [FILE]: renderRepoConfig(effective) }));
     expect(result.problems).toEqual([]);
     expect(result.values.defaultBaseBranch).toBe('trunk');
-    expect(result.values.docker).toEqual(effective.docker);
+    expect(result.values.ports).toEqual(effective.ports);
   });
 
   it('ends with a newline, for the diff of whoever commits it', () => {
@@ -287,13 +278,9 @@ describe('renderRepoConfig', () => {
 describe('updateRepoConfig', () => {
   const values = {
     worktreesDirectory: '../wt',
-    docker: {
-      composeFile: 'compose.yaml',
-      overrideFile: '',
-      ports: ['HTTP_PORT'],
-      basePort: 31000,
-      portStride: 20,
-    },
+    ports: ['HTTP_PORT'],
+    basePort: 31000,
+    portStride: 20,
   };
 
   it('keeps keys this build does not know, where they were', () => {
@@ -330,12 +317,6 @@ describe('updateRepoConfig', () => {
     expect(JSON.parse(updateRepoConfig('{}', values)).version).toBe(REPO_CONFIG_VERSION);
   });
 
-  it('merges docker key by key, so a newer Stack\'s docker keys survive too', () => {
-    const existing = JSON.stringify({ docker: { composeFile: 'old.yml', networkName: 'shared' } });
-    const parsed = JSON.parse(updateRepoConfig(existing, values));
-    expect(parsed.docker).toEqual({ ...values.docker, networkName: 'shared' });
-  });
-
   it('replaces a file that is not a JSON object, as the panel says it will', () => {
     for (const broken of ['{ "worktreesDirectory": ', '[1,2]', 'null']) {
       const parsed = JSON.parse(updateRepoConfig(broken, values));
@@ -353,7 +334,7 @@ describe('updateRepoConfig', () => {
     const existing = JSON.stringify({ version: 1, futureKey: true });
     const result = readRepoConfig(ROOT, fsWith({ [FILE]: updateRepoConfig(existing, values) }));
     expect(result.values.worktreesDirectory).toBe('../wt');
-    expect(result.values.docker).toEqual(values.docker);
+    expect(result.values.ports).toEqual(values.ports);
     expect(result.problems).toEqual(['unknown key "futureKey"']);
   });
 });

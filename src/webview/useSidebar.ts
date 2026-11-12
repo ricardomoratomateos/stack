@@ -108,8 +108,8 @@ export function useSidebar(): Sidebar {
   const { dragFor, order } = useWorktreeDrag(state.worktrees);
   const items = useMemo(() => order(describeAll(state), (d) => d.wt.id), [state, order]);
   const controlItem = useMemo(
-    () => (state.controlSession ? describe(state.controlSession, state.dockerUnavailable) : undefined),
-    [state.controlSession, state.dockerUnavailable],
+    () => (state.controlSession ? describe(state.controlSession) : undefined),
+    [state.controlSession],
   );
 
   return { state, loaded, items, controlItem, selectedId: selected, select, dragFor, now };

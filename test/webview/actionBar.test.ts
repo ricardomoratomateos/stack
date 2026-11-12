@@ -9,7 +9,7 @@ const { visibleCount, worktreeActions } = await import('../../src/webview/compon
 const clean = { hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 };
 const wt = (over: Partial<WorktreeItem> = {}): WorktreeItem => ({
   id: 'a', branch: 'feat/a', path: '/r/a', isMain: false, deleting: false, agent: 'idle',
-  agentCount: 0, terminalCount: 0, sessions: [], ports: [], docker: [], git: clean, pr: null,
+  agentCount: 0, terminalCount: 0, sessions: [], ports: [], git: clean, pr: null,
   since: 0, ...over,
 });
 
@@ -35,30 +35,19 @@ describe('visibleCount', () => {
 
 describe('worktreeActions', () => {
   it('lists the frequent actions first and delete last', () => {
-    const ids = worktreeActions(wt({ git: { ...clean, base: { ref: 'origin/develop', ahead: 0, behind: 2 } } }), true).map((a) => a.id);
-    expect(ids).toEqual(['terminal', 'diff', 'docker', 'setup', 'drift', 'rename', 'delete']);
+    const ids = worktreeActions(wt({ git: { ...clean, base: { ref: 'origin/develop', ahead: 0, behind: 2 } } })).map((a) => a.id);
+    expect(ids).toEqual(['terminal', 'diff', 'setup', 'drift', 'rename', 'delete']);
   });
 
-  it('leaves out what does not apply: no docker, no setup on main, no drift without a base', () => {
+  it('leaves out what does not apply: no setup on main, no drift without a base', () => {
     expect(worktreeActions(wt({ isMain: true })).map((a) => a.id)).toEqual(['terminal', 'diff', 'rename', 'delete']);
-  });
-
-  it('offers stop for a running stack, and nothing to click while docker is busy', () => {
-    const running = worktreeActions(wt({ docker: [{ name: 'web', state: 'running' }] }), true).find((a) => a.id === 'docker')!;
-    expect(running.label).toBe('Stop containers');
-    const busy = worktreeActions(wt({ dockerBusy: 'starting' }), true).find((a) => a.id === 'docker')!;
-    expect(busy.disabled).toBe(true);
-    expect(busy.label).toBe('Docker is starting the stack');
   });
 
   it('each action posts its message for this worktree', () => {
     posted.length = 0;
-    for (const a of worktreeActions(wt({ git: { ...clean, base: { ref: 'b', ahead: 0, behind: 0 } } }), true)) a.run();
+    for (const a of worktreeActions(wt({ git: { ...clean, base: { ref: 'b', ahead: 0, behind: 0 } } }))) a.run();
     expect(posted.map((m) => (m as { type: string }).type)).toEqual([
-      'openTerminal', 'openDiff', 'dockerUp', 'initWorktree', 'refreshDrift', 'renameWorktree', 'deleteWorktree',
+      'openTerminal', 'openDiff', 'initWorktree', 'refreshDrift', 'renameWorktree', 'deleteWorktree',
     ]);
-    posted.length = 0;
-    worktreeActions(wt({ docker: [{ name: 'web', state: 'running' }] }), true).find((a) => a.id === 'docker')!.run();
-    expect(posted).toEqual([{ type: 'dockerDown', worktreeId: 'a' }]);
   });
 });

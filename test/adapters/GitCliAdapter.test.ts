@@ -183,7 +183,7 @@ describe('GitCliAdapter (integration, real temp git repo)', () => {
 
   describe('createWorktree: branch names', () => {
     // The worktree directory is named after the branch, and from there the path
-    // reaches tmux, docker and terminal command lines. Git accepts `$(…)` in a
+    // reaches tmux and terminal command lines. Git accepts `$(…)` in a
     // ref; Stack does not make a worktree for one.
     it.each([
       'feat/$(touch pwned)',

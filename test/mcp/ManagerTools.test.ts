@@ -9,7 +9,7 @@ import type { StartOutcome } from '../../src/application/WorktreeApplicationServ
 
 const wt = (over: Partial<Worktree> = {}): Worktree => ({
   id: 'a', branch: 'feat/a', path: '/repo/.worktrees/feat-a', repoRoot: '/repo', debugPort: 9899,
-  dockerProjectName: 'feat-a', createdAt: 1, ...over,
+  createdAt: 1, ...over,
 });
 
 const session = (over: Partial<SessionItem> = {}): SessionItem => ({
@@ -20,7 +20,7 @@ const item = (over: Partial<WorktreeItem> = {}): WorktreeItem => ({
   id: 'a', branch: 'feat/a', path: '/repo/.worktrees/feat-a', isMain: false, deleting: false, agent: 'waiting',
   agentCount: 1, terminalCount: 0, sessions: [session()],
   git: { hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 },
-  docker: [], ports: [], pr: null, ...over,
+  ports: [], pr: null, ...over,
 });
 
 function harness(o: { worktrees?: Worktree[]; items?: WorktreeItem[]; root?: string | null } = {}) {

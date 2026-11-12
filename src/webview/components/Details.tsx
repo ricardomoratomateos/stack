@@ -1,20 +1,7 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { send } from '../vscode';
 import type { Described, DescribedPr } from '../derive';
-import type { DockerContainer, TicketItem } from '../types';
-import { stackRunning } from './ActionBar';
-
-/** The gist of a container for one line: its service (or a trimmed name) and what it is doing. */
-function containerLine(c: DockerContainer): { name: string; status: string; tone: 'ok' | 'bad' | 'muted' } {
-  // strip common prefix noise like "my-app-" and "-1"
-  const name = c.service ?? c.name.replace(/^[\w-]+-app-/, '').replace(/-\d+$/, '');
-  const crashed = c.state === 'exited' && (c.exitCode ?? 0) !== 0;
-  return {
-    name,
-    status: crashed ? `exited (${c.exitCode})` : c.state,
-    tone: c.state === 'running' ? 'ok' : crashed ? 'bad' : 'muted',
-  };
-}
+import type { TicketItem } from '../types';
 
 function changesText(d: Described): string {
   const g = d.wt.git;
@@ -28,15 +15,11 @@ function changesText(d: Described): string {
 
 /**
  * What the selected worktree is sitting on: drift against its base, local
- * changes, the docker stack (with its start/stop and every container), the
- * ports it owns and its PR. The sidebar shows this for the selected worktree,
- * so none of it depends on which look is chosen.
+ * changes, the ports it owns and its PR. The sidebar shows this for the
+ * selected worktree.
  */
-export function Details({ d, dockerEnabled }: { d: Described; dockerEnabled?: boolean }) {
-  const [showStack, setShowStack] = useState(false);
+export function Details({ d }: { d: Described }) {
   const wt = d.wt;
-  const running = stackRunning(wt);
-  const hasStack = wt.docker.length > 0;
 
   return (
     <dl className="fm-det" aria-label={`Details of ${d.name}`}>
@@ -63,59 +46,6 @@ export function Details({ d, dockerEnabled }: { d: Described; dockerEnabled?: bo
         {wt.git.ahead > 0 && <span className="fm-chip-text" data-tone="ok" title="Commits not pushed yet">↑{wt.git.ahead}</span>}
         {wt.git.behind > 0 && <span className="fm-chip-text" data-tone="bad" title="Commits upstream you do not have">↓{wt.git.behind}</span>}
       </dd>
-
-      {(dockerEnabled || hasStack || wt.dockerError || d.stack.text !== '—') && (
-        <>
-          <dt>Stack</dt>
-          <dd>
-            <button
-              type="button"
-              className="fm-link"
-              data-tone={d.stack.tone}
-              title={d.stack.title}
-              aria-expanded={hasStack ? showStack : undefined}
-              disabled={!hasStack}
-              onClick={() => setShowStack((v) => !v)}
-            >
-              {hasStack && <i className={`codicon codicon-chevron-${showStack ? 'down' : 'right'}`} aria-hidden="true" />}
-              {d.stack.text}
-            </button>
-            {dockerEnabled && (
-              <button
-                type="button"
-                className="fm-mini"
-                disabled={!!wt.dockerBusy}
-                aria-label={running ? 'Stop containers' : 'Start containers'}
-                title={wt.dockerBusy ? `Docker is ${wt.dockerBusy === 'starting' ? 'starting' : 'stopping'} the stack` : running ? 'Stop containers' : 'Start containers'}
-                onClick={() => send({ type: running ? 'dockerDown' : 'dockerUp', worktreeId: wt.id })}
-              >
-                <i className={`codicon codicon-${wt.dockerBusy ? 'loading codicon-modifier-spin' : running ? 'debug-stop' : 'play'}`} aria-hidden="true" />
-              </button>
-            )}
-          </dd>
-        </>
-      )}
-
-      {showStack && hasStack && (
-        <dd className="fm-det-wide">
-          <ul className="fm-containers" aria-label="Containers">
-            {wt.docker.map((c) => {
-              const line = containerLine(c);
-              return (
-                <li key={c.name} data-tone={line.tone} title={c.status ?? c.name}>
-                  <span className="fm-container-dot" aria-hidden="true" />
-                  <span className="fm-container-name">{line.name}</span>
-                  <span className="fm-container-state">{line.status}</span>
-                </li>
-              );
-            })}
-          </ul>
-        </dd>
-      )}
-
-      {wt.dockerError && (
-        <dd className="fm-det-wide fm-error" role="alert">{wt.dockerError}</dd>
-      )}
 
       {d.ports.length > 0 && (
         <>

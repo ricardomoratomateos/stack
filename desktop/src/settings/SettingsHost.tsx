@@ -76,7 +76,7 @@ export function SettingsHost({ repo, onClose }: { repo?: { name: string; root: s
         )}
         {!inRepo && <div className="setting-item">
           <div className="setting-title">Other settings</div>
-          <div className="setting-desc">Docker and the rest are objects or advanced options: edit them in the file.</div>
+          <div className="setting-desc">The rest are lists, objects or advanced options: edit them in the file.</div>
           <button type="button" className="secondary" onClick={() => invoke('open_settings_file').catch((e) => setError(String(e)))}>Open settings.json</button>
         </div>}
       </div>

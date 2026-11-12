@@ -27,13 +27,13 @@ export function buildView(snapshot: Snapshot | null, repoRoot?: string): View | 
   const repo = snapshot?.repos.find((r) => r.repoRoot === repoRoot) ?? snapshot?.repos[0];
   if (!snapshot || !repo) return null;
   const { state } = repo;
-  const items = state.worktrees.map((wt) => describe(wt, state.dockerUnavailable));
+  const items = state.worktrees.map((wt) => describe(wt));
   return {
     repoRoot: repo.repoRoot,
     repoName: baseName(repo.repoRoot),
     repos: snapshot.repos.map((r) => ({ repoRoot: r.repoRoot, name: baseName(r.repoRoot) })),
     items,
-    control: state.controlSession ? describe(state.controlSession, state.dockerUnavailable) : undefined,
+    control: state.controlSession ? describe(state.controlSession) : undefined,
     counts: countByGroup(items),
   };
 }

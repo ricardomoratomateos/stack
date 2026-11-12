@@ -23,7 +23,6 @@ export function buildControlSession(repoRoot: string): Worktree {
     path: repoRoot,
     repoRoot,
     debugPort: 0,
-    dockerProjectName: '',
     createdAt: 0,
     isControl: true,
   };

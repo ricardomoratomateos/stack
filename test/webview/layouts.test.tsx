@@ -20,7 +20,7 @@ const clean = { hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 
 function wt(over: Partial<WorktreeItem>): WorktreeItem {
   return {
     id: 'a', branch: 'feat/a', path: '/r/a', isMain: false, deleting: false, agent: 'idle',
-    agentCount: 0, terminalCount: 0, sessions: [], ports: [], docker: [], git: clean, pr: null,
+    agentCount: 0, terminalCount: 0, sessions: [], ports: [], git: clean, pr: null,
     since: 0, ...over,
   };
 }
@@ -28,7 +28,6 @@ function wt(over: Partial<WorktreeItem>): WorktreeItem {
 const state: StackState = {
   defaultProvider: 'claude',
   installedProviders: ['claude'],
-  dockerEnabled: true,
   worktrees: [
     wt({ id: 'main', branch: 'develop', isMain: true }),
     wt({
@@ -36,14 +35,12 @@ const state: StackState = {
       sessions: [session({ state: 'permission', attention: 'Bash: composer test' })],
       git: { ...clean, hasChanges: true, unstaged: 2, lines: { added: 12, removed: 3 }, base: { ref: 'origin/develop', ahead: 1, behind: 2 } },
       ports: [{ name: 'HTTP_PORT', port: 8082, openable: true }, { name: 'DEBUG_PORT', port: 9902, openable: false }],
-      docker: [{ name: 'x-app-web-1', state: 'running', service: 'web' }, { name: 'db', state: 'exited', exitCode: 1 }],
     }),
     wt({
       id: 'rev', branch: 'feat/csv', agent: 'waiting', sessions: [session({ title: 'CSV export' }), session({ name: 'zsh', kind: 'shell', provider: undefined, index: 2, title: 'npm run dev' })],
       git: { ...clean, hasChanges: true, staged: 1 }, pr: { number: 41, state: 'OPEN' },
-      dockerError: 'port is already allocated',
     }),
-    wt({ id: 'work', branch: 'feat/work', agent: 'active', sessions: [session({ state: 'active', provider: 'codex' })], dockerBusy: 'starting' }),
+    wt({ id: 'work', branch: 'feat/work', agent: 'active', sessions: [session({ state: 'active', provider: 'codex' })] }),
     wt({ id: 'gone', branch: 'spike/old', missing: true }),
     wt({ id: 'bye', branch: 'feat/bye', deleting: true }),
   ],
@@ -89,13 +86,12 @@ describe('aside layout', () => {
     expect(html).toContain('Review diff');
   });
 
-  it('shows the selected worktree\'s ports, containers and PR somewhere', () => {
+  it('shows the selected worktree\'s ports and PR somewhere', () => {
     const html = render(props({ selectedId: 'ask' }));
     expect(html).toContain(':8082');
     expect(html).toContain('Ports');
     const rev = render(props({ selectedId: 'rev' }));
     expect(rev).toContain('#41');
-    expect(rev).toContain('port is already allocated');
   });
 
   it('offers a way to launch an agent, open a terminal and review for the selected worktree', () => {
@@ -118,14 +114,5 @@ describe('aside layout', () => {
   it('copes with a selection that no longer exists', () => {
     expect(() => render(props({ selectedId: 'vanished' }))).not.toThrow();
     expect(() => render(props({ selectedId: null }))).not.toThrow();
-  });
-});
-
-describe('docker on the health strip', () => {
-  it('says docker is down, with the reason, instead of counting containers', async () => {
-    const down: StackState = { ...state, dockerUnavailable: 'Cannot connect to the Docker daemon' };
-    const html = renderToStaticMarkup(<Aside {...props({ state: down, items: describeAll(down) })} />);
-    expect(html).toContain('docker down');
-    expect(html).toContain('Cannot connect to the Docker daemon');
   });
 });

@@ -15,7 +15,6 @@ import { HookRoutes } from '../providers/shared/HookRoutes';
 import { ConfigFileError } from '../providers/shared/configFile';
 import { HookServer } from '../server/HookServer';
 import { GitWatcher } from '../git/GitWatcher';
-import { DockerMonitor } from '../docker/DockerMonitor';
 import { PrMonitor } from '../pr/PrMonitor';
 import { GitCliAdapter } from '../adapters/GitCliAdapter';
 import { OsaNotifyAdapter } from '../adapters/OsaNotifyAdapter';
@@ -92,7 +91,7 @@ export class CommandError extends Error {
 type Body = Record<string, unknown>;
 
 /** The sidebar messages the daemon runs itself (see the `message` command). */
-const DAEMON_MESSAGES = ['dockerUp', 'dockerDown', 'reorderSessions', 'reorderWorktrees', 'setupAction', 'refreshDrift', 'forgetWorktree'];
+const DAEMON_MESSAGES = ['reorderSessions', 'reorderWorktrees', 'setupAction', 'refreshDrift', 'forgetWorktree'];
 
 const str = (b: Body, k: string): string | undefined => {
   const v = b[k];
@@ -117,7 +116,7 @@ const windowIndex = (b: Body): number | undefined => {
  * `stackd serve`: the single owner of Stack's state for one user, all repos.
  *
  * Composes the core (session manager, hook server, MCP tools, git watcher,
- * docker and PR monitors, one WorktreeApplicationService per repository) over
+ * PR monitor, one WorktreeApplicationService per repository) over
  * Node adapters, keeps its state in `<configDir>/state.json`, and answers the
  * agents' hooks. The HTTP/SSE API in front of it lives in api.ts; everything
  * it can do is here, as `snapshot()` and `command()`.
@@ -131,7 +130,6 @@ export class StackDaemon {
   readonly registry: WindowRegistry;
   private readonly providers: ProviderFactory;
   private readonly git = new GitWatcher();
-  private readonly docker = new DockerMonitor();
   private readonly pr = new PrMonitor();
   private readonly worktreeStore: WorktreeStore;
   private readonly attention: AttentionNotifier;
@@ -238,7 +236,6 @@ export class StackDaemon {
     this.attention.dispose();
     this.agents.dispose();
     this.git.dispose();
-    this.docker.dispose();
     this.pr.dispose();
     try { this.routes.release(this.hookUrl); } catch { /* best effort */ }
     this.registry.dispose();
@@ -293,7 +290,6 @@ export class StackDaemon {
       host: new HeadlessHost(repoRoot, this.log),
       git: new GitCliAdapter(),
       gitWatcher: this.git,
-      dockerMonitor: this.docker,
       prMonitor: this.pr,
       globalState: stateLike(this.store),
       workspaceState: scoped,

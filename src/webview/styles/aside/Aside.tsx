@@ -111,7 +111,7 @@ export function Aside({ state, loaded, items, controlItem, selectedId, select, d
         ))}
       </div>
 
-      {loaded && items.length > 0 && <HealthStrip items={items} state={state} />}
+      {loaded && items.length > 0 && <HealthStrip items={items} />}
     </div>
   );
 }
@@ -153,13 +153,12 @@ function Row({ d, selected, now, state, select, drag }: {
         </span>
       </button>
 
-      {wt.dockerError && !selected && <div className="fm-row-error as-indent" title={wt.dockerError}>stack: {wt.dockerError}</div>}
       {d.group === 'missing' && <ForgetActions d={d} />}
       {wt.setup && !wt.deleting && <SetupActions d={d} />}
 
       {selected && d.group !== 'missing' && (
         <div className="as-expand">
-          {!wt.isControl && state.host !== 'desktop' && <Details d={d} dockerEnabled={state.dockerEnabled} />}
+          {!wt.isControl && state.host !== 'desktop' && <Details d={d} />}
           <SessionList wt={wt} onSelect={pick} />
           <div className="as-actions">
             <LaunchSplit
@@ -168,7 +167,7 @@ function Row({ d, selected, now, state, select, drag }: {
               installedProviders={state.installedProviders}
               tone="solid"
             />
-            <ActionBar wt={wt} dockerEnabled={state.dockerEnabled} emphasis={d.group === 'review' ? 'diff' : undefined} />
+            <ActionBar wt={wt} emphasis={d.group === 'review' ? 'diff' : undefined} />
           </div>
         </div>
       )}

@@ -27,8 +27,7 @@ Working on several things at once with AI agents gets messy fast: branches colli
 - **PRs and cleanup** — the row shows the branch's PR (open, draft, merged) with a CI dot, and opens it on click. Deleting tells you first what would be lost (uncommitted files, unpushed commits); a merged, clean worktree gets a one-click **Clean up**. A worktree whose folder disappeared shows as *Missing* with a **Forget** button — Stack never deletes one on its own.
 - **Scoped to the active worktree** — text search, Quick Open, and breakpoints are automatically scoped to the worktree you're in, so parallel worktrees don't drown each other out. Editor tabs can be scoped too — see [Switching worktrees](#switching-worktrees).
 - **Diff review panel** — review a worktree's changes in your theme's diff colours, with a folder tree, a *Viewed* checkbox per file, inline or split view, wrap toggle and keyboard navigation; leave per-line comments and send them straight back to the agent, no PR round-trip needed.
-- **Per-worktree debugging** *(optional)* — each worktree gets its own `launch.json` on a unique debug port, wired to its container, so you can step-debug several worktrees at once without ports colliding. Any debugger VS Code supports — Node by default, PHP, Python, Go, whatever your stack runs.
-- **Per-worktree Docker** *(optional)* — start/stop a dedicated compose stack per worktree with auto-generated, collision-free ports.
+- **Per-worktree debugging** *(optional)* — each worktree gets its own `launch.json` on a unique debug port, so you can step-debug several worktrees at once without ports colliding. Any debugger VS Code supports — Node by default, PHP, Python, Go, whatever your stack runs.
 - **Per-worktree setup/teardown** *(optional)* — run a repo-local script when a worktree is created or removed (install deps, copy env, boot services).
 - **Manager agent (MCP)** *(optional)* — let a Claude Code session (the VS Code panel included) create Stack tasks from your tickets, watch them and talk to their agents. See [Manager agent (MCP)](#manager-agent-mcp).
 
@@ -56,7 +55,7 @@ Each worktree joins the window as a folder, and the window is named after the pr
 
 To hand an agent a screenshot, drop the image straight onto its terminal — VS Code opens it as a tab, Stack closes that tab and attaches the file to the agent in that editor group. `Cmd+Alt+V` in the agent's terminal attaches the latest screenshot from your screenshots folder.
 
-For the heavier setup — Docker per worktree, a debugger port per worktree, setup/teardown scripts — open **Stack settings** with the gear next to **+** in the Worktrees header. It prefills what it finds in the repository (compose files, their `${HTTP_PORT}`-style ports, the language stack) and saves the project half to `.stack/config.json` so the whole team inherits it, and your own preferences to your VS Code settings.
+For the heavier setup — a debugger port per worktree, setup/teardown scripts — open **Stack settings** with the gear next to **+** in the Worktrees header. It prefills what it finds in the repository (the language stack) and saves the project half to `.stack/config.json` so the whole team inherits it, and your own preferences to your VS Code settings.
 
 ## Shortcuts and commands
 
@@ -89,7 +88,7 @@ For the heavier setup — Docker per worktree, a debugger port per worktree, set
 | `stack.focusMode` | `false` | Clean-slate switching: close the other worktrees' editor tabs and agent terminals so only the active worktree is on screen (see [Switching worktrees](#switching-worktrees)) |
 | `stack.setupScript` / `stack.teardownScript` | `""` | Script run on worktree create / delete (e.g. `.stack/setup.sh`) |
 | `stack.setupInTerminal` | `false` | Run the setup script in a terminal you can type into, without holding the agent back — for scripts that ask questions |
-| `stack.docker` | — | Per-worktree compose file + auto-generated ports (opt-in; see below) |
+| `stack.ports` / `stack.basePort` / `stack.portStride` | `[]` / `20000` / `100` | Env var names to allocate a port per worktree for (e.g. `HTTP_PORT`), from a block of `portStride` ports per worktree starting at `basePort` |
 | `stack.debugBasePort` | `9898` | First debug port; each worktree takes the next free slot above it |
 | `stack.debugTemplate` | node attach | `launch.json` template generated per worktree (`{{PORT}}`, `{{WORKTREE_PATH}}`); any debugger, see [Debugging](#per-worktree-debugging) |
 
@@ -141,11 +140,11 @@ Then ask, for example:
 |---|---|
 | `stack_status` | Every task: id, name, branch, base, group (needs you / review / working / idle / missing), sessions with state and pending question, diff `+N −M`, PR and CI, ports, ticket |
 | `stack_create_task` | New branch + worktree + agent on a prompt. With a `ticket`, the branch is `<KEY>-<slug>`, the ticket shows as a chip beside the task's name, and its text reaches the worker fenced as reference data. Idempotent per ticket key |
-| `stack_delete_task` | Tears a task down: agent session, tmux, teardown script, docker stack, the git worktree, and — with `delete_branch: true` — its local branch. No confirm dialog; refuses the main worktree |
+| `stack_delete_task` | Tears a task down: agent session, tmux, teardown script, the git worktree, and — with `delete_branch: true` — its local branch. No confirm dialog; refuses the main worktree |
 | `stack_send_to_agent` | Types a message into a task's running agent and submits it (the same path the Review panel uses); if none is running, starts one with the message as its first prompt instead. On a permission prompt, this answers it |
 | `stack_read_agent` | The last lines (≤ 200) of an agent's terminal |
 | `stack_wait` | Blocks until a task goes idle, needs input, or the timeout (≤ 110 s) passes — event-driven, from the agents' own hooks |
-| `stack_env` | For workers: worktree path, branch, ports with URLs, the compose project and a ready `docker compose … logs` command, setup/teardown scripts, test command |
+| `stack_env` | For workers: worktree path, branch, ports with URLs, setup/teardown scripts, test command |
 | `stack_request_review` | For workers: marks the task ready for review with a one-line summary (shown as its row's line) and opens its Review panel |
 
 **Workers get it too.** Every Claude Code or Codex agent Stack starts is given the same server for its own task (`--mcp-config` / `-c mcp_servers.stack.*`, your own MCP servers untouched), and its first prompt asks it to call `stack_request_review` when done. opencode is started without it.
@@ -178,23 +177,19 @@ The base is recorded when the worktree is created, so a worktree cut from `relea
 
 ## Per-repo configuration
 
-For heavier setups (dedicated Docker stack, dependency prep, debug), point the `stack.setupScript` / `stack.teardownScript` and `stack.docker` settings at your own script and compose files — **anywhere in the repo**, wherever you like to keep them.
+For heavier setups (dependency prep, debug), point the `stack.setupScript` / `stack.teardownScript` settings at your own scripts — **anywhere in the repo**, wherever you like to keep them.
 
 The setup script runs in the background, its output in the **Stack** output channel, and the new worktree's agent starts once it has finished — so the agent never wakes up without its `vendor/`, `node_modules/` or `.env`. The worktree's row reads "Preparing… 1:42" meanwhile; if the script fails the row says so, with buttons to show the log, retry, or launch the agent anyway. **Init worktree** re-runs it the same way. A script that asks questions needs `stack.setupInTerminal`, which runs it in a terminal as before and starts the agent straight away.
 
-When it runs your setup script, Stack exports `STACK_REPO_ROOT`, `STACK_WORKTREE_PATH`, `STACK_BRANCH`, `STACK_COMPOSE_PROJECT` and the worktree's auto-generated ports, and the matching debug port is wired into the generated `launch.json`. With Docker configured it also exports `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE`, so a plain `docker compose up -d` in the script starts the very stack the card shows and deleting the worktree stops it (add `--project-directory "$STACK_WORKTREE_PATH"` when the compose file lives in the main repo). Relative paths resolve against the worktree first, then the main repo.
+When it runs your setup script, Stack exports `STACK_REPO_ROOT`, `STACK_WORKTREE_PATH`, `STACK_BRANCH` and the worktree's auto-generated ports, and the matching debug port is wired into the generated `launch.json`. Relative paths resolve against the worktree first, then the main repo.
 
 The teardown script runs in the background and deleting the worktree waits for it — the directory is only removed once the script is done (or after 10 minutes). Its output goes to the **Stack** output channel; a script that fails is reported, and the delete you asked for still happens.
 
-The ▶ on a card runs `docker compose up -d` itself and waits for it: compose's output goes to the **Stack: Docker** output channel, and a stack that does not come up says why — on the card and in a toast with a *Show output* button. Before starting, Stack asks compose for the merged configuration and checks every port it will publish. Compose *adds* the override's `ports` to the base file's instead of replacing them, so a port hard-coded in the base file (`"27017:27017"`) is published by every worktree and the second stack fails; write it as `"${DB_PORT:-27017}:27017"` and add `DB_PORT` to the generated ports, or replace the list in the override with `ports: !override`.
+Each worktree's ports are listed on its card, and clicking one opens `http://localhost:<port>` — the numbers are derived from the same function that builds the scripts' environment, so the card cannot drift from what they were handed. The debug port is shown when you name `DEBUG_PORT` but is not clickable; a debugger listener answers nothing a browser can render.
 
-If the Docker daemon is still starting (Docker Desktop, OrbStack, colima after a reboot), Stack waits a few seconds for it before giving up with a clear message, and nothing it runs against Docker can hang: a stuck `docker compose down` is abandoned after a minute with a warning, so deleting a worktree never sits in "deleting" forever.
+Ports are checked against the machine, not just against Stack's own bookkeeping: every port a worktree will bind is probed before the slot is handed out, and probed again right before a setup script runs. If something has taken one in the meantime — another project's server, a local dev server — the worktree moves to a free slot, its `launch.json` follows, and you get a toast naming the port that was busy. Slots are also reserved across VS Code windows, so two windows creating worktrees at the same moment never get the same one. Re-run your setup script afterwards if it bakes the port into a generated file such as `.env`.
 
-Each worktree's ports are listed on its card, under Docker, and clicking one opens `http://localhost:<port>` — the numbers are derived from the same function that builds the compose environment, so the card cannot drift from what the container actually publishes. The debug port is shown when you name `DEBUG_PORT` but is not clickable; a debugger listener answers nothing a browser can render.
-
-Ports are checked against the machine, not just against Stack's own bookkeeping: every port a worktree will bind is probed before the slot is handed out, and probed again right before a setup script or `compose up` runs. If something has taken one in the meantime — another project's container, a leftover stack from a deleted worktree, a local dev server — the worktree moves to a free slot, its `launch.json` follows, and you get a toast naming the port that was busy. Ports held by the worktree's own running stack don't count as taken. Slots are also reserved across VS Code windows, so two windows creating worktrees at the same moment never get the same one. Re-run your setup script afterwards if it bakes the port into a generated file such as `.env`.
-
-> A `.stack/` folder is a handy place to keep these together. Scripts and compose files can live anywhere; only `.stack/config.json` below is a fixed path.
+> A `.stack/` folder is a handy place to keep these together. Scripts can live anywhere; only `.stack/config.json` below is a fixed path.
 
 ## Per-worktree debugging
 
@@ -221,11 +216,11 @@ PHP with Xdebug against a container, for comparison:
 }
 ```
 
-Name `DEBUG_PORT` in `stack.docker.ports` and the container is handed the same number in its environment, so what your compose file publishes and what the listener waits on cannot drift apart.
+Name `DEBUG_PORT` in `stack.ports` and your scripts are handed the same number in their environment, so what they configure and what the listener waits on cannot drift apart.
 
 ## Sharing the setup with your team
 
-Most of the settings above describe the *project*, not you: where worktrees go, which compose files exist, which branch work starts from, what the setup script is called. Keeping them in your own `settings.json` means a teammate who clones the repo gets an extension that does nothing useful until someone pastes them a copy of your config.
+Most of the settings above describe the *project*, not you: where worktrees go, which ports each gets, which branch work starts from, what the setup script is called. Keeping them in your own `settings.json` means a teammate who clones the repo gets an extension that does nothing useful until someone pastes them a copy of your config.
 
 Put them in **`.stack/config.json`** instead and commit it:
 
@@ -236,13 +231,9 @@ Put them in **`.stack/config.json`** instead and commit it:
   "defaultBaseBranch": "main",
   "setupScript": ".stack/setup.sh",
   "teardownScript": ".stack/teardown.sh",
-  "docker": {
-    "composeFile": "docker-compose.yml",
-    "overrideFile": "docker-compose.worktree.yml",
-    "ports": ["HTTP_PORT", "DB_PORT"],
-    "basePort": 20000,
-    "portStride": 100
-  },
+  "ports": ["HTTP_PORT", "DB_PORT"],
+  "basePort": 20000,
+  "portStride": 100,
   "debugBasePort": 9898
 }
 ```
@@ -251,7 +242,7 @@ Run **Stack: Create Repo Config File** from the command palette to generate it f
 
 **Precedence** is *your explicit setting* → *the repo file* → *the shipped default*. So the repo file gives everyone a sane starting point, and anyone who deliberately sets a value in their own `settings.json` keeps it. Only an explicitly-set value counts; a key you never touched doesn't shadow the repo's.
 
-**Which keys it accepts:** `worktreesDirectory`, `defaultBaseBranch`, `setupScript`, `setupInTerminal`, `teardownScript`, `docker`, `debugBasePort`, `debugTemplate`. Every key is optional, and `docker` merges key by key — naming just your compose file won't reset `basePort`.
+**Which keys it accepts:** `worktreesDirectory`, `defaultBaseBranch`, `setupScript`, `setupInTerminal`, `teardownScript`, `ports`, `basePort`, `portStride`, `debugBasePort`, `debugTemplate`. Every key is optional.
 
 **Which it doesn't:** `defaultProvider`, the per-agent commands, `notifyOnAttention`, `focusMode`, `scopeSearchToActiveWorktree`. Which agent you reach for and where its binary lives are properties of your machine, and a repository you cloned has no business overriding them. Put one in the file and Stack tells you so rather than quietly ignoring it.
 

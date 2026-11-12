@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  attentionOf, attentionQueue, countByGroup, describe as describeWt, describeAll, describeStack, formatAge, formatElapsed,
+  attentionOf, attentionQueue, countByGroup, describe as describeWt, describeAll, formatAge, formatElapsed,
   groupOf, nextInQueue, parseAttention, primaryAgent, sessionToOpen,
 } from '../../src/webview/derive';
 import type { AgentState, SessionItem, WorktreeItem } from '../../src/webview/types';
@@ -11,7 +11,7 @@ const session = (state: AgentState, over: Partial<SessionItem> = {}): SessionIte
 function wt(over: Partial<WorktreeItem> = {}): WorktreeItem {
   return {
     id: 'a', branch: 'feat/a', path: '/r/a', isMain: false, deleting: false, agent: 'idle',
-    agentCount: 0, terminalCount: 0, sessions: [], ports: [], docker: [],
+    agentCount: 0, terminalCount: 0, sessions: [], ports: [],
     git: { hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 },
     ...over,
   };
@@ -190,40 +190,9 @@ describe('describe', () => {
     expect(describeWt(wt({ deleting: true, setup: { state: 'running', startedAt: 1 } })).line).toBe('Deleting…');
   });
 
-  it('describes every worktree of a state, passing docker availability along', () => {
-    const all = describeAll({ worktrees: [wt(), wt({ id: 'b' })], dockerUnavailable: 'daemon down' });
+  it('describes every worktree of a state', () => {
+    const all = describeAll({ worktrees: [wt(), wt({ id: 'b' })] });
     expect(all.map((d) => d.wt.id)).toEqual(['a', 'b']);
-    expect(all[0].stack.text).toBe('unknown');
-  });
-});
-
-describe('describeStack', () => {
-  const c = (state: string, exitCode?: number) => ({ name: `n-${state}`, state, exitCode });
-
-  it('says what docker is doing before anything else', () => {
-    expect(describeStack(wt({ dockerBusy: 'starting', dockerError: 'x' }))).toMatchObject({ text: 'starting…', tone: 'warn' });
-    expect(describeStack(wt({ dockerBusy: 'stopping' })).text).toBe('stopping…');
-  });
-
-  it('surfaces the error compose gave', () => {
-    expect(describeStack(wt({ dockerError: 'port is already allocated' }))).toEqual({
-      text: 'failed', tone: 'bad', title: 'port is already allocated',
-    });
-  });
-
-  it('reads an empty stack as unknown when docker is not answering, stopped when ports exist, nothing otherwise', () => {
-    expect(describeStack(wt(), 'daemon down')).toMatchObject({ text: 'unknown', tone: 'muted' });
-    expect(describeStack(wt({ ports: [{ name: 'HTTP_PORT', port: 1, openable: true }] }))).toMatchObject({ text: 'stopped' });
-    expect(describeStack(wt())).toMatchObject({ text: '—' });
-  });
-
-  it('counts running containers, and calls out a crash', () => {
-    expect(describeStack(wt({ docker: [c('running'), c('running')] }))).toMatchObject({ text: '2/2 up', tone: 'ok' });
-    expect(describeStack(wt({ docker: [c('running'), c('created')] }))).toMatchObject({ text: '1/2 up', tone: 'warn' });
-    expect(describeStack(wt({ docker: [c('exited', 0)] }))).toMatchObject({ text: 'stopped', tone: 'muted' });
-    expect(describeStack(wt({ docker: [c('exited', 0), c('exited')] })).title).toBe('2 containers, none running');
-    expect(describeStack(wt({ docker: [c('exited')] })).title).toBe('1 container, none running');
-    expect(describeStack(wt({ docker: [c('running'), c('exited', 137)] }))).toMatchObject({ text: '1 crashed', tone: 'bad' });
   });
 });
 

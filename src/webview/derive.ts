@@ -186,7 +186,6 @@ export interface Described {
   /** Lines when git could count them, else the number of files touched. */
   diff?: { added: number; removed: number } | { files: number };
   base: { text: string; tone: Tone; title: string };
-  stack: { text: string; tone: Tone; title: string };
   /** "http :8082" style, in the order the settings name them. */
   ports: Array<{ label: string; port: number; openable: boolean }>;
   pr?: DescribedPr;
@@ -233,25 +232,7 @@ function describeBase(wt: WorktreeItem): Described['base'] {
   return { text: `up to date with ${base.ref}`, tone: 'ok', title };
 }
 
-/** "3/3 up", "stopped", "starting…", "1 crashed" — and why, in the tooltip. */
-export function describeStack(wt: WorktreeItem, dockerUnavailable?: string): Described['stack'] {
-  if (wt.dockerBusy) return { text: wt.dockerBusy === 'starting' ? 'starting…' : 'stopping…', tone: 'warn', title: 'Docker is working on this stack' };
-  if (wt.dockerError) return { text: 'failed', tone: 'bad', title: wt.dockerError };
-  const total = wt.docker.length;
-  if (total === 0) {
-    // An empty list while docker is unreachable means "unknown", not "down".
-    if (dockerUnavailable) return { text: 'unknown', tone: 'muted', title: `Docker is not answering: ${dockerUnavailable}` };
-    return { text: wt.ports.length > 0 ? 'stopped' : '—', tone: 'muted', title: 'No containers' };
-  }
-  const up = wt.docker.filter((c) => c.state === 'running').length;
-  const crashed = wt.docker.filter((c) => c.state === 'exited' && (c.exitCode ?? 0) !== 0).length;
-  if (crashed > 0) return { text: `${crashed} crashed`, tone: 'bad', title: `${up}/${total} containers up` };
-  if (up === total) return { text: `${up}/${total} up`, tone: 'ok', title: 'All containers are running' };
-  if (up === 0) return { text: 'stopped', tone: 'muted', title: `${total} container${total === 1 ? '' : 's'}, none running` };
-  return { text: `${up}/${total} up`, tone: 'warn', title: 'Some containers are not running' };
-}
-
-export function describe(wt: WorktreeItem, dockerUnavailable?: string): Described {
+export function describe(wt: WorktreeItem): Described {
   const group = groupOf(wt);
   const agent = primaryAgent(wt);
   return {
@@ -264,15 +245,14 @@ export function describe(wt: WorktreeItem, dockerUnavailable?: string): Describe
     attention: group === 'needs' ? attentionOf(wt) : undefined,
     diff: describeDiff(wt),
     base: describeBase(wt),
-    stack: describeStack(wt, dockerUnavailable),
-    // HTTP_PORT reads as "http", beside lowercase container names.
+    // HTTP_PORT reads as "http".
     ports: wt.ports.map((p) => ({ label: p.name.replace(/_PORT$/, '').toLowerCase(), port: p.port, openable: p.openable })),
     pr: describePr(wt.pr),
   };
 }
 
 export function describeAll(state: StackState): Described[] {
-  return state.worktrees.map((wt) => describe(wt, state.dockerUnavailable));
+  return state.worktrees.map((wt) => describe(wt));
 }
 
 export function countByGroup(items: Described[]): Record<WorktreeGroup, number> {

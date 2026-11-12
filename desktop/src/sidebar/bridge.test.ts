@@ -48,7 +48,7 @@ describe('translate', () => {
     expect(translate({ type: 'deleteWorktree', worktreeId: 'zzz' }, ctx)).toEqual({ kind: 'none' });
   });
   it('messages stackd runs itself go through the `message` command', () => {
-    const msg = { type: 'dockerUp', worktreeId: 'ask' } as const;
+    const msg = { type: 'refreshDrift', worktreeId: 'ask' } as const;
     expect(translate(msg, ctx)).toEqual({ kind: 'command', name: 'message', body: { message: msg, repo: '/r' } });
     expect(translate({ type: 'reorderWorktrees', orderedIds: ['a'] }, ctx)).toMatchObject({ name: 'message' });
     expect(translate({ type: 'forgetWorktree', worktreeId: 'gone' }, ctx)).toMatchObject({ name: 'message' });

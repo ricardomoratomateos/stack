@@ -93,7 +93,6 @@ export class WorktreeManager {
         path: wt.path,
         repoRoot,
         debugPort,
-        dockerProjectName: wt.branch.replace(/[^a-z0-9-]/gi, '-').toLowerCase(),
         createdAt: Date.now(),
         isMain,
       };
@@ -181,7 +180,6 @@ export class WorktreeManager {
         path: worktreePath,
         repoRoot,
         debugPort,
-        dockerProjectName: branch.replace(/[^a-z0-9-]/gi, '-').toLowerCase(),
         createdAt: Date.now(),
         // Recorded now, because it is unknowable later: git keeps no note of
         // what a branch was cut from, and the setting this came from will have
@@ -216,7 +214,6 @@ export class WorktreeManager {
       path: worktreePath,
       repoRoot,
       debugPort: await this.portAllocator.allocate(),
-      dockerProjectName: branch.replace(/[^a-z0-9-]/gi, '-').toLowerCase(),
       createdAt: Date.now(),
     };
 
@@ -231,10 +228,9 @@ export class WorktreeManager {
   /**
    * Re-check the ports this worktree is about to bind and move it to a free
    * slot if something grabbed them since it was allocated. Worth doing right
-   * before a setup script or `compose up`: the slot may have been picked
-   * minutes (or days) earlier, and the thief is usually invisible to the port
-   * registry — another project's container, or a leftover stack from a worktree
-   * that was deleted without its containers coming down.
+   * before a setup script: the slot may have been picked minutes (or days)
+   * earlier, and the thief is usually invisible to the port registry —
+   * another project's server, or a leftover process from a deleted worktree.
    *
    * Regenerates launch.json so the debug listener follows the new port.
    * Returns the worktree unchanged when its block is still free.
@@ -245,8 +241,8 @@ export class WorktreeManager {
   ): Promise<{ worktree: Worktree; movedFrom?: number }> {
     if (worktree.isMain || worktree.debugPort <= 0) return { worktree };
 
-    // Ports the worktree's own stack already holds are busy by definition;
-    // counting them moved a running stack to a fresh slot on every ▶.
+    // Ports the worktree itself already holds are busy by definition;
+    // counting them would move it to a fresh slot on every re-check.
     const busyPort = await this.portAllocator.firstBusyPort(worktree.debugPort, ownPorts);
     if (busyPort === undefined) return { worktree };
 

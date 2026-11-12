@@ -8,8 +8,8 @@ import * as path from 'node:path';
  * against (globalState) only learns about a worktree after it is added. Two
  * windows creating a worktree at the same moment therefore read the same
  * registry, probed the same free ports and were handed the same slot — two
- * worktrees sharing one block of docker ports, failing minutes later inside
- * `compose up`. The probe cannot catch it: nothing is listening yet.
+ * worktrees sharing one block of ports, failing minutes later when the second
+ * binds them. The probe cannot catch it: nothing is listening yet.
  */
 export interface SharedPortReservations {
   /** Claims `port` for this window; false when another live window holds it. */

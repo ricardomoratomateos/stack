@@ -23,7 +23,7 @@ export interface ManagerDeps {
     branch: string; title: string; description: string; baseBranch?: string;
     provider?: ProviderId; ticket?: WorktreeTicket; silent: true; select: false;
   }): Promise<{ ok: boolean; error?: string; worktree?: Worktree; started?: Promise<StartOutcome> }>;
-  /** Full teardown, no confirm dialog: session, docker stack, git worktree and (if asked) its branch. */
+  /** Full teardown, no confirm dialog: session, git worktree and (if asked) its branch. */
   deleteWorktree(worktreeId: string, opts: { deleteBranch: boolean }): Promise<{ ok: boolean; error?: string }>;
   /** Starts an agent in an existing, idle task with `prompt` as its first message. False if the task is unknown. */
   launchAgent(worktreeId: string, prompt: string): Promise<boolean>;

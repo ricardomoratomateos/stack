@@ -1,5 +1,5 @@
 import { IWorktreeRepository } from '../ports/IWorktreeRepository';
-import { portBlockFor } from '../docker/dockerCompose';
+import { portBlockFor } from './namedPorts';
 import { isPortFree as probePort } from './portProbe';
 import type { StackConfig } from '../types';
 import type { SharedPortReservations } from './portReservations';
@@ -12,8 +12,8 @@ const MAX_SLOTS = 500;
 
 export interface PortAllocatorOptions {
   /**
-   * Current config, re-read on every allocation so the derived docker block is
-   * validated too. Omit and only the debug port itself is checked.
+   * Current config, re-read on every allocation so the derived named-port
+   * block is validated too. Omit and only the debug port itself is checked.
    */
   config?: () => StackConfig;
   /** OS-level availability probe. Injected in tests to keep them off real sockets. */
@@ -38,8 +38,8 @@ export class PortAllocator {
 
   /**
    * `basePort` may be a getter so `stack.debugBasePort` is read per
-   * allocation. It used to be captured once at activation while the docker
-   * block derivation (dockerPortsFor) read the setting live, so changing it
+   * allocation. It used to be captured once at activation while the named-port
+   * block derivation (namedPortsFor) read the setting live, so changing it
    * mid-session made the two disagree about which block a slot owns.
    */
   constructor(store: PortRegistryReader, basePort: number | (() => number), options: PortAllocatorOptions = {}) {
@@ -52,7 +52,7 @@ export class PortAllocator {
    * The lowest slot that is free both in the registry *and* on the machine.
    *
    * The registry alone is not enough: it only knows worktrees Stack created,
-   * so it cannot see another project's containers, a leftover stack from a
+   * so it cannot see another project's servers, a leftover process from a
    * deleted worktree, or any other local listener. Every port the slot will
    * bind is probed, not just the debug one — a slot is only usable if its
    * whole block is.
@@ -72,8 +72,8 @@ export class PortAllocator {
       // Claim the candidate BEFORE probing it. The probe is async and the
       // caller only writes to the store afterwards, so two creations started
       // together used to read the same registry, probe the same free ports and
-      // be handed the same slot — two worktrees with one block of docker ports,
-      // failing minutes later inside `compose up`.
+      // be handed the same slot — two worktrees with one block of ports,
+      // failing minutes later when the second one binds them.
       this.reserved.add(port);
       // Then across windows: the registry is globalState, which a creation in
       // another window reaches only after its own allocate() returned.
@@ -91,7 +91,7 @@ export class PortAllocator {
     );
   }
 
-  /** Every port a worktree on this slot will bind (debug + its docker block). */
+  /** Every port a worktree on this slot will bind (debug + its named ports). */
   blockFor(debugPort: number): number[] {
     const config = this.options.config?.();
     return config ? portBlockFor(debugPort, config) : [debugPort];
@@ -100,11 +100,11 @@ export class PortAllocator {
   /**
    * The first port of the slot's block that cannot be bound, or undefined when
    * the whole block is free. Used both to pick a slot and to re-check one long
-   * after it was picked — a setup script can run for minutes before docker
+   * after it was picked — a setup script can run for minutes before anything
    * finally reaches for the port.
    *
-   * `ignore` lists ports known to be held by the worktree itself (its own
-   * running containers, its debug listener): busy, but not a collision.
+   * `ignore` lists ports known to be held by the worktree itself (its debug
+   * listener): busy, but not a collision.
    */
   async firstBusyPort(debugPort: number, ignore: ReadonlySet<number> = new Set()): Promise<number | undefined> {
     const probe = this.options.isPortFree ?? probePort;

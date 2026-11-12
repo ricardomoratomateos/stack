@@ -4,8 +4,8 @@ import * as path from 'node:path';
 import type { StackConfig } from '../types';
 import type { ConfigSource } from '../config/ConfigSource';
 import { PROVIDER_IDS, type ProviderId } from '../ports/IAgentProvider';
-import { PROJECT_DEFAULTS, DOCKER_DEFAULTS } from '../config/defaults';
-import { readRepoConfig } from '../config/RepoConfig';
+import { PROJECT_DEFAULTS } from '../config/defaults';
+import { legacyPorts, readRepoConfig } from '../config/RepoConfig';
 
 /** `~/.config/stack/settings.json`: the user's own settings for `stackd`. */
 export const DEFAULT_SETTINGS_PATH = path.join(os.homedir(), '.config', 'stack', 'settings.json');
@@ -47,7 +47,9 @@ export class NodeConfig implements ConfigSource {
       if (explicit !== undefined && typeof explicit === typeof PROJECT_DEFAULTS[key]) return explicit as (typeof PROJECT_DEFAULTS)[K];
       return (repo[key] as (typeof PROJECT_DEFAULTS)[K] | undefined) ?? PROJECT_DEFAULTS[key];
     };
-    const userDocker = user('docker');
+    // Named ports from before they left the retired `docker` block; a top-level value wins.
+    const userLegacy = legacyPorts(user('docker'));
+    const portNames = user('ports');
     const provider = user('defaultProvider');
     return {
       worktreesDirectory: pick('worktreesDirectory'),
@@ -64,11 +66,11 @@ export class NodeConfig implements ConfigSource {
       scopeSearchToActiveWorktree: bool(user('scopeSearchToActiveWorktree'), true),
       focusMode: bool(user('focusMode'), false),
       sessionTabs: user('sessionTabs') === 'single' ? 'single' : 'perSession',
-      docker: {
-        ...DOCKER_DEFAULTS,
-        ...(repo.docker ?? {}),
-        ...(userDocker && typeof userDocker === 'object' ? (userDocker as object) : {}),
-      },
+      ports: Array.isArray(portNames) && portNames.every((n) => typeof n === 'string')
+        ? (portNames as string[])
+        : userLegacy.ports ?? repo.ports ?? PROJECT_DEFAULTS.ports,
+      basePort: user('basePort') === undefined && userLegacy.basePort !== undefined ? userLegacy.basePort : pick('basePort'),
+      portStride: user('portStride') === undefined && userLegacy.portStride !== undefined ? userLegacy.portStride : pick('portStride'),
       debugBasePort: pick('debugBasePort'),
       debugTemplate: pick('debugTemplate'),
     };

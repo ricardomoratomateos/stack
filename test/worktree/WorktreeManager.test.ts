@@ -140,7 +140,7 @@ function makeWorktree(overrides: Partial<Worktree> = {}): Worktree {
     path: '/repo/zer/feat-x',
     repoRoot: '/repo',
     debugPort: 9899,
-    dockerProjectName: 'feat-x',
+   
     createdAt: 1,
     ...overrides,
   };
@@ -313,7 +313,7 @@ describe('create', () => {
       const existingPath = path.join(REPO, 'zer', 'feat-x');
       const tracked: Worktree = {
         id: 'existing-id', branch: 'feat/x', path: existingPath, repoRoot: REPO,
-        debugPort: 9950, dockerProjectName: 'feat-x', createdAt: 1,
+        debugPort: 9950, createdAt: 1,
       };
       store = makeStoreStub([tracked]);
       git.listWorktrees.mockReturnValue([{ path: existingPath, branch: 'feat/x', head: 'abc' }]);
@@ -352,11 +352,6 @@ describe('create', () => {
   it('uses an absolute worktreesDirectory as-is', async () => {
     const wt = await mgr(makeConfigStub({ worktreesDirectory: '/abs/wts' })).create('a', REPO);
     expect(wt.path).toBe(path.join('/abs/wts', 'a'));
-  });
-
-  it('derives dockerProjectName (lowercase, non [a-z0-9-] → -)', async () => {
-    const wt = await mgr().create('Feat/X_1', REPO);
-    expect(wt.dockerProjectName).toBe('feat-x-1');
   });
 
   it('generates launch.json and settings.json', async () => {
@@ -499,7 +494,6 @@ describe('reconcile', () => {
     expect(main.branch).toBe('main');
     expect(linked.isMain).toBe(false);
     expect(linked.branch).toBe('feat/x');
-    expect(linked.dockerProjectName).toBe('feat-x');
     expect(linked.repoRoot).toBe(REPO);
     expect(typeof linked.id).toBe('string');
     expect(linked.id).not.toBe('');

@@ -16,7 +16,8 @@ describe('NodeConfig', () => {
     const c = new NodeConfig(() => dir, path.join(dir, 'none.json')).get();
     expect(c.defaultProvider).toBe('claude');
     expect(c.worktreesDirectory).toBe('.worktrees');
-    expect(c.docker.basePort).toBe(20000);
+    expect(c.basePort).toBe(20000);
+    expect(c.ports).toEqual([]);
   });
 
   it('layers user settings over the repo config over defaults', () => {
@@ -40,6 +41,19 @@ describe('NodeConfig', () => {
     expect(c.defaultProvider).toBe('claude');
     expect(c.debugBasePort).toBe(9898);
   });
+
+  it('takes named ports from the top level, or from a retired docker block, without choking on its compose keys', () => {
+    fs.mkdirSync(path.join(dir, '.stack'));
+    fs.writeFileSync(path.join(dir, '.stack', 'config.json'), JSON.stringify({ version: 1, docker: { composeFile: 'c.yml', ports: ['HTTP_PORT'], basePort: 31000 } }));
+    const settings = path.join(dir, 'settings.json');
+    fs.writeFileSync(settings, JSON.stringify({ 'stack.docker': { overrideFile: 'o.yml', portStride: 7 } }));
+    let c = new NodeConfig(() => dir, settings).get();
+    expect(c).toMatchObject({ ports: ['HTTP_PORT'], basePort: 31000, portStride: 7 });
+    expect(c).not.toHaveProperty('docker');
+    fs.writeFileSync(settings, JSON.stringify({ ports: ['API_PORT'], portStride: 3, docker: { portStride: 7 } }));
+    c = new NodeConfig(() => dir, settings).get();
+    expect(c).toMatchObject({ ports: ['API_PORT'], basePort: 31000, portStride: 3 });
+  });
 });
 
 describe('MemoryStore / readVsCodeGlobalState', () => {
@@ -60,7 +74,7 @@ describe('MemoryStore / readVsCodeGlobalState', () => {
 describe('collectStatus', () => {
   const repo = '/r';
   const wt = (id: string, extra: object = {}) => ({
-    id, branch: `b-${id}`, path: `/r/.worktrees/${id}`, repoRoot: repo, debugPort: 1, dockerProjectName: id, createdAt: 0, ...extra,
+    id, branch: `b-${id}`, path: `/r/.worktrees/${id}`, repoRoot: repo, debugPort: 1, createdAt: 0, ...extra,
   });
   const tmux = (sessions: Record<string, Array<{ index: number; name: string }>>): ISessionManager => ({
     hasSession: async (n: string) => n in sessions,

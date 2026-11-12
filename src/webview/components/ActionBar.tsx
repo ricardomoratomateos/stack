@@ -3,12 +3,6 @@ import { send } from '../vscode';
 import type { WorktreeItem } from '../types';
 import { MenuItem, MenuPanel, MenuSeparator, useDropdown } from './Menu';
 
-/**
- * Whether the stack is up, for the one start/stop control. Any running
- * container counts: a half-up stack is stopped, not started again.
- */
-export const stackRunning = (wt: WorktreeItem) => wt.docker.some((c) => c.state === 'running');
-
 interface Action {
   id: string;
   icon: string;
@@ -19,28 +13,18 @@ interface Action {
 }
 
 /** Every worktree action, most used first: the end of the list is what overflows first. */
-export function worktreeActions(wt: WorktreeItem, dockerEnabled?: boolean): Action[] {
-  // Not a worktree: no diff, no docker, no setup, no branch to delete.
+export function worktreeActions(wt: WorktreeItem): Action[] {
+  // Not a worktree: no diff, no setup, no branch to delete.
   if (wt.isControl) {
     return [
       { id: 'terminal', icon: 'terminal', label: 'Open terminal', run: () => send({ type: 'openTerminal', worktreeId: wt.id }) },
       { id: 'rename', icon: 'edit', label: 'Rename / set title', run: () => send({ type: 'renameWorktree', worktreeId: wt.id }) },
     ];
   }
-  const running = stackRunning(wt);
   const actions: Action[] = [
     { id: 'terminal', icon: 'terminal', label: 'Open terminal', run: () => send({ type: 'openTerminal', worktreeId: wt.id }) },
     { id: 'diff', icon: 'git-compare', label: 'Review diff & comment', run: () => send({ type: 'openDiff', worktreeId: wt.id }) },
   ];
-  if (dockerEnabled) {
-    actions.push({
-      id: 'docker',
-      icon: wt.dockerBusy ? 'loading codicon-modifier-spin' : running ? 'debug-stop' : 'play',
-      label: wt.dockerBusy ? `Docker is ${wt.dockerBusy} the stack` : running ? 'Stop containers' : 'Start containers',
-      disabled: !!wt.dockerBusy,
-      run: () => send({ type: running ? 'dockerDown' : 'dockerUp', worktreeId: wt.id }),
-    });
-  }
   if (!wt.isMain) {
     actions.push({ id: 'setup', icon: 'zap', label: 'Run setup script', run: () => send({ type: 'initWorktree', worktreeId: wt.id }) });
   }
@@ -73,9 +57,8 @@ export function visibleCount(width: number | undefined, count: number): number {
  * given: everything inline when it fits, and a "⋯" only for what does not —
  * not a menu by default that hides actions there was room for.
  */
-export function ActionBar({ wt, dockerEnabled, className = '', emphasis }: {
+export function ActionBar({ wt, className = '', emphasis }: {
   wt: WorktreeItem;
-  dockerEnabled?: boolean;
   className?: string;
   /** The action the worktree's state calls for (e.g. 'diff' when it is ready for review), drawn in the accent. */
   emphasis?: string;
@@ -92,7 +75,7 @@ export function ActionBar({ wt, dockerEnabled, className = '', emphasis }: {
     return () => ro.disconnect();
   }, []);
 
-  const actions = worktreeActions(wt, dockerEnabled);
+  const actions = worktreeActions(wt);
   const shown = visibleCount(width, actions.length);
   const inline = actions.slice(0, shown);
   const overflow = actions.slice(shown);

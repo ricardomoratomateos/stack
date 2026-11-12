@@ -38,7 +38,7 @@ const wt: Worktree = {
   path: '/nonexistent/wt-1',
   repoRoot: '/nonexistent/repo',
   debugPort: 9898,
-  dockerProjectName: 'feat-login',
+ 
   createdAt: 0,
 };
 const SESSION = 'stack-wt-1'; // TmuxManager.sessionName('wt-1')
@@ -49,7 +49,7 @@ const wt2: Worktree = {
   path: '/nonexistent/wt-2',
   repoRoot: '/nonexistent/repo',
   debugPort: 9899,
-  dockerProjectName: 'other',
+ 
   createdAt: 0,
 };
 

@@ -23,7 +23,7 @@ const baseName = (p: string) => p.replace(/\/+$/, '').split('/').pop() || p;
 interface Row { repo: string; d: Described }
 
 function rows(snapshot: Snapshot | null): Row[] {
-  return (snapshot?.repos ?? []).flatMap((r) => r.state.worktrees.map((wt) => ({ repo: baseName(r.repoRoot), d: describe(wt, r.state.dockerUnavailable) })));
+  return (snapshot?.repos ?? []).flatMap((r) => r.state.worktrees.map((wt) => ({ repo: baseName(r.repoRoot), d: describe(wt) })));
 }
 
 

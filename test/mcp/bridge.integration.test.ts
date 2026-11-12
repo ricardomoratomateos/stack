@@ -44,11 +44,11 @@ describe('stack-mcp bridge over stdio, against a real window', () => {
       define: { 'process.env.STACK_MCP_VERSION': '"it"' },
     });
 
-    const wt: Worktree = { id: 'wt-1', branch: 'feat/x', path: path.join(repo, '.worktrees', 'feat-x'), repoRoot: repo, debugPort: 1, dockerProjectName: 'x', createdAt: 1 };
+    const wt: Worktree = { id: 'wt-1', branch: 'feat/x', path: path.join(repo, '.worktrees', 'feat-x'), repoRoot: repo, debugPort: 1, createdAt: 1 };
     const item = {
       id: 'wt-1', branch: 'feat/x', path: wt.path, isMain: false, deleting: false, agent: 'active', agentCount: 1, terminalCount: 0,
       sessions: [{ name: 'claude', kind: 'agent', provider: 'claude', state: 'active', index: 1 }],
-      git: { hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 }, docker: [], ports: [], pr: null,
+      git: { hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 }, ports: [], pr: null,
     } as WorktreeItem;
     const tools = new ManagerTools({
       repoRoot: () => repo,

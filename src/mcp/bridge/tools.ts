@@ -70,7 +70,7 @@ export const TOOLS: ToolDef[] = [
     name: 'stack_delete_task',
     title: 'Stack: delete task',
     description:
-      'Tear down a task completely: kills its agent session(s) and tmux windows, runs its teardown script if any, brings its docker compose stack down, '
+      'Tear down a task completely: kills its agent session(s) and tmux windows, runs its teardown script if any, '
       + 'removes the git worktree, and — only if `delete_branch` is true — deletes its local branch too (never touches the remote). '
       + 'Irreversible: uncommitted changes are always lost with the worktree, and with `delete_branch` so are any commits that exist only on that branch. '
       + 'Check stack_status first (diff, PR state) before setting `delete_branch` on one that was never merged or pushed. Refuses the main worktree. '
@@ -130,7 +130,7 @@ export const TOOLS: ToolDef[] = [
     name: 'stack_env',
     title: 'Stack: task environment',
     description:
-      'For the agent working in a Stack task: its worktree path, branch and base, its ports by name with URLs, the Docker Compose project with ready-made `docker compose … logs` and `ps` commands, '
+      'For the agent working in a Stack task: its worktree path, branch and base, its ports by name with URLs, '
       + 'the setup/teardown scripts, and the test command when the repository has one. task_id defaults to this agent\'s own task.',
     inputSchema: { task_id: taskId.optional(), repo },
     annotations: { readOnlyHint: true, openWorldHint: false },
