@@ -1,5 +1,4 @@
 import type { ProviderId } from '../ports/IAgentProvider';
-import type { SidebarStyle } from '../sidebarStyle';
 
 /** Everything the panel needs to render, and re-sent whenever a setting changes. */
 export interface NewTaskInit {
@@ -7,8 +6,6 @@ export interface NewTaskInit {
   branches: string[];
   /** Preselected base. */
   baseBranch: string;
-  /** `stack.sidebarStyle`: the panel wears the same accent as the sidebar. */
-  sidebarStyle: SidebarStyle;
   /** Agent preselected in the picker (`stack.defaultProvider`). */
   defaultProvider: ProviderId;
   /** Agents whose command resolves on PATH; the rest are dimmed. */

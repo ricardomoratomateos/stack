@@ -4,7 +4,6 @@ import * as path from 'node:path';
 import type { StackConfig } from '../types';
 import type { ConfigSource } from '../config/ConfigSource';
 import { PROVIDER_IDS, type ProviderId } from '../ports/IAgentProvider';
-import { normalizeSidebarStyle } from '../sidebarStyle';
 import { PROJECT_DEFAULTS, DOCKER_DEFAULTS } from '../config/defaults';
 import { readRepoConfig } from '../config/RepoConfig';
 
@@ -65,7 +64,6 @@ export class NodeConfig implements ConfigSource {
       scopeSearchToActiveWorktree: bool(user('scopeSearchToActiveWorktree'), true),
       focusMode: bool(user('focusMode'), false),
       sessionTabs: user('sessionTabs') === 'single' ? 'single' : 'perSession',
-      sidebarStyle: normalizeSidebarStyle(typeof user('sidebarStyle') === 'string' ? (user('sidebarStyle') as string) : undefined),
       docker: {
         ...DOCKER_DEFAULTS,
         ...(repo.docker ?? {}),

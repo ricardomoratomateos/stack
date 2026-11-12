@@ -450,15 +450,6 @@ pub async fn stackd_start_now(app: AppHandle) -> Result<(), String> {
     crate::launchd::start_now(&setup)
 }
 
-/// The user's VS Code `settings.json` (JSONC, parsed by the frontend), or `None` when there is none.
-/// Read-only: the app takes `stack.sidebarStyle` from it.
-#[tauri::command]
-pub fn vscode_settings() -> Option<String> {
-    let home = std::env::var_os("HOME")?;
-    let path = std::path::Path::new(&home).join("Library/Application Support/Code/User/settings.json");
-    std::fs::read_to_string(path).ok()
-}
-
 // ── ~/.config/stack/settings.json (what stackd reads; the Settings screen edits it) ──
 
 /// `$STACKD_CONFIG_DIR/settings.json`, else `~/.config/stack/settings.json`.
@@ -540,8 +531,8 @@ mod settings_tests {
 
     #[test]
     fn merge_sets_keeps_unknown_and_drops_prefixed_twin() {
-        let out = merge_settings(obj(json!({"stack.sidebarStyle": "claude", "other": 1, "defaultBaseBranch": "main"})), &obj(json!({"sidebarStyle": "mission", "stack.defaultBaseBranch": "dev"})));
-        assert_eq!(Value::Object(out), json!({"sidebarStyle": "mission", "other": 1, "defaultBaseBranch": "dev"}));
+        let out = merge_settings(obj(json!({"stack.claudeCommand": "claude", "other": 1, "defaultBaseBranch": "main"})), &obj(json!({"claudeCommand": "cl", "stack.defaultBaseBranch": "dev"})));
+        assert_eq!(Value::Object(out), json!({"claudeCommand": "cl", "other": 1, "defaultBaseBranch": "dev"}));
     }
 
     #[test]

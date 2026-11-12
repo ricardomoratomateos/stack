@@ -1196,7 +1196,6 @@ export class WorktreeApplicationService implements DiffPanelHost {
       installedProviders: (this.deps.installedProviders ?? installedProviders)(config),
       dockerEnabled: dockerOn,
       dockerUnavailable: dockerOn ? this.deps.dockerMonitor.unavailable() : undefined,
-      sidebarStyle: config.sidebarStyle,
       branches: this.branchOptions?.branches,
       baseBranch: this.branchOptions?.base,
     };
@@ -1343,12 +1342,11 @@ export class WorktreeApplicationService implements DiffPanelHost {
     if (copy === 'Copy command') await this.deps.host.writeClipboard(install);
   }
 
-  /** Everything the new-task panel renders from: branches, accent, and which agents can run. */
+  /** Everything the new-task panel renders from: branches and which agents can run. */
   newTaskInit(): NewTaskInit {
     const config = this.deps.config.get();
     return {
       ...this.newTaskBranchOptions(),
-      sidebarStyle: config.sidebarStyle,
       defaultProvider: config.defaultProvider,
       installedProviders: (this.deps.installedProviders ?? installedProviders)(config),
     };

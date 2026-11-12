@@ -29,7 +29,7 @@ function changesText(d: Described): string {
 /**
  * What the selected worktree is sitting on: drift against its base, local
  * changes, the docker stack (with its start/stop and every container), the
- * ports it owns and its PR. Every layout shows this for the selected worktree,
+ * ports it owns and its PR. The sidebar shows this for the selected worktree,
  * so none of it depends on which look is chosen.
  */
 export function Details({ d, dockerEnabled }: { d: Described; dockerEnabled?: boolean }) {
@@ -161,12 +161,8 @@ const CI_TEXT: Record<NonNullable<DescribedPr['ci']>, string> = {
 /**
  * The PR as one clickable token — "#42 open", with a dot for its checks and a
  * mark when a reviewer asked for changes — that opens it on GitHub.
- *
- * `inCard` is for a badge drawn inside a card's own button (mission's metadata
- * grid): a button cannot hold another, so it is a span that keeps the click to
- * itself. The keyboard reaches the same link through the details block.
  */
-export function PrBadge({ worktreeId, pr, inCard }: { worktreeId: string; pr: DescribedPr; inCard?: boolean }) {
+export function PrBadge({ worktreeId, pr }: { worktreeId: string; pr: DescribedPr }) {
   const label = pr.draft ? 'draft' : pr.state;
   const title = [
     `Pull request #${pr.number} is ${label}`,
@@ -186,14 +182,12 @@ export function PrBadge({ worktreeId, pr, inCard }: { worktreeId: string; pr: De
     </>
   );
   const attrs = { className: 'fm-pr', 'data-state': pr.state, 'data-draft': pr.draft || undefined, title, onClick: open };
-  return inCard
-    ? <span {...attrs}>{body}</span>
-    : <button type="button" {...attrs} aria-label={title}>{body}</button>;
+  return <button type="button" {...attrs} aria-label={title}>{body}</button>;
 }
 
 /**
  * The tracker ticket a worktree was created for, as a small chip beside its
- * name — "AS-1234" — that opens the ticket. A span, not a button: every
+ * name — "AS-1234" — that opens the ticket. A span, not a button: the
  * layout draws the name inside the row's own button.
  */
 export function TicketChip({ worktreeId, ticket }: { worktreeId: string; ticket: TicketItem }) {

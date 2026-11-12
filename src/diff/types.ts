@@ -1,5 +1,4 @@
 import type { DiffBase } from '../ports/IGitPort';
-import type { SidebarStyle } from '../sidebarStyle';
 
 export type { DiffBase };
 
@@ -44,6 +43,4 @@ export type DiffPanelExtMessage =
       /** The requested destination was not available, so it went somewhere else. */
       fellBack?: true;
     }
-  | { type: 'error'; message: string }
-  /** The sidebar style, which the panel borrows its accent colour from. Sent on open and whenever the setting changes. */
-  | { type: 'style'; style: SidebarStyle };
+  | { type: 'error'; message: string };

@@ -10,7 +10,6 @@
  * Pure: no DOM, no Tauri, so it is unit-tested.
  */
 import { PROVIDER_IDS, PROVIDER_INSTALL, type ProviderId } from '@core/ports/IAgentProvider';
-import { normalizeSidebarStyle, type SidebarStyle } from '@core/sidebarStyle';
 import type { StackState, WebMessage, WorktreeItem } from '@core/webview/types';
 import { planDelete } from '@core/application/deletePlan';
 import type { Snapshot } from '../stackd/api';
@@ -18,7 +17,7 @@ import type { Snapshot } from '../stackd/api';
 /** The state message the extension posts to its webview. */
 export function toSidebarState(
   snapshot: Snapshot | null,
-  opts: { repoRoot?: string; activeWorktreeId?: string; sidebarStyle?: SidebarStyle; defaultProvider?: ProviderId },
+  opts: { repoRoot?: string; activeWorktreeId?: string; defaultProvider?: ProviderId },
 ): StackState | null {
   const repo = snapshot?.repos.find((r) => r.repoRoot === opts.repoRoot) ?? snapshot?.repos[0];
   if (!repo) return null;
@@ -26,7 +25,6 @@ export function toSidebarState(
     ...repo.state,
     host: 'desktop',
     activeWorktreeId: opts.activeWorktreeId ?? repo.state.activeWorktreeId,
-    sidebarStyle: normalizeSidebarStyle(opts.sidebarStyle ?? repo.state.sidebarStyle),
     ...(opts.defaultProvider ? { defaultProvider: opts.defaultProvider } : {}),
   };
 }
@@ -161,37 +159,4 @@ export function describeCounts(state: StackState): string {
   if (active > 0) parts.push(`${active} thinking`);
   if (perm > 0) parts.push(`${perm} needs you`);
   return parts.join(' · ');
-}
-
-// ── stack.sidebarStyle from the user's VS Code settings ─────────────────────
-
-/** `settings.json` is JSONC: comments and trailing commas. */
-export function parseJsonc(text: string): unknown {
-  let out = '';
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (c === '"') {
-      let j = i + 1;
-      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
-      out += text.slice(i, j + 1);
-      i = j;
-    } else if (c === '/' && text[i + 1] === '/') {
-      while (i < text.length && text[i] !== '\n') i++;
-    } else if (c === '/' && text[i + 1] === '*') {
-      const end = text.indexOf('*/', i + 2);
-      i = end < 0 ? text.length : end + 1;
-    } else out += c;
-  }
-  return JSON.parse(out.replace(/,(\s*[}\]])/g, '$1'));
-}
-
-/** `stack.sidebarStyle` from the contents of a VS Code `settings.json`; `aside` when absent or unreadable. */
-export function sidebarStyleFromSettings(text: string | null | undefined): SidebarStyle {
-  if (!text) return normalizeSidebarStyle(undefined);
-  try {
-    const json = parseJsonc(text) as Record<string, unknown> | null;
-    return normalizeSidebarStyle(json?.['stack.sidebarStyle']);
-  } catch {
-    return normalizeSidebarStyle(undefined);
-  }
 }

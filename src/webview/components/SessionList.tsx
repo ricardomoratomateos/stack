@@ -5,8 +5,6 @@ import type { AgentState, SessionItem, WorktreeItem } from '../types';
 import { StatusDot } from './StatusDot';
 import { ProviderMark } from './providers';
 
-export type SessionVariant = 'claude' | 'mission' | 'aside';
-
 const STATE_LABEL: Record<AgentState, string> = {
   active: 'working',
   waiting: 'waiting',
@@ -15,11 +13,12 @@ const STATE_LABEL: Record<AgentState, string> = {
   terminated: 'ended',
 };
 
-/** What the marker in front of a session looks like, per layout. */
-// Every layout draws what is running — the agent's own mark, or a terminal for
-// a shell — with the state as a small dot on the agent's corner. A bare dot
-// said "something" but not what; the icon is what the eye looks for.
-function Mark({ session }: { session: SessionItem; variant: SessionVariant }) {
+/**
+ * The marker in front of a session: what is running — the agent's own mark, or
+ * a terminal for a shell — with the state as a small dot on the agent's corner.
+ * A bare dot said "something" but not what; the icon is what the eye looks for.
+ */
+function Mark({ session }: { session: SessionItem }) {
   if (session.kind !== 'agent') return <i className="codicon codicon-terminal fm-sess-shell" aria-hidden="true" />;
   return (
     <>
@@ -32,9 +31,9 @@ function Mark({ session }: { session: SessionItem; variant: SessionVariant }) {
 /**
  * A worktree's sessions: click one to bring its tmux window up, drag to
  * reorder, and rename or kill from the buttons that appear on hover or keyboard
- * focus. One implementation for all three layouts; only the marker differs.
+ * focus.
  */
-export function SessionList({ wt, variant, onSelect }: { wt: WorktreeItem; variant: SessionVariant; onSelect: () => void }) {
+export function SessionList({ wt, onSelect }: { wt: WorktreeItem; onSelect: () => void }) {
   // Move window `from` to the slot occupied by window `to`, and persist the
   // resulting order of tmux window indexes.
   const commitReorder = (from: number, to: number) => {
@@ -77,7 +76,7 @@ export function SessionList({ wt, variant, onSelect }: { wt: WorktreeItem; varia
                 send({ type: 'focusSession', worktreeId: wt.id, kind: s.kind, index: s.index, ...(e.altKey ? { toSide: true } : {}) });
               }}
             >
-              <span className="fm-sess-mark"><Mark session={s} variant={variant} /></span>
+              <span className="fm-sess-mark"><Mark session={s} /></span>
               <span className="fm-sess-text">
                 <span className="fm-sess-name">{name}</span>
                 {s.title && <span className="fm-sess-sub" title={s.title}>{s.title}</span>}

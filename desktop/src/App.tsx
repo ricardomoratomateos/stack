@@ -15,11 +15,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { NewTaskExtMessage, NewTaskInit, NewTaskMessage } from '@core/newtask/types';
 import type { ProviderId } from '@core/ports/IAgentProvider';
-import { loadSidebarStyle, resolveSidebarStyle } from './sidebar/settings';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { SettingsHost } from './settings/SettingsHost';
 import { Dialog, type DialogSpec } from './ui/Dialog';
-import type { SidebarStyle } from '@core/sidebarStyle';
 import type { WebMessage } from '@core/webview/types';
 import { SessionView } from './ui/Pane';
 import { useSessionPane } from './ui/useSessionPane';
@@ -62,7 +60,6 @@ export function App() {
   const sizes = layout.sizes[mode];
   const [focusTick, setFocusTick] = useState(0);
   const [sessionOf, setSessionOf] = useState<Record<string, string>>({});
-  const [style, setStyle] = useState<SidebarStyle>('aside');
   const [dialog, setDialog] = useState<DialogSpec | null>(null);
   const [notice, setNotice] = useState('');
   const [defaultProvider, setDefaultProvider] = useState<ProviderId | undefined>(loadDefaultProvider);
@@ -73,15 +70,11 @@ export function App() {
   const postToNewTask = useRef<((msg: NewTaskExtMessage) => void) | null>(null);
   const registerPost = useCallback((post: ((msg: NewTaskExtMessage) => void) | null) => { postToNewTask.current = post; }, []);
 
-  useEffect(() => { void loadSidebarStyle().then(setStyle); }, []);
-  // The chrome paints from the sidebar style's palette: its `fm-<style>` class on <html> defines --fm-* for the --app-* tokens.
+  // The chrome paints from the sidebar's palette: the `fm-aside` class on <html> defines --fm-* for the --app-* tokens.
   useEffect(() => {
-    const root = document.documentElement;
-    const cls = `fm-${style}`;
-    root.classList.remove('fm-aside', 'fm-claude', 'fm-mission');
-    root.classList.add(cls);
+    document.documentElement.classList.add('fm-aside');
     registry.refreshTheme();
-  }, [style, registry]);
+  }, [registry]);
   useEffect(() => saveLayout(layout), [layout]);
   // The native menu (menu.rs): Settings… (⌘,) and the window modes.
   useEffect(() => {
@@ -398,8 +391,8 @@ export function App() {
   }, [focusTick, manager.pane, registry]);
 
   const sidebarState = useMemo(
-    () => toSidebarState(snapshot, { repoRoot, activeWorktreeId: selected?.wt.id, sidebarStyle: style, defaultProvider }),
-    [snapshot, repoRoot, selected?.wt.id, style, defaultProvider],
+    () => toSidebarState(snapshot, { repoRoot, activeWorktreeId: selected?.wt.id, defaultProvider }),
+    [snapshot, repoRoot, selected?.wt.id, defaultProvider],
   );
 
   const runCommand = useCallback(async (name: string, body: Record<string, unknown>) => {
@@ -490,7 +483,7 @@ export function App() {
       case 'init': {
         let fromStackd: NewTaskInit | undefined;
         try { fromStackd = await api.command<NewTaskInit>('newTaskInit', { repo: view.repoRoot }); } catch (e) { console.error(e); }
-        postToNewTask.current?.({ type: 'init', init: toNewTaskInit(fromStackd, { sidebarStyle: style, defaultProvider }) });
+        postToNewTask.current?.({ type: 'init', init: toNewTaskInit(fromStackd, { defaultProvider }) });
         return;
       }
       case 'create':
@@ -514,7 +507,7 @@ export function App() {
         return;
       }
     }
-  }, [view, api, style, defaultProvider, select]);
+  }, [view, api, defaultProvider, select]);
 
   const commands = useCallback((id: string) => {
     const session = sessionOf[id];
@@ -636,7 +629,7 @@ export function App() {
                         : 'Connecting…'}
                     />
                   </div>
-                  {reviewing && <ReviewHost key={selected.wt.id} worktree={selected.wt} style={style} api={api} onClose={closeReview} onNotice={setNotice} />}
+                  {reviewing && <ReviewHost key={selected.wt.id} worktree={selected.wt} api={api} onClose={closeReview} onNotice={setNotice} />}
                   </div>
                 </>
               ) : (
@@ -681,8 +674,8 @@ export function App() {
             </section>
           </>
         )}
-        {newTaskOpen && <NewTaskHost style={style} onMessage={(m) => void onNewTaskMessage(m)} registerPost={registerPost} />}
-        {settingsOpen && <SettingsHost repo={view.repos.find((r) => r.repoRoot === view.repoRoot) && { name: view.repos.find((r) => r.repoRoot === view.repoRoot)!.name, root: view.repoRoot }} onClose={() => setSettingsOpen(false)} onSaved={(file) => void loadSidebarStyle().then(setStyle).catch(() => setStyle(resolveSidebarStyle(file, null)))} />}
+        {newTaskOpen && <NewTaskHost onMessage={(m) => void onNewTaskMessage(m)} registerPost={registerPost} />}
+        {settingsOpen && <SettingsHost repo={view.repos.find((r) => r.repoRoot === view.repoRoot) && { name: view.repos.find((r) => r.repoRoot === view.repoRoot)!.name, root: view.repoRoot }} onClose={() => setSettingsOpen(false)} />}
         {sw?.visible && <Switcher rows={sw.rows} index={sw.index} onPick={(id) => commitSwitcher(id)} />}
         {dialog && <Dialog spec={dialog} onClose={() => setDialog(null)} />}
       </div>

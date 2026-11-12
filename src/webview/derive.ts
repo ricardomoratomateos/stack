@@ -2,8 +2,8 @@
  * What the sidebar makes of a worktree's raw state: which group it belongs to,
  * what its one-line summary says, how its stack and drift read.
  *
- * Pure, with no DOM or React: the three layouts all read from here (so they can
- * never disagree about what "needs you" means), and the extension host imports
+ * Pure, with no DOM or React: the sidebar reads from here (so it can never
+ * disagree about what "needs you" means), and the extension host imports
  * it too, so the "jump to the next one that needs me" shortcut walks the same
  * queue the sidebar draws.
  */

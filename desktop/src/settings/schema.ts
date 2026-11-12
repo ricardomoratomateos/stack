@@ -6,7 +6,7 @@ import schema from './settings.json';
 /** The settings the desktop app and stackd care about, in display order. */
 export const SHOWN = [
   'worktreesDirectory', 'defaultBaseBranch', 'setupScript', 'setupInTerminal', 'teardownScript', 'promptPrefix',
-  'defaultProvider', 'claudeCommand', 'codexCommand', 'opencodeCommand', 'sidebarStyle', 'notifyOnAttention',
+  'defaultProvider', 'claudeCommand', 'codexCommand', 'opencodeCommand', 'notifyOnAttention',
 ] as const;
 
 /** The project keys the screen edits (a repo's `.stack/config.json` owns them); the rest of SHOWN is the user's. */
@@ -66,11 +66,6 @@ export function valueOf(def: SettingDef, file: Record<string, unknown>): Setting
 
 /** Modified = explicitly set to something other than the default. */
 export const isModified = (def: SettingDef, value: SettingValue | undefined): boolean => value !== undefined && value !== def.default;
-
-/** `stack.sidebarStyle` from the stack settings file, when set. */
-export function sidebarStyleOf(file: Record<string, unknown>): unknown {
-  return file.sidebarStyle ?? file['stack.sidebarStyle'];
-}
 
 export const PROJECT_DEFS: SettingDef[] = DEFS.filter((d) => PROJECT_KEYS.includes(d.key));
 export const USER_DEFS: SettingDef[] = DEFS.filter((d) => !PROJECT_KEYS.includes(d.key));

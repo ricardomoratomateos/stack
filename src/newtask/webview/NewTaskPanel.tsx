@@ -4,7 +4,6 @@ import { Picker, type PickerItem } from './Picker';
 import { BranchChip } from './BranchChip';
 import { useAutoGrow } from './useAutoGrow';
 import { PROVIDER_ORDER, ProviderMark } from '../../webview/components/providers';
-import { normalizeSidebarStyle } from '../../sidebarStyle';
 import { isCancelKey, isSubmitKey, providerName, resolveBranch, submitShortcutLabel } from '../composer';
 import type { ProviderId } from '../../ports/IAgentProvider';
 import type { NewTaskExtMessage, NewTaskInit } from '../types';
@@ -14,8 +13,6 @@ const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 export function NewTaskPanel() {
   const [init, setInit] = useState<NewTaskInit>({
     branches: [], baseBranch: '', defaultProvider: 'claude', installedProviders: ['claude', 'codex', 'opencode'],
-    // The extension writes the style into <body> so the first paint is already right.
-    sidebarStyle: normalizeSidebarStyle(document.body.dataset.style),
   });
   // What the user chose; null means "whatever the extension currently suggests".
   const [pickedBase, setPickedBase] = useState<string | null>(null);
@@ -117,7 +114,7 @@ export function NewTaskPanel() {
   const sendTitle = busy ? 'Creating…' : !installed ? `${providerName(provider)} is not installed` : canSubmit ? `Create and start (${shortcut})` : 'Describe the task to start';
 
   return (
-    <div className={`nt nt-${init.sidebarStyle}`}>
+    <div className="nt nt-aside">
       <main className="nt-col">
         <h1 className="nt-title">
           <input

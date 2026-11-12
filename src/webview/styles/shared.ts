@@ -1,13 +1,11 @@
 import { T } from '../tokens';
 
 /**
- * Styles every layout shares: buttons, the launch split, popup menus, session
- * rows, the details block and the health strip.
+ * Styles of the sidebar's shared components: buttons, the launch split, popup
+ * menus, session rows, the details block and the health strip.
  *
- * All of it reads CSS variables (`--fm-*`) that a layout's root class defines,
- * so the same markup takes the layout's palette, radius and density. That is
- * what lets the three looks be three stylesheets over one set of components
- * instead of three copies of them.
+ * All of it reads CSS variables (`--fm-*`) that the layout's root class
+ * (`.fm-aside`) defines, so the markup takes its palette, radius and density.
  */
 export const SHARED_CSS = `
 /* An app, not a document: text in the chrome is not selectable and shows the
@@ -53,12 +51,8 @@ body.vscode-light .fm { --fm-needs-text: color-mix(in srgb, var(--fm-needs) 70%,
 .fm-actionbar { display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0; }
 .fm-btn-primary { background: var(--fm-primary-bg); color: var(--fm-primary-ink); border-color: transparent; font-weight: 600; }
 .fm-btn-primary:hover:not(:disabled) { background: var(--fm-primary-bg); filter: brightness(1.1); }
-.fm-btn-needs { background: var(--fm-needs); color: var(--fm-needs-ink, #1a1a1a); border-color: transparent; font-weight: 600; }
-.fm-btn-needs:hover:not(:disabled) { background: var(--fm-needs); filter: brightness(1.08); }
 .fm-btn-accent { background: var(--fm-accent-soft); border-color: var(--fm-accent-border); color: var(--fm-accent-text); font-weight: 500; }
 .fm-btn-accent:hover:not(:disabled) { background: color-mix(in srgb, var(--fm-accent) 22%, transparent); }
-.fm-btn-ok { background: var(--fm-ok-solid, var(--fm-ok)); color: #fff; border-color: transparent; font-weight: 600; }
-.fm-btn-ok:hover:not(:disabled) { filter: brightness(1.1); background: var(--fm-ok-solid, var(--fm-ok)); }
 .fm-btn-quiet { color: var(--fm-text-dim); border-color: var(--fm-border); }
 
 /* High contrast: a filled button on a black sidebar needs its outline to be found. */

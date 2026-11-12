@@ -21,7 +21,7 @@ Working on several things at once with AI agents gets messy fast: branches colli
 - **Agents per worktree** — launch Claude Code, Codex CLI or opencode (pluggable providers) in any worktree. Multiple agent + shell sessions per worktree, each tracked separately.
 - **Sessions survive reloads** — agents run in tmux, so they keep working across VS Code window reloads and reconnect automatically.
 - **State at a glance** — per-session status (working / needs you / ready for review / idle) with live task titles pulled from the agent. When an agent asks for something, its question is the row's line (`$ composer test`); `Cmd+Alt+J` jumps to the next worktree that needs you — its terminal when an agent is asking, its Review panel when one has finished. A sidebar badge and an optional native notification tell you when you're elsewhere.
-- **Three sidebar styles** — *aside* (monochrome, one lime accent), *claude* (terracotta, a prompt-style composer) and *mission* (state counters that filter, an attention queue, cards). Same worktrees and actions in each; pick one in Stack settings › Appearance. Worktrees keep the order you give them (drag to reorder) — they never jump around as agents change state.
+- **Stable order** — worktrees keep the order you give them (drag to reorder); they never jump around as agents change state.
 - **New task composer** — name the task, describe it, pick the base branch and the agent; the branch is generated from the name (`AS-1234-fix-payments`) and checked as you type. It creates the worktree, waits for the setup script, then starts the agent with your description.
 - **A tab per session** — every agent and shell gets its own terminal tab, so you can drag them side by side, split and resize like any editor; see [Sessions side by side](#sessions-side-by-side).
 - **PRs and cleanup** — the row shows the branch's PR (open, draft, merged) with a CI dot, and opens it on click. Deleting tells you first what would be lost (uncommitted files, unpushed commits); a merged, clean worktree gets a one-click **Clean up**. A worktree whose folder disappeared shows as *Missing* with a **Forget** button — Stack never deletes one on its own.
@@ -79,7 +79,6 @@ For the heavier setup — Docker per worktree, a debugger port per worktree, set
 | `stack.worktreesDirectory` | `.worktrees` | Where worktrees are created (relative to the workspace root) |
 | `stack.defaultBaseBranch` | `develop` | Branch new worktrees start from, preselected in the New Task form. When it doesn't exist, Stack uses the repo's own main line (first of `main`/`master`/`develop` it finds, local or remote), then the current branch |
 | `stack.defaultProvider` | `claude` | Primary agent: the one the big launch button starts. The chevron beside it opens the rest |
-| `stack.sidebarStyle` | `aside` | How the sidebar looks: `aside` (monochrome, one lime accent), `claude` (terracotta, a prompt-style composer) or `mission` (state counters, attention queue, cards). Switches live; also under **Stack: Switch Sidebar Style** and in the settings panel |
 | `stack.claudeCommand` | `claude` | Command to launch Claude Code |
 | `stack.codexCommand` | `codex` | Command to launch Codex CLI |
 | `stack.opencodeCommand` | `opencode` | Command to launch opencode |

@@ -4,10 +4,6 @@ export type AgentState = 'active' | 'waiting' | 'permission' | 'idle' | 'termina
 export type { ProviderId } from '../ports/IAgentProvider';
 import type { ProviderId } from '../ports/IAgentProvider';
 
-/** Which of the sidebar's layouts to render (type-only, erased at build). */
-export type { SidebarStyle } from '../sidebarStyle';
-import type { SidebarStyle } from '../sidebarStyle';
-
 export interface GitStatus {
   hasChanges: boolean;
   staged: number;
@@ -170,8 +166,6 @@ export interface StackState {
   dockerUnavailable?: string;
   /** Set by the desktop app, which hosts this webview: it fills the brand row's slot and has no composer. */
   host?: 'desktop';
-  /** Which layout the sidebar renders (stack.sidebarStyle). */
-  sidebarStyle?: SidebarStyle;
   /** Local branches offered as the base for a new worktree (filled on demand). */
   branches?: string[];
   /** Branch preselected as the base — the main repo's current branch. */

@@ -4,7 +4,7 @@ import { Sheet } from '../ui/Sheet';
 import { PROJECT_DEFS, USER_DEFS, isModified, repoValueOf, valueOf, type SettingDef, type SettingValue } from './schema';
 
 /** Settings editor, a centred sheet, over ~/.config/stack/settings.json, in the look of VS Code's. */
-export function SettingsHost({ repo, onClose, onSaved }: { repo?: { name: string; root: string }; onClose: () => void; onSaved: (file: Record<string, unknown>) => void }) {
+export function SettingsHost({ repo, onClose }: { repo?: { name: string; root: string }; onClose: () => void }) {
   const [file, setFile] = useState<Record<string, unknown> | null>(null);
   const [repoFile, setRepoFile] = useState<Record<string, unknown> | null>(null);
   const [scope, setScope] = useState<'user' | 'repo'>(repo ? 'repo' : 'user');
@@ -33,7 +33,6 @@ export function SettingsHost({ repo, onClose, onSaved }: { repo?: { name: string
       const next = await invoke<Record<string, unknown>>('write_settings', { changes: { [key]: value } });
       setFile(next);
       setError('');
-      onSaved(next);
     } catch (e) {
       setError(String(e));
     }

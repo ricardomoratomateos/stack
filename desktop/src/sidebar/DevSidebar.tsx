@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { normalizeSidebarStyle } from '@core/sidebarStyle';
 import { sampleState } from './fixtures';
 import { describeCounts, translate } from './bridge';
 import { ViewTitle } from './ViewTitle';
@@ -7,15 +6,14 @@ import { SidebarHost } from './SidebarHost';
 
 /**
  * Dev-only page: the sidebar on a fixed sample state, to compare with VS Code side by side.
- *   /?dev=sidebar[&style=aside|claude|mission][&width=340]
+ *   /?dev=sidebar[&width=340]
  */
 export function DevSidebar() {
   const params = new URLSearchParams(location.search);
-  const style = normalizeSidebarStyle(params.get('style') ?? undefined);
   const width = Number(params.get('width')) || 340;
   const [selected, setSelected] = useState('ask');
   const [last, setLast] = useState('');
-  const state = useMemo(() => ({ ...sampleState(), host: 'desktop' as const, sidebarStyle: style, activeWorktreeId: selected }), [style, selected]);
+  const state = useMemo(() => ({ ...sampleState(), host: 'desktop' as const, activeWorktreeId: selected }), [selected]);
   const ctx = useMemo(() => ({ repoRoot: '/r', worktrees: [...state.worktrees, ...(state.controlSession ? [state.controlSession] : [])] }), [state]);
 
   return (

@@ -52,7 +52,7 @@ export class TerminalRegistry {
 
   constructor(private api: TmuxApi, private scheduler: Scheduler = rafScheduler) {}
 
-  /** Re-reads the theme (the sidebar style changed the chrome background) into every open terminal. */
+  /** Re-reads the theme (the chrome palette just landed on <html>) into every open terminal. */
   refreshTheme(): void {
     const theme = xtermTheme(documentVar);
     for (const e of this.entries.values()) e.term.options.theme = theme;

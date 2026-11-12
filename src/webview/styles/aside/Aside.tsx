@@ -160,7 +160,7 @@ function Row({ d, selected, now, state, select, drag }: {
       {selected && d.group !== 'missing' && (
         <div className="as-expand">
           {!wt.isControl && state.host !== 'desktop' && <Details d={d} dockerEnabled={state.dockerEnabled} />}
-          <SessionList wt={wt} variant="aside" onSelect={pick} />
+          <SessionList wt={wt} onSelect={pick} />
           <div className="as-actions">
             <LaunchSplit
               wt={wt}

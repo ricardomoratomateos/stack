@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { send, loadState, saveState } from './vscode';
 import type { DiffBase, DiffComment, SendDestination, DiffPanelExtMessage } from '../types';
-import { DEFAULT_SIDEBAR_STYLE, normalizeSidebarStyle, type SidebarStyle } from '../../sidebarStyle';
 import {
   anchorOf, filterReview, hasAnchor, prepareReview, type FileEntry, type Line, type Review, type Side,
 } from './model';
@@ -27,7 +26,6 @@ function sameList<T>(a: T[], b: T[]): boolean {
 
 export function DiffApp() {
   const saved = useMemo(loadState, []);
-  const [style, setStyle] = useState<SidebarStyle>(DEFAULT_SIDEBAR_STYLE);
   const [base, setBase] = useState<DiffBase>('branch');
   const [view, setView] = useState<View>(saved.format ?? 'inline');
   const [wrap, setWrap] = useState(saved.wrap ?? false);
@@ -111,9 +109,7 @@ export function DiffApp() {
   useEffect(() => {
     const handler = (e: MessageEvent) => {
       const msg = e.data as DiffPanelExtMessage;
-      if (msg.type === 'style') {
-        setStyle(normalizeSidebarStyle(msg.style));
-      } else if (msg.type === 'diff') {
+      if (msg.type === 'diff') {
         // Parsed here, once; everything the UI shows is derived from this.
         const next = msg.error ? EMPTY_REVIEW : prepareReview(msg.unified);
         setReview(next);
@@ -375,7 +371,7 @@ export function DiffApp() {
   }, [goToFile]);
 
   return (
-    <div className="rv-root" data-style={style}>
+    <div className="rv-root">
       <Toolbar
         label={label}
         base={base}

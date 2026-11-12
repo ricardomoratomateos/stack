@@ -1,5 +1,4 @@
 import type { ProviderId } from './ports/IAgentProvider';
-import type { SidebarStyle } from './sidebarStyle';
 
 export type AgentSessionState = 'active' | 'waiting' | 'permission' | 'idle' | 'terminated';
 
@@ -202,8 +201,6 @@ export interface StackConfig {
    * switches between them (`single`, the behaviour before tabs).
    */
   sessionTabs: 'perSession' | 'single';
-  /** Which of the sidebar's layouts to render. */
-  sidebarStyle: SidebarStyle;
   /** Per-worktree docker orchestration (compose files + auto-generated ports). */
   docker: DockerConfig;
   debugBasePort: number;

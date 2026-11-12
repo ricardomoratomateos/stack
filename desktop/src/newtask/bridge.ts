@@ -5,7 +5,6 @@
  * Pure, so it is unit-tested.
  */
 import type { ProviderId } from '@core/ports/IAgentProvider';
-import { normalizeSidebarStyle, type SidebarStyle } from '@core/sidebarStyle';
 import type { NewTaskInit, NewTaskMessage } from '@core/newtask/types';
 
 export type NewTaskAction =
@@ -37,12 +36,11 @@ export function translateNewTask(msg: NewTaskMessage, ctx: { repoRoot: string })
 /** The panel's inputs: stackd's `newTaskInit` (branches, installed agents) with the app's own choices on top. */
 export function toNewTaskInit(
   fromStackd: Partial<NewTaskInit> | null | undefined,
-  prefs: { sidebarStyle?: SidebarStyle; defaultProvider?: ProviderId },
+  prefs: { defaultProvider?: ProviderId },
 ): NewTaskInit {
   return {
     branches: fromStackd?.branches ?? [],
     baseBranch: fromStackd?.baseBranch ?? 'main',
-    sidebarStyle: normalizeSidebarStyle(prefs.sidebarStyle ?? fromStackd?.sidebarStyle),
     defaultProvider: prefs.defaultProvider ?? fromStackd?.defaultProvider ?? 'claude',
     installedProviders: fromStackd?.installedProviders ?? ['claude', 'codex', 'opencode'],
   };

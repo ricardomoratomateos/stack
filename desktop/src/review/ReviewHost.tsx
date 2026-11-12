@@ -5,7 +5,6 @@ import '../sidebar/webviewStyles';
 import { invoke } from '@tauri-apps/api/core';
 import { buildCommentPrompt } from '@core/diff/commentPrompt';
 import type { DiffPanelExtMessage, DiffPanelMessage } from '@core/diff/types';
-import type { SidebarStyle } from '@core/sidebarStyle';
 import type { WorktreeItem } from '@core/webview/types';
 import { nameOf } from '@core/webview/derive';
 import type { StackdApi } from '../stackd/api';
@@ -32,9 +31,8 @@ const reason = (e: unknown): string => {
  * clipboard destination is built and written locally, and `openFile` opens VS Code at the line.
  * The panel and its stylesheet are loaded on first use.
  */
-export function ReviewHost({ worktree, style, api, onClose, onNotice }: {
+export function ReviewHost({ worktree, api, onClose, onNotice }: {
   worktree: WorktreeItem;
-  style: SidebarStyle;
   api: StackdApi;
   /** Esc in the review: back to the terminal. */
   onClose: () => void;
@@ -43,8 +41,6 @@ export function ReviewHost({ worktree, style, api, onClose, onNotice }: {
   const [Panel, setPanel] = useState<ComponentType | null>(null);
   const wtRef = useRef(worktree);
   wtRef.current = worktree;
-  const styleRef = useRef(style);
-  styleRef.current = style;
   const hostRef = useRef<HTMLDivElement>(null);
   const id = worktree.id;
 
@@ -87,7 +83,6 @@ export function ReviewHost({ worktree, style, api, onClose, onNotice }: {
       const msg = raw as DiffPanelMessage;
       switch (msg.type) {
         case 'ready':
-          post({ type: 'style', style: styleRef.current });
           void pushDiff('branch');
           break;
         case 'requestDiff':
@@ -117,9 +112,6 @@ export function ReviewHost({ worktree, style, api, onClose, onNotice }: {
     };
     return () => { live = false; reviewShim.onMessage = () => {}; reviewShim.onState = undefined; reviewShim.state = undefined; };
   }, [id, api, onNotice]);
-
-  // The accent follows the app's style, live.
-  useEffect(() => { if (Panel) postToWebview({ type: 'style', style } satisfies DiffPanelExtMessage); }, [style, Panel]);
 
   // Esc goes back to the terminal unless the panel is using it for a dialog, popover or comment box.
   useEffect(() => {

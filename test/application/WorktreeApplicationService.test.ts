@@ -1348,11 +1348,6 @@ describe('buildState', () => {
     expect(off.service.buildState().dockerUnavailable).toBeUndefined();
   });
 
-  it('passes the configured sidebar style through', () => {
-    const h = makeHarness({ config: { sidebarStyle: 'mission' } });
-    expect(h.service.buildState().sidebarStyle).toBe('mission');
-  });
-
   it('flags a worktree whose directory is gone', () => {
     const a = makeWorktree({ id: 'a' });
     const h = makeHarness({ worktrees: [a], missingIds: ['a'] });
@@ -4185,14 +4180,14 @@ describe('new-agent panel', () => {
 });
 
 describe('new-task panel inputs', () => {
-  it('newTaskInit adds the accent, default agent and installed agents to the branch options', () => {
+  it('newTaskInit adds the default agent and installed agents to the branch options', () => {
     const h = makeHarness({
       workspaceFolders: ['/repo'], branches: ['develop'], installedProviders: ['claude', 'codex'],
-      config: { defaultBaseBranch: 'develop', defaultProvider: 'codex', sidebarStyle: 'claude' },
+      config: { defaultBaseBranch: 'develop', defaultProvider: 'codex' },
     });
     expect(h.service.newTaskInit()).toEqual({
       branches: ['develop'], baseBranch: 'develop',
-      sidebarStyle: 'claude', defaultProvider: 'codex', installedProviders: ['claude', 'codex'],
+      defaultProvider: 'codex', installedProviders: ['claude', 'codex'],
     });
   });
 

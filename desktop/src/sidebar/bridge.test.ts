@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeCounts, installHint, parseJsonc, sidebarStyleFromSettings, toSidebarState, translate, type Context } from './bridge';
+import { describeCounts, installHint, toSidebarState, translate, type Context } from './bridge';
 import { sampleState } from './fixtures';
 import type { Snapshot } from '../stackd/api';
 
@@ -8,20 +8,16 @@ const snapshot: Snapshot = { seq: 1, tmux: {}, repos: [{ repoRoot: '/r', state }
 const ctx: Context = { repoRoot: '/r', worktrees: [...state.worktrees, state.controlSession!] };
 
 describe('toSidebarState', () => {
-  it('is the repo state with the app selection and the style', () => {
-    const s = toSidebarState(snapshot, { repoRoot: '/r', activeWorktreeId: 'rev', sidebarStyle: 'claude' })!;
+  it('is the repo state with the app selection', () => {
+    const s = toSidebarState(snapshot, { repoRoot: '/r', activeWorktreeId: 'rev' })!;
     expect(s.worktrees).toBe(state.worktrees);
     expect(s.controlSession).toBe(state.controlSession);
     expect(s.activeWorktreeId).toBe('rev');
-    expect(s.sidebarStyle).toBe('claude');
   });
   it('picks the repo asked for, else the first, else nothing', () => {
     expect(toSidebarState(snapshot, { repoRoot: '/s' })!.worktrees).toEqual([]);
     expect(toSidebarState(snapshot, { repoRoot: '/nope' })!.worktrees).toBe(state.worktrees);
     expect(toSidebarState(null, {})).toBeNull();
-  });
-  it('falls back to aside for a style it does not know', () => {
-    expect(toSidebarState(snapshot, { sidebarStyle: 'weird' as never })!.sidebarStyle).toBe('aside');
   });
 });
 
@@ -100,20 +96,5 @@ describe('describeCounts', () => {
   it('matches the view header text of the extension', () => {
     expect(describeCounts(state)).toBe('1 thinking · 1 needs you');
     expect(describeCounts({ worktrees: [] })).toBe('');
-  });
-});
-
-describe('sidebar style from settings.json', () => {
-  it('reads stack.sidebarStyle through comments and trailing commas', () => {
-    expect(sidebarStyleFromSettings('{\n // c\n "a": "x//y", /* b */\n "stack.sidebarStyle": "mission",\n}')).toBe('mission');
-  });
-  it('is aside when absent, unknown, unreadable or missing', () => {
-    expect(sidebarStyleFromSettings('{"editor.fontSize": 12}')).toBe('aside');
-    expect(sidebarStyleFromSettings('{"stack.sidebarStyle": "neon"}')).toBe('aside');
-    expect(sidebarStyleFromSettings('{ nope')).toBe('aside');
-    expect(sidebarStyleFromSettings(null)).toBe('aside');
-  });
-  it('parseJsonc keeps strings that look like comments', () => {
-    expect(parseJsonc('{"u": "http://x"}')).toEqual({ u: 'http://x' });
   });
 });

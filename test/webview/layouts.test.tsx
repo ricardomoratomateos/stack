@@ -6,10 +6,10 @@ import type { LayoutProps } from '../../src/webview/styles/types';
 import { describeAll } from '../../src/webview/derive';
 
 /**
- * Render smoke tests: each layout draws every kind of worktree without
- * throwing, and says the things a layout must say. The sidebar is excluded from
+ * Render smoke tests: the layout draws every kind of worktree without
+ * throwing, and says the things it must say. The sidebar is excluded from
  * coverage (it is a view), but "does not crash on a missing worktree with no
- * sessions" is cheap to keep true, and the three layouts have to stay in step.
+ * sessions" is cheap to keep true.
  */
 
 const session = (over: Partial<SessionItem>): SessionItem =>
@@ -67,26 +67,17 @@ function props(over: Partial<LayoutProps> = {}): LayoutProps {
   };
 }
 
-let layouts: Record<string, (p: LayoutProps) => React.ReactElement>;
+let Aside: (p: LayoutProps) => React.ReactElement;
 
 beforeAll(async () => {
   // The webview talks to VS Code through this global, and reads the platform.
   vi.stubGlobal('acquireVsCodeApi', () => ({ postMessage: () => {}, getState: () => null, setState: () => {} }));
   vi.stubGlobal('navigator', { platform: 'MacIntel' });
-  const [aside, claude, mission] = await Promise.all([
-    import('../../src/webview/styles/aside/Aside'),
-    import('../../src/webview/styles/claude/Claude'),
-    import('../../src/webview/styles/mission/Mission'),
-  ]);
-  layouts = {
-    aside: (p) => <aside.Aside {...p} />,
-    claude: (p) => <claude.Claude {...p} />,
-    mission: (p) => <mission.Mission {...p} />,
-  };
+  ({ Aside } = await import('../../src/webview/styles/aside/Aside'));
 });
 
-describe.each(['aside', 'claude', 'mission'])('%s layout', (name) => {
-  const render = (p: LayoutProps) => renderToStaticMarkup(layouts[name](p));
+describe('aside layout', () => {
+  const render = (p: LayoutProps) => renderToStaticMarkup(<Aside {...p} />);
 
   it('draws every kind of worktree and the question the agent asked', () => {
     const html = render(props());
@@ -132,9 +123,8 @@ describe.each(['aside', 'claude', 'mission'])('%s layout', (name) => {
 
 describe('docker on the health strip', () => {
   it('says docker is down, with the reason, instead of counting containers', async () => {
-    const { Claude } = await import('../../src/webview/styles/claude/Claude');
     const down: StackState = { ...state, dockerUnavailable: 'Cannot connect to the Docker daemon' };
-    const html = renderToStaticMarkup(<Claude {...props({ state: down, items: describeAll(down) })} />);
+    const html = renderToStaticMarkup(<Aside {...props({ state: down, items: describeAll(down) })} />);
     expect(html).toContain('docker down');
     expect(html).toContain('Cannot connect to the Docker daemon');
   });

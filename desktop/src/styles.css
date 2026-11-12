@@ -1,8 +1,7 @@
 /*
- * App chrome. Painted from --app-* tokens, which read the --fm-* palette of the sidebar style (stack.sidebarStyle:
- * aside / claude / mission). App.tsx puts that style's `fm-<style>` class on <html>, so the very same palette CSS the
- * sidebar uses (src/webview/styles/*) defines --fm-* here, and switching style re-paints the chrome live.
- * Claude and Mission take surfaces from the VS Code theme, so the surface tokens fall back to mixes of bg and text.
+ * App chrome. Painted from --app-* tokens, which read the sidebar's --fm-* palette (Aside). App.tsx puts the
+ * `fm-aside` class on <html>, so the very same palette CSS the sidebar uses (src/webview/styles/aside) defines --fm-*
+ * here.
  * The terminal keeps VS Code's colours except its background, which is --app-bg.
  */
 :root {

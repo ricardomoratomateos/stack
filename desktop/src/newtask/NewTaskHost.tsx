@@ -10,8 +10,7 @@ import type { NewTaskExtMessage, NewTaskMessage } from '@core/newtask/types';
  * through `onMessage`; the host answers with `post`-ed `init` / `error` (see `NewTaskPanelManager`).
  * The panel and its stylesheet are loaded on first use.
  */
-export function NewTaskHost({ style, onMessage, registerPost }: {
-  style: string;
+export function NewTaskHost({ onMessage, registerPost }: {
   onMessage: (msg: NewTaskMessage) => void;
   /** Gives the owner a way to send `init` / `error` to the panel. */
   registerPost: (post: ((msg: NewTaskExtMessage) => void) | null) => void;
@@ -49,7 +48,7 @@ export function NewTaskHost({ style, onMessage, registerPost }: {
 
   return (
     <Sheet title="New task" className="newtask-sheet" onClose={back}>
-      <div data-style={style}>{Panel && <Panel />}</div>
+      <div>{Panel && <Panel />}</div>
     </Sheet>
   );
 }

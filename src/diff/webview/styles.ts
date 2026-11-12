@@ -3,9 +3,7 @@
  *
  * Surfaces and diff colours come from the user's VS Code theme, so the panel
  * matches the editor beside it. Only the accent (primary button, focus ring,
- * selected states) is the product's own, and it follows `stack.sidebarStyle`:
- * the same lime / terracotta / blue the sidebar wears, set on the root as
- * `data-style` and updated live.
+ * selected states) is the product's own: the same lime the sidebar wears.
  */
 export const DIFF_CSS = `
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -59,12 +57,7 @@ button:disabled { cursor: default; }
   color: var(--rv-fg); background: var(--rv-bg);
   font-size: 12.5px; line-height: 1.4;
 }
-.rv-root[data-style='aside'] { --rv-accent: #c8ff00; --rv-accent-ink: #0a0a0a; --rv-accent-text: #c8ff00; }
-body.vscode-light .rv-root[data-style='aside'] { --rv-accent-text: #4d6b00; --rv-accent-soft: color-mix(in srgb, var(--rv-accent) 28%, transparent); --rv-accent-border: rgba(77, 107, 0, .5); }
-.rv-root[data-style='claude'] { --rv-accent: #D97757; --rv-accent-ink: #1a1a1a; --rv-accent-text: #E8956F; }
-body.vscode-light .rv-root[data-style='claude'] { --rv-accent-text: #B4532F; }
-.rv-root[data-style='mission'] { --rv-accent: #4FA3F7; --rv-accent-ink: #06101d; --rv-accent-text: #4FA3F7; }
-body.vscode-light .rv-root[data-style='mission'] { --rv-accent: #0B6BCB; --rv-accent-ink: #ffffff; --rv-accent-text: #0B6BCB; }
+body.vscode-light .rv-root { --rv-accent-text: #4d6b00; --rv-accent-soft: color-mix(in srgb, var(--rv-accent) 28%, transparent); --rv-accent-border: rgba(77, 107, 0, .5); }
 body.vscode-high-contrast .rv-root, body.vscode-high-contrast-light .rv-root {
   --rv-accent: var(--vscode-button-background, var(--vscode-focusBorder));
   --rv-accent-ink: var(--vscode-button-foreground, #fff);

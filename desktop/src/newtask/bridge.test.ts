@@ -25,15 +25,14 @@ describe('translateNewTask', () => {
 
 describe('toNewTaskInit', () => {
   it('uses stackd\'s branches, base and installed agents', () => {
-    const init = toNewTaskInit({ branches: ['main', 'dev'], baseBranch: 'dev', installedProviders: ['claude'], defaultProvider: 'codex', sidebarStyle: 'claude' }, {});
-    expect(init).toEqual({ branches: ['main', 'dev'], baseBranch: 'dev', installedProviders: ['claude'], defaultProvider: 'codex', sidebarStyle: 'claude' });
+    const init = toNewTaskInit({ branches: ['main', 'dev'], baseBranch: 'dev', installedProviders: ['claude'], defaultProvider: 'codex' }, {});
+    expect(init).toEqual({ branches: ['main', 'dev'], baseBranch: 'dev', installedProviders: ['claude'], defaultProvider: 'codex' });
   });
-  it('the app\'s own style and default provider win', () => {
-    const init = toNewTaskInit({ defaultProvider: 'codex', sidebarStyle: 'claude' }, { defaultProvider: 'opencode', sidebarStyle: 'mission' });
+  it('the app\'s own default provider wins', () => {
+    const init = toNewTaskInit({ defaultProvider: 'codex' }, { defaultProvider: 'opencode' });
     expect(init.defaultProvider).toBe('opencode');
-    expect(init.sidebarStyle).toBe('mission');
   });
   it('is usable before stackd answers', () => {
-    expect(toNewTaskInit(null, {})).toEqual({ branches: [], baseBranch: 'main', sidebarStyle: 'aside', defaultProvider: 'claude', installedProviders: ['claude', 'codex', 'opencode'] });
+    expect(toNewTaskInit(null, {})).toEqual({ branches: [], baseBranch: 'main', defaultProvider: 'claude', installedProviders: ['claude', 'codex', 'opencode'] });
   });
 });

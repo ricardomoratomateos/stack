@@ -1,12 +1,10 @@
 /**
  * Styles for the new-task composer.
  *
- * The page wears the sidebar style's accent: lime for Aside, terracotta for
- * Claude, the theme's button blue for Mission control. Everything else follows
- * the VS Code theme, except Aside, which paints its own near-black / near-white
- * palette in dark and light themes like the sidebar does (high contrast steps
- * aside everywhere, since a fixed palette cannot promise the contrast those
- * themes exist for).
+ * The page wears the sidebar's look (Aside): its own near-black / near-white
+ * palette with the lime accent, in dark and light themes like the sidebar does
+ * (high contrast steps aside, since a fixed palette cannot promise the contrast
+ * those themes exist for).
  */
 export const NEWTASK_CSS = `
 /* An app, not a document: text in the chrome is not selectable and shows the
@@ -41,7 +39,7 @@ html, body { background: var(--vscode-editor-background); }
   font-family: var(--nt-sans); font-size: var(--vscode-font-size, 13px);
 }
 
-/* ── the three accents ── */
+/* ── the Aside palette ── */
 .nt-aside {
   --nt-bg: #111111; --nt-fg: #fafafa; --nt-dim: #a3a3a3; --nt-faint: #8a8a8a;
   --nt-card: #171717; --nt-border: #2a2a2a; --nt-hover: rgba(255, 255, 255, 0.07);
@@ -58,18 +56,6 @@ body.vscode-light .nt-aside {
   /* Lime is a fill on light, never text or a ring: it has no contrast against white. */
   --nt-accent-text: #4d6b00;
 }
-.nt-claude {
-  --nt-radius: 12px; --nt-chip-radius: 8px; --nt-btn-radius: 9px;
-  --nt-accent: #D97757; --nt-accent-ink: #1A1A1A; --nt-accent-text: #E8956F;
-}
-body.vscode-light .nt-claude { --nt-accent-text: #B4532F; }
-.nt-mission {
-  --nt-radius: 8px; --nt-chip-radius: 5px; --nt-btn-radius: 6px;
-  --nt-accent: var(--vscode-button-background, #0e639c);
-  --nt-accent-ink: var(--vscode-button-foreground, #fff);
-  --nt-accent-text: #4FA3F7; --nt-ring: var(--vscode-focusBorder, #4FA3F7);
-}
-body.vscode-light .nt-mission { --nt-accent-text: #0B6BCB; }
 
 body.vscode-high-contrast .nt, body.vscode-high-contrast-light .nt {
   --nt-bg: var(--vscode-editor-background); --nt-fg: var(--vscode-foreground);

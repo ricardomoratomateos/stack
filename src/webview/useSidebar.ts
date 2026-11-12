@@ -1,17 +1,11 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { getState, send, setState } from './vscode';
+import { send } from './vscode';
 import { usePointerReorder, type ReorderProps } from './usePointerReorder';
-import { normalizeSidebarStyle } from '../sidebarStyle';
 import { describe, describeAll, type Described } from './derive';
 import type { ExtMessage, StackState, WorktreeItem } from './types';
 
-/**
- * The style the sidebar wore last time, so a reload paints it from the first
- * frame instead of flashing the default until the extension's first push.
- */
 function initialState(): StackState {
-  const saved = (getState() as { sidebarStyle?: unknown } | null | undefined)?.sidebarStyle;
-  return { worktrees: [], sidebarStyle: saved === undefined ? undefined : normalizeSidebarStyle(saved) };
+  return { worktrees: [] };
 }
 
 function reducer(current: StackState, msg: ExtMessage): StackState {
@@ -75,9 +69,9 @@ export interface Sidebar {
 }
 
 /**
- * Everything the three layouts share: the state the extension pushes, which
+ * Everything the layout draws from: the state the extension pushes, which
  * worktree is selected, the derived groups, drag-to-reorder and the clock.
- * The layouts only draw it.
+ * The layout only draws it.
  */
 export function useSidebar(): Sidebar {
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
@@ -95,12 +89,6 @@ export function useSidebar(): Sidebar {
     send({ type: 'ready' });
     return () => window.removeEventListener('message', handler);
   }, []);
-
-  useEffect(() => {
-    if (!loaded || !state.sidebarStyle) return;
-    // Merged into the existing webview state, never clobbering whatever else is in it.
-    setState({ ...((getState() as Record<string, unknown> | null) ?? {}), sidebarStyle: state.sidebarStyle });
-  }, [loaded, state.sidebarStyle]);
 
   // When the extension tells us the active worktree, always follow it (reload / terminal focus)
   useEffect(() => {
