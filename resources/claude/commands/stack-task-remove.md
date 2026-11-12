@@ -2,7 +2,7 @@
 description: Borra tareas de Stack terminadas — worktree, agente, tmux y rama si procede
 argument-hint: [tarea | branch | "las mergeadas"]
 ---
-<!-- Installed by Stack (VS Code). Removed when "Stack tools in Claude Code" is switched off. -->
+<!-- Installed by Stack (Settings → "Stack tools in Claude Code"); rewritten on every install. -->
 
 Clean up Stack tasks: $ARGUMENTS
 

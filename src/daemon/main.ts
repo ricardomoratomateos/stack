@@ -71,7 +71,10 @@ async function status(repoArg: string | undefined): Promise<void> {
 async function serve(): Promise<void> {
   const dir = configDir();
   const bridge = path.join(__dirname, BRIDGE_FILE);
+  // The manager skill/commands: `claude/` next to stackd.js in the app, resources/claude from the repo's dist/.
+  const claudeAssets = [path.join(__dirname, 'claude'), path.join(__dirname, '..', 'resources', 'claude')].find((d) => fs.existsSync(d));
   const daemon = new StackDaemon({
+    claudeAssets,
     configDir: dir,
     home: process.env.STACKD_HOME,
     tmuxSocket: process.env.STACKD_TMUX_SOCKET || undefined,

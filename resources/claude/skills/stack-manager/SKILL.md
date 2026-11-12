@@ -2,7 +2,7 @@
 name: stack-manager
 description: Use when the user asks how their coding agents, Stack tasks or worktrees are doing, who needs them or what is ready to review; wants to turn a Jira/Linear ticket, a Slack thread or an idea into a new Stack task; wants to pass a message to one of their agents; or wants to clean up, delete or retire finished/abandoned tasks. Triggers include "¿cómo van mis agentes?", "¿alguno me necesita?", "crea una tarea para AS-1234", "dile al agente de X que…", "borra esta tarea", "limpia los worktrees ya mergeados", "how are my agents doing", "start a task from this ticket", "clean up my tasks".
 ---
-<!-- Installed by Stack (VS Code). Removed when "Stack tools in Claude Code" is switched off. -->
+<!-- Installed by Stack (Settings → "Stack tools in Claude Code"); rewritten on every install. -->
 
 # Stack manager
 

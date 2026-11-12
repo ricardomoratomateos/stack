@@ -227,6 +227,48 @@ describe('ClaudeHookInstaller', () => {
       ]);
     });
 
+    it("replaces the VS Code extension's entries, whose notify.sh lives in globalStorage", () => {
+      // The extension is gone but its hooks stayed, firing at a script nobody answers.
+      const old = path.join(tmpDir, 'Library/Application Support/Code/User/globalStorage/ricardomoratomateos.stack-agents/notify.sh');
+      writeSettings({
+        hooks: {
+          Stop: [
+            { matcher: '', hooks: [{ type: 'command', command: `"${old}" Stop claude` }] },
+            { matcher: '', hooks: [{ type: 'command', command: '/other/notify.sh' }, { type: 'command', command: `"${old}" Stop` }] },
+          ],
+        },
+      });
+
+      makeHook().install(hookUrl);
+
+      const hooks = readSettings()['hooks'] as Record<string, HookEntry[]>;
+      expect(hooks['Stop']).toEqual([
+        { matcher: '', hooks: [{ type: 'command', command: '/other/notify.sh' }] },
+        { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Stop claude` }] },
+      ]);
+    });
+
+    it('replaces a Stack notify.sh at any other path, recognised by its header', () => {
+      makeHook().install(hookUrl);
+      const elsewhere = path.join(tmpDir, 'old-storage', 'notify.sh');
+      fs.mkdirSync(path.dirname(elsewhere), { recursive: true });
+      fs.copyFileSync(scriptPath, elsewhere);
+      const foreign = path.join(tmpDir, 'other-tool', 'notify.sh');
+      fs.mkdirSync(path.dirname(foreign), { recursive: true });
+      fs.writeFileSync(foreign, '#!/bin/bash\n# another harness\n');
+      writeSettings({
+        hooks: { Stop: [{ matcher: '', hooks: [{ type: 'command', command: `"${elsewhere}" Stop claude` }, { type: 'command', command: `${foreign} Stop` }] }] },
+      });
+
+      makeHook().install(hookUrl);
+
+      const hooks = readSettings()['hooks'] as Record<string, HookEntry[]>;
+      expect(hooks['Stop']).toEqual([
+        { matcher: '', hooks: [{ type: 'command', command: `${foreign} Stop` }] },
+        { matcher: '', hooks: [{ type: 'command', command: `"${scriptPath}" Stop claude` }] },
+      ]);
+    });
+
     it('handles missing settings file (creates it, including parent dirs)', () => {
       expect(fs.existsSync(settingsPath)).toBe(false);
       makeHook().install(hookUrl);

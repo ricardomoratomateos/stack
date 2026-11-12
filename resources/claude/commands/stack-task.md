@@ -2,7 +2,7 @@
 description: Crea una tarea en Stack desde un ticket (Jira, Linear), un hilo de Slack o una descripción
 argument-hint: <AS-1234 | enlace | descripción>
 ---
-<!-- Installed by Stack (VS Code). Removed when "Stack tools in Claude Code" is switched off. -->
+<!-- Installed by Stack (Settings → "Stack tools in Claude Code"); rewritten on every install. -->
 
 Create a Stack task for: $ARGUMENTS
 

@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { Emitter } from '../core/Emitter';
 import { JsonFileStore } from '../core/JsonFileStore';
@@ -32,6 +33,8 @@ import { resolveWindow } from '../mcp/discovery';
 import type { ApiRequest, ApiResponse, WindowFile } from '../mcp/protocol';
 import { BRIDGE_FILE } from '../mcp/protocol';
 import { bridgeCommand, installBridge, type BridgeCommand } from '../mcp/workerMcp';
+import { claudeBinary, enableManager, execRun, managerStatus, type Run } from '../mcp/registration';
+import { installClaudeAssets } from '../mcp/claudeAssets';
 import { NodeConfig } from './NodeConfig';
 import { HeadlessHost, headlessTerminals, LogNotify, NO_BREAKPOINTS, NO_TABS, stateLike } from './headless';
 import { readVsCodeGlobalState } from './vscodeState';
@@ -59,6 +62,10 @@ export interface DaemonOptions {
   deferImport?: boolean;
   /** The MCP bridge to hand workers (`dist/stack-mcp.js`); none: workers start without it. */
   bridgeSource?: string;
+  /** The manager skill and commands to install into ~/.claude (resources/claude); none: MCP registration only. */
+  claudeAssets?: string;
+  /** Runs `claude mcp …` for enableManager; default execFile. */
+  run?: Run;
   /** Native notification sink for "the agent needs you"; default `osascript`. */
   notify?: (message: string) => void;
   log?: (line: string) => void;
@@ -140,6 +147,9 @@ export class StackDaemon {
   private seq = 0;
   private timer?: ReturnType<typeof setTimeout>;
   private bridge?: BridgeCommand;
+  /** `<configDir>/stack-mcp.js`, once installed: what Claude Code is pointed at. */
+  private bridgePath?: string;
+  private readonly global: NodeConfig;
   private readonly settingsPath: string;
   /** Settings clients pushed with `setSettings`; see NodeConfig. */
   private pushed: Record<string, unknown> = {};
@@ -163,12 +173,16 @@ export class StackDaemon {
     if (opts.bridgeSource) {
       try {
         const installed = installBridge(opts.bridgeSource, dir);
-        if (installed) this.bridge = bridgeCommand(installed);
+        if (installed) {
+          this.bridgePath = installed;
+          this.bridge = bridgeCommand(installed);
+        }
       } catch (e) {
         this.log(`[stackd] installing the MCP bridge (${BRIDGE_FILE}) failed: ${String(e)}`);
       }
     }
     const global = new NodeConfig(() => undefined, this.settingsPath, () => this.pushed);
+    this.global = global;
     this.providers = new ProviderFactory(global, dir, opts.home, () => this.bridge);
     this.agents = new AgentSessionManager(this.providers, this.store, this.tmux, undefined, undefined, undefined, () => 'perSession', () => global.get().promptPrefix, headlessTerminals());
     this.hooks = new HookServer(this.agents);
@@ -612,9 +626,35 @@ export class StackDaemon {
       case 'newTaskInit': {
         return this.repoFor(b).service.newTaskInit();
       }
+      case 'managerStatus': {
+        return managerStatus(path.join(this.home, '.claude.json'), this.bridgePath);
+      }
+      case 'enableManager': {
+        // The stable copy of the bridge, run by the node this daemon runs on: both outlive app updates.
+        if (!this.bridgePath) throw new CommandError(`The MCP bridge (${BRIDGE_FILE}) is missing from this build.`, 409);
+        const run = this.opts.run ?? execRun;
+        const result = await enableManager(run, claudeBinary(this.global.get().claudeCommand), { command: process.execPath, args: [this.bridgePath] });
+        if (!result.ok) throw new CommandError(result.message, 409);
+        let message = result.message;
+        if (this.opts.claudeAssets) {
+          try {
+            const { skipped } = installClaudeAssets(path.join(this.home, '.claude'), this.opts.claudeAssets);
+            message += ' Try /stack, /stack-task or /stack-next.';
+            if (skipped.length) message += ` (Kept your own ${skipped.join(', ')}.)`;
+          } catch (e) {
+            this.log(`[stackd] could not install the Claude skill/commands: ${String(e)}`);
+          }
+        }
+        return { message, ...managerStatus(path.join(this.home, '.claude.json'), this.bridgePath) };
+      }
       default:
         throw new CommandError(`Unknown command "${name}".`, 404);
     }
+  }
+
+  /** Where ~/.claude and ~/.claude.json live. */
+  private get home(): string {
+    return this.opts.home ?? os.homedir();
   }
 
   private newWindow(worktreeId: string, before: Set<number>): number | undefined {

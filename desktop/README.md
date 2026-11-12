@@ -72,7 +72,7 @@ Socket: `~/.config/stack/stackd.sock` (state in `~/.config/stack/`). By hand, fr
 
 ## MCP (Claude Code manager)
 
-stackd hands the bridge (`stack-mcp.js`) to the workers it starts. To use the `stack_*` tools from your own Claude Code session, either switch on **Stack tools in Claude Code** in the extension's Stack settings (or run **Stack: Enable Manager (MCP)**), or register the bridge yourself: `claude mcp add --scope user stack -- node <repo>/dist/stack-mcp.js`. Then in Claude Code run `/mcp` and reconnect `stack` (or start a new session).
+stackd hands the bridge (`stack-mcp.js`) to the workers it starts. To use the `stack_*` tools from your own Claude Code session, use **Settings › Stack tools in Claude Code › Register** (stackd registers its copy, `~/.config/stack/stack-mcp.js`, with the node it runs on, and installs the `/stack` skill and commands), or register the bridge yourself: `claude mcp add --scope user stack -- node ~/.config/stack/stack-mcp.js`. Then in Claude Code run `/mcp` and reconnect `stack` (or start a new session).
 
 ## Logs
 

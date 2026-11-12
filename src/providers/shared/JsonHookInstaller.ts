@@ -263,9 +263,41 @@ export class JsonHookInstaller {
   }
 
   /**
-   * Ours iff it invokes our script, whatever quoting or event suffix it carries.
+   * Ours iff it invokes our script, whatever quoting or event suffix it carries
+   * — or a Stack notify.sh somewhere else (see isStackNotifyScript), so that
+   * install replaces the VS Code extension's entries instead of leaving them
+   * to fire at a script nobody listens to.
    */
   private isOurs(command: unknown): boolean {
-    return typeof command === 'string' && command.includes(this.scriptPath);
+    if (typeof command !== 'string') return false;
+    if (command.includes(this.scriptPath)) return true;
+    const script = scriptOf(command);
+    return script !== undefined && isStackNotifyScript(script);
+  }
+}
+
+/** The program a hook command runs: the leading quoted path, or its first word. */
+function scriptOf(command: string): string | undefined {
+  const trimmed = command.trim();
+  const m = trimmed.startsWith('"') ? /^"([^"]+)"/.exec(trimmed) : /^(\S+)/.exec(trimmed);
+  return m?.[1];
+}
+
+/** The second line of every notify.sh Stack has written, the VS Code extension's included. */
+export const NOTIFY_HEADER = '# Stack notify hook — generated, do not edit manually.';
+
+/**
+ * A notify.sh Stack wrote at another path: the VS Code extension kept it in
+ * its globalStorage (`…/globalStorage/<publisher>.stack-agents/notify.sh`),
+ * which outlives the extension. Recognised by that path — even when the file
+ * is already gone — or by the script's own header.
+ */
+export function isStackNotifyScript(script: string): boolean {
+  if (path.basename(script) !== 'notify.sh') return false;
+  if (/\/globalStorage\/[^/]*stack-agents[^/]*\/notify\.sh$/i.test(script)) return true;
+  try {
+    return fs.readFileSync(script, 'utf8').split('\n', 3).includes(NOTIFY_HEADER);
+  } catch {
+    return false;
   }
 }

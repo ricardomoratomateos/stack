@@ -41,6 +41,7 @@
     "resources": {
       "../../dist/stackd.js": "stackd/stackd.js",
       "../../dist/stack-mcp.js": "stackd/stack-mcp.js",
+      "../../resources/claude": "stackd/claude",
       "resources/stackd-package.json": "stackd/package.json"
     },
     "macOS": {

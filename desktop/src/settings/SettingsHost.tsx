@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Sheet } from '../ui/Sheet';
+import { stackd } from '../stackd/api';
 import { PROJECT_DEFS, USER_DEFS, isModified, repoValueOf, valueOf, type SettingDef, type SettingValue } from './schema';
 
 /** Settings editor, a centred sheet, over ~/.config/stack/settings.json, in the look of VS Code's. */
@@ -74,6 +75,7 @@ export function SettingsHost({ repo, onClose }: { repo?: { name: string; root: s
             {PROJECT_DEFS.map((d) => <SettingRow key={d.key} def={d} stored={valueOf(d, file)} onSave={save} />)}
           </>
         )}
+        {!inRepo && <ManagerRow />}
         {!inRepo && <div className="setting-item">
           <div className="setting-title">Other settings</div>
           <div className="setting-desc">The rest are lists, objects or advanced options: edit them in the file.</div>
@@ -81,6 +83,52 @@ export function SettingsHost({ repo, onClose }: { repo?: { name: string; root: s
         </div>}
       </div>
     </Sheet>
+  );
+}
+
+type ManagerState = 'registered' | 'elsewhere' | 'missing';
+
+const MANAGER_TEXT: Record<ManagerState, string> = {
+  registered: 'Registered: every Claude Code session has the stack_* tools and the /stack commands.',
+  elsewhere: 'Registered, but pointing at another copy (likely the old VS Code extension).',
+  missing: 'Not registered: Claude Code sessions outside Stack have no stack_* tools.',
+};
+
+/** Registers stackd's MCP bridge with Claude Code (user scope) and installs the manager skill/commands. */
+function ManagerRow() {
+  const [status, setStatus] = useState<{ state: ManagerState; detail?: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    stackd.command<{ state: ManagerState; detail?: string }>('managerStatus').then(setStatus).catch((e) => setNote(String(e)));
+  }, []);
+
+  const enable = async () => {
+    setBusy(true);
+    try {
+      const r = await stackd.command<{ state: ManagerState; detail?: string; message: string }>('enableManager');
+      setStatus(r);
+      setNote(r.message);
+    } catch (e) {
+      setNote(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="setting-item">
+      <div className="setting-title">Stack tools in Claude Code</div>
+      <div className="setting-desc">
+        {status ? MANAGER_TEXT[status.state] : 'Checking…'}
+        {status?.detail && <> <code>{status.detail}</code></>}
+      </div>
+      {note && <div className="setting-desc" role="status">{note}</div>}
+      <button type="button" className={status?.state === 'registered' ? 'secondary' : undefined} disabled={busy || !status} onClick={() => void enable()}>
+        {busy ? 'Registering…' : status?.state === 'registered' ? 'Register again' : status?.state === 'elsewhere' ? 'Point it at this Stack' : 'Register'}
+      </button>
+    </div>
   );
 }
 
