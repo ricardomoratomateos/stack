@@ -1,0 +1,61 @@
+/* The boot screen: the repo as a trunk, each task a branch that grows, then lights up. */
+.boot {
+  --boot-needs: var(--fm-needs, #c8ff00);
+  --boot-review: var(--fm-review, #3b82f6);
+  --boot-working: var(--fm-working, #fafafa);
+  --boot-idle: var(--fm-idle, #525252);
+  --boot-missing: var(--fm-bad, #f07167);
+  --boot-line: var(--app-border-strong, #404040);
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px;
+  background: var(--app-bg, #111);
+  /* A boot that finishes fast never shows: the screen fades in only after a beat. */
+  animation: boot-in .25s ease .22s both;
+}
+.boot[data-phase='leaving'] { animation: boot-out .38s ease forwards; }
+.boot-graph { max-width: calc(100vw - 32px); height: auto; overflow: visible; }
+
+.boot-trunk, .boot-stem { fill: none; stroke: var(--boot-line); stroke-width: 1.5; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; }
+.boot-trunk { animation: boot-draw .6s cubic-bezier(.3, .7, .2, 1) .22s forwards; }
+.boot-root { fill: var(--app-text-dim, #a3a3a3); opacity: 0; animation: boot-pop .3s ease .2s forwards; }
+.boot-trunk-label, .boot-name, .boot-step { font-family: var(--vscode-editor-font-family, ui-monospace, monospace); }
+.boot-trunk-label { font-size: 10px; fill: var(--app-text-dim, #a3a3a3); letter-spacing: .04em; opacity: 0; animation: boot-fade .4s ease .5s forwards; }
+
+/* Each branch: its stem grows from the trunk, then its tip and name appear. */
+.boot-branch { --d: calc(.55s + var(--i) * 90ms); }
+.boot-stem { animation: boot-draw .5s cubic-bezier(.3, .7, .2, 1) var(--d) forwards; transition: stroke .35s ease calc(var(--i) * 70ms), opacity .35s ease; }
+.boot-fork { fill: var(--boot-line); opacity: 0; animation: boot-pop .2s ease var(--d) forwards; }
+.boot-tip {
+  fill: var(--app-bg, #111); stroke: var(--app-text-dim, #a3a3a3); stroke-width: 1.5;
+  transform-box: fill-box; transform-origin: center; opacity: 0;
+  animation: boot-pop .25s ease calc(var(--d) + .4s) forwards, boot-breathe 1.4s ease-in-out calc(var(--d) + .7s) infinite;
+  transition: fill .3s ease calc(var(--i) * 70ms), stroke .3s ease calc(var(--i) * 70ms);
+}
+.boot-name { font-size: 12px; fill: var(--app-text, #fafafa); opacity: 0; animation: boot-fade .35s ease calc(var(--d) + .45s) forwards; }
+.boot-state { font-size: 10px; fill: var(--c); opacity: 0; animation: boot-fade .3s ease calc(var(--i) * 70ms + .15s) forwards; }
+
+/* Confirmed: the branch takes its state's colour, the tip fills in and sends out one ring. */
+.boot-branch[data-lit] .boot-stem { stroke: var(--c); opacity: .55; }
+.boot-branch[data-lit] .boot-tip { fill: var(--c); stroke: var(--c); animation: boot-pop .25s ease calc(var(--d) + .4s) forwards; opacity: 1; }
+.boot-ripple {
+  fill: none; stroke: var(--c); stroke-width: 1.5; transform-box: fill-box; transform-origin: center; opacity: 0;
+  animation: boot-ripple .7s ease-out calc(var(--i) * 70ms) forwards;
+}
+
+.boot-step { font-size: 11px; color: var(--app-text-dim, #a3a3a3); letter-spacing: .02em; min-height: 1.4em; }
+.boot-step::after { content: ''; display: inline-block; width: .5em; margin-left: 2px; border-bottom: 1px solid currentColor; animation: boot-caret 1s steps(1) infinite; }
+.boot[data-phase='lit'] .boot-step::after, .boot[data-phase='leaving'] .boot-step::after { display: none; }
+
+@keyframes boot-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes boot-out { to { opacity: 0; transform: translateY(-6px); } }
+@keyframes boot-draw { to { stroke-dashoffset: 0; } }
+@keyframes boot-pop { from { opacity: 0; transform: scale(.4); } to { opacity: 1; transform: scale(1); } }
+@keyframes boot-fade { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
+@keyframes boot-breathe { 50% { opacity: .35; } }
+@keyframes boot-ripple { from { opacity: .7; transform: scale(1); } to { opacity: 0; transform: scale(3.2); } }
+@keyframes boot-caret { 50% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .boot, .boot *, .boot *::after { animation-duration: 1ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition: none !important; }
+  .boot-ripple { display: none; }
+}
