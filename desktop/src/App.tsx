@@ -614,9 +614,9 @@ export function App() {
                   <nav className="tabs" aria-label={`Sessions of ${nameOf(selected.wt)}`} onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'session'))}>
                     <span className="tabs-title">{selected.name}</span>
                     {rows.map((r) => (
-                      <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={(!reviewing && r.index === selectedIndex) || undefined} {...onMiddleClick(() => closeSessionTab(selected.wt.id, r.index))} onClick={() => select(selected.wt.id, r.index)} title={[r.kind === 'agent' ? stateWord(r.state, r.turned) : r.detail, r.index === selectedIndex ? 'Double-click to maximize' : ''].filter(Boolean).join(' · ') || undefined}>
+                      <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={(!reviewing && r.index === selectedIndex) || undefined} {...onMiddleClick(() => closeSessionTab(selected.wt.id, r.index))} onClick={() => select(selected.wt.id, r.index)} title={[r.name, r.kind === 'agent' ? stateWord(r.state, r.turned) : r.detail, r.index === selectedIndex ? 'Double-click to maximize' : ''].filter(Boolean).join(' · ')}>
                         <StatusDot state={r.state} size="sm" />
-                        {r.name}
+                        <span className="tab-name">{r.name}</span>
                         {maximized === 'session' && r.index === selectedIndex && <span className="max-badge" title={maxTitle}>maximized</span>}
                       </button>
                     ))}
@@ -653,9 +653,9 @@ export function App() {
               <nav className="tabs" aria-label="Manager sessions" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧M toggle">
                 <span className="tabs-title">{view.control?.name || 'Manager'}</span>
                 {managerRows.map((r) => (
-                  <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === managerIdx || undefined} {...onMiddleClick(() => view.control && closeSessionTab(view.control.wt.id, r.index))} onClick={() => setManagerTabs((m) => ({ ...m, [view.repoRoot]: r.index }))} title={(r.kind === 'agent' ? stateWord(r.state, r.turned) : r.detail) || undefined}>
+                  <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === managerIdx || undefined} {...onMiddleClick(() => view.control && closeSessionTab(view.control.wt.id, r.index))} onClick={() => setManagerTabs((m) => ({ ...m, [view.repoRoot]: r.index }))} title={[r.name, r.kind === 'agent' ? stateWord(r.state, r.turned) : r.detail].filter(Boolean).join(' · ')}>
                     <StatusDot state={r.state} size="sm" />
-                    {r.name}
+                    <span className="tab-name">{r.name}</span>
                   </button>
                 ))}
                 {maximized === 'manager' && <span className="max-badge" title={maxTitle}>maximized</span>}
@@ -672,9 +672,9 @@ export function App() {
               <nav className="tabs" aria-label="Manager sessions" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧M toggle">
                 <span className="tabs-title">{view.control?.name || 'Manager'}</span>
                 {managerRows.map((r) => (
-                  <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === managerIdx || undefined} {...onMiddleClick(() => view.control && closeSessionTab(view.control.wt.id, r.index))} onClick={() => setManagerTabs((m) => ({ ...m, [view.repoRoot]: r.index }))} title={(r.kind === 'agent' ? stateWord(r.state, r.turned) : r.detail) || undefined}>
+                  <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === managerIdx || undefined} {...onMiddleClick(() => view.control && closeSessionTab(view.control.wt.id, r.index))} onClick={() => setManagerTabs((m) => ({ ...m, [view.repoRoot]: r.index }))} title={[r.name, r.kind === 'agent' ? stateWord(r.state, r.turned) : r.detail].filter(Boolean).join(' · ')}>
                     <StatusDot state={r.state} size="sm" />
-                    {r.name}
+                    <span className="tab-name">{r.name}</span>
                   </button>
                 ))}
                 {maximized === 'manager' && <span className="max-badge" title={maxTitle}>maximized</span>}
