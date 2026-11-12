@@ -56,4 +56,18 @@ export interface IAgentProvider {
   /** Wire the provider's hook/plugin system to POST state events to hookUrl. */
   installHooks(hookUrl: string): void;
   uninstallHooks(): void;
+  /** Whether the hooks are in place, read from the agent's config without touching it (stackd doctor). */
+  hookStatus?(): HookStatus;
+}
+
+/** What `hookStatus()` found in an agent's hook config. */
+export interface HookStatus {
+  /** The agent's config file (or plugin) Stack writes into. */
+  file: string;
+  /** What is not there: events without Stack's command, `notify.sh`, `plugin`. */
+  missing: string[];
+  /** Stack hook commands pointing at another notify.sh (the VS Code extension's). */
+  stale: string[];
+  /** The file could not be read (a syntax error): nothing else is known. */
+  error?: string;
 }

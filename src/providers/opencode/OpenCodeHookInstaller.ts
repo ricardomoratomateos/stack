@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { OPENCODE_PLUGIN_PATH } from '../../constants';
 import { DEFAULT_URL_FILE, HookRoutes, ROUTES_DIR } from '../shared/HookRoutes';
+import type { HookStatus } from '../../ports/IAgentProvider';
 
 /**
  * Wires opencode to the stack HookServer by writing a plugin into opencode's
@@ -52,6 +53,13 @@ export class OpenCodeHookInstaller {
     } catch {
       // best effort
     }
+  }
+
+  /** Whether the plugin on disk is the one install() writes. */
+  status(): HookStatus {
+    let current: string | undefined;
+    try { current = fs.readFileSync(this.pluginPath, 'utf8'); } catch { /* not installed */ }
+    return { file: this.pluginPath, missing: current === this.pluginSource() ? [] : ['plugin'], stale: [] };
   }
 
   /** Env prefix for launching opencode in `worktreeId`; see HookRoutes.launchEnv. */

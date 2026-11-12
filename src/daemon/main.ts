@@ -11,6 +11,11 @@ import { ApiServer, callDaemon, socketPathFor } from './api';
 import type { Snapshot } from './StackDaemon';
 import { canonicalPath } from '../worktree/worktreesInRepo';
 import { BRIDGE_FILE } from '../mcp/protocol';
+import * as os from 'node:os';
+import { ProviderFactory } from '../providers/ProviderFactory';
+import { TmuxManager } from '../session/TmuxManager';
+import { runChecks } from './doctor';
+import { formatChecks, type Check } from './doctorReport';
 
 const USAGE = `stackd — Stack without VS Code
 
@@ -22,6 +27,9 @@ Usage:
   stackd status [repo]   Print the worktrees, sessions and states of a repo
                          (default: the repo containing the current directory).
                          Asks the daemon when it runs.
+  stackd doctor          Check what Stack needs on this Mac (tmux, node, hooks,
+                         MCP registration, agent CLIs). Asks the daemon when it
+                         runs, checks from here otherwise. Exit 1 on a failure.
 
 Environment: STACKD_CONFIG_DIR (default ~/.config/stack), STACKD_TMUX_SOCKET
 (a tmux -L server of its own), STACKD_HOME (where ~/.claude, ~/.codex live),
@@ -68,6 +76,29 @@ async function status(repoArg: string | undefined): Promise<void> {
   process.stdout.write(formatStatus(repo, items));
 }
 
+/** The daemon's checks when it answers (its PATH and node are the ones that matter), this process's otherwise. */
+async function doctor(): Promise<number> {
+  const dir = configDir();
+  let checks: Check[];
+  try {
+    checks = await callDaemon<Check[]>(socketPathFor(dir), 'POST', '/commands/doctor', {});
+  } catch {
+    const home = process.env.STACKD_HOME ?? os.homedir();
+    const config = new NodeConfig(() => undefined, path.join(dir, 'settings.json'));
+    const bridge = path.join(dir, BRIDGE_FILE);
+    checks = await runChecks({
+      config: config.get(),
+      providers: new ProviderFactory(config, dir, home).all(),
+      claudeConfigPath: path.join(home, '.claude.json'),
+      bridgePath: fs.existsSync(bridge) ? bridge : undefined,
+      socketPath: socketPathFor(dir),
+      tmuxVersion: () => TmuxManager.version(),
+    });
+  }
+  process.stdout.write(formatChecks(checks));
+  return checks.every((c) => c.ok) ? 0 : 1;
+}
+
 async function serve(): Promise<void> {
   const dir = configDir();
   const bridge = path.join(__dirname, BRIDGE_FILE);
@@ -102,6 +133,7 @@ async function main(argv: string[]): Promise<number> {
     await serve();
     return 0;
   }
+  if (cmd === 'doctor') return doctor();
   if (cmd === 'status') {
     await status(rest[0]);
     return 0;

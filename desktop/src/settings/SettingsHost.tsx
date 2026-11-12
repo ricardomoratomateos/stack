@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Sheet } from '../ui/Sheet';
 import { stackd } from '../stackd/api';
+import { useStackd } from '../stackd/useStackd';
+import { APP_VERSION } from '../stackd/version';
+import { formatChecks } from '@core/daemon/doctorReport';
+import { diagnostics, type Check } from './diagnostics';
 import { PROJECT_DEFS, USER_DEFS, isModified, repoValueOf, valueOf, type SettingDef, type SettingValue } from './schema';
 
 /** Settings editor, a centred sheet, over ~/.config/stack/settings.json, in the look of VS Code's. */
@@ -81,6 +85,7 @@ export function SettingsHost({ repo, onClose }: { repo?: { name: string; root: s
           <div className="setting-desc">The rest are lists, objects or advanced options: edit them in the file.</div>
           <button type="button" className="secondary" onClick={() => invoke('open_settings_file').catch((e) => setError(String(e)))}>Open settings.json</button>
         </div>}
+        {!inRepo && <Diagnostics />}
       </div>
     </Sheet>
   );
@@ -129,6 +134,48 @@ function ManagerRow() {
         {busy ? 'Registering…' : status?.state === 'registered' ? 'Register again' : status?.state === 'elsewhere' ? 'Point it at this Stack' : 'Register'}
       </button>
     </div>
+  );
+}
+
+/** stackd's `doctor` checks, plus the app's version check; Copy gives the text for an issue. */
+function Diagnostics() {
+  const { running, snapshot } = useStackd();
+  const [doctor, setDoctor] = useState<Check[] | { error: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const run = () => {
+    setDoctor(null);
+    stackd.command<Check[]>('doctor').then(setDoctor).catch((e) => setDoctor({ error: String(e) }));
+  };
+  useEffect(() => { if (running) run(); }, [running]);
+
+  const checks = running === null || (running && !doctor) ? null : diagnostics(APP_VERSION, running, snapshot?.version, doctor ?? []);
+  const copy = () => {
+    if (!checks) return;
+    void navigator.clipboard.writeText(`Stack ${APP_VERSION} diagnostics\n${formatChecks(checks)}`).then(() => setCopied(true), () => {});
+  };
+
+  return (
+    <>
+      <h2 className="settings-group">Diagnostics</h2>
+      <p className="settings-sub">What Stack needs on this Mac, as stackd sees it.</p>
+      <div className="setting-item">
+        {checks ? (
+          <ul className="diagnostics">
+            {checks.map((c) => (
+              <li key={c.id} data-ok={c.ok || undefined}>
+                <span className="diag-mark" aria-label={c.ok ? 'ok' : 'failed'}>{c.ok ? '✓' : '✗'}</span>
+                <span className="diag-id">{c.id}</span>
+                <span className="diag-detail">{c.detail}{!c.ok && c.fix && <div className="diag-fix">{c.fix}</div>}</span>
+              </li>
+            ))}
+          </ul>
+        ) : <div className="setting-desc">Checking…</div>}
+        <button type="button" className="secondary" disabled={!checks} onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
+        {' '}
+        <button type="button" className="secondary" disabled={!running || !checks} onClick={() => { setCopied(false); run(); }}>Check again</button>
+      </div>
+    </>
   );
 }
 

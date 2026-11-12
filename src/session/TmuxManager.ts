@@ -185,6 +185,13 @@ export class TmuxManager implements ISessionManager {
     });
   }
 
+  /** `tmux -V` ("tmux 3.4"), or undefined when there is no tmux on PATH. */
+  static version(): Promise<string | undefined> {
+    return new Promise(resolve => {
+      execFile('tmux', ['-V'], (err, stdout) => resolve(err ? undefined : String(stdout).trim()));
+    });
+  }
+
   /**
    * Exact (`=`): a bare name is also matched as a unique prefix, so with the
    * base session gone a single view session would answer for it — and

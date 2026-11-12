@@ -1,4 +1,4 @@
-import type { IAgentProvider } from '../../ports/IAgentProvider';
+import type { HookStatus, IAgentProvider } from '../../ports/IAgentProvider';
 import type { ConfigSource, WorkerMcpSource } from '../claude/ClaudeProvider';
 import type { CodexHookInstaller } from './CodexHookInstaller';
 import { codexMcpArgs } from '../../mcp/workerMcp';
@@ -34,5 +34,9 @@ export class CodexProvider implements IAgentProvider {
 
   uninstallHooks(): void {
     this.hooks.uninstall();
+  }
+
+  hookStatus(): HookStatus {
+    return this.hooks.status();
   }
 }

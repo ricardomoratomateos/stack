@@ -1,4 +1,4 @@
-import type { IAgentProvider } from '../../ports/IAgentProvider';
+import type { HookStatus, IAgentProvider } from '../../ports/IAgentProvider';
 import type { StackConfig } from '../../types';
 import type { ClaudeHookInstaller } from './ClaudeHookInstaller';
 import { claudeMcpArgs, type BridgeCommand } from '../../mcp/workerMcp';
@@ -39,5 +39,9 @@ export class ClaudeProvider implements IAgentProvider {
 
   uninstallHooks(): void {
     this.hooks.uninstall();
+  }
+
+  hookStatus(): HookStatus {
+    return this.hooks.status();
   }
 }

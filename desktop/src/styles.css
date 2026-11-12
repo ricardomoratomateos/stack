@@ -195,6 +195,13 @@ body[data-resizing] .term-host, body[data-resizing] .sidebar-body { pointer-even
 .settings-tabs button { padding: 6px 12px; background: none; color: var(--app-text-dim); border-bottom: 2px solid transparent; }
 .settings-tabs button[aria-selected='true'] { color: var(--app-text); border-bottom-color: var(--app-focus); }
 .settings-group { font-size: 15px; font-weight: 600; margin: 24px 0 4px; }
+.diagnostics { list-style: none; margin: 0 0 10px; padding: 0; font-size: 12px; line-height: 1.5; }
+.diagnostics li { display: grid; grid-template-columns: 16px 110px 1fr; gap: 6px; padding: 2px 0; }
+.diag-mark { color: var(--app-error); font-weight: 600; }
+.diagnostics li[data-ok] .diag-mark { color: var(--app-accent-text); }
+.diag-id { color: var(--app-text-dim); font-family: var(--vscode-editor-font-family, monospace); }
+.diag-detail { word-break: break-word; }
+.diag-fix { color: var(--app-text-dim); }
 .setting-override { margin-left: 8px; font-size: 11px; font-weight: 400; color: var(--fm-warn, var(--app-text-dim)); }
 
 /* ⌃Tab worktree switcher: a quick-pick look. */

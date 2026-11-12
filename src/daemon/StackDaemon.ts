@@ -38,6 +38,7 @@ import { installClaudeAssets } from '../mcp/claudeAssets';
 import { NodeConfig } from './NodeConfig';
 import { HeadlessHost, headlessTerminals, LogNotify, NO_BREAKPOINTS, NO_TABS, stateLike } from './headless';
 import { readVsCodeGlobalState } from './vscodeState';
+import { runChecks } from './doctor';
 
 /** Replaced by esbuild with package.json's version (see esbuild.js). */
 export const STACKD_VERSION = process.env.STACKD_VERSION ?? 'dev';
@@ -636,6 +637,18 @@ export class StackDaemon {
       }
       case 'newTaskInit': {
         return this.repoFor(b).service.newTaskInit();
+      }
+      case 'doctor': {
+        return runChecks({
+          config: this.global.get(),
+          providers: this.providers.all(),
+          claudeConfigPath: path.join(this.home, '.claude.json'),
+          bridgePath: this.bridgePath,
+          // api.ts's socketPathFor; not imported, api.ts imports this file.
+          socketPath: path.join(this.opts.configDir, 'stackd.sock'),
+          tmuxVersion: () => TmuxManager.version(),
+          inDaemon: true,
+        });
       }
       case 'managerStatus': {
         return managerStatus(path.join(this.home, '.claude.json'), this.bridgePath);

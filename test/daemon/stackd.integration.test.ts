@@ -83,6 +83,13 @@ describe.skipIf(!hasTmux)('stackd serve (real tmux on an isolated socket)', () =
     expect(file['stackd.imported']).toBe(true);
   });
 
+  it('runs its doctor checks over the API', async () => {
+    const checks = await cmd<Array<{ id: string; ok: boolean }>>('doctor', {});
+    expect(checks.find((c) => c.id === 'tmux')?.ok).toBe(true);
+    expect(checks.find((c) => c.id === 'stackd')?.ok).toBe(true);
+    expect(checks.map((c) => c.id)).toEqual(expect.arrayContaining(['node', 'mcp', 'cli.claude', 'cli.codex', 'cli.opencode']));
+  });
+
   it('refuses a second daemon on the same socket', async () => {
     await expect(new ApiServer(daemon, sock).start()).rejects.toThrow(/already running/);
   });

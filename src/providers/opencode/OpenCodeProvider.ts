@@ -1,4 +1,4 @@
-import type { IAgentProvider } from '../../ports/IAgentProvider';
+import type { HookStatus, IAgentProvider } from '../../ports/IAgentProvider';
 import type { ConfigSource } from '../claude/ClaudeProvider';
 import type { OpenCodeHookInstaller } from './OpenCodeHookInstaller';
 
@@ -26,5 +26,9 @@ export class OpenCodeProvider implements IAgentProvider {
 
   uninstallHooks(): void {
     this.hooks.uninstall();
+  }
+
+  hookStatus(): HookStatus {
+    return this.hooks.status();
   }
 }

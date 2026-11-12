@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { HookEntry } from '../../types';
+import type { HookStatus } from '../../ports/IAgentProvider';
 import { ConfigFileError, displayPath, readJsonObject, writeFileAtomic } from './configFile';
 import { HookRoutes } from './HookRoutes';
 
@@ -161,6 +162,29 @@ export class JsonHookInstaller {
   /** Env prefix for launching an agent in `worktreeId`; see HookRoutes.launchEnv. */
   launchEnv(worktreeId: string): string {
     return this.routes.launchEnv(worktreeId, this.hookUrl);
+  }
+
+  /** What install() would change, read only: events without our command, and other Stack notify.sh entries. */
+  status(): HookStatus {
+    const status: HookStatus = { file: this.settingsPath, missing: [], stale: [] };
+    if (!fs.existsSync(this.scriptPath)) status.missing.push('notify.sh');
+    let hooks: Record<string, unknown[]>;
+    try {
+      hooks = this.hooksOf(this.readSettings('check its hooks'), 'check its hooks');
+    } catch (e) {
+      return { ...status, error: e instanceof Error ? e.message : String(e) };
+    }
+    const stale = new Set<string>();
+    for (const event of this.events) {
+      const commands = (hooks[event] ?? []).flatMap((group) => {
+        const g = group as HookEntry | null;
+        return g && Array.isArray(g.hooks) ? g.hooks.map((c) => c?.command) : [];
+      });
+      if (!commands.includes(this.commandFor(event))) status.missing.push(event);
+      for (const c of commands) if (typeof c === 'string' && this.isOurs(c) && !c.includes(this.scriptPath)) stale.add(c);
+    }
+    status.stale = [...stale];
+    return status;
   }
 
   /** `"<script>" <Event> <agent>` — quoted so paths like "Application Support" survive. */

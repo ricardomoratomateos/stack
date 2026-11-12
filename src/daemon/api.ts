@@ -44,7 +44,7 @@ function readBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
  *   GET  /state            the snapshot: every repo, its worktrees, sessions, states
  *   GET  /events           SSE; `event: state` with the snapshot on connect and after every change
  *   POST /commands/<name>  createTask deleteTask spawnAgent spawnShell killWindow
- *                          sendToAgent respondPermission attachTarget addRepo
+ *                          sendToAgent respondPermission attachTarget addRepo doctor …
  *
  * Answers are `{ok: true, result}` / `{ok: false, error}`.
  */
