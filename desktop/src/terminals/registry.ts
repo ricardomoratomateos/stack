@@ -1,4 +1,5 @@
-import { Terminal } from '@xterm/xterm';
+import { Terminal, type ILink } from '@xterm/xterm';
+import { findUrls, opensLink } from './links';
 import { documentVar, terminalOptions, xtermTheme } from '../theme/terminalTheme';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { FitAddon } from '@xterm/addon-fit';
@@ -9,6 +10,40 @@ import { modesSequence, parsePaneModes, screenSequence } from './paneModes';
 import { log } from '../log';
 
 export const SCROLLBACK = 2000;
+
+/**
+ * Plain-text URLs on buffer row `y` (1-based), found in its whole wrapped line so a
+ * URL that wraps onto the next row is one link. Each string offset maps back to
+ * its cell, so wide characters before the URL don't shift the range.
+ */
+function plainLinks(term: Terminal, y: number, activate: (e: MouseEvent, url: string) => void): ILink[] | undefined {
+  const buf = term.buffer.active;
+  let first = y - 1;
+  while (first > 0 && buf.getLine(first)?.isWrapped) first--;
+  let last = y - 1;
+  while (buf.getLine(last + 1)?.isWrapped) last++;
+  let text = '';
+  const cells: { x: number; y: number }[] = [];
+  for (let row = first; row <= last; row++) {
+    const line = buf.getLine(row);
+    if (!line) break;
+    for (let x = 0; x < line.length; x++) {
+      const cell = line.getCell(x);
+      if (!cell || cell.getWidth() === 0) continue;
+      const chars = cell.getChars() || ' ';
+      for (let i = 0; i < chars.length; i++) cells.push({ x: x + 1, y: row + 1 });
+      text += chars;
+    }
+  }
+  const links = findUrls(text)
+    .map(({ url, start, end }): ILink => ({
+      text: url,
+      range: { start: cells[start], end: cells[end - 1] },
+      activate: (e) => activate(e, url),
+    }))
+    .filter((l) => l.range.start.y <= y && l.range.end.y >= y);
+  return links.length ? links : undefined;
+}
 
 interface Entry {
   term: Terminal;
@@ -252,11 +287,18 @@ export class TerminalRegistry {
   private ensure(pane: string): Entry {
     let e = this.entries.get(pane);
     if (e) return e;
+    const open = (e: MouseEvent, url: string) => {
+      if (!opensLink(e)) return;
+      void this.api.openUrl(url).catch((err) => log('warn', 'link', url, String(err)));
+    };
     const term = new Terminal({
       scrollback: SCROLLBACK,
       ...terminalOptions(documentVar),
       allowProposedApi: true,
+      // OSC 8 hyperlinks: xterm's default asks with confirm() and window.open, neither of which works here.
+      linkHandler: { activate: open },
     });
+    term.registerLinkProvider({ provideLinks: (y, cb) => cb(plainLinks(term, y, open)) });
     const fit = new FitAddon();
     term.loadAddon(fit);
     e = { term, fit, pending: null, queue: [], queued: 0, stale: false, loaded: 0, count: 0, loadingHistory: false };

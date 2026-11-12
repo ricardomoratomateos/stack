@@ -12,6 +12,7 @@ vi.mock('@xterm/xterm', () => ({
     onResize() {}
     onScroll() {}
     attachCustomKeyEventHandler() {}
+    registerLinkProvider() {}
     reset() {}
     rows = 24;
     element?: { host?: unknown };
