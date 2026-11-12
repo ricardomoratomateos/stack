@@ -61,10 +61,12 @@ Tests: `npm test` (root and `desktop/`); `cargo test` from `desktop/` for the Ru
 
 ## stackd
 
-The app never starts the daemon by itself. With no daemon running it shows two buttons:
+When the app opens and no daemon answers, it starts one: through the login agent below when it is installed (`launchctl kickstart`), else as one detached run (until you log out or reboot). If that fails, the app says why and offers:
 
-- **Start stackd now**: one detached run, until you log out or reboot.
+- **Start stackd now**: the same start, again.
 - **Start stackd at login**: installs a launchd user agent (`~/Library/LaunchAgents/dev.stack.stackd.plist`, runs at login, restarts after a crash, log in `~/.config/stack/stackd.log`). The same switch is in the menu-bar menu; turning it off unloads and removes the agent.
+
+stackd reports its version (the root `package.json`'s, baked in by esbuild); the app, built from the same file, compares. A daemon from another build (the app was updated while stackd kept running) gets a banner, **stackd is an older version — Restart**: the app stops that process (SIGTERM) and starts its own, as above. Agents are not interrupted: they run in tmux sessions, which belong to the tmux server, not to stackd; the new daemon reattaches to them.
 
 stackd runs on your own Node (it is not bundled yet): `STACK_NODE`, else your login shell's `node`, else `~/.nvm`, else Homebrew. The path found is stored in the plist; switch it off and on again after changing Node. Its PATH is your login shell's, so tmux, git and the agent CLIs are found.
 

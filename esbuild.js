@@ -26,6 +26,8 @@ const stackdConfig = {
   target: 'node20',
   sourcemap: true,
   minify: !isWatch,
+  // Reported in its snapshot; the desktop app, built from the same package.json, compares.
+  define: { 'process.env.STACKD_VERSION': JSON.stringify(require('./package.json').version) },
 };
 
 async function build() {

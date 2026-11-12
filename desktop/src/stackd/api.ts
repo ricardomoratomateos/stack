@@ -10,6 +10,9 @@ export interface RepoSnapshot {
 
 export interface Snapshot {
   seq: number;
+  /** stackd's package.json version; absent from a stackd older than the field. */
+  version?: string;
+  pid?: number;
   tmux: { socket?: string };
   repos: RepoSnapshot[];
 }

@@ -1,9 +1,10 @@
 //! Running stackd outside a terminal: the user's node, the launchd user agent
 //! (`~/Library/LaunchAgents/dev.stack.stackd.plist`) and a one-off detached start.
 //!
-//! Nothing here runs by itself: the app calls it only when the user asks (the "Start stackd at
-//! login" setting, "Start stackd now"). Every side effect goes through an injected `Runner` or an
-//! explicit path, so the tests use a temp HOME and never call `launchctl`.
+//! The app starts stackd (`launch`) when it opens and none answers, and on "Start stackd now" /
+//! "Restart"; it installs the LaunchAgent only when the user asks ("Start stackd at login").
+//! Every launchd side effect goes through an injected `Runner` or an explicit path, so the tests
+//! use a temp HOME and never call `launchctl`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -274,6 +275,69 @@ pub fn start_now(s: &Setup) -> Result<(), String> {
         .map_err(|e| format!("could not start stackd: {e}"))
 }
 
+/// Starts stackd the way it is meant to run here: under the LaunchAgent when the user installed
+/// one ("Start stackd at login": `kickstart`, or a rewritten plist when the app's stackd.js or node
+/// moved), else a one-off detached run. Never installs the LaunchAgent itself.
+pub fn launch(runner: &dyn Runner, s: &Setup) -> Result<(), String> {
+    if !is_installed(&s.home) {
+        return start_now(s);
+    }
+    let current = std::fs::read_to_string(plist_path(&s.home)).unwrap_or_default();
+    if current == render_plist(s) && runner.run("launchctl", &["kickstart".into(), format!("{}/{LABEL}", domain(s.uid))]).is_ok() {
+        return Ok(());
+    }
+    enable(runner, s)
+}
+
+/// Whether `pid` still runs; reaps it first when it is our own child (a stackd started by
+/// "Start stackd now" is), so a zombie does not count as alive.
+fn alive(pid: i32) -> bool {
+    let mut status = 0;
+    // SAFETY: plain syscalls on a pid; WNOHANG never blocks, ECHILD (not our child) is ignored.
+    unsafe {
+        if libc::waitpid(pid, &mut status, libc::WNOHANG) == pid {
+            return false;
+        }
+        libc::kill(pid, 0) == 0
+    }
+}
+
+/// SIGTERM (stackd closes its socket and exits), SIGKILL after `grace`. Agents are not affected:
+/// they live in tmux, whose server is its own daemon, not a child of stackd.
+pub fn stop_pid(pid: i32, grace: std::time::Duration) -> Result<(), String> {
+    if pid <= 1 || pid as u32 == std::process::id() {
+        return Err(format!("refusing to stop pid {pid}"));
+    }
+    // SAFETY: sending a signal has no memory-safety preconditions.
+    if unsafe { libc::kill(pid, libc::SIGTERM) } != 0 {
+        return Ok(()); // already gone
+    }
+    let wait = |d: std::time::Duration| {
+        let end = std::time::Instant::now() + d;
+        while std::time::Instant::now() < end {
+            if !alive(pid) {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        !alive(pid)
+    };
+    if wait(grace) {
+        return Ok(());
+    }
+    // SAFETY: as above.
+    unsafe { libc::kill(pid, libc::SIGKILL) };
+    if wait(std::time::Duration::from_secs(2)) { Ok(()) } else { Err(format!("stackd (pid {pid}) did not stop")) }
+}
+
+/// "Restart": stop the running stackd (`pid` from its snapshot), then `launch` the app's own.
+pub fn restart(runner: &dyn Runner, s: &Setup, pid: Option<i32>) -> Result<(), String> {
+    if let Some(pid) = pid {
+        stop_pid(pid, std::time::Duration::from_secs(5))?;
+    }
+    launch(runner, s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,6 +347,7 @@ mod tests {
     struct Fake {
         calls: RefCell<Vec<(String, Vec<String>)>>,
         fail_bootstrap: bool,
+        fail_kickstart: bool,
     }
 
     impl Runner for Fake {
@@ -290,6 +355,9 @@ mod tests {
             self.calls.borrow_mut().push((program.into(), args.to_vec()));
             if self.fail_bootstrap && args[0] == "bootstrap" {
                 return Err("boom".into());
+            }
+            if self.fail_kickstart && args[0] == "kickstart" {
+                return Err("Could not find service".into());
             }
             Ok(String::new())
         }
@@ -351,6 +419,42 @@ mod tests {
         disable(&fake, &home, 501).unwrap();
         assert_eq!(fake.calls.borrow().last().unwrap().1[0], "bootout");
         std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn launch_kickstarts_the_login_agent_and_rewrites_a_stale_plist() {
+        let home = temp_home("launch");
+        let s = setup(&home);
+        enable(&Fake::default(), &s).unwrap();
+        // Same plist: kickstart, nothing else.
+        let fake = Fake::default();
+        launch(&fake, &s).unwrap();
+        assert_eq!(fake.calls.borrow().iter().map(|c| c.1.clone()).collect::<Vec<_>>(), vec![vec!["kickstart".to_string(), "gui/501/dev.stack.stackd".into()]]);
+        // The job is not loaded: load it again.
+        let fake = Fake { fail_kickstart: true, ..Default::default() };
+        launch(&fake, &s).unwrap();
+        assert_eq!(fake.calls.borrow().last().unwrap().1[0], "bootstrap");
+        // The app's stackd.js moved: the plist is rewritten, then loaded.
+        let moved = Setup { script: "/elsewhere/stackd.js".into(), ..s.clone() };
+        let fake = Fake::default();
+        launch(&fake, &moved).unwrap();
+        let firsts: Vec<String> = fake.calls.borrow().iter().map(|c| c.1[0].clone()).collect();
+        assert_eq!(firsts, ["bootout", "bootstrap"]);
+        assert!(std::fs::read_to_string(plist_path(&home)).unwrap().contains("/elsewhere/stackd.js"));
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn stop_pid_terms_then_kills_and_refuses_odd_pids() {
+        let polite = Command::new("sleep").arg("30").spawn().unwrap();
+        stop_pid(polite.id() as i32, std::time::Duration::from_secs(2)).unwrap();
+        assert!(!alive(polite.id() as i32));
+        let stubborn = Command::new("sh").args(["-c", "trap '' TERM; while :; do :; done"]).spawn().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100)); // let the trap be set
+        stop_pid(stubborn.id() as i32, std::time::Duration::from_millis(200)).unwrap();
+        assert!(!alive(stubborn.id() as i32));
+        assert!(stop_pid(1, std::time::Duration::ZERO).is_err());
+        assert!(stop_pid(std::process::id() as i32, std::time::Duration::ZERO).is_err());
     }
 
     #[test]

@@ -6,6 +6,7 @@ import './sidebar/webviewStyles';
 import { App } from './App';
 import { DevSidebar } from './sidebar/DevSidebar';
 import { StackdProvider } from './stackd/useStackd';
+import { VersionBanner } from './stackd/VersionBanner';
 import { TerminalsProvider } from './terminals';
 import { installLogging } from './log';
 
@@ -23,6 +24,7 @@ createRoot(document.getElementById('root')!).render(
         <TerminalsProvider>
           <App />
         </TerminalsProvider>
+        <VersionBanner />
       </StackdProvider>
     )}
   </React.StrictMode>,

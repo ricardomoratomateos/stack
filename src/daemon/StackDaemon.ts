@@ -39,6 +39,9 @@ import { NodeConfig } from './NodeConfig';
 import { HeadlessHost, headlessTerminals, LogNotify, NO_BREAKPOINTS, NO_TABS, stateLike } from './headless';
 import { readVsCodeGlobalState } from './vscodeState';
 
+/** Replaced by esbuild with package.json's version (see esbuild.js). */
+export const STACKD_VERSION = process.env.STACKD_VERSION ?? 'dev';
+
 /** Keys of the daemon's own, next to the ones the core keeps in the same file. */
 const REPOS_KEY = 'stackd.repos';
 const IMPORTED_KEY = 'stackd.imported';
@@ -87,6 +90,10 @@ export interface RepoSnapshot {
 export interface Snapshot {
   /** Bumped on every change: a client can tell "new" from "same". */
   seq: number;
+  /** package.json's version, baked in at build time (esbuild.js); "dev" unbundled. */
+  version: string;
+  /** This process, for a client that restarts it (agents live in tmux and keep running). */
+  pid: number;
   tmux: { socket?: string };
   repos: RepoSnapshot[];
 }
@@ -426,6 +433,8 @@ export class StackDaemon {
   snapshot(): Snapshot {
     return {
       seq: this.seq,
+      version: STACKD_VERSION,
+      pid: process.pid,
       tmux: { socket: this.opts.tmuxSocket },
       repos: [...this.repos.values()].map((ctx) => ({ repoRoot: ctx.root, state: ctx.service.buildState() })),
     };

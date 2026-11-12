@@ -1,9 +1,14 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
+import fs from 'node:fs';
+
+// The version stackd reports is the root package.json's (esbuild.js); the app compares with the same one.
+const version = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8')).version as string;
 
 export default defineConfig({
   plugins: [react()],
+  define: { __STACK_VERSION__: JSON.stringify(version) },
   clearScreen: false,
   // `@core` is the extension's own source: the sidebar's rules (derive.ts) are shared, not copied.
   resolve: {

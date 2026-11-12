@@ -109,3 +109,17 @@ describe('collectStatus', () => {
     expect(formatStatus(repo, [])).toContain('no worktrees');
   });
 });
+
+describe('StackDaemon snapshot', () => {
+  it('says which build and process it is, so the app can spot an old stackd and restart it', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stackd-snap-'));
+    try {
+      const { StackDaemon, STACKD_VERSION } = await import('../../src/daemon/StackDaemon');
+      const daemon = new StackDaemon({ configDir: dir, home: dir, installHooks: false, notify: () => {} });
+      expect(daemon.snapshot()).toMatchObject({ version: STACKD_VERSION, pid: process.pid, repos: [] });
+      await daemon.stop();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

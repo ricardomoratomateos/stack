@@ -14,6 +14,7 @@ fn main() {
     tauri::Builder::default()
         .manage(commands::Bridge::default())
         .manage(commands::StackdLatest::default())
+        .manage(commands::StackdAutostart::default())
         .manage(shell::Shell::default())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -45,6 +46,8 @@ fn main() {
             commands::stackd_login_status,
             commands::stackd_set_login,
             commands::stackd_start_now,
+            commands::stackd_autostart,
+            commands::stackd_restart,
             commands::open_url,
             commands::open_in_editor,
             commands::read_settings,

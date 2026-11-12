@@ -380,9 +380,26 @@ pub struct Latest {
     snapshot: Option<Value>,
 }
 
-/// Starts the watcher; it only ever connects to an existing socket.
+/// The start the app makes by itself when it opens and no stackd answers; `stackd://autostart` on change.
+#[derive(Default, Clone, Serialize)]
+pub struct Autostart {
+    attempted: bool,
+    done: bool,
+    error: Option<String>,
+}
+
+#[derive(Default)]
+pub struct StackdAutostart(StdMutex<Autostart>);
+
+fn set_autostart(app: &AppHandle, a: Autostart) {
+    *app.state::<StackdAutostart>().0.lock().unwrap() = a.clone();
+    let _ = app.emit("stackd://autostart", a);
+}
+
+/// Starts the watcher. The first time it finds no stackd (the app just opened), it starts one.
 pub fn start_stackd_watch(app: AppHandle) {
     let socket = stackd::socket_path();
+    let first = std::sync::atomic::AtomicBool::new(true);
     tauri::async_runtime::spawn(async move {
         let sink_app = app.clone();
         let sock_name = socket.display().to_string();
@@ -390,6 +407,15 @@ pub fn start_stackd_watch(app: AppHandle) {
             let latest = sink_app.state::<StackdLatest>();
             match u {
                 stackd::Update::Status(running) => {
+                    if first.swap(false, std::sync::atomic::Ordering::SeqCst) && !running {
+                        let app = sink_app.clone();
+                        set_autostart(&app, Autostart { attempted: true, ..Default::default() });
+                        tauri::async_runtime::spawn_blocking(move || {
+                            let res = crate::launchd::real_setup(resource_dir(&app).as_deref())
+                                .and_then(|s| crate::launchd::launch(&crate::launchd::RealRunner, &s));
+                            set_autostart(&app, Autostart { attempted: true, done: true, error: res.err() });
+                        });
+                    }
                     let mut g = latest.inner.lock().unwrap();
                     g.0 = running;
                     if !running {
@@ -424,7 +450,7 @@ pub async fn stackd_command(name: String, body: Option<Value>) -> Result<Value, 
     stackd::request(&stackd::socket_path(), "POST", &format!("/commands/{name}"), Some(&body)).await
 }
 
-// ── stackd as a launchd agent / one-off start (only on the user's explicit action) ──
+// ── stackd as a launchd agent / one-off start (at app open when none runs, or on the user's action) ──
 
 fn resource_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
     use tauri::Manager;
@@ -443,11 +469,33 @@ pub async fn stackd_set_login(app: AppHandle, enabled: bool) -> Result<bool, Str
     crate::shell::set_login(&app, enabled)
 }
 
-/// Starts a detached stackd with the user's node; the log goes to ~/.config/stack/stackd.log.
+/// Starts stackd with the user's node (under the login agent when installed, else detached);
+/// the log goes to ~/.config/stack/stackd.log.
 #[tauri::command]
 pub async fn stackd_start_now(app: AppHandle) -> Result<(), String> {
     let setup = crate::launchd::real_setup(resource_dir(&app).as_deref())?;
-    crate::launchd::start_now(&setup)
+    crate::launchd::launch(&crate::launchd::RealRunner, &setup)
+}
+
+/// What the app's own start at open did (for the "stackd is not running" screen).
+#[tauri::command]
+pub fn stackd_autostart(state: State<'_, StackdAutostart>) -> Autostart {
+    state.0.lock().unwrap().clone()
+}
+
+/// Stops the running stackd (its pid is in the snapshot) and starts the app's own build of it.
+/// Agents keep running: they live in tmux sessions, which outlive stackd.
+#[tauri::command]
+pub async fn stackd_restart(app: AppHandle) -> Result<(), String> {
+    let pid = {
+        let latest = app.state::<StackdLatest>();
+        let g = latest.inner.lock().unwrap();
+        g.1.as_ref().and_then(|s| s.get("pid")).and_then(Value::as_i64).map(|p| p as i32)
+    };
+    let setup = crate::launchd::real_setup(resource_dir(&app).as_deref())?;
+    tauri::async_runtime::spawn_blocking(move || crate::launchd::restart(&crate::launchd::RealRunner, &setup, pid))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 // ── ~/.config/stack/settings.json (what stackd reads; the Settings screen edits it) ──
