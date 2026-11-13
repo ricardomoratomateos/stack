@@ -15,11 +15,23 @@ lo lleva a la app: una pestaña **Code** por tarea, servida por stackd. Las medi
   `codeDiagnostics`, `codeStatus`) en `src/code/`, por el `stackd_command` de siempre.
   - Lecturas: `realpath` dentro del worktree de la tarea; además, solo lectura, `vendor/` del checkout
     principal y los `node_modules` a los que el worktree enlaza.
-  - PHP: Phpactor por tarea, arrancado en la primera navegación PHP, índice completo en
-    `~/.config/stack/cache/phpactor/<id de tarea>` (se borra con la tarea), apagado a los 10 min sin
-    peticiones. Binario: ajuste `phpactorPath`, si no `phpactor` en el PATH, si no
-    `~/.config/stack/tools/phpactor.phar`. Mientras se construye el primer índice, la pestaña enseña el
-    avance y la navegación dice "Indexing PHP…".
+  - PHP: Phpactor. Binario: ajuste `phpactorPath`, si no `phpactor` en el PATH, si no
+    `~/.config/stack/tools/phpactor.phar`. Todo bajo `~/.config/stack/cache/phpactor/<repo>-<hash>/`:
+    - **Base por repo** (`src/code/phpBase.ts`): la rama base del repo (`origin/<defaultBaseBranch>`, si no
+      la rama local, si no el HEAD del checkout principal). `git archive <commit> -- <dirs con PHP>` + 
+      `composer.json/lock` → `base-src/` (solo los `.php`); su índice en `base/`; `base.json` = `{ref,
+      commit, ready}`. Se construye en segundo plano al arrancar stackd, y se pone al día cuando la ref se
+      mueve (al abrir Code, tras "refresh drift", y cada 5 min): solo se vuelven a extraer los PHP de
+      `git diff old new` (los borrados se borran) y Phpactor reindexa por ctime. Phpactor con `nice`, parado
+      al acabar. Una tarea nunca escribe en la base.
+    - **Tarea** (`tasks/<id>/`): clon APFS del índice base (`clonefileat`, ~1 s) marcado como construido
+      ahora, y los PHP que difieren del commit base (`git diff --name-only <base> <HEAD>` + sin commitear y
+      sin seguir) en la lista `dirty` del índice, que el primer pase de Phpactor indexa con lo demás. El
+      checkout principal es una tarea más. Si la base aún se prepara, la navegación espera ("Preparing
+      develop… n/m") y la base no se mata por una tarea.
+    - Un Phpactor por repo (todos ven la misma ruta `view/`), arranques en serie, apagado a los 10 min sin
+      peticiones. La cabecera de Code enseña la base: "Preparing develop… n/m" o "develop @ 1a2b3c4".
+    - Prueba de punta a punta: `desktop/scripts/code-e2e.mjs` (CodeService real, git y Phpactor reales).
   - JS/TS: el índice ligero (`src/code/lightIndex.ts`) + `git grep`, por proyecto (el `tsconfig.json` más
     cercano), construido al primer uso y guardado en memoria.
   - Diagnósticos: `oxlint --lsp` (del PATH o de `~/.config/stack/tools/node_modules/.bin/`) con una

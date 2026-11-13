@@ -42,4 +42,9 @@ describe('rewriteUris', () => {
     const back = rewriteUris(out, pairs.map(([a, b]) => [b, a]));
     expect(JSON.parse(back).uri).toBe('file:///repo/lib/A.php');
   });
+
+  it('sees URIs written with escaped slashes, as Phpactor writes them', () => {
+    const raw = '{"result":[{"uri":"file:\\/\\/\\/view\\/lib\\/A.php","range":{}}]}';
+    expect(JSON.parse(rewriteUris(raw, [['/view/lib/', '/repo/lib/']])).result[0].uri).toBe('file:///repo/lib/A.php');
+  });
 });

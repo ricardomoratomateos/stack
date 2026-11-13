@@ -166,6 +166,7 @@ export class StackDaemon {
   private readonly subscriptions: Array<{ dispose(): void }> = [];
   /** The Code tab's backend: files, navigation and diagnostics of a task's worktree. */
   private readonly code: CodeService;
+  private baseTimer?: ReturnType<typeof setInterval>;
 
   /** How many clients follow `/events`; the API server keeps it current. */
   clients: () => number = () => 0;
@@ -252,6 +253,11 @@ export class StackDaemon {
     this.updateRegistry();
 
     await this.loadKnownRepos();
+    // The base branches move (fetches, pulls): catch up now and then. A check is one `git rev-parse`.
+    this.baseTimer = setInterval(() => {
+      for (const ctx of this.repos.values()) void this.code.prepareBase(ctx.root, ctx.config.get().defaultBaseBranch);
+    }, 5 * 60 * 1000);
+    this.baseTimer.unref?.();
   }
 
   /** Every repository this user has worktrees for, plus the ones added explicitly. */
@@ -266,6 +272,7 @@ export class StackDaemon {
   async stop(): Promise<void> {
     if (this.timer) clearTimeout(this.timer);
     for (const s of this.subscriptions) s.dispose();
+    if (this.baseTimer) clearInterval(this.baseTimer);
     this.code.dispose();
     this.attention.dispose();
     this.agents.dispose();
@@ -356,6 +363,8 @@ export class StackDaemon {
     });
     const ctx: RepoContext = { root: repoRoot, config, service, tools };
     this.repos.set(repoRoot, ctx);
+    // The repo's PHP base index (its base branch), in the background: a Code tab then opens in seconds.
+    void this.code.prepareBase(ctx.root, ctx.config.get().defaultBaseBranch);
     const roots = new Set(this.store.get<string[]>(REPOS_KEY, []));
     if (!roots.has(repoRoot)) await this.store.update(REPOS_KEY, [...roots, repoRoot]);
 
@@ -386,7 +395,7 @@ export class StackDaemon {
   private codeTask(b: Body): { task: CodeTask; wt: Worktree; ctx: RepoContext } {
     const { wt, ctx } = this.findWorktree(need(b, 'worktreeId'));
     if (!fs.existsSync(wt.path)) throw new CommandError('The task\'s worktree is not on disk.');
-    return { task: { id: wt.id, root: wt.path, repoRoot: ctx.root }, wt, ctx };
+    return { task: { id: wt.id, root: wt.path, repoRoot: ctx.root, baseBranch: ctx.config.get().defaultBaseBranch }, wt, ctx };
   }
 
   /** Runs a Code command; what the browser should show as a message becomes a 4xx with that message. */
@@ -639,7 +648,11 @@ export class StackDaemon {
         const msg = b['message'] as { type?: string; worktreeId?: string } | undefined;
         if (!msg || typeof msg.type !== 'string' || !DAEMON_MESSAGES.includes(msg.type)) throw new CommandError('Not a daemon message.');
         const ctx = typeof msg.worktreeId === 'string' ? this.findWorktree(msg.worktreeId).ctx : this.repoFor(b);
-        await ctx.service.handleMessage(msg as never);
+        if (msg.type === 'refreshDrift' && typeof msg.worktreeId === 'string') {
+          // The one fetch of the base branch: once it is in, the repo's PHP base may have a new commit to catch up with.
+          await ctx.service.refreshDrift(msg.worktreeId);
+          void this.code.prepareBase(ctx.root, ctx.config.get().defaultBaseBranch);
+        } else await ctx.service.handleMessage(msg as never);
         return {};
       }
       case 'renameTask': {
@@ -674,6 +687,7 @@ export class StackDaemon {
       case 'codeOpen': {
         const { task, wt, ctx } = this.codeTask(b);
         this.code.refreshFiles(task);
+        void this.code.prepareBase(task.repoRoot, task.baseBranch); // its ref may have moved since
         let unified = '';
         try { unified = await ctx.service.getDiff(wt.id, 'branch'); } catch { /* no base to compare with: nothing "changed" */ }
         return this.codeCommand(() => this.code.open(task, unified));

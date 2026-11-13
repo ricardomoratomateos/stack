@@ -35,11 +35,33 @@ export interface LspSpec {
   view?: { root: string; map: Array<[real: string, view: string]> };
 }
 
-/** Rewrites `"file:///from…` to `"file:///to…` inside a serialized JSON message (only at the start of a string). */
+/**
+ * Rewrites the `file://` URIs under `from` to `to` in a message: every string value that starts with one.
+ * On the parsed message, not its text: Phpactor writes its JSON with escaped slashes (`file:\/\/\/…`), which
+ * a textual replace does not see.
+ */
+export function rewriteUrisIn(value: unknown, pairs: Array<[from: string, to: string]>): unknown {
+  const prefixes = pairs.map(([from, to]) => [pathToFileURL(from).href, pathToFileURL(to).href] as const);
+  const walk = (v: unknown): unknown => {
+    if (typeof v === 'string') {
+      if (!v.startsWith('file://')) return v;
+      for (const [from, to] of prefixes) if (v.startsWith(from)) return to + v.slice(from.length);
+      return v;
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') {
+      const out: Record<string, unknown> = {};
+      for (const [k, x] of Object.entries(v)) out[k] = walk(x);
+      return out;
+    }
+    return v;
+  };
+  return walk(value);
+}
+
+/** {@link rewriteUrisIn} for a serialized message. */
 export function rewriteUris(json: string, pairs: Array<[from: string, to: string]>): string {
-  let out = json;
-  for (const [from, to] of pairs) out = out.split(`"${pathToFileURL(from).href}`).join(`"${pathToFileURL(to).href}`);
-  return out;
+  return JSON.stringify(rewriteUrisIn(JSON.parse(json), pairs));
 }
 
 export type LspState = 'starting' | 'indexing' | 'ready' | 'dead';
@@ -157,10 +179,12 @@ export class LspProcess {
       const len = m ? Number(m[1]) : 0;
       if (this.buf.length < head + 4 + len) return;
       const raw = this.buf.subarray(head + 4, head + 4 + len).toString('utf8');
-      const body = this.fromServer.length ? rewriteUris(raw, this.fromServer) : raw;
       this.buf = this.buf.subarray(head + 4 + len);
       let msg: Message;
-      try { msg = JSON.parse(body) as Message; } catch { continue; }
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        msg = (this.fromServer.length ? rewriteUrisIn(parsed, this.fromServer) : parsed) as Message;
+      } catch { continue; }
       this.onMessage(msg);
     }
   }
@@ -217,8 +241,7 @@ export class LspProcess {
 
   private write(msg: unknown): void {
     if (this.state === 'dead') return;
-    const json = JSON.stringify(msg);
-    const body = Buffer.from(this.toServer.length ? rewriteUris(json, this.toServer) : json, 'utf8');
+    const body = Buffer.from(JSON.stringify(this.toServer.length ? rewriteUrisIn(msg, this.toServer) : msg), 'utf8');
     this.child.stdin.write(`Content-Length: ${body.length}\r\n\r\n`);
     this.child.stdin.write(body);
   }
@@ -239,12 +262,6 @@ export class LspProcess {
     if (this.open.has(file)) return;
     this.open.add(file);
     this.notify('textDocument/didOpen', { textDocument: { uri: pathToFileURL(file).href, languageId, version: 1, text } });
-  }
-
-  /** Makes the server index `file` as it is now (Phpactor indexes a document on save). */
-  save(file: string, languageId: string, text: string): void {
-    this.ensureOpen(file, languageId, text);
-    this.notify('textDocument/didSave', { textDocument: { uri: pathToFileURL(file).href }, text });
   }
 
   /**

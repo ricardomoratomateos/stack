@@ -45,7 +45,7 @@ export function CodeBrowser({ backend, root, initialFile, initialLine, changed, 
   const [notice, setNoticeText] = useState('');
   // "Indexing…" is not a failure: it is said quietly, and withdrawn when the indexing ends.
   const setNotice = useCallback((text: string) => setNoticeText(text.replace(/^Error: /, '')), []);
-  const waiting = /indexing/i.test(notice);
+  const waiting = /indexing|preparing/i.test(notice);
   const [palette, setPalette] = useState<null | { query: string }>(null);
 
   const ensureModel = useCallback((path: string): Promise<monaco.editor.ITextModel> => {
@@ -196,7 +196,7 @@ export function CodeBrowser({ backend, root, initialFile, initialLine, changed, 
       if (!alive) return;
       const mine = s.filter((x) => !x.root || x.root === root);
       setStatus(mine);
-      if (!mine.some((x) => x.state === 'indexing' || x.state === 'starting')) setNoticeText((n) => (/indexing/i.test(n) ? '' : n));
+      if (!mine.some((x) => x.state === 'indexing' || x.state === 'starting')) setNoticeText((n) => (/indexing|preparing/i.test(n) ? '' : n));
     }).catch(() => {});
     tick();
     const timer = setInterval(tick, 2000);
@@ -266,8 +266,10 @@ export function CodeBrowser({ backend, root, initialFile, initialLine, changed, 
           </button>
           <span className="code-status">
             {status.map((s) => (
-              <span key={s.server} className={`code-pill is-${s.state}`} title={`${s.server}: ${s.state}${s.message ? ` — ${s.message}` : ''}${s.rssMb ? ` · ${s.rssMb} MB` : ''}${s.indexMs ? ` · indexed in ${(s.indexMs / 1000).toFixed(1)} s` : ''}`}>
-                {s.server}{s.state === 'indexing' ? ` · ${s.message || 'indexing…'}` : s.state === 'ready' ? '' : ` · ${s.state}`}
+              <span key={s.server} className={`code-pill is-${s.state}${s.server === 'php base' ? ' is-base' : ''}`} title={`${s.server}: ${s.state}${s.message ? ` — ${s.message}` : ''}${s.rssMb ? ` · ${s.rssMb} MB` : ''}${s.indexMs ? ` · indexed in ${(s.indexMs / 1000).toFixed(1)} s` : ''}`}>
+                {s.server === 'php base'
+                  ? s.message // "Preparing develop… 1200/33000", then "develop @ 1a2b3c4"
+                  : <>{s.server}{s.state === 'indexing' ? ` · ${s.message || 'indexing…'}` : s.state === 'ready' ? '' : ` · ${s.state}`}</>}
               </span>
             ))}
           </span>

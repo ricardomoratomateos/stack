@@ -27,6 +27,8 @@
 .code-status { display: flex; gap: 6px; flex: none; }
 .code-pill { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--app-border-strong); color: var(--app-text-dim); white-space: nowrap; }
 .code-pill.is-ready { color: var(--app-accent-text); }
+/* The repo's PHP base: there to be glanced at, not read. */
+.code-pill.is-base { border-color: transparent; color: var(--app-text-faint); padding: 1px 2px; }
 .code-pill.is-dead { color: var(--app-error); border-color: var(--app-error); }
 .code-notice { flex: none; padding: 4px 12px; font-size: 12px; color: var(--app-error); background: var(--app-error-bg); }
 .code-notice.is-waiting { color: var(--app-text-dim); background: var(--app-surface); }
