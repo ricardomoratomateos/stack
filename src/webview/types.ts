@@ -184,6 +184,8 @@ export type WebMessage =
   /** The setup row's buttons: its output, run it again, start the held agent regardless, or drop a failure. */
   | { type: 'setupAction'; worktreeId: string; action: 'log' | 'retry' | 'launch' | 'dismiss' }
   | { type: 'openDiff'; worktreeId: string }
+  /** The desktop app's Code tab for the task (the card's "Browse code"). */
+  | { type: 'openCode'; worktreeId: string }
   /** The empty-state "New agent" button opens the full-screen panel. */
   | { type: 'openNewTask' }
   | { type: 'createWorktree'; branch: string; title?: string; description?: string; baseBranch?: string; provider?: ProviderId }

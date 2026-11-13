@@ -480,6 +480,10 @@ export function App() {
           setReviewId(a.worktreeId);
           setFrontPanel('review');
           break;
+        case 'code':
+          select(a.worktreeId);
+          openCode(a.worktreeId);
+          break;
         case 'open':
           invoke('open_url', { url: a.url }).catch((e) => setNotice(String(e)));
           break;

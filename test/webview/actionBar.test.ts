@@ -43,6 +43,16 @@ describe('worktreeActions', () => {
     expect(worktreeActions(wt({ isMain: true })).map((a) => a.id)).toEqual(['terminal', 'diff', 'rename', 'delete']);
   });
 
+  it('offers "Browse code" right after the review when the host has a code browser', () => {
+    const actions = worktreeActions(wt({}), true);
+    expect(actions.map((a) => a.id).slice(0, 3)).toEqual(['terminal', 'diff', 'code']);
+    expect(actions[2]).toMatchObject({ icon: 'code', label: 'Browse code' });
+    posted.length = 0;
+    actions[2].run();
+    expect(posted).toEqual([{ type: 'openCode', worktreeId: wt({}).id }]);
+    expect(worktreeActions(wt({ isControl: true }), true).map((a) => a.id)).toEqual(['terminal', 'rename']);
+  });
+
   it('each action posts its message for this worktree', () => {
     posted.length = 0;
     for (const a of worktreeActions(wt({ git: { ...clean, base: { ref: 'b', ahead: 0, behind: 0 } } }))) a.run();

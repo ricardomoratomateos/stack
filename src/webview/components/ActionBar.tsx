@@ -12,8 +12,11 @@ interface Action {
   danger?: boolean;
 }
 
-/** Every worktree action, most used first: the end of the list is what overflows first. */
-export function worktreeActions(wt: WorktreeItem): Action[] {
+/**
+ * Every worktree action, most used first: the end of the list is what overflows first.
+ * `browse`: the host can show the task's code (the desktop app's Code tab).
+ */
+export function worktreeActions(wt: WorktreeItem, browse = false): Action[] {
   // Not a worktree: no diff, no setup, no branch to delete.
   if (wt.isControl) {
     return [
@@ -25,6 +28,7 @@ export function worktreeActions(wt: WorktreeItem): Action[] {
     { id: 'terminal', icon: 'terminal', label: 'Open terminal', run: () => send({ type: 'openTerminal', worktreeId: wt.id }) },
     { id: 'diff', icon: 'git-compare', label: 'Review diff & comment', run: () => send({ type: 'openDiff', worktreeId: wt.id }) },
   ];
+  if (browse) actions.push({ id: 'code', icon: 'code', label: 'Browse code', run: () => send({ type: 'openCode', worktreeId: wt.id }) });
   if (!wt.isMain) {
     actions.push({ id: 'setup', icon: 'zap', label: 'Run setup script', run: () => send({ type: 'initWorktree', worktreeId: wt.id }) });
   }
@@ -57,9 +61,11 @@ export function visibleCount(width: number | undefined, count: number): number {
  * given: everything inline when it fits, and a "⋯" only for what does not —
  * not a menu by default that hides actions there was room for.
  */
-export function ActionBar({ wt, className = '', emphasis }: {
+export function ActionBar({ wt, className = '', emphasis, browse }: {
   wt: WorktreeItem;
   className?: string;
+  /** The host has a code browser for the task: adds "Browse code". */
+  browse?: boolean;
   /** The action the worktree's state calls for (e.g. 'diff' when it is ready for review), drawn in the accent. */
   emphasis?: string;
 }) {
@@ -75,7 +81,7 @@ export function ActionBar({ wt, className = '', emphasis }: {
     return () => ro.disconnect();
   }, []);
 
-  const actions = worktreeActions(wt);
+  const actions = worktreeActions(wt, browse);
   const shown = visibleCount(width, actions.length);
   const inline = actions.slice(0, shown);
   const overflow = actions.slice(shown);

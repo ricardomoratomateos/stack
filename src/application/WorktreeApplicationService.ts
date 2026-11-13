@@ -660,6 +660,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
     initWorktree: (msg) => this.initWorktree(this.findWorktree(msg.worktreeId)),
     setupAction: (msg) => this.setupAction(msg.worktreeId, msg.action),
     openDiff: (msg) => this.ui.openDiffPanel(msg.worktreeId),
+    // The desktop app's own: it opens its Code tab without asking the core.
+    openCode: () => {},
     openNewTask: () => this.ui.openNewTask(),
     createWorktree: async (msg) => {
       await this.createWorktree({

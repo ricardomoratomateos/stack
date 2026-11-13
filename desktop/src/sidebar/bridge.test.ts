@@ -64,6 +64,10 @@ describe('translate', () => {
     expect(translate({ type: 'openDiff', worktreeId: 'rev' }, ctx)).toEqual({ kind: 'review', worktreeId: 'rev' });
     expect(translate({ type: 'openDiff', worktreeId: 'nope' }, ctx).kind).toBe('none');
   });
+  it('openCode opens the Code tab of that worktree', () => {
+    expect(translate({ type: 'openCode', worktreeId: 'rev' }, ctx)).toEqual({ kind: 'code', worktreeId: 'rev' });
+    expect(translate({ type: 'openCode', worktreeId: 'nope' }, ctx).kind).toBe('none');
+  });
   it('PR, ticket and port links open in the browser, https and localhost only', () => {
     const withLinks: Context = {
       repoRoot: '/r',

@@ -168,7 +168,7 @@ function Row({ d, selected, now, state, select, drag }: {
               installedProviders={state.installedProviders}
               tone="solid"
             />
-            <ActionBar wt={wt} emphasis={d.group === 'review' ? 'diff' : undefined} />
+            <ActionBar wt={wt} emphasis={d.group === 'review' ? 'diff' : undefined} browse={state.host === 'desktop'} />
           </div>
         </div>
       )}

@@ -54,6 +54,8 @@ export type Action =
   | { kind: 'install'; provider: ProviderId }
   /** The PR-style review of a worktree's changes, in the centre. */
   | { kind: 'review'; worktreeId: string }
+  /** The task's code, to browse, in the centre. */
+  | { kind: 'code'; worktreeId: string }
   /** Not available in the desktop app yet. */
   | { kind: 'unsupported'; what: string }
   | { kind: 'none' };
@@ -134,6 +136,8 @@ export function translate(msg: WebMessage, ctx: Context): Action {
       return DAEMON_MESSAGES.includes(msg.type) ? { kind: 'command', name: 'message', body: { message: msg, repo: ctx.repoRoot } } : { kind: 'none' };
     case 'openDiff':
       return find(msg.worktreeId) ? { kind: 'review', worktreeId: msg.worktreeId } : { kind: 'none' };
+    case 'openCode':
+      return find(msg.worktreeId) ? { kind: 'code', worktreeId: msg.worktreeId } : { kind: 'none' };
     case 'openPr':
     case 'openTicket': {
       const wt = find(msg.worktreeId);
