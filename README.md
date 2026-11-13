@@ -63,7 +63,29 @@ Your own settings are in `~/.config/stack/settings.json` (Settings in the app, `
 | `ports` / `basePort` / `portStride` | `[]` / `20000` / `100` | Env var names to allocate a port per worktree for (e.g. `HTTP_PORT`), from a block of `portStride` ports per worktree starting at `basePort` |
 | `debugBasePort` / `debugTemplate` | `9898` / node attach | Debug port per worktree and the `launch.json` template written into each one (`{{PORT}}`, `{{WORKTREE_PATH}}`) |
 
-`.stack/config.json` accepts the project keys only: `worktreesDirectory`, `defaultBaseBranch`, `setupScript`, `setupInTerminal`, `teardownScript`, `ports`, `basePort`, `portStride`, `debugBasePort` and `debugTemplate`. If the file has bad JSON, an unknown key or a wrong type, Stack falls back to your own settings and tells you what is wrong.
+### Code tab
+
+The Code tab browses a task's worktree read-only. PHP navigation uses [Phpactor](https://phpactor.readthedocs.io): each repository gets one index of its base branch, built in the background and kept in `~/.config/stack/cache`. A task clones that index and re-indexes only the PHP files it changed. JS/TS uses a syntactic index plus `git grep`, and diagnostics come from oxlint and `php -l`. Nothing is written inside a repository.
+
+| Setting | Default | Description |
+|---|---|---|
+| `phpNavigation` | `true` | PHP navigation and the base index. Off: PHP files are only shown |
+| `phpIndexDirs` | `[]` | Directories (or files) Phpactor indexes, e.g. `["lib", "www"]`. Empty: every top-level directory with tracked PHP |
+| `phpExcludeDirs` | `["vendor", "node_modules"]` | Directories never indexed (`vendor`, `lib/legacy`). `.git` and the worktrees directory are always excluded. Vendor classes are still found through Composer's class maps |
+| `phpExtensions` | `["php"]` | PHP file extensions (`php`, `phtml`, `inc`) |
+| `phpAutoloader` | `vendor/autoload.php` | Composer's autoloader, relative to the worktree, falling back to the main checkout's |
+| `phpBaseBranch` | `""` | Branch the index is built from. Empty: `defaultBaseBranch` |
+| `phpMaxChangedFiles` | `6000` | Past this many PHP files differing from the base, a task is indexed on its own, in full |
+| `phpactorOptions` | `{}` | Extra Phpactor settings (`.phpactor.json` keys). They can't turn on anything that writes into the worktree |
+| `scriptExcludeDirs` | `["node_modules", "dist", "build", "coverage", "vendor"]` | Skipped by the JS/TS index: a name is skipped anywhere, a path (`apps/legacy`) only at that path |
+| `oxlintConfig` | `""` | The repo's oxlint config, relative to the worktree. Empty: Stack's correctness-only rules |
+| `phpBaseOnStart` | `true` | *(yours)* Build the base index when stackd starts. Off: the first Code tab builds it |
+| `codeIdleMinutes` | `10` | *(yours)* An unused language server is stopped after this many minutes |
+| `phpactorPath` / `oxlintPath` / `phpPath` | `""` / `""` / `php` | *(yours)* Where the tools are. Empty: on `PATH`, then `~/.config/stack/tools` |
+
+Changes apply on the next Code tab start. Changing `phpIndexDirs`, `phpExcludeDirs` or `phpExtensions` rebuilds the base index.
+
+`.stack/config.json` accepts the project keys only: `worktreesDirectory`, `defaultBaseBranch`, `setupScript`, `setupInTerminal`, `teardownScript`, `ports`, `basePort`, `portStride`, `debugBasePort`, `debugTemplate`, and the Code tab's settings that aren't marked *(yours)*. If the file has bad JSON, an unknown key or a wrong type, Stack falls back to your own settings and tells you what is wrong.
 
 **Codex:** its hooks are off by default. Until you enable them with `[features] codex_hooks = true` in `~/.codex/config.toml` and trust them (`/hooks`), Codex sessions never change state.
 

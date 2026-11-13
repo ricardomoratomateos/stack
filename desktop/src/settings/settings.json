@@ -60,6 +60,101 @@
       "type": "boolean",
       "default": true,
       "description": "Show a native OS notification, with a chime on macOS, when an agent finishes or asks for permission while Stack is in the background. Off means no notification and no sound. The sidebar attention badge is always shown regardless."
+    },
+    "stack.phpNavigation": {
+      "type": "boolean",
+      "default": true,
+      "group": "Code",
+      "description": "Go to definition, references and symbols for PHP in the Code tab, with Phpactor. Off: PHP files are shown without navigation, and no index of the base branch is built. Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+    },
+    "stack.phpIndexDirs": {
+      "type": "array",
+      "default": [],
+      "group": "Code",
+      "description": "Directories (or files) Phpactor indexes, relative to the repository, e.g. lib, www, src. Empty: every top-level directory holding tracked PHP. Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+    },
+    "stack.phpExcludeDirs": {
+      "type": "array",
+      "default": [
+        "vendor",
+        "node_modules"
+      ],
+      "group": "Code",
+      "description": "Directories never indexed, relative to the repository (vendor, or lib/legacy). .git and the worktrees directory are always left out. A vendor class is still found through Composer's class maps. Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+    },
+    "stack.phpExtensions": {
+      "type": "array",
+      "default": [
+        "php"
+      ],
+      "group": "Code",
+      "description": "File extensions that are PHP, without the dot (php, phtml, inc). Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+    },
+    "stack.phpAutoloader": {
+      "type": "string",
+      "default": "vendor/autoload.php",
+      "group": "Code",
+      "description": "Composer's autoloader, relative to the worktree (the main checkout's when the worktree has none). Phpactor reads its class maps to find vendor classes. Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+    },
+    "stack.phpBaseBranch": {
+      "type": "string",
+      "default": "",
+      "group": "Code",
+      "description": "Branch the PHP index is built from, once, in the background; each task then re-indexes only the files it changed. Empty: Default Base Branch. Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+    },
+    "stack.phpMaxChangedFiles": {
+      "type": "number",
+      "default": 6000,
+      "group": "Code",
+      "description": "Past this many PHP files differing from the base branch, a task is indexed on its own, in full, instead of from the base's index. Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+    },
+    "stack.scriptExcludeDirs": {
+      "type": "array",
+      "default": [
+        "node_modules",
+        "dist",
+        "build",
+        "coverage",
+        "vendor"
+      ],
+      "group": "Code",
+      "description": "For JS/TS navigation: directory names never read, anywhere (dist), or paths relative to the repository (apps/legacy). .git and the worktrees directory are always left out. Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+    },
+    "stack.oxlintConfig": {
+      "type": "string",
+      "default": "",
+      "group": "Code",
+      "description": "The repository's oxlint config for JS/TS diagnostics in the Code tab, relative to the worktree (e.g. .oxlintrc.json). Empty: Stack's own correctness rules. Can be set for everyone who clones the repo in .stack/config.json; a value set here wins."
+    },
+    "stack.phpBaseOnStart": {
+      "type": "boolean",
+      "default": true,
+      "group": "Code",
+      "description": "Build each repository's PHP index of its base branch when stackd starts, in the background and at low priority (a few minutes and ~1 GB of disk for a large repo). Off: the first Code tab opened builds it."
+    },
+    "stack.codeIdleMinutes": {
+      "type": "number",
+      "default": 10,
+      "group": "Code",
+      "description": "Minutes a language server of the Code tab (Phpactor, oxlint) may go unused before it is stopped to free its memory."
+    },
+    "stack.phpactorPath": {
+      "type": "string",
+      "default": "",
+      "group": "Code",
+      "description": "Phpactor: an executable, or a phpactor.phar run with PHP. Empty: phpactor on PATH, else ~/.config/stack/tools/phpactor.phar."
+    },
+    "stack.oxlintPath": {
+      "type": "string",
+      "default": "",
+      "group": "Code",
+      "description": "oxlint, for JS/TS diagnostics. Empty: oxlint on PATH, else ~/.config/stack/tools/node_modules/.bin/oxlint."
+    },
+    "stack.phpPath": {
+      "type": "string",
+      "default": "php",
+      "group": "Code",
+      "description": "The PHP binary, for Phpactor's .phar and php -l."
     }
   }
 }

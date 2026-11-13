@@ -30,12 +30,12 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const require = createRequire(path.join(repo, 'package.json'));
 const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'stack-code-dev-')), 'CodeService.cjs');
 require('esbuild').buildSync({ entryPoints: [path.join(repo, 'src/code/CodeService.ts')], bundle: true, platform: 'node', format: 'cjs', target: 'node20', outfile: out, logLevel: 'warning' });
-const { CodeService, CodeError, PathRefused } = require(out);
+const { CodeService, CodeError, PathRefused, defaultCodeConfig } = require(out);
 
 const service = new CodeService({
   cacheDir: path.join(configDir, 'cache'),
   toolsDir: path.join(configDir, 'tools'),
-  setting: (/** @type {string} */ key) => (key === 'phpactorPath' ? arg('phpactor') : undefined),
+  config: () => defaultCodeConfig({ phpactorPath: arg('phpactor') ?? '' }),
   log: console.log,
 });
 const task = { id: `dev-${path.basename(path.resolve(root))}`, root: path.resolve(root), repoRoot };

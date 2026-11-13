@@ -8,6 +8,7 @@ import { LspProcess, spawnLsp, type LspSpec, type LspStatus, type SpawnLsp } fro
 import { LightIndex, gitGrep, projectDirOf, type Declaration, type Grep, type Place } from './lightIndex';
 import { dependencyRoots, PathRefused, resolveInWorktree, resolveReadable, type ReadScope } from './pathGuard';
 import { linkView, PhpBase, pipe as realPipe, type BaseInfo, type Pipe } from './phpBase';
+import { defaultCodeConfig, isPhpFile, phpFilterOf, phpPathspecs, phpTopsOf, phpWanted, type CodeConfig, type PhpFilter } from './config';
 
 /** Something the user should read as is ("indexing…", "Phpactor is not installed"), not a crash. */
 export class CodeError extends Error {}
@@ -39,8 +40,8 @@ export interface CodeOptions {
   cacheDir: string;
   /** `<configDir>/tools`: where Stack keeps tools it was given (phpactor.phar, node_modules/.bin/oxlint). */
   toolsDir: string;
-  /** A user setting (settings.json), e.g. `phpactorPath`. */
-  setting?: (key: string) => string | undefined;
+  /** The repository's Code settings (config.ts), read at every use; default the defaults. */
+  config?: (repoRoot: string) => CodeConfig;
   spawn?: SpawnLsp;
   run?: Run;
   /** `git archive … | tar -x`, for the base's sources. */
@@ -52,7 +53,7 @@ export interface CodeOptions {
   sleep?: (ms: number) => Promise<void>;
   grep?: Grep;
   now?: () => number;
-  /** A language server nobody asked anything of for this long is stopped. */
+  /** A language server nobody asked anything of for this long is stopped; default the repo's `codeIdleMinutes`. */
   idleMs?: number;
   /** PATH to look tools up on; default the daemon's. */
   pathEnv?: () => string;
@@ -72,9 +73,6 @@ interface Running {
   firstIndex: boolean;
 }
 
-/** Past this many differing PHP files, a clone of the base is no shortcut: the task is indexed in full. */
-const MAX_OVERLAY = 6000;
-
 interface TaskState {
   repoRoot: string;
   servers: Map<string, Running>;
@@ -83,7 +81,6 @@ interface TaskState {
   extras?: string[];
 }
 
-const TEN_MINUTES = 10 * 60 * 1000;
 const isPhp = (languageId: string): boolean => languageId === 'php';
 const isScript = (languageId: string): boolean => /^(type|java)script(react)?$/.test(languageId);
 const scriptLanguage = (file: string): string => (/\.tsx$/.test(file) ? 'typescriptreact' : /\.[cm]?ts$/.test(file) ? 'typescript' : /\.jsx$/.test(file) ? 'javascriptreact' : 'javascript');
@@ -121,7 +118,6 @@ export class CodeService {
   private readonly run: Run;
   private readonly grep: Grep;
   private readonly now: () => number;
-  private readonly idleMs: number;
   private readonly log: (line: string) => void;
 
   constructor(private readonly opts: CodeOptions) {
@@ -133,8 +129,12 @@ export class CodeService {
     this.discard = opts.discard ?? discardDirectory;
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => { setTimeout(r, ms).unref?.(); }));
     this.now = opts.now ?? Date.now;
-    this.idleMs = opts.idleMs ?? TEN_MINUTES;
     this.log = opts.log ?? (() => {});
+  }
+
+  /** The repository's Code settings, read afresh: a change applies from the next start. */
+  config(repoRoot: string): CodeConfig {
+    return this.opts.config?.(repoRoot) ?? defaultCodeConfig();
   }
 
   private state(task: CodeTask): TaskState {
@@ -185,19 +185,25 @@ export class CodeService {
     return undefined;
   }
 
-  /** `phpactorPath` setting, else `phpactor` on PATH, else `<tools>/phpactor.phar`. */
-  phpactorCommand(): { command: string; args: string[] } | undefined {
-    const configured = this.opts.setting?.('phpactorPath');
-    const php = (file: string) => ({ command: 'php', args: ['-d', 'memory_limit=-1', file, 'language-server'] });
-    if (configured) return fs.existsSync(configured) ? php(configured) : undefined;
+  /** `phpactorPath` (an executable, else a .phar run with PHP), else `phpactor` on PATH, else `<tools>/phpactor.phar`. */
+  phpactorCommand(repoRoot = ''): { command: string; args: string[] } | undefined {
+    const { tools } = this.config(repoRoot);
+    const php = (file: string) => ({ command: tools.php, args: ['-d', 'memory_limit=-1', file, 'language-server'] });
+    if (tools.phpactor) {
+      if (!fs.existsSync(tools.phpactor)) return undefined; // a wrong setting is not papered over
+      const executable = (() => { try { fs.accessSync(tools.phpactor, fs.constants.X_OK); return true; } catch { return false; } })();
+      return executable && !tools.phpactor.endsWith('.phar') ? { command: tools.phpactor, args: ['language-server'] } : php(tools.phpactor);
+    }
     const found = this.onPath('phpactor');
     if (found) return { command: found, args: ['language-server'] };
     const phar = path.join(this.opts.toolsDir, 'phpactor.phar');
     return fs.existsSync(phar) ? php(phar) : undefined;
   }
 
-  /** `oxlint` on PATH, else `<tools>/node_modules/.bin/oxlint`. */
-  oxlintCommand(): string | undefined {
+  /** `oxlintPath`, else `oxlint` on PATH, else `<tools>/node_modules/.bin/oxlint`. */
+  oxlintCommand(repoRoot = ''): string | undefined {
+    const configured = this.config(repoRoot).tools.oxlint;
+    if (configured) return fs.existsSync(configured) ? configured : undefined;
     const local = path.join(this.opts.toolsDir, 'node_modules', '.bin', 'oxlint');
     return this.onPath('oxlint') ?? (fs.existsSync(local) ? local : undefined);
   }
@@ -226,9 +232,11 @@ export class CodeService {
         baseBranch: () => this.baseBranches.get(repoRoot),
         // A task's Phpactor runs, or is being started, on the repo's view: the base waits for it to go.
         busy: () => this.phpStarts.has(repoRoot) || this.phpAlive(repoRoot),
+        filter: () => phpFilterOf(this.config(repoRoot)),
         spec: (xdg, view) => {
-          const cmd = this.phpactorCommand();
-          return cmd ? this.phpactorSpecFor(cmd, xdg, view, path.join(repoRoot, 'vendor', 'autoload.php')) : undefined;
+          const cmd = this.phpactorCommand(repoRoot);
+          const cfg = this.config(repoRoot);
+          return cmd ? this.phpactorSpecFor(cmd, cfg, xdg, view, path.join(repoRoot, cfg.php.autoloader)) : undefined;
         },
       });
       this.bases.set(repoRoot, base);
@@ -249,8 +257,11 @@ export class CodeService {
    * Builds the repo's PHP base in the background, or brings it up to date when its ref has moved. Called when
    * stackd starts, when a Code tab opens, and now and then. Returns at once.
    */
-  async prepareBase(repoRoot: string, baseBranch?: string): Promise<void> {
-    if (!this.phpactorCommand()) return; // nothing to build it with; a PHP navigation says how to get it
+  async prepareBase(repoRoot: string, baseBranch?: string, opts: { onlyUpdate?: boolean } = {}): Promise<void> {
+    // Off for this repo, or nothing to build it with (a PHP navigation says how to get it).
+    if (!this.config(repoRoot).php.enabled || !this.phpactorCommand(repoRoot)) return;
+    // Not wanted before a Code tab asks for it (phpBaseOnStart off), and none built yet.
+    if (opts.onlyUpdate && !fs.existsSync(path.join(this.repoDir(repoRoot), 'base.json'))) return;
     try { await this.base(repoRoot, baseBranch).check(); } catch (e) { this.log(`[code] checking the base of ${repoRoot} failed: ${String(e)}`); }
   }
 
@@ -258,14 +269,21 @@ export class CodeService {
   async baseSettled(repoRoot: string): Promise<void> { await this.bases.get(repoRoot)?.settled(); }
 
   private phpactorSpec(task: CodeTask, dir: string): LspSpec {
-    const cmd = this.phpactorCommand();
-    if (!cmd) throw new CodeError('PHP navigation needs Phpactor: set "phpactorPath" in ~/.config/stack/settings.json, or put phpactor.phar in ~/.config/stack/tools/.');
-    const own = path.join(task.root, 'vendor', 'autoload.php');
-    const view = phpactorView(task.root, path.join(this.repoDir(task.repoRoot), 'view'));
-    return this.phpactorSpecFor(cmd, dir, view, fs.existsSync(own) ? own : path.join(task.repoRoot, 'vendor', 'autoload.php'));
+    const cfg = this.config(task.repoRoot);
+    const cmd = this.phpactorCommand(task.repoRoot);
+    if (!cmd) {
+      throw new CodeError(cfg.tools.phpactor
+        ? `Phpactor is not at "${cfg.tools.phpactor}" (phpactorPath in ~/.config/stack/settings.json).`
+        : 'PHP navigation needs Phpactor: set "phpactorPath" in ~/.config/stack/settings.json, or put phpactor.phar in ~/.config/stack/tools/.');
+    }
+    const own = path.join(task.root, cfg.php.autoloader);
+    const view = phpactorView(task.root, path.join(this.repoDir(task.repoRoot), 'view'), phpFilterOf(cfg));
+    return this.phpactorSpecFor(cmd, cfg, dir, view, fs.existsSync(own) ? own : path.join(task.repoRoot, cfg.php.autoloader));
   }
 
-  private phpactorSpecFor(cmd: { command: string; args: string[] }, dir: string, view: { root: string; map: Array<[string, string]> }, autoloader: string): LspSpec {
+  private phpactorSpecFor(
+    cmd: { command: string; args: string[] }, cfg: CodeConfig, dir: string, view: { root: string; map: Array<[string, string]> }, autoloader: string,
+  ): LspSpec {
     const env = { XDG_CACHE_HOME: path.join(dir, 'cache'), XDG_CONFIG_HOME: path.join(dir, 'config'), XDG_DATA_HOME: path.join(dir, 'data') };
     for (const d of Object.values(env)) fs.mkdirSync(d, { recursive: true });
     return {
@@ -274,8 +292,18 @@ export class CodeService {
       env,
       view,
       init: {
+        'composer.enable': true,
+        'composer.class_maps_only': true,
+        'language_server_indexer.workspace_symbol_search_limit': 100,
+        'indexer.supported_extensions': cfg.php.extensions,
+        // phpExcludeDirs below the top level (a top-level one is kept out of the view altogether). An excluded
+        // vendor/ is still found through Composer's class maps, read as data.
+        'indexer.exclude_patterns': [...cfg.php.exclude, '.php'].map((x) => `/${x}/**/*`),
+        // The repo's phpactorOptions, then what is not negotiable.
+        ...cfg.php.phpactorOptions,
         // The view is symlinks into the sources (see phpactorView): the indexer must follow them.
         'indexer.follow_symlinks': true,
+        'composer.autoloader_path': autoloader,
         // MUST stay off: left on, Phpactor writes `<project>/.phpactor.json` at start. Nothing is written in a worktree.
         'language_server_configuration.auto_config': false,
         'language_server.enable_trust_check': false, // and never load the worktree's own .phpactor.json
@@ -283,12 +311,6 @@ export class CodeService {
         'language_server.diagnostics_on_update': false,
         'language_server.diagnostics_on_save': false,
         'indexer.enabled_watchers': ['lsp'],
-        // vendor/ is not indexed; a vendor class is still found through Composer's class maps, read as data.
-        'indexer.exclude_patterns': ['/vendor/**/*', '/node_modules/**/*', '/.worktrees/**/*', '/.php/**/*'],
-        'composer.enable': true,
-        'composer.class_maps_only': true,
-        'composer.autoloader_path': autoloader,
-        'language_server_indexer.workspace_symbol_search_limit': 100,
       },
     };
   }
@@ -299,16 +321,23 @@ export class CodeService {
   }
 
   private oxlintSpec(task: CodeTask): LspSpec | undefined {
-    const command = this.oxlintCommand();
+    const command = this.oxlintCommand(task.repoRoot);
     if (!command) return undefined;
-    // Stack's own rules, outside any repository: native rules only, so no plugin code from the repo is run.
-    const config = path.join(this.opts.cacheDir, 'oxlint.json');
-    fs.mkdirSync(this.opts.cacheDir, { recursive: true });
-    fs.writeFileSync(config, JSON.stringify({
-      plugins: ['typescript', 'react', 'unicorn', 'jsx-a11y', 'import'],
-      categories: { correctness: 'warn' },
-      env: { browser: true, es2021: true, node: true },
-    }, null, 2));
+    // The repo's own config (oxlintConfig) when it names one that exists, else Stack's own rules, outside any
+    // repository: native rules only, so no plugin code from the repo is run.
+    const own = this.config(task.repoRoot).scripts.oxlintConfig;
+    const theirs = own ? path.resolve(task.root, own) : undefined;
+    let config: string;
+    if (theirs && fs.existsSync(theirs)) config = theirs;
+    else {
+      config = path.join(this.opts.cacheDir, 'oxlint.json');
+      fs.mkdirSync(this.opts.cacheDir, { recursive: true });
+      fs.writeFileSync(config, JSON.stringify({
+        plugins: ['typescript', 'react', 'unicorn', 'jsx-a11y', 'import'],
+        categories: { correctness: 'warn' },
+        env: { browser: true, es2021: true, node: true },
+      }, null, 2));
+    }
     return {
       id: 'oxlint', command, args: ['--lsp'],
       init: [{ workspaceUri: pathToFileURL(task.root).href, options: { configPath: config, run: 'onType' } }],
@@ -336,7 +365,7 @@ export class CodeService {
       running.proc.stop();
       if (this.tasks.get(taskId)?.servers.get(id) === running) this.tasks.get(taskId)?.servers.delete(id);
       this.log(`[code] ${id} stopped for ${taskId} (idle)`);
-    }, this.idleMs);
+    }, this.opts.idleMs ?? this.config(this.tasks.get(taskId)?.repoRoot ?? '').idleMs);
     running.timer.unref?.();
   }
 
@@ -348,7 +377,10 @@ export class CodeService {
     const p = (params ?? {}) as { textDocument?: { uri?: unknown }; position?: { line?: unknown; character?: unknown }; query?: unknown };
     const uri = p.textDocument?.uri;
     const file = typeof uri === 'string' ? resolveReadable(this.scope(task), fileURLToPath(uri)) : undefined;
-    if (isPhp(languageId)) return this.php(task, method, params, file);
+    if (isPhp(languageId)) {
+      if (!this.config(task.repoRoot).php.enabled) throw new CodeError('PHP navigation is off for this repository (phpNavigation).');
+      return this.php(task, method, params, file);
+    }
     if (isScript(languageId)) return this.script(task, method, p, file);
     throw new CodeError(`No navigation for ${languageId}.`);
   }
@@ -397,7 +429,7 @@ export class CodeService {
         this.log(`[code] phpactor stopped for ${id} (switching to ${task.id})`);
       }
     }
-    if (!this.phpactorCommand()) this.phpactorSpec(task, this.taskDir(task)); // throws how to get Phpactor
+    if (!this.phpactorCommand(task.repoRoot)) this.phpactorSpec(task, this.taskDir(task)); // throws how to get Phpactor
     const base = this.base(task.repoRoot, task.baseBranch);
     await base.check(true); // builds it, or catches up with its ref; a build in flight is left alone
     const st = base.status();
@@ -406,7 +438,7 @@ export class CodeService {
     const info = base.info();
     const dir = this.taskDir(task);
     const changed = info ? await this.phpChanges(task, info.commit) : undefined;
-    if (!info || changed === undefined || changed.length > MAX_OVERLAY) {
+    if (!info || changed === undefined || changed.length > this.config(task.repoRoot).php.maxChangedFiles) {
       // No base to stand on (no git ref, or too far from it): the task is indexed in full, on its own.
       if (this.readJson<{ base?: string }>(path.join(dir, 'clone.json'))) this.discard(dir);
       return this.server(task, this.phpactorSpec(task, dir), !this.hasPhpIndex(dir));
@@ -437,12 +469,14 @@ export class CodeService {
   private async phpChanges(task: CodeTask, baseCommit: string): Promise<string[] | undefined> {
     const head = await this.gitHead(task.root);
     if (!head) return undefined;
-    const diff = await this.run('git', ['-C', task.root, 'diff', '--name-only', '-z', baseCommit, head, '--', '*.php'], task.root);
+    const filter = phpFilterOf(this.config(task.repoRoot));
+    const specs = phpPathspecs(filter);
+    const diff = await this.run('git', ['-C', task.root, 'diff', '--name-only', '-z', baseCommit, head, '--', ...specs], task.root);
     if (diff.code !== 0) return undefined;
-    const dirty = await this.run('git', ['-C', task.root, 'status', '--porcelain', '-z', '--untracked-files=all', '--', '*.php'], task.root);
+    const dirty = await this.run('git', ['-C', task.root, 'status', '--porcelain', '-z', '--untracked-files=all', '--', ...specs], task.root);
     const mine = dirty.code === 0 ? dirty.stdout.split('\0').filter((l) => l.length > 3).map((l) => l.slice(3)) : [];
     const files = new Set([...diff.stdout.split('\0').filter(Boolean), ...mine]);
-    return [...files].filter((f) => f.endsWith('.php') && !['vendor', 'node_modules'].includes(f.split('/')[0]));
+    return [...files].filter((f) => phpWanted(filter, f));
   }
 
   private async gitHead(root: string): Promise<string | undefined> {
@@ -460,7 +494,9 @@ export class CodeService {
     let entry = s.light.get(project);
     if (!entry) {
       const fresh = { done: 0, total: 0, ready: false, index: undefined as unknown as Promise<LightIndex> };
-      fresh.index = LightIndex.build(project, (done, total) => { fresh.done = done; fresh.total = total; }, this.grep)
+      // scriptExcludeDirs: a path is the worktree's (`apps/legacy`), whatever project the file is in.
+      const skip = this.config(task.repoRoot).scripts.exclude.map((d) => (d.includes('/') ? path.join(fs.realpathSync(task.root), d) : d));
+      fresh.index = LightIndex.build(project, (done, total) => { fresh.done = done; fresh.total = total; }, this.grep, skip)
         .then((index) => { fresh.ready = true; return index; });
       fresh.index.catch(() => { s.light.delete(project); });
       s.light.set(project, fresh);
@@ -497,7 +533,7 @@ export class CodeService {
 
   async diagnostics(task: CodeTask, fileArg: unknown): Promise<LspDiagnostic[]> {
     const file = resolveInWorktree(this.scope(task), fileArg);
-    if (/\.(php|phtml)$/.test(file)) return this.phpLint(task, file);
+    if (isPhpFile(phpFilterOf(this.config(task.repoRoot)), file)) return this.phpLint(task, file);
     if (!/\.([cm]?[jt]sx?)$/.test(file)) return [];
     const spec = this.oxlintSpec(task);
     if (!spec) return [];
@@ -509,7 +545,7 @@ export class CodeService {
 
   /** `php -l`: syntax only. "PHP Parse error: … in <file> on line N". */
   private async phpLint(task: CodeTask, file: string): Promise<LspDiagnostic[]> {
-    const { code, stdout, stderr } = await this.run('php', ['-l', file], task.root);
+    const { code, stdout, stderr } = await this.run(this.config(task.repoRoot).tools.php, ['-l', file], task.root);
     if (code === 0) return [];
     const m = /(?:Parse|Fatal) error:\s*(.+?) in .+? on line (\d+)/.exec(stdout + '\n' + stderr);
     if (!m) return [];
@@ -579,28 +615,28 @@ function outline(decls: Declaration[]): unknown[] {
 }
 
 export { PathRefused };
+export { defaultCodeConfig } from './config';
 
 /**
  * What Phpactor is started on: a directory of symlinks to the worktree's top-level entries that hold
- * tracked PHP files, rebuilt at every start. Its indexer walks every directory under its root before
+ * tracked PHP files (or the repo's `phpIndexDirs`), rebuilt at every start. Its indexer walks every directory under its root before
  * applying exclude patterns, so on a checkout with real node_modules, vendor or other worktrees nested
  * inside (the main checkout keeps them in .worktrees/), walking the worktree itself takes forever and
  * indexes every nested copy. vendor/ stays out (Composer's class maps still find a vendor class).
  */
-export function phpactorView(root: string, viewDir: string, listPhp: (root: string) => string[] = trackedPhp): { root: string; map: Array<[string, string]> } {
-  const tops = new Set<string>();
-  for (const file of listPhp(root)) {
-    const top = file.split('/')[0];
-    if (top && !['vendor', 'node_modules', '.worktrees', '.git'].includes(top)) tops.add(top);
-  }
+export function phpactorView(
+  root: string, viewDir: string, filter: PhpFilter = phpFilterOf(defaultCodeConfig()),
+  listPhp: (root: string, filter: PhpFilter) => string[] = trackedPhp,
+): { root: string; map: Array<[string, string]> } {
+  const tops = new Set(phpTopsOf(filter, listPhp(root, filter)).filter((t) => !t.startsWith('composer.')));
   for (const extra of ['composer.json', 'composer.lock']) if (fs.existsSync(path.join(root, extra))) tops.add(extra);
   return linkView(root, viewDir, [...tops]);
 }
 
 /** Tracked PHP files, relative to `root` (git's index, so nested worktrees and untracked trees are not walked). */
-function trackedPhp(root: string): string[] {
+function trackedPhp(root: string, filter: PhpFilter): string[] {
   try {
-    const out = execFileSync('git', ['-C', root, 'ls-files', '-z', '--', '*.php'], { maxBuffer: 256 * 1024 * 1024, timeout: 20_000 });
+    const out = execFileSync('git', ['-C', root, 'ls-files', '-z', '--', ...phpPathspecs(filter)], { maxBuffer: 256 * 1024 * 1024, timeout: 20_000 });
     return out.toString('utf8').split('\0').filter(Boolean);
   } catch {
     return [];

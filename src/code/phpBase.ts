@@ -2,6 +2,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { LspProcess, type LspSpec, type SpawnLsp } from './LspProcess';
+import { defaultCodeConfig, phpFilterOf, phpPathspecs, phpTopsOf, phpWanted, type PhpFilter } from './config';
 
 export interface RunResult { code: number; stdout: string; stderr: string }
 export type Run = (command: string, args: string[], cwd: string) => Promise<RunResult>;
@@ -46,6 +47,8 @@ export interface PhpBaseDeps {
   baseBranch: () => string | undefined;
   /** A task's Phpactor is using the repo's view: the base is not touched until it is gone. */
   busy: () => boolean;
+  /** Which files are the repo's PHP (its Code settings); default the defaults. */
+  filter?: () => PhpFilter;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
   /** Removes a directory without holding the caller up. */
@@ -53,7 +56,8 @@ export interface PhpBaseDeps {
   log: (line: string) => void;
 }
 
-const SKIP_TOPS = new Set(['vendor', 'node_modules', '.worktrees', '.git']);
+/** What a base was built with: when the repo's PHP settings change, it is built again from scratch. */
+export const filterKey = (f: PhpFilter): string => JSON.stringify([f.dirs, f.exclude, f.extensions]);
 
 /** `origin/<branch>`, else the local branch, else the main checkout's HEAD. */
 export async function resolveBaseRef(run: Run, repoRoot: string, branch: string | undefined): Promise<BaseInfo | undefined> {
@@ -66,19 +70,22 @@ export async function resolveBaseRef(run: Run, repoRoot: string, branch: string 
   return undefined;
 }
 
-/** The top-level entries of `commit` that hold PHP, plus Composer's files when the commit has them. */
-export async function phpTops(run: Run, repoRoot: string, commit: string): Promise<string[]> {
+/** The entries of `commit` that hold its PHP (see phpTopsOf), plus Composer's files when the commit has them. */
+export async function phpTops(run: Run, repoRoot: string, commit: string, filter: PhpFilter = phpFilterOf(defaultCodeConfig())): Promise<string[]> {
   const r = await run('git', ['-C', repoRoot, 'ls-tree', '-r', '--name-only', '-z', commit], repoRoot);
   if (r.code !== 0) return [];
-  const tops = new Set<string>();
-  for (const file of r.stdout.split('\0')) {
-    if (file === 'composer.json' || file === 'composer.lock') tops.add(file);
-    else if (file.endsWith('.php')) {
-      const top = file.split('/')[0];
-      if (!SKIP_TOPS.has(top)) tops.add(top);
-    }
+  return phpTopsOf(filter, r.stdout.split('\0'));
+}
+
+/** git pathspecs for the PHP under `tops` (and Composer's files), minus the excluded directories. */
+export function basePathspecs(filter: PhpFilter, tops: readonly string[]): string[] {
+  const specs: string[] = [];
+  for (const t of tops) {
+    if (t.startsWith('composer.') || filter.extensions.some((e) => t.endsWith(`.${e}`))) specs.push(t);
+    else for (const e of filter.extensions) specs.push(`:(glob)${t}/**/*.${e}`);
   }
-  return [...tops].sort();
+  for (const x of filter.exclude) specs.push(`:(exclude)${x}`);
+  return specs;
 }
 
 /** Symlinks in `viewDir` to the given top-level entries of `root`: what Phpactor is started on. */
@@ -89,6 +96,7 @@ export function linkView(root: string, viewDir: string, tops: readonly string[])
   for (const top of [...tops].sort()) {
     const real = path.join(root, top);
     if (!fs.existsSync(real)) continue;
+    fs.mkdirSync(path.dirname(path.join(viewDir, top)), { recursive: true }); // a nested phpIndexDirs entry (lib/modules)
     fs.symlinkSync(real, path.join(viewDir, top));
     const dir = fs.statSync(real).isDirectory();
     map.push(dir ? [`${real}/`, `${path.join(viewDir, top)}/`] : [real, path.join(viewDir, top)]);
@@ -132,8 +140,10 @@ export class PhpBase {
     this.infoFile = path.join(dir, 'base.json');
   }
 
-  private record(): (Partial<BaseInfo> & { ready?: boolean; from?: BaseInfo }) | undefined {
-    try { return JSON.parse(fs.readFileSync(this.infoFile, 'utf8')) as Partial<BaseInfo> & { ready?: boolean; from?: BaseInfo }; } catch { return undefined; }
+  private filter(): PhpFilter { return this.deps.filter?.() ?? phpFilterOf(defaultCodeConfig()); }
+
+  private record(): (Partial<BaseInfo> & { ready?: boolean; from?: BaseInfo; filter?: string }) | undefined {
+    try { return JSON.parse(fs.readFileSync(this.infoFile, 'utf8')) as Partial<BaseInfo> & { ready?: boolean; from?: BaseInfo; filter?: string }; } catch { return undefined; }
   }
 
   /** The base as it is on disk, when its index is complete (it may be behind the ref: still good to clone). */
@@ -167,8 +177,10 @@ export class PhpBase {
     if (this.building || this.disposed) return;
     const target = await resolveBaseRef(this.deps.run, this.repoRoot, this.deps.baseBranch());
     if (!target || this.building || this.disposed) return;
-    const have = this.info() ?? this.interrupted();
-    if (have?.commit === target.commit && this.info() || this.noPhp === target.commit) return;
+    // Built with other PHP settings: not a base to update, one to build again.
+    const sameFilter = (this.record()?.filter ?? filterKey(this.filter())) === filterKey(this.filter());
+    const have = sameFilter ? this.info() ?? this.interrupted() : undefined;
+    if (have?.commit === target.commit && this.info() || this.noPhp === `${target.commit} ${filterKey(this.filter())}`) return;
     if (!claimed && this.deps.busy()) return;
     this.target = target;
     this.failure = '';
@@ -185,22 +197,23 @@ export class PhpBase {
   private async build(have: BaseInfo | undefined, target: BaseInfo): Promise<void> {
     const t0 = this.deps.now();
     const git = (args: string[]) => this.deps.run('git', ['-C', this.repoRoot, ...args], this.repoRoot);
-    const tops = await phpTops(this.deps.run, this.repoRoot, target.commit);
-    if (!tops.some((t) => !t.startsWith('composer.'))) { this.noPhp = target.commit; return; } // not a PHP repository: no base
+    const filter = this.filter();
+    const tops = await phpTops(this.deps.run, this.repoRoot, target.commit, filter);
+    if (!tops.some((t) => !t.startsWith('composer.'))) { this.noPhp = `${target.commit} ${filterKey(filter)}`; return; } // not a PHP repository: no base
     const incremental = !!have && fs.existsSync(this.src);
     // Until the index is complete again nothing may clone it.
     fs.mkdirSync(this.dir, { recursive: true });
-    fs.writeFileSync(this.infoFile, JSON.stringify({ ...target, ready: false, ...(incremental && have ? { from: have } : {}) }));
+    fs.writeFileSync(this.infoFile, JSON.stringify({ ...target, ready: false, filter: filterKey(filter), ...(incremental && have ? { from: have } : {}) }));
     let touched = 0;
     if (incremental && have) {
       this.progress = 'updating sources';
-      const diff = await git(['diff', '--name-status', '-z', '--no-renames', have.commit, target.commit, '--', '*.php', 'composer.json', 'composer.lock']);
+      const diff = await git(['diff', '--name-status', '-z', '--no-renames', have.commit, target.commit, '--', ...phpPathspecs(filter), 'composer.json', 'composer.lock']);
       if (diff.code !== 0) throw new Error(`git diff failed: ${diff.stderr.trim()}`);
       const parts = diff.stdout.split('\0').filter(Boolean);
       const changed: string[] = [];
       for (let i = 0; i + 1 < parts.length; i += 2) {
         const file = parts[i + 1];
-        if (SKIP_TOPS.has(file.split('/')[0])) continue;
+        if (!file.startsWith('composer.') && !phpWanted(filter, file)) continue;
         if (parts[i] === 'D') fs.rmSync(path.join(this.src, file), { force: true }); else changed.push(file);
       }
       // `tar -m`: extracted now. Phpactor re-indexes a file whose ctime is past its index's timestamp.
@@ -215,7 +228,7 @@ export class PhpBase {
       this.deps.discard(this.xdg);
       fs.mkdirSync(this.src, { recursive: true });
       // Only the PHP of those directories (and Composer's files): the base is for an index, not a checkout.
-      const specs = tops.map((t) => (/\.(php|json|lock)$/.test(t) ? t : `:(glob)${t}/**/*.php`));
+      const specs = basePathspecs(filter, tops);
       const r = await this.deps.pipe(['git', ['-C', this.repoRoot, 'archive', '--format=tar', target.commit, '--', ...specs]], ['tar', ['-xmf', '-', '-C', this.src]], this.repoRoot);
       if (r.code !== 0) throw new Error(`extracting ${target.ref} failed: ${r.stderr.trim()}`);
     }
@@ -223,7 +236,7 @@ export class PhpBase {
     if (this.disposed) return;
     await this.index(tops, incremental);
     if (this.disposed) return;
-    fs.writeFileSync(this.infoFile, JSON.stringify({ ...target, ready: true }));
+    fs.writeFileSync(this.infoFile, JSON.stringify({ ...target, ready: true, filter: filterKey(filter) }));
     this.deps.log(`[code] base of ${path.basename(this.repoRoot)} ${incremental ? `updated (${touched} file(s))` : 'built'} at ${target.ref} ${target.commit.slice(0, 7)}: sources ${extractedMs} ms, index ${this.deps.now() - t0 - extractedMs} ms`);
   }
 

@@ -617,7 +617,12 @@ mod settings_tests {
 // ── <repo>/.stack/config.json (the project settings; the Settings screen's repo tab edits it) ──
 
 /// The keys of a repo's config the screen may write (scalar ones; the file may hold more, which stay).
-const REPO_KEYS: [&str; 5] = ["worktreesDirectory", "defaultBaseBranch", "setupScript", "setupInTerminal", "teardownScript"];
+const REPO_KEYS: [&str; 14] = [
+    "worktreesDirectory", "defaultBaseBranch", "setupScript", "setupInTerminal", "teardownScript",
+    // The Code tab
+    "phpNavigation", "phpIndexDirs", "phpExcludeDirs", "phpExtensions", "phpAutoloader", "phpBaseBranch", "phpMaxChangedFiles",
+    "scriptExcludeDirs", "oxlintConfig",
+];
 
 /// `<root>/.stack/config.json`, only when `root` is a directory holding `.git` (file or directory).
 fn repo_config_path(root: &str) -> Result<std::path::PathBuf, String> {

@@ -41,6 +41,7 @@ import { HeadlessHost, headlessTerminals, LogNotify, NO_BREAKPOINTS, NO_TABS, st
 import { readVsCodeGlobalState } from './vscodeState';
 import { runChecks } from './doctor';
 import { CodeError, CodeService, PathRefused, type CodeTask } from '../code/CodeService';
+import { codeConfigOf } from '../code/config';
 
 /** Replaced by esbuild with package.json's version (see esbuild.js). */
 export const STACKD_VERSION = process.env.STACKD_VERSION ?? 'dev';
@@ -182,7 +183,8 @@ export class StackDaemon {
     this.code = new CodeService({
       cacheDir: path.join(dir, 'cache'),
       toolsDir: path.join(dir, 'tools'),
-      setting: (key) => this.userSetting(key),
+      // The repo's Code settings: its .stack/config.json under yours (settings.json).
+      config: (repoRoot) => codeConfigOf((this.repos.get(repoRoot)?.config ?? this.global).get()),
       log: this.log,
     });
     this.store = new JsonFileStore(path.join(dir, 'state.json'));
@@ -255,7 +257,7 @@ export class StackDaemon {
     await this.loadKnownRepos();
     // The base branches move (fetches, pulls): catch up now and then. A check is one `git rev-parse`.
     this.baseTimer = setInterval(() => {
-      for (const ctx of this.repos.values()) void this.code.prepareBase(ctx.root, ctx.config.get().defaultBaseBranch);
+      for (const ctx of this.repos.values()) this.prepareCodeBase(ctx, 'refresh');
     }, 5 * 60 * 1000);
     this.baseTimer.unref?.();
   }
@@ -364,7 +366,7 @@ export class StackDaemon {
     const ctx: RepoContext = { root: repoRoot, config, service, tools };
     this.repos.set(repoRoot, ctx);
     // The repo's PHP base index (its base branch), in the background: a Code tab then opens in seconds.
-    void this.code.prepareBase(ctx.root, ctx.config.get().defaultBaseBranch);
+    this.prepareCodeBase(ctx, 'start');
     const roots = new Set(this.store.get<string[]>(REPOS_KEY, []));
     if (!roots.has(repoRoot)) await this.store.update(REPOS_KEY, [...roots, repoRoot]);
 
@@ -383,19 +385,20 @@ export class StackDaemon {
     return undefined;
   }
 
-  /** A string the user set in settings.json (with or without the `stack.` prefix) or a client pushed. */
-  private userSetting(key: string): string | undefined {
-    let raw: Record<string, unknown> = {};
-    try { raw = JSON.parse(fs.readFileSync(this.settingsPath, 'utf8')) as Record<string, unknown>; } catch { /* no settings file */ }
-    const value = raw?.[key] ?? raw?.[`stack.${key}`] ?? this.pushed[key];
-    return typeof value === 'string' && value ? value : undefined;
+  /**
+   * The repo's PHP base, in the background. At start and on the periodic check it is built only when
+   * `phpBaseOnStart` is on (yours); off, the first Code tab builds it, and from then on it is kept up to date.
+   */
+  private prepareCodeBase(ctx: RepoContext, why: 'start' | 'refresh' | 'open'): void {
+    const cfg = codeConfigOf(ctx.config.get());
+    void this.code.prepareBase(ctx.root, cfg.php.baseBranch, { onlyUpdate: why !== 'open' && !cfg.php.buildBaseOnStart });
   }
 
   /** The task a `code*` command is about. */
   private codeTask(b: Body): { task: CodeTask; wt: Worktree; ctx: RepoContext } {
     const { wt, ctx } = this.findWorktree(need(b, 'worktreeId'));
     if (!fs.existsSync(wt.path)) throw new CommandError('The task\'s worktree is not on disk.');
-    return { task: { id: wt.id, root: wt.path, repoRoot: ctx.root, baseBranch: ctx.config.get().defaultBaseBranch }, wt, ctx };
+    return { task: { id: wt.id, root: wt.path, repoRoot: ctx.root, baseBranch: codeConfigOf(ctx.config.get()).php.baseBranch }, wt, ctx };
   }
 
   /** Runs a Code command; what the browser should show as a message becomes a 4xx with that message. */
@@ -651,7 +654,7 @@ export class StackDaemon {
         if (msg.type === 'refreshDrift' && typeof msg.worktreeId === 'string') {
           // The one fetch of the base branch: once it is in, the repo's PHP base may have a new commit to catch up with.
           await ctx.service.refreshDrift(msg.worktreeId);
-          void this.code.prepareBase(ctx.root, ctx.config.get().defaultBaseBranch);
+          this.prepareCodeBase(ctx, 'refresh');
         } else await ctx.service.handleMessage(msg as never);
         return {};
       }
@@ -687,7 +690,7 @@ export class StackDaemon {
       case 'codeOpen': {
         const { task, wt, ctx } = this.codeTask(b);
         this.code.refreshFiles(task);
-        void this.code.prepareBase(task.repoRoot, task.baseBranch); // its ref may have moved since
+        this.prepareCodeBase(ctx, 'open'); // its ref may have moved since
         let unified = '';
         try { unified = await ctx.service.getDiff(wt.id, 'branch'); } catch { /* no base to compare with: nothing "changed" */ }
         return this.codeCommand(() => this.code.open(task, unified));

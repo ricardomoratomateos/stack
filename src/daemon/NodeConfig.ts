@@ -5,6 +5,7 @@ import type { StackConfig } from '../types';
 import type { ConfigSource } from '../config/ConfigSource';
 import { PROVIDER_IDS, type ProviderId } from '../ports/IAgentProvider';
 import { PROJECT_DEFAULTS } from '../config/defaults';
+import { CODE_USER_DEFAULTS } from '../code/config';
 import { legacyPorts, readRepoConfig } from '../config/RepoConfig';
 
 /** `~/.config/stack/settings.json`: the user's own settings for `stackd`. */
@@ -22,6 +23,7 @@ function readObject(file: string): Record<string, unknown> {
 
 const str = (v: unknown, d: string): string => (typeof v === 'string' ? v : d);
 const bool = (v: unknown, d: boolean): boolean => (typeof v === 'boolean' ? v : d);
+const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : d);
 
 /**
  * The configuration `stackd` runs on (a ConfigSource). An explicit user value (settings.json, keys without the `stack.`
@@ -44,7 +46,9 @@ export class NodeConfig implements ConfigSource {
     const repo = root ? readRepoConfig(root).values : {};
     const pick = <K extends keyof typeof PROJECT_DEFAULTS>(key: K): (typeof PROJECT_DEFAULTS)[K] => {
       const explicit = user(key);
-      if (explicit !== undefined && typeof explicit === typeof PROJECT_DEFAULTS[key]) return explicit as (typeof PROJECT_DEFAULTS)[K];
+      if (explicit !== undefined && typeof explicit === typeof PROJECT_DEFAULTS[key] && Array.isArray(explicit) === Array.isArray(PROJECT_DEFAULTS[key])) {
+        return explicit as (typeof PROJECT_DEFAULTS)[K];
+      }
       return (repo[key] as (typeof PROJECT_DEFAULTS)[K] | undefined) ?? PROJECT_DEFAULTS[key];
     };
     // Named ports from before they left the retired `docker` block; a top-level value wins.
@@ -73,6 +77,21 @@ export class NodeConfig implements ConfigSource {
       portStride: user('portStride') === undefined && userLegacy.portStride !== undefined ? userLegacy.portStride : pick('portStride'),
       debugBasePort: pick('debugBasePort'),
       debugTemplate: pick('debugTemplate'),
+      phpNavigation: pick('phpNavigation'),
+      phpIndexDirs: pick('phpIndexDirs'),
+      phpExcludeDirs: pick('phpExcludeDirs'),
+      phpExtensions: pick('phpExtensions'),
+      phpAutoloader: pick('phpAutoloader'),
+      phpBaseBranch: pick('phpBaseBranch'),
+      phpMaxChangedFiles: pick('phpMaxChangedFiles'),
+      phpactorOptions: pick('phpactorOptions'),
+      scriptExcludeDirs: pick('scriptExcludeDirs'),
+      oxlintConfig: pick('oxlintConfig'),
+      phpBaseOnStart: bool(user('phpBaseOnStart'), CODE_USER_DEFAULTS.phpBaseOnStart),
+      codeIdleMinutes: num(user('codeIdleMinutes'), CODE_USER_DEFAULTS.codeIdleMinutes),
+      phpactorPath: str(user('phpactorPath'), CODE_USER_DEFAULTS.phpactorPath),
+      oxlintPath: str(user('oxlintPath'), CODE_USER_DEFAULTS.oxlintPath),
+      phpPath: str(user('phpPath'), CODE_USER_DEFAULTS.phpPath),
     };
   }
 }

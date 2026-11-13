@@ -41,7 +41,17 @@ export type RepoScopedKey =
   | 'basePort'
   | 'portStride'
   | 'debugBasePort'
-  | 'debugTemplate';
+  | 'debugTemplate'
+  | 'phpNavigation'
+  | 'phpIndexDirs'
+  | 'phpExcludeDirs'
+  | 'phpExtensions'
+  | 'phpAutoloader'
+  | 'phpBaseBranch'
+  | 'phpMaxChangedFiles'
+  | 'phpactorOptions'
+  | 'scriptExcludeDirs'
+  | 'oxlintConfig';
 
 export type RepoConfigValues = Partial<Pick<StackConfig, RepoScopedKey>>;
 
@@ -86,6 +96,12 @@ const asStringArray: Validator = (raw, problems, key) => {
   return undefined;
 };
 
+const asCount: Validator = (raw, problems, key) => {
+  if (typeof raw === 'number' && Number.isInteger(raw) && raw >= 0) return raw;
+  problems.push(`"${key}" must be a whole number, got ${describe(raw)}`);
+  return undefined;
+};
+
 const asObject: Validator = (raw, problems, key) => {
   if (isPlainObject(raw)) return raw;
   problems.push(`"${key}" must be an object, got ${describe(raw)}`);
@@ -116,6 +132,16 @@ const validators: Record<RepoScopedKey, Validator> = {
   portStride: asPositiveInt,
   debugBasePort: asPositiveInt,
   debugTemplate: asDebugTemplate,
+  phpNavigation: asBoolean,
+  phpIndexDirs: asStringArray,
+  phpExcludeDirs: asStringArray,
+  phpExtensions: asStringArray,
+  phpAutoloader: asString,
+  phpBaseBranch: asString,
+  phpMaxChangedFiles: asCount,
+  phpactorOptions: asObject,
+  scriptExcludeDirs: asStringArray,
+  oxlintConfig: asString,
 };
 
 /**
@@ -154,6 +180,11 @@ const USER_SCOPED = new Set([
   'focusMode',
   'scopeSearchToActiveWorktree',
   'sessionTabs',
+  'phpBaseOnStart',
+  'codeIdleMinutes',
+  'phpactorPath',
+  'oxlintPath',
+  'phpPath',
 ]);
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {

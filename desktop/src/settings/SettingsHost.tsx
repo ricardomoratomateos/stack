@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Sheet } from '../ui/Sheet';
 import { stackd } from '../stackd/api';
@@ -6,7 +6,7 @@ import { useStackd } from '../stackd/useStackd';
 import { APP_VERSION } from '../stackd/version';
 import { formatChecks } from '@core/daemon/doctorReport';
 import { diagnostics, type Check } from './diagnostics';
-import { PROJECT_DEFS, USER_DEFS, isModified, repoValueOf, valueOf, type SettingDef, type SettingValue } from './schema';
+import { PROJECT_DEFS, USER_DEFS, formatValue, isModified, parseList, repoValueOf, sameValue, valueOf, type SettingDef, type SettingValue } from './schema';
 
 /** Settings editor, a centred sheet, over ~/.config/stack/settings.json, in the look of VS Code's. */
 export function SettingsHost({ repo, onClose }: { repo?: { name: string; root: string }; onClose: () => void }) {
@@ -67,28 +67,38 @@ export function SettingsHost({ repo, onClose }: { repo?: { name: string; root: s
           <p className="settings-sub">Saved to <code>~/.config/stack/settings.json</code>; stackd picks changes up right away.</p>
         )}
         {error && <div className="settings-error" role="alert">{error}</div>}
-        {inRepo && repoFile && PROJECT_DEFS.map((d) => (
+        {inRepo && repoFile && grouped(PROJECT_DEFS, (d) => (
           <SettingRow key={`repo-${d.key}`} def={d} stored={repoValueOf(d, repoFile)} onSave={saveRepo}
             note={file && valueOf(d, file) !== undefined ? 'Overridden by User setting' : undefined} />
         ))}
-        {!inRepo && file && USER_DEFS.map((d) => <SettingRow key={d.key} def={d} stored={valueOf(d, file)} onSave={save} />)}
+        {!inRepo && file && grouped(USER_DEFS, (d) => <SettingRow key={d.key} def={d} stored={valueOf(d, file)} onSave={save} />)}
         {!inRepo && file && (
           <>
             <h2 className="settings-group">Project settings</h2>
             <p className="settings-sub">A value set here overrides this key in every repository, including its <code>.stack/config.json</code>. Leave it unset to let each repo decide.</p>
-            {PROJECT_DEFS.map((d) => <SettingRow key={d.key} def={d} stored={valueOf(d, file)} onSave={save} />)}
+            {grouped(PROJECT_DEFS, (d) => <SettingRow key={d.key} def={d} stored={valueOf(d, file)} onSave={save} />, 'h3')}
           </>
         )}
         {!inRepo && <ManagerRow />}
         {!inRepo && <div className="setting-item">
           <div className="setting-title">Other settings</div>
-          <div className="setting-desc">The rest are lists, objects or advanced options: edit them in the file.</div>
+          <div className="setting-desc">The rest are objects or advanced options (phpactorOptions, ports, debugTemplate…): edit them in the file.</div>
           <button type="button" className="secondary" onClick={() => invoke('open_settings_file').catch((e) => setError(String(e)))}>Open settings.json</button>
         </div>}
         {!inRepo && <Diagnostics />}
       </div>
     </Sheet>
   );
+}
+
+/** The rows, with a heading where a group ("Code") starts. */
+function grouped(defs: SettingDef[], row: (d: SettingDef) => React.ReactNode, Heading: 'h2' | 'h3' = 'h2') {
+  return defs.map((d, i) => (
+    <Fragment key={d.key}>
+      {d.group && d.group !== defs[i - 1]?.group && <Heading className="settings-group">{d.group}</Heading>}
+      {row(d)}
+    </Fragment>
+  ));
 }
 
 type ManagerState = 'registered' | 'elsewhere' | 'missing';
@@ -181,11 +191,22 @@ function Diagnostics() {
 
 function SettingRow({ def, stored, onSave, note }: { def: SettingDef; stored: SettingValue | undefined; onSave: (key: string, v: SettingValue | null) => void; note?: string }) {
   const current = stored ?? def.default;
-  const [draft, setDraft] = useState(String(current));
-  useEffect(() => setDraft(String(current)), [current]);
+  const shown = formatValue(current);
+  const [draft, setDraft] = useState(shown);
+  useEffect(() => setDraft(shown), [shown]);
   const modified = isModified(def, stored);
   // Saving the default is the same as resetting: the key leaves the file.
-  const commit = (v: SettingValue) => onSave(def.key, v === def.default ? null : v);
+  const commit = (v: SettingValue) => onSave(def.key, sameValue(v, def.default) ? null : v);
+  /** The text box's draft as the setting's type; a number that is not one goes back to what it was. */
+  const commitDraft = () => {
+    if (draft === shown) return;
+    if (def.type === 'array') return commit(parseList(draft));
+    if (def.type === 'number') {
+      const n = Number(draft);
+      return Number.isFinite(n) && n > 0 && draft.trim() !== '' ? commit(n) : setDraft(shown);
+    }
+    commit(draft);
+  };
   const id = `setting-${def.key}`;
 
   return (
@@ -209,9 +230,11 @@ function SettingRow({ def, stored, onSave, note }: { def: SettingDef; stored: Se
               {def.enum.map((v, i) => <option key={v} value={v} title={def.enumDescriptions?.[i]}>{v}</option>)}
             </select>
           ) : def.multiline ? (
-            <textarea id={id} rows={4} value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={() => draft !== current && commit(draft)} />
+            <textarea id={id} rows={4} value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commitDraft} />
           ) : (
-            <input id={id} value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={() => draft !== current && commit(draft)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
+            <input id={id} value={draft} inputMode={def.type === 'number' ? 'numeric' : undefined}
+              placeholder={def.type === 'array' ? 'comma-separated' : undefined}
+              onChange={(e) => setDraft(e.target.value)} onBlur={commitDraft} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
           )}
           {def.enum && def.enumDescriptions && <div className="setting-desc">{def.enumDescriptions[def.enum.indexOf(String(current))]}</div>}
         </>

@@ -25,7 +25,8 @@ export interface Place { file: string; line: number; col: number; length: number
 
 const SOURCE = /\.(tsx?|jsx?|mjs|cjs|mts|cts)$/;
 const EXT = ['.ts', '.tsx', '.d.ts', '.js', '.jsx', '.mjs'];
-const SKIP = new Set(['node_modules', '.git', 'dist', 'coverage', 'vendor', '.worktrees']);
+/** Directory names never walked into when nothing else is said (the repo's `scriptExcludeDirs`). */
+export const DEFAULT_SKIP: readonly string[] = ['node_modules', '.git', 'dist', 'build', 'coverage', 'vendor', '.worktrees'];
 
 /** Loaded on first use: the parser is several MB of JavaScript nobody needs until a JS/TS file is navigated. */
 let loaded: typeof TS | undefined;
@@ -37,15 +38,18 @@ const parse = (file: string, text: string): TS.SourceFile => {
 };
 
 /** Every JS/TS source under `dir`, absolute. */
-export function sourceFiles(dir: string, limit = 60_000): string[] {
+export function sourceFiles(dir: string, limit = 60_000, skipDirs: readonly string[] = DEFAULT_SKIP): string[] {
   const out: string[] = [];
+  // A name (`dist`) is skipped anywhere; a path (`apps/legacy`, absolute or relative to `dir`) only there.
+  const names = new Set(skipDirs.filter((d) => !d.includes('/')));
+  const paths = new Set(skipDirs.filter((d) => d.includes('/')).map((d) => (path.isAbsolute(d) ? d : path.join(dir, d))));
   const visit = (d: string): void => {
     let entries: fs.Dirent[];
     try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
       if (out.length >= limit) return;
-      if (SKIP.has(e.name)) continue;
       const p = path.join(d, e.name);
+      if (names.has(e.name) || paths.has(p)) continue;
       if (e.isDirectory()) visit(p); else if (e.isFile() && SOURCE.test(e.name)) out.push(p);
     }
   };
@@ -177,8 +181,10 @@ export class LightIndex {
    * Parses every source of the project. The daemon is one thread and has other work (hooks, state): it yields
    * between small batches, and reports progress.
    */
-  static async build(projectDir: string, onProgress: (done: number, total: number) => void = () => {}, grep: Grep = gitGrep): Promise<LightIndex> {
-    const files = sourceFiles(projectDir);
+  static async build(
+    projectDir: string, onProgress: (done: number, total: number) => void = () => {}, grep: Grep = gitGrep, skipDirs: readonly string[] = DEFAULT_SKIP,
+  ): Promise<LightIndex> {
+    const files = sourceFiles(projectDir, 60_000, skipDirs);
     const data: IndexData = {};
     for (let i = 0; i < files.length; i++) {
       try { data[path.relative(projectDir, files[i])] = declarationsOf(files[i], fs.readFileSync(files[i], 'utf8')); } catch { /* unreadable: skip */ }

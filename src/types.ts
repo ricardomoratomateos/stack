@@ -173,6 +173,23 @@ export interface StackConfig {
   portStride: number;
   debugBasePort: number;
   debugTemplate: DebugTemplate;
+  // ── The Code tab (see src/code/config.ts). The project's: ──
+  phpNavigation: boolean;
+  phpIndexDirs: string[];
+  phpExcludeDirs: string[];
+  phpExtensions: string[];
+  phpAutoloader: string;
+  phpBaseBranch: string;
+  phpMaxChangedFiles: number;
+  phpactorOptions: Record<string, unknown>;
+  scriptExcludeDirs: string[];
+  oxlintConfig: string;
+  // ── …and yours (this machine): ──
+  phpBaseOnStart: boolean;
+  codeIdleMinutes: number;
+  phpactorPath: string;
+  oxlintPath: string;
+  phpPath: string;
 }
 
 export type HookEntry = {

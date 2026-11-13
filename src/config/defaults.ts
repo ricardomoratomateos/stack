@@ -1,5 +1,6 @@
 import type { StackConfig, DebugTemplate } from '../types';
 import type { RepoScopedKey } from './RepoConfig';
+import { CODE_DEFAULTS } from '../code/config';
 
 /**
  * The launch configuration written into each worktree, with its own port in it.
@@ -33,4 +34,5 @@ export const PROJECT_DEFAULTS: Pick<StackConfig, RepoScopedKey> = {
   portStride: 100,
   debugBasePort: 9898,
   debugTemplate: DEBUG_TEMPLATE_DEFAULT,
+  ...CODE_DEFAULTS,
 };

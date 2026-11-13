@@ -1,8 +1,9 @@
+import { defaultCodeConfig, phpFilterOf } from '../../src/code/config';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PhpBase, phpTops, resolveBaseRef, type PhpBaseDeps, type Pipe, type Run } from '../../src/code/phpBase';
+import { filterKey, PhpBase, phpTops, resolveBaseRef, type PhpBaseDeps, type Pipe, type Run } from '../../src/code/phpBase';
 import { fakeSpawn, settle, type FakeServer } from './fakeLsp';
 
 const SHA_A = 'a'.repeat(40);
@@ -96,7 +97,8 @@ describe('PhpBase', () => {
     await base.check();
     expect(base.status()).toMatchObject({ state: 'preparing', ref: 'origin/develop', commit: SHA_A });
     const server = await indexes(1, base.xdg);
-    expect(pipes[0].a).toEqual(['-C', repo, 'archive', '--format=tar', SHA_A, '--', 'composer.json', ':(glob)lib/**/*.php']);
+    expect(pipes[0].a).toEqual(['-C', repo, 'archive', '--format=tar', SHA_A, '--', 'composer.json', ':(glob)lib/**/*.php',
+      ':(exclude).git', ':(exclude).worktrees', ':(exclude)vendor', ':(exclude)node_modules']);
     expect(pipes[0].b).toEqual(['-xmf', '-', '-C', base.src]);
     expect(spawned.calls[0]).toMatchObject({ command: 'nice', args: ['-n', '10', 'php', 'phpactor.phar', 'language-server'], cwd: base.view });
     expect(fs.realpathSync(path.join(base.view, 'lib'))).toBe(path.join(base.src, 'lib')); // the view points at the base's sources
@@ -135,6 +137,24 @@ describe('PhpBase', () => {
     done(server);
     await base.settled();
     expect(base.info()).toEqual({ ref: 'origin/develop', commit: SHA_B });
+  });
+
+  it('is built again from scratch when the repo\'s PHP settings change, even at the same commit', async () => {
+    let filter = phpFilterOf(defaultCodeConfig());
+    const base = make({ filter: () => filter });
+    await base.check();
+    done(await indexes(1, base.xdg));
+    await base.settled();
+    lsTree = 'lib/A.php\0src/B.php\0composer.json\0';
+    filter = phpFilterOf(defaultCodeConfig({ phpIndexDirs: ['src'] }));
+    await base.check();
+    expect(base.status()).toMatchObject({ state: 'preparing', commit: SHA_A });
+    const server = await indexes(2, base.xdg);
+    expect(pipes[1].a).toContain(':(glob)src/**/*.php');
+    expect(pipes[1].a).not.toContain(':(glob)lib/**/*.php');
+    done(server);
+    await base.settled();
+    expect(JSON.parse(fs.readFileSync(path.join(dir, 'base.json'), 'utf8')).filter).toBe(filterKey(filter));
   });
 
   it('resumes an update that was cut short from where it started', async () => {

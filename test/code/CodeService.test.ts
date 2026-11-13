@@ -1,3 +1,4 @@
+import { defaultCodeConfig } from '../../src/code/config';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
@@ -208,6 +209,31 @@ describe('CodeService', () => {
     svc.dispose();
   });
 
+  it('takes the repo\'s Code settings: phpactorOptions, but never over what keeps the worktree untouched; its autoloader', async () => {
+    baseIndex();
+    const config = () => defaultCodeConfig({
+      phpAutoloader: 'lib/autoload.php', phpExcludeDirs: ['lib/old'],
+      phpactorOptions: { 'php_code_sniffer.enabled': true, 'language_server_configuration.auto_config': true },
+    });
+    const svc = make({ run: git(''), config });
+    await expect(svc.lsp(task, 'php', 'textDocument/hover', { textDocument: { uri: uri('src/A.php') }, position: { line: 1, character: 7 } })).rejects.toThrow(CodeError);
+    const init = (spawned.servers[0].sent('initialize')[0].params as { initializationOptions: Record<string, unknown> }).initializationOptions;
+    expect(init['php_code_sniffer.enabled']).toBe(true);
+    expect(init['language_server_configuration.auto_config']).toBe(false);
+    expect(init['composer.autoloader_path']).toBe(path.join(repo, 'lib', 'autoload.php'));
+    expect(init['indexer.exclude_patterns']).toContain('/lib/old/**/*');
+    svc.dispose();
+  });
+
+  it('phpNavigation off: no Phpactor and no base, and it says why', async () => {
+    const svc = make({ run: git(''), config: () => defaultCodeConfig({ phpNavigation: false }) });
+    await expect(svc.lsp(task, 'php', 'textDocument/hover', { textDocument: { uri: uri('src/A.php') }, position: { line: 0, character: 0 } }))
+      .rejects.toThrow(/off for this repository/);
+    await svc.prepareBase(repo, 'develop');
+    expect(spawned.calls).toHaveLength(0);
+    svc.dispose();
+  });
+
   it('says "indexing" until the clone\'s start-up pass is over, then answers', async () => {
     baseIndex();
     const svc = make({ run: git('') });
@@ -277,11 +303,12 @@ describe('CodeService', () => {
     fs.writeFileSync(path.join(bin, 'phpactor'), '#!/bin/sh\n', { mode: 0o755 });
     const mine = path.join(tmp, 'my-phpactor');
     fs.writeFileSync(mine, '');
-    expect(make({ setting: (k) => (k === 'phpactorPath' ? mine : undefined), pathEnv: () => bin }).phpactorCommand())
+    const withPath = (p: string) => ({ config: () => defaultCodeConfig({ phpactorPath: p }) });
+    expect(make({ ...withPath(mine), pathEnv: () => bin }).phpactorCommand())
       .toEqual({ command: 'php', args: ['-d', 'memory_limit=-1', mine, 'language-server'] });
     expect(make({ pathEnv: () => `/nope${path.delimiter}${bin}` }).phpactorCommand()).toEqual({ command: path.join(bin, 'phpactor'), args: ['language-server'] });
     expect(make().phpactorCommand()?.args[2]).toBe(path.join(cfg, 'tools', 'phpactor.phar'));
-    expect(make({ setting: () => path.join(tmp, 'missing') }).phpactorCommand()).toBeUndefined(); // a wrong setting is not papered over
+    expect(make(withPath(path.join(tmp, 'missing'))).phpactorCommand()).toBeUndefined(); // a wrong setting is not papered over
     fs.rmSync(path.join(cfg, 'tools', 'phpactor.phar'));
     await expect(make().lsp(task, 'php', 'textDocument/hover', { textDocument: { uri: uri('src/A.php') } })).rejects.toThrow(/needs Phpactor/);
     expect(spawned.calls).toHaveLength(0);

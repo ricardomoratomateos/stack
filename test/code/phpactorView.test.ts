@@ -16,7 +16,7 @@ describe('phpactorView', () => {
     fs.writeFileSync(path.join(root, 'rector.php'), '<?php');
     fs.writeFileSync(path.join(root, 'composer.json'), '{}');
     const view = path.join(dir(), 'root');
-    const v = phpactorView(root, view, () => ['lib/A.php', 'www/b/C.php', 'vendor/x/D.php', 'rector.php', '.worktrees/t/lib/E.php']);
+    const v = phpactorView(root, view, undefined, () => ['lib/A.php', 'www/b/C.php', 'vendor/x/D.php', 'rector.php', '.worktrees/t/lib/E.php']);
     expect(fs.readdirSync(view).sort()).toEqual(['composer.json', 'lib', 'rector.php', 'www']);
     expect(fs.realpathSync(path.join(view, 'lib'))).toBe(fs.realpathSync(path.join(root, 'lib')));
     expect(v.map).toContainEqual([`${path.join(root, 'lib')}/`, `${path.join(view, 'lib')}/`]);
@@ -28,8 +28,8 @@ describe('phpactorView', () => {
     fs.mkdirSync(path.join(root, 'lib'));
     fs.mkdirSync(path.join(root, 'src'));
     const view = path.join(dir(), 'root');
-    phpactorView(root, view, () => ['lib/A.php', 'src/B.php']);
-    phpactorView(root, view, () => ['lib/A.php']);
+    phpactorView(root, view, undefined, () => ['lib/A.php', 'src/B.php']);
+    phpactorView(root, view, undefined, () => ['lib/A.php']);
     expect(fs.readdirSync(view)).toEqual(['lib']);
   });
 });
