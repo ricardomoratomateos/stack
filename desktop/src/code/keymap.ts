@@ -5,7 +5,7 @@
 
 /** What a key does anywhere in the Code tab (tree, bar or editor). */
 export type CodeAction =
-  | 'go-to-file' | 'go-to-symbol' | 'find-in-path' | 'recent-files' | 'back' | 'forward';
+  | 'go-to-file' | 'go-to-symbol' | 'find-in-path' | 'find-in-file' | 'recent-files' | 'back' | 'forward';
 
 /** Monaco commands for PhpStorm's keys while the editor has focus (bound in the editor, so its own peeks keep theirs). */
 export const EDITOR_KEYS: ReadonlyArray<{ keys: string; label: string; command: string }> = [
@@ -31,6 +31,7 @@ export function codeActionOf(e: KeyLike): CodeAction | null {
   if (cmd && !ctrl) {
     if (e.code === 'KeyO') return shift && !alt ? 'go-to-file' : 'go-to-symbol'; // ⇧⌘O file · ⌘O class · ⌥⌘O symbol
     if (e.code === 'KeyF' && shift && !alt) return 'find-in-path';
+    if (e.code === 'KeyF' && !shift && !alt) return 'find-in-file';
     if (e.code === 'KeyE' && !shift && !alt) return 'recent-files';
     if (e.code === 'BracketLeft' && !shift && !alt) return 'back';
     if (e.code === 'BracketRight' && !shift && !alt) return 'forward';

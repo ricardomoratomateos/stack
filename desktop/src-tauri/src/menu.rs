@@ -4,7 +4,7 @@
 //! "switch" / "switch-back" / "next" / "prev" / "tab-prev" / "tab-next" / "needs" / "manager"). Go carries ⌃Tab: AppKit swallows it as a key-view
 //! loop key before the page sees it, but menu key equivalents are matched first.
 //!
-//! "Cycle mode" has no accelerator here: ⇧⌘F is already handled by the webview (src/model.ts), and
+//! "Cycle mode" has no accelerator here: ⇧⌘M is already handled by the webview (src/model.ts), and
 //! both would toggle it twice.
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -65,7 +65,7 @@ fn build(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &mode("half", "Half", Some("CmdOrCtrl+Shift+2"))?,
             &mode("float", "Float", Some("CmdOrCtrl+Shift+3"))?,
             &PredefinedMenuItem::separator(app)?,
-            &mode("cycle", "Cycle Mode  ⇧⌘F", None)?,
+            &mode("cycle", "Cycle Mode  ⇧⌘M", None)?,
             &mode("side", "Snap Half to the Other Side", None)?,
         ],
     )?;

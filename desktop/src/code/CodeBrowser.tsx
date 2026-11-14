@@ -20,7 +20,7 @@ interface Props {
   /** The files the task changed, listed above the tree. The browser opens on the first one. */
   changed?: ChangedFile[];
   /** "Show this place": a new `tick` jumps there (a click on a file or a line in the Review). */
-  target?: { path: string; line?: number; tick: number };
+  target?: { path?: string; line?: number; search?: boolean; tick: number };
 }
 
 type Hit = { type: 'file'; path: string } | ({ type: 'symbol' } & SymbolHit) | ({ type: 'text' } & TextHit);
@@ -213,13 +213,15 @@ export function CodeBrowser({ backend, root, initialFile, initialLine, changed, 
     consumedTick.current = target?.tick;
     const first = initialFile ?? target?.path ?? changed?.find((c) => c.status !== 'D')?.path;
     if (first) void show(first.startsWith('/') ? first : `${root}/${first}`, initialFile ? initialLine : target?.line);
+    if (target?.search) setPalette({ query: '', mode: 'text' });
   }, [root, initialFile, initialLine, loadDir, show]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A place asked for from outside (the Review): each new tick is one jump.
   useEffect(() => {
     if (!target || target.tick === consumedTick.current) return;
     consumedTick.current = target.tick;
-    void show(target.path.startsWith('/') ? target.path : `${root}/${target.path}`, target.line);
+    if (target.path) void show(target.path.startsWith('/') ? target.path : `${root}/${target.path}`, target.line);
+    if (target.search) setPalette({ query: '', mode: 'text' });
   }, [target?.tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Language servers' state, while the tab is visible.
@@ -255,6 +257,16 @@ export function CodeBrowser({ backend, root, initialFile, initialLine, changed, 
       if (e.type !== 'keydown') return;
       const action = codeActionOf(e);
       if (!action) return;
+      // ⌘F: the editor's own find widget when it has focus; from anywhere else in the tab, give it focus first.
+      if (action === 'find-in-file') {
+        const ed = editorRef.current;
+        if (!ed || ed.hasTextFocus() || !ed.getModel()) return;
+        e.preventDefault();
+        e.stopPropagation();
+        ed.focus();
+        void ed.getAction('actions.find')?.run();
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       if (action === 'back' || action === 'forward') travel(action === 'back' ? -1 : 1);

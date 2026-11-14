@@ -84,8 +84,9 @@ stackd hands the bridge (`stack-mcp.js`) to the workers it starts. To use the `s
 | `⌥⌘←` / `⌥⌘→` | Previous / next session tab |
 | `⌘⇧J` | Next worktree that needs you |
 | `⌘⇧1` / `⌘⇧2` / `⌘⇧3` | Full / Half / Float |
-| `⌘⇧F` | Cycle window mode |
-| `⌘⇧M` | Expand / collapse the Manager |
+| `⌘⇧M` | Cycle window mode (Full → Half → Float) |
+| `⌘F` / `⌘⇧F` | Search the code: find in the file, Find in Path (opens the task's Code tab) |
+| `⌘⇧0` | Expand / collapse the Manager |
 | `⌘⇧Enter` | Maximize |
 | `⌘,` | Settings |
 | `⌘⇧[` / `⌘⇧]` | Previous / next |

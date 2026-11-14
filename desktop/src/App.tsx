@@ -278,6 +278,13 @@ export function App() {
       else setStripExpanded((x) => !x);
     }
     if (fx.cycleMode) setLayout((l) => setMode(l, nextMode(l.mode)));
+    // From the terminal (or anywhere outside the Code tab): the task's Code tab, on Find in Path.
+    if (fx.codeSearch && latest.current.selectedId) {
+      const id = latest.current.selectedId;
+      setCodeTarget((t) => ({ search: true, tick: (t?.tick ?? 0) + 1 }));
+      setCodeId(id);
+      setFrontPanel('code');
+    }
     if (fx.maximize) setMaximized((m) => cycleMaximized(m, latest.current.mode));
     if (fx.focusManager) {
       touch(MANAGER_ID);
@@ -298,8 +305,8 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       const sc = shortcutOf(e);
       if (!sc) return;
-      // In the Code tab ⇧⌘F is PhpStorm's Find in Path (code/keymap.ts), not the window mode.
-      if (sc.kind === 'cycle-mode' && (e.target as Element | null)?.closest?.('.code-host')) return;
+      // ⌘F / ⇧⌘F while the Code tab is showing: its own keys (code/keymap.ts) — Find in Path, find in file.
+      if (sc.kind === 'code-search' && document.querySelector('.code-host:not([hidden])')) return;
       e.preventDefault();
       e.stopPropagation();
       if ((sc.kind === 'needs' || sc.kind === 'tab-prev' || sc.kind === 'tab-next' || sc.kind === 'focus-manager') && !dedupeNeeds()) return;
@@ -718,7 +725,7 @@ export function App() {
           {mode !== 'full' && maximized !== 'session' && (
             <section className="manager-dock" data-expanded={bigManager || undefined} aria-label="Manager">
               {!bigManager && <Splitter orientation="row" invert label="Resize Manager strip" value={stripPx} min={heightFromLines(limits(mode, 'lines').min)} max={heightFromLines(limits(mode, 'lines').max)} reset={heightFromLines(DEFAULT_SIZES[mode].lines)} onChange={(px) => resizeTo('lines', linesFromHeight(px))} />}
-              <nav className="tabs" aria-label="Manager sessions" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧M toggle">
+              <nav className="tabs" aria-label="Manager sessions" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧0 toggle">
                 <span className="tabs-title">{view.control?.name || 'Manager'}</span>
                 {managerRows.map((r) => (
                   <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === managerIdx || undefined} {...onMiddleClick(() => view.control && closeSessionTab(view.control.wt.id, r.index))} onClick={() => setManagerTabs((m) => ({ ...m, [view.repoRoot]: r.index }))} title={(r.kind === 'agent' ? stateWord(r.state, r.turned) : r.detail) || undefined}>
@@ -737,7 +744,7 @@ export function App() {
           <>
             {maximized === null && <Splitter orientation="col" invert label="Resize Manager" value={sizes.manager} min={managerLimits.min} max={Math.max(managerLimits.min, managerMax)} reset={DEFAULT_SIZES[mode].manager} onChange={(v) => v === DEFAULT_SIZES[mode].manager ? resetTo('manager') : resizeTo('manager', v)} />}
             <section className="manager" aria-label="Manager" style={maximized === 'manager' ? { flex: 1 } : { width: sizes.manager }}>
-              <nav className="tabs" aria-label="Manager sessions" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧M toggle">
+              <nav className="tabs" aria-label="Manager sessions" onDoubleClick={() => setMaximized((m) => toggleMaximized(m, 'manager'))} title="Double-click to maximize · ⌘0 focus · ⌘⇧0 toggle">
                 <span className="tabs-title">{view.control?.name || 'Manager'}</span>
                 {managerRows.map((r) => (
                   <button key={r.index} type="button" className="tab" data-state={r.state} data-selected={r.index === managerIdx || undefined} {...onMiddleClick(() => view.control && closeSessionTab(view.control.wt.id, r.index))} onClick={() => setManagerTabs((m) => ({ ...m, [view.repoRoot]: r.index }))} title={(r.kind === 'agent' ? stateWord(r.state, r.turned) : r.detail) || undefined}>

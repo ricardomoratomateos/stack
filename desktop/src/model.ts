@@ -121,6 +121,7 @@ export type Shortcut =
   | { kind: 'tab-prev' }
   | { kind: 'tab-next' }
   | { kind: 'toggle-manager' }
+  | { kind: 'code-search'; inFile: boolean }
   | { kind: 'cycle-mode' }
   | { kind: 'maximize' };
 
@@ -139,7 +140,7 @@ function bracketOf(e: KeyLike): 'prev' | 'next' | null {
   return null;
 }
 
-/** ⌘1..9, ⌘⇧[ / ⌘⇧], ⌘⇧J, ⌘0, ⌘⇧M, ⌘⇧F, ⌘⇧Enter. Digits and letters use the physical key; the brackets match the
+/** ⌘1..9, ⌘⇧[ / ⌘⇧], ⌘⇧J, ⌘0, ⌘⇧0, ⌘⇧M, ⌘F / ⌘⇧F, ⌘⇧Enter. Digits and letters use the physical key; the brackets match the
  * physical key OR the produced character ('[' ']' '{' '}'), since on some layouts (Spanish) they need ⌥ and
  * the key code is not what the user presses. The layout-proof next/previous are the menu's ⌥⌘↓ / ⌥⌘↑. */
 export function shortcutOf(e: KeyLike): Shortcut | null {
@@ -153,6 +154,9 @@ export function shortcutOf(e: KeyLike): Shortcut | null {
     return null;
   }
   const digit = /^Digit([0-9])$/.exec(e.code);
+  if (e.shiftKey && e.code === 'Digit0') return { kind: 'toggle-manager' };
+  // ⌘F / ⇧⌘F always search the code (⌘F inside the editor stays its find-in-file).
+  if (e.code === 'KeyF') return { kind: 'code-search', inFile: !e.shiftKey };
   if (!e.shiftKey && digit) {
     const n = Number(digit[1]);
     return n === 0 ? { kind: 'focus-manager' } : { kind: 'worktree', n };
@@ -160,8 +164,7 @@ export function shortcutOf(e: KeyLike): Shortcut | null {
   if (e.shiftKey) {
     if (e.code === 'Enter' || e.code === 'NumpadEnter') return { kind: 'maximize' };
     if (e.code === 'KeyJ') return { kind: 'needs' };
-    if (e.code === 'KeyM') return { kind: 'toggle-manager' };
-    if (e.code === 'KeyF') return { kind: 'cycle-mode' };
+    if (e.code === 'KeyM') return { kind: 'cycle-mode' };
   }
   return null;
 }
@@ -176,6 +179,8 @@ export interface Effect {
   tab?: { pane: Pane; dir: 1 | -1 };
   focusManager?: true;
   toggleManager?: true;
+  /** Open the selected task's Code tab on Find in Path. */
+  codeSearch?: true;
   cycleMode?: true;
   maximize?: true;
 }
@@ -191,6 +196,8 @@ export function resolveShortcut(sc: Shortcut, items: Described[], selectedId: st
       return { tab: { pane: focus, dir: sc.kind === 'tab-next' ? 1 : -1 } };
     case 'toggle-manager':
       return { toggleManager: true };
+    case 'code-search':
+      return { codeSearch: true };
     case 'cycle-mode':
       return { cycleMode: true };
     case 'maximize':

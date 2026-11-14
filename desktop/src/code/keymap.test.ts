@@ -20,7 +20,7 @@ describe('Code tab keys (PhpStorm)', () => {
     expect(codeActionOf(key('KeyT', { metaKey: true }))).toBe('go-to-symbol');
     expect(codeActionOf(key('Minus', { ctrlKey: true }, '-'))).toBe('back');
     expect(codeActionOf(key('Minus', { ctrlKey: true, shiftKey: true }, '_'))).toBe('forward');
-    expect(codeActionOf(key('KeyF', { metaKey: true }))).toBeNull(); // ⌘F: Monaco's find in file
+    expect(codeActionOf(key('KeyF', { metaKey: true }))).toBe('find-in-file'); // Monaco's find widget
     expect(codeActionOf(key('KeyF', { metaKey: true, ctrlKey: true, shiftKey: true }))).toBeNull();
     expect(codeActionOf(key('Digit1', { metaKey: true }))).toBeNull(); // the app's task switching
   });

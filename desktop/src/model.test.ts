@@ -121,7 +121,7 @@ describe('shortcutOf', () => {
     expect(shortcutOf({ ...key('Quote', { shiftKey: true }), key: '{' })).toEqual({ kind: 'prev' });
     expect(shortcutOf({ ...key('Equal', { shiftKey: true }), key: ']' })).toEqual({ kind: 'next' });
     expect(shortcutOf({ ...key('BracketLeft', { shiftKey: true, altKey: true }), key: '”' })).toEqual({ kind: 'prev' });
-    expect(shortcutOf(key('KeyM', { shiftKey: true }))).toEqual({ kind: 'toggle-manager' });
+    expect(shortcutOf(key('Digit0', { shiftKey: true }))).toEqual({ kind: 'toggle-manager' });
   });
   it('ignores everything else, so the terminal keeps its keys', () => {
     expect(shortcutOf(key('Digit1', { metaKey: false }))).toBeNull();
@@ -179,8 +179,11 @@ describe('resolveShortcut', () => {
 
 describe('mode shortcuts and the float list', () => {
   it('maps ⌘⇧F to cycling the mode', () => {
-    expect(shortcutOf(key('KeyF', { shiftKey: true }))).toEqual({ kind: 'cycle-mode' });
-    expect(shortcutOf(key('KeyF'))).toBeNull();
+    expect(shortcutOf(key('KeyM', { shiftKey: true }))).toEqual({ kind: 'cycle-mode' });
+    // ⌘F and ⇧⌘F are the code search, never the window mode.
+    expect(shortcutOf(key('KeyF', { shiftKey: true }))).toEqual({ kind: 'code-search', inFile: false });
+    expect(shortcutOf(key('KeyF'))).toEqual({ kind: 'code-search', inFile: true });
+    expect(resolveShortcut({ kind: 'code-search', inFile: false }, [], undefined)).toEqual({ codeSearch: true });
     expect(shortcutOf(key('Enter', { shiftKey: true }))).toEqual({ kind: 'maximize' });
     expect(resolveShortcut({ kind: 'maximize' }, [], undefined)).toEqual({ maximize: true });
     expect(resolveShortcut({ kind: 'cycle-mode' }, [], undefined)).toEqual({ cycleMode: true });

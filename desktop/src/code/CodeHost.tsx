@@ -9,7 +9,7 @@ import './code.css';
 const CodeBrowser = lazy(() => import('./CodeBrowser').then((m) => ({ default: m.CodeBrowser })));
 
 /** Where the Code tab should be looking (a file and line clicked in the Review). */
-export interface CodeTarget { path: string; line?: number; tick: number }
+export interface CodeTarget { path?: string; line?: number; /** Open Find in Path (⌘F / ⇧⌘F from outside the tab). */ search?: boolean; tick: number }
 
 /**
  * A task's worktree, to read: what the task changed, its files, and navigation through stackd.
