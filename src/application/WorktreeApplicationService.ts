@@ -1,15 +1,13 @@
 import * as path from 'node:path';
 import type { StackConfig, Worktree, WorktreeTicket } from '../types';
-import type { StackState, WorktreeItem, WebMessage, PortMapping } from '../webview/types';
+import type { StackState, WorktreeItem, WebMessage } from '../webview/types';
 import type { WorktreeManager } from '../worktree/WorktreeManager';
 import type { AgentSessionManager } from '../session/AgentSessionManager';
 import type { ConfigSource } from '../config/ConfigSource';
 import { DEFAULT_STATUS, type GitWatcher } from '../git/GitWatcher';
-import type { PrMonitor } from '../pr/PrMonitor';
 import type { IWorktreeRepository } from '../ports/IWorktreeRepository';
 import { isProviderId, PROVIDER_IDS, PROVIDER_INSTALL, type ProviderId } from '../ports/IAgentProvider';
 import { installedProviders } from '../providers/commandLookup';
-import { computeNamedPorts, portBlockFor, portEnv } from '../worktree/namedPorts';
 import type { IGitPort, DiffBase } from '../ports/IGitPort';
 import type { INotifyPort } from '../ports/INotifyPort';
 import type { SendDestination, DiffComment } from '../diff/types';
@@ -18,7 +16,7 @@ import { displayLabel, truncateLabel } from '../worktree/displayLabel';
 import { findRepoRoot } from '../worktree/findRepoRoot';
 import { canonicalPath, worktreesInRepo } from '../worktree/worktreesInRepo';
 import { buildControlSession } from '../worktree/controlSession';
-import { MAIN_BRANCH_CANDIDATES, SETTINGS_JSON_PATH } from '../constants';
+import { MAIN_BRANCH_CANDIDATES } from '../constants';
 import { attentionQueue, groupOf, nextInQueue, type WorktreeGroup } from '../webview/derive';
 import { envPrefix, shellQuote } from '../shell/shellQuote';
 import type { NewTaskInit } from '../newtask/types';
@@ -36,8 +34,6 @@ export interface TaskEnv {
   branch: string;
   base?: string;
   repo_root: string;
-  /** By env var name: the port, and a URL for the ones a browser can open. */
-  ports: Record<string, { port: number; url?: string }>;
   setup_script?: string;
   teardown_script?: string;
   /** What runs the tests here, when the repository says (package.json, composer.json, Makefile). */
@@ -47,8 +43,8 @@ export interface TaskEnv {
 /**
  * The selected worktree, in workspaceState: it is a property of a WINDOW.
  * It used to live in globalState, shared by every window, so one window read
- * another's selection — an id none of its worktrees has, which scoped search
- * and dimmed the explorer as if the user had selected nothing at all.
+ * another's selection — an id none of its worktrees has, which dimmed the
+ * explorer as if the user had selected nothing at all.
  */
 export const ACTIVE_WORKTREE_KEY = 'stack.activeWorktreeId';
 export const WORKTREE_ORDER_KEY = 'stack.worktreeOrder';
@@ -70,8 +66,8 @@ export const TEARDOWN_TIMEOUT_MS = 10 * 60 * 1000;
  * not hold the agent back forever.
  */
 export const SETUP_TIMEOUT_MS = 30 * 60 * 1000;
-/** How long a resolved drift base is trusted; see driftBaseFor. */
-const DRIFT_BASE_TTL_MS = 60 * 1000;
+/** How long a resolved base branch is trusted; see cachedBaseBranch. */
+const BASE_TTL_MS = 60 * 1000;
 
 /** A terminal created for setup/teardown scripts (structural subset of vscode.Terminal). */
 export interface HostTerminal {
@@ -114,15 +110,13 @@ export interface IWorkspaceHost {
   showScriptOutput(): void;
   showInputBox(options: { prompt: string; value?: string; placeHolder?: string }): Promise<string | undefined>;
   showQuickPick(items: string[], options: { placeHolder: string }): Promise<string | undefined>;
-  /** Set (or clear with undefined) a folder-scoped setting, e.g. 'search.exclude'. */
-  updateFolderSetting(folderPath: string, section: string, value: unknown): Promise<void>;
   activeTerminal(): unknown;
   exists(p: string): boolean;
   isDirectory(p: string): boolean;
   writeClipboard(text: string): Promise<void>;
   /** Open a file in the editor, optionally revealing a 1-based line. */
   openFileInEditor(absPath: string, line?: number): Promise<void>;
-  /** Hand a URL to the OS (the browser, for a worktree's own http port). */
+  /** Hand a URL to the OS (the browser, for a worktree's ticket). */
   openExternal(url: string): Promise<void>;
 }
 
@@ -191,7 +185,6 @@ export interface WorktreeAppDeps {
   host: IWorkspaceHost;
   git: IGitPort;
   gitWatcher: GitWatcher;
-  prMonitor: PrMonitor;
   globalState: GlobalStateLike;
   /** Per-window state (ctx.workspaceState): the selected worktree. */
   workspaceState: GlobalStateLike;
@@ -229,8 +222,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
   private branchOptions?: { branches: string[]; base: string };
   /**
    * Worktrees whose directory is gone, as of the last reconcile. Shown with a
-   * flag and an explicit "Forget"; never watched, polled or added to the
-   * workspace, and never dropped from the store on Stack's own initiative.
+   * flag and an explicit "Forget"; never watched or added to the workspace,
+   * and never dropped from the store on Stack's own initiative.
    */
   private missing = new Set<string>();
   /**
@@ -253,16 +246,16 @@ export class WorktreeApplicationService implements DiffPanelHost {
   /** The control session's title, from "Rename / set title" — see renameControlSession. */
   private controlAlias: string = DEFAULT_CONTROL_ALIAS;
   /**
-   * What this window is watching and polling, by worktree id — so a reload can
-   * stop what it no longer shows instead of only ever starting more.
+   * What this window is watching, by worktree id — so a reload can stop what
+   * it no longer shows instead of only ever starting more.
    */
   private monitored = new Map<string, Worktree>();
   /** Script terminals, one per worktree and purpose, reused instead of piling up ptys. */
   private scriptTerminals = new Map<string, HostTerminal>();
   /** A switch to the named workspace on its way; see openNamedWorkspace. */
   private namingInFlight?: Promise<void>;
-  /** resolveBaseBranch for drift, which is display-only — see driftBaseFor. */
-  private driftBaseCache = new Map<string, { base: string; at: number }>();
+  /** resolveBaseBranch, remembered — see cachedBaseBranch. */
+  private baseCache = new Map<string, { base: string; at: number }>();
   /**
    * Headless setup runs, by worktree id: running, or failed and waiting for
    * the user. The entry is also the run's identity — a result that comes back
@@ -272,8 +265,6 @@ export class WorktreeApplicationService implements DiffPanelHost {
   private setups = new Map<string, { state: 'running' | 'failed'; startedAt: number; error?: string }>();
   /** The agent each worktree's setup is holding back; started when it succeeds. */
   private heldLaunches = new Map<string, () => void>();
-  /** Whether each folder's .vscode/settings.json is versioned — see syncSearchScoping. */
-  private trackedSettingsCache = new Map<string, { tracked: boolean; at: number }>();
 
   constructor(private readonly deps: WorktreeAppDeps) {
     this.currentWorktreeId = this.restoreActiveWorktreeId();
@@ -296,11 +287,9 @@ export class WorktreeApplicationService implements DiffPanelHost {
     this.deps.workspaceState.update(ACTIVE_WORKTREE_KEY, id ?? null);
   }
 
-  /** A deleted worktree stops being the selection; search goes back to main. */
+  /** A deleted worktree stops being the selection. */
   private forgetActive(deletedId: string): void {
-    if (this.currentWorktreeId !== deletedId) return;
-    this.setActiveWorktreeId(undefined);
-    this.syncSearchScoping();
+    if (this.currentWorktreeId === deletedId) this.setActiveWorktreeId(undefined);
   }
 
   /**
@@ -308,9 +297,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * window's worktrees, otherwise the main checkout.
    *
    * A selection that resolves to nothing — another window's, or a worktree
-   * since deleted — used to be passed on as is, and every consumer reads "no
-   * worktree is X" as "exclude everything": search.exclude `**` on every
-   * folder (search and Quick Open find nothing) and the whole explorer dimmed.
+   * since deleted — used to be passed on as is, and the explorer dimming reads
+   * "no worktree is X" as "dim everything".
    */
   private effectiveActiveId(worktrees: Worktree[] = this.worktreesInWindow()): string | undefined {
     return worktrees.find((w) => w.id === this.currentWorktreeId)?.id ?? worktrees.find((w) => w.isMain)?.id;
@@ -369,8 +357,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
   /**
    * Run a setup/teardown script in a visible host terminal registered to the
    * worktree. The script path is resolved against the repo (worktree-first,
-   * then main), and the script gets STACK_* env plus the worktree's named
-   * ports so it can prepare deps and start services without guessing.
+   * then main), and the script gets the STACK_* env so it knows where it runs.
    */
   private runScriptTerminal(wt: Worktree, script: string, labelPrefix: string, doneMessage?: string): void {
     const { resolved, env } = this.scriptInvocation(wt, script);
@@ -388,20 +375,16 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   /**
    * Where a setup/teardown script lives (worktree-first, then main) and the
-   * STACK_* env plus named ports it is handed — shared by the terminal run
-   * and the awaited teardown so the two can never disagree.
+   * STACK_* env it is handed — shared by the terminal run and the awaited
+   * teardown so the two can never disagree.
    */
   private scriptInvocation(wt: Worktree, script: string): { resolved: string; env: Record<string, string> } {
     const resolved =
       this.locateRepoFile(wt, script) ?? (path.isAbsolute(script) ? script : path.join(wt.repoRoot, script));
-    const stack: Record<string, string> = {
+    const env: Record<string, string> = {
       STACK_REPO_ROOT: wt.repoRoot,
       STACK_WORKTREE_PATH: wt.path,
       STACK_BRANCH: wt.branch,
-    };
-    const env: Record<string, string> = {
-      ...stack,
-      ...portEnv(wt, this.deps.config.get()),
     };
     return { resolved, env };
   }
@@ -552,32 +535,6 @@ export class WorktreeApplicationService implements DiffPanelHost {
     return this.deps.host.exists(inRoot) ? inRoot : undefined;
   }
 
-  /**
-   * Move a worktree off ports that got taken since they were allocated, before
-   * spending minutes on a setup script that would only fail at the very end
-   * with "address already in use". Deliberately not applied to teardown, which
-   * must address whatever is running on the ports it actually came up on.
-   */
-  private async ensurePortsFree(wt: Worktree, ownPorts?: Set<number>): Promise<Worktree> {
-    let moved: { worktree: Worktree; movedFrom?: number };
-    try {
-      moved = await this.deps.manager.ensureFreePorts(wt, ownPorts);
-    } catch (e) {
-      // No free slot at all, or the store rejected the patch. Carry on with the
-      // ports we have and let whatever binds them report the collision.
-      console.error('[stack] port re-check failed; keeping the current ports:', e);
-      return wt;
-    }
-    if (moved.movedFrom !== undefined) {
-      const ports = portBlockFor(moved.worktree.debugPort, this.deps.config.get()).join(', ');
-      this.deps.notify.showWarning(
-        `Port ${moved.movedFrom} is already in use — "${displayLabel(moved.worktree)}" moved to ${ports}.`,
-      );
-      this.ui.pushWebview();
-    }
-    return moved.worktree;
-  }
-
   // ── Webview message dispatch ───────────────────────────────────────────────
 
   /**
@@ -676,10 +633,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       this.ui.pushWebview();
     },
     renameSession: (msg) => void this.renameSession(msg.worktreeId, msg.index),
-    openPort: (msg) => void this.openPort(msg.port),
-    openPr: (msg) => void this.openPr(msg.worktreeId),
     openTicket: (msg) => void this.openTicket(msg.worktreeId),
-    refreshDrift: (msg) => void this.refreshDrift(msg.worktreeId),
     selectWorktree: (msg) => this.switchToWorktree(msg.worktreeId),
     forgetWorktree: (msg) => this.forgetWorktree(msg.worktreeId),
   };
@@ -788,7 +742,6 @@ export class WorktreeApplicationService implements DiffPanelHost {
     }
 
     this.refreshDecorations();
-    this.syncSearchScoping();
   }
 
   /**
@@ -866,7 +819,6 @@ export class WorktreeApplicationService implements DiffPanelHost {
       this.setActiveWorktreeId(wt.id);
       this.ui.pushWebview();
       this.refreshDecorations();
-      this.syncSearchScoping();
     }
   }
 
@@ -889,18 +841,19 @@ export class WorktreeApplicationService implements DiffPanelHost {
   }
 
   /**
-   * Branch this worktree's drift should be measured against, if any.
+   * Branch this worktree is compared with, if any: what its +N −M is counted
+   * from, what stack_env names as its base, and what the delete confirm counts
+   * never-pushed commits against.
    *
    * The one recorded at creation wins: a worktree cut from release/3.2 stays
-   * measured against release/3.2 however the setting moves afterwards. Older
+   * compared with release/3.2 however the setting moves afterwards. Older
    * worktrees and ones adopted from git have no record, so they fall back to the
-   * configured base — right in the common case and honest about being a guess,
-   * since the card names the ref it compared.
+   * configured base — right in the common case.
    *
    * Nothing for the main worktree, and nothing for a worktree sitting on the
-   * base itself: a row of zeroes against your own branch is noise.
+   * base itself: comparing a branch with itself says nothing.
    */
-  private driftBaseFor(wt: Worktree): string | undefined {
+  private baseFor(wt: Worktree): string | undefined {
     if (wt.isMain) return undefined;
     const base = wt.baseBranch ?? this.cachedBaseBranch(wt.repoRoot);
     return base && base !== wt.branch ? base : undefined;
@@ -912,44 +865,16 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * It is up to seven synchronous git calls, and loading a repo asked it once
    * per worktree — a frozen extension host on every window load, scaling with
    * the number of worktrees, for an answer that is the same each time. Only
-   * drift uses the cache: it is display-only and names the ref it compared, so
-   * a minute of staleness is honest. Creating a worktree still resolves fresh.
+   * baseFor uses the cache, for worktrees that recorded no base of their own;
+   * creating a worktree still resolves fresh.
    */
   private cachedBaseBranch(repoRoot: string): string {
     const key = `${canonicalPath(repoRoot)}\0${this.deps.config.get().defaultBaseBranch ?? ''}`;
-    const hit = this.driftBaseCache.get(key);
-    if (hit && Date.now() - hit.at < DRIFT_BASE_TTL_MS) return hit.base;
+    const hit = this.baseCache.get(key);
+    if (hit && Date.now() - hit.at < BASE_TTL_MS) return hit.base;
     const base = this.resolveBaseBranch(repoRoot);
-    this.driftBaseCache.set(key, { base, at: Date.now() });
+    this.baseCache.set(key, { base, at: Date.now() });
     return base;
-  }
-
-  /**
-   * Refreshes the remote ref the drift is measured against, on request.
-   *
-   * The only place Stack touches the network for this. It is a click rather
-   * than a timer because the numbers are read off a filesystem watch that fires
-   * on every save, and because a repo's remote may be slow or want credentials —
-   * neither is something to inflict on someone who just typed.
-   */
-  async refreshDrift(worktreeId: string): Promise<void> {
-    const wt = this.findWorktree(worktreeId);
-    // A missing worktree has nothing to compare, and watching it would undo
-    // keeping it out of the watcher.
-    if (!wt || this.missing.has(wt.id)) return;
-    // An explicit "check again" deserves a fresh answer to "against what?" too.
-    this.driftBaseCache.clear();
-    const base = this.driftBaseFor(wt);
-    if (!base) return;
-    try {
-      await this.deps.git.fetchBranch(wt.path, 'origin', base);
-    } catch {
-      // No remote, no network, no credentials: the local comparison below is
-      // still worth redoing, and a toast for a fetch nobody watched is noise.
-    }
-    this.deps.gitWatcher.watch(wt.path, base);
-    await this.deps.gitWatcher.refreshNow(wt.path);
-    this.ui.pushWebview();
   }
 
   /**
@@ -970,28 +895,6 @@ export class WorktreeApplicationService implements DiffPanelHost {
     if (name === undefined) return; // dismissed
     this.deps.agentManager.setSessionAlias(worktreeId, index, name);
     this.ui.pushWebview();
-  }
-
-  /**
-   * Opens one of a worktree's ports in the browser.
-   *
-   * localhost rather than 0.0.0.0 or the machine's LAN address: a URL a
-   * browser will actually resolve is the whole value of the click.
-   */
-  async openPort(port: number): Promise<void> {
-    await this.deps.host.openExternal(`http://localhost:${port}`);
-  }
-
-  /**
-   * Opens the worktree's pull request in the browser.
-   *
-   * The webview names the worktree, not the URL: what is handed to the OS is
-   * the link gh itself reported, so nothing the webview says can open anything
-   * else. A PR not known (yet) opens nothing.
-   */
-  async openPr(worktreeId: string): Promise<void> {
-    const url = this.deps.prMonitor.getStatus(worktreeId)?.url;
-    if (url && /^https:\/\//.test(url)) await this.deps.host.openExternal(url);
   }
 
   /** Opens the worktree's ticket — the stored link, and only an https one. */
@@ -1032,24 +935,20 @@ export class WorktreeApplicationService implements DiffPanelHost {
     this.ui.pushWebview();
   }
 
-  /** stack_env: the worktree's paths, ports and scripts. Undefined when it is not this window's. */
+  /** stack_env: the worktree's paths and scripts. Undefined when it is not this window's. */
   taskEnv(worktreeId: string): TaskEnv | undefined {
     const wt = this.worktreesInWindow().find((w) => w.id === worktreeId);
     if (!wt) return undefined;
     const config = this.deps.config.get();
-    const ports: TaskEnv['ports'] = {};
-    for (const p of this.portsFor(wt)) {
-      ports[p.name] = p.openable ? { port: p.port, url: `http://localhost:${p.port}` } : { port: p.port };
-    }
+    const base = this.baseFor(wt);
     const script = (file: string) => (file ? this.scriptInvocation(wt, file).resolved : undefined);
     const env: TaskEnv = {
       task_id: wt.id,
       name: displayLabel(wt),
       path: wt.path,
       branch: wt.branch,
-      ...(this.driftBaseFor(wt) ? { base: this.driftBaseFor(wt) } : {}),
+      ...(base ? { base } : {}),
       repo_root: wt.repoRoot,
-      ports,
     };
     const setup = script(config.setupScript);
     if (setup) env.setup_script = setup;
@@ -1058,30 +957,6 @@ export class WorktreeApplicationService implements DiffPanelHost {
     const test = detectTestCommand(wt.path);
     if (test) env.test_command = test;
     return env;
-  }
-
-  /**
-   * The ports this worktree actually owns, for display on its card.
-   *
-   * Derived, never stored: the same derivation the script env and the port
-   * probe use, so the number on the card is by construction the number the
-   * scripts were handed. A worktree moved to a free slot takes its card with
-   * it.
-   *
-   * Only the ports the user named in `stack.ports` — the debug port is
-   * in there when they asked for it (DEBUG_PORT) and left out otherwise, since
-   * a debug port nobody configured is Stack's bookkeeping rather than something
-   * the user needs to know.
-   */
-  private portsFor(wt: Worktree): PortMapping[] {
-    const config = this.deps.config.get();
-    return Object.entries(computeNamedPorts(wt, config)).map(([name, port]) => ({
-      name,
-      port,
-      // Everything but the debug port: a debugger listener answers nothing a
-      // browser can render, and offering to open it is a dead tab every time.
-      openable: name !== 'DEBUG_PORT',
-    }));
   }
 
   /** `resume` for a task whose agent can be picked up again after its tmux session was lost. */
@@ -1106,8 +981,6 @@ export class WorktreeApplicationService implements DiffPanelHost {
       terminalCount: this.deps.agentManager.getShellCount(wt.id),
       sessions: this.deps.agentManager.getSessions(wt.id),
       git: this.deps.gitWatcher.getStatus(wt.path),
-      ports: this.portsFor(wt),
-      pr: this.deps.prMonitor.getStatus(wt.id) ?? null,
       ...this.setupItem(wt.id),
       ...(wt.ticket ? { ticket: wt.ticket } : {}),
       ...(wt.review ? { review: wt.review } : {}),
@@ -1129,8 +1002,6 @@ export class WorktreeApplicationService implements DiffPanelHost {
       terminalCount: this.deps.agentManager.getShellCount(control.id),
       sessions: this.deps.agentManager.getSessions(control.id),
       git: DEFAULT_STATUS,
-      ports: [],
-      pr: null,
     };
     return {
       worktrees: items,
@@ -1217,7 +1088,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     // first of main/master/develop that existed — so a worktree cut from
     // release/3.2 in a repo that also has main was diffed against main, showing
     // every commit release/3.2 carries over main mixed in with the three the
-    // agent wrote, while the card beside it measured drift against the right
+    // agent wrote, while the card beside it counted its lines from the right
     // branch. The defaults stay behind it, so a base branch deleted since still
     // resolves to something rather than collapsing to a plain HEAD diff.
     const mainBranchCandidates = wt.baseBranch
@@ -1328,51 +1199,6 @@ export class WorktreeApplicationService implements DiffPanelHost {
     if (root && paths.some((p) => canonicalPath(p) === canonicalPath(root))) {
       await this.loadWorktreesForRepo(root);
     }
-    // Worktree folders register asynchronously after addWorkspaceFolders —
-    // folder-scoped settings can only be written once the folder exists, so
-    // re-apply the scoping whenever folders actually land in the workspace.
-    this.syncSearchScoping();
-  }
-
-  /**
-   * Folder-scoped search.exclude: every folder except the active one is hidden
-   * from text search and Quick Open, so results come only from the folder the
-   * user is working in (the main repo when no worktree is selected). This is
-   * pure config — no language-server re-indexing; search is evaluated on demand.
-   */
-  private syncSearchScoping(): void {
-    const enabled = this.deps.config.get().scopeSearchToActiveWorktree;
-    const worktrees = this.worktreesInWindow();
-    // With no worktree selected — or one that no longer resolves — keep the main
-    // repo searchable as the fallback. And if even that is missing, exclude
-    // nothing: a window where search finds nothing at all is the worst outcome.
-    const activeId = this.effectiveActiveId(worktrees);
-    for (const wt of worktrees) {
-      if (this.missing.has(wt.id)) continue; // no folder to scope
-      // A folder-scoped setting has exactly one home: the folder's own
-      // .vscode/settings.json. VS Code offers no other — a .code-workspace
-      // cannot carry per-folder settings, and a workspace-level
-      // search.exclude is matched relative to EVERY folder, so it cannot name
-      // one. When the repository versions that file, writing into it is a
-      // modified file in git status, in the review diff, and in the agent's
-      // next `git add -A`; that folder then simply stays searchable.
-      if (this.settingsTracked(wt.path)) continue;
-      const exclude = enabled && activeId !== undefined && wt.id !== activeId ? { '**': true } : undefined;
-      void this.deps.host.updateFolderSetting(wt.path, 'search.exclude', exclude).catch(() => {});
-    }
-  }
-
-  /**
-   * Whether git tracks a folder's .vscode/settings.json, remembered for a
-   * minute: scoping is re-applied on every switch, and this is a git process
-   * per worktree for an answer that only a checkout changes.
-   */
-  private settingsTracked(folder: string): boolean {
-    const hit = this.trackedSettingsCache.get(folder);
-    if (hit && Date.now() - hit.at < DRIFT_BASE_TTL_MS) return hit.tracked;
-    const tracked = this.deps.git.isTracked(folder, SETTINGS_JSON_PATH);
-    this.trackedSettingsCache.set(folder, { tracked, at: Date.now() });
-    return tracked;
   }
 
   async loadWorktreesForRepo(repoRoot: string): Promise<void> {
@@ -1384,13 +1210,12 @@ export class WorktreeApplicationService implements DiffPanelHost {
     this.missing = new Set(missing.map((w) => w.id));
     const normalizedRoot = canonicalPath(repoRoot);
     // The store is global; this window is not. Everything below — the explorer
-    // folders, the git watches, the PR polling — used to run against
-    // every worktree of every repository the extension had ever seen, which is
-    // how a window opened on one project filled up with another one's folders.
+    // folders, the git watches — used to run against every worktree of every
+    // repository the extension had ever seen, which is how a window opened on
+    // one project filled up with another one's folders.
     //
     // A missing worktree stays on its card (so it can be forgotten) and out of
-    // everything else: a folder that does not exist, a watcher on nothing, and
-    // a `gh` poll every five minutes for a branch nobody is working on.
+    // everything else: a folder that does not exist, a watcher on nothing.
     const mine = worktreesInRepo(current, repoRoot).filter((w) => !this.missing.has(w.id));
 
     const keep = new Set([repoRoot, ...mine.map((w) => w.path)].map(canonicalPath));
@@ -1433,8 +1258,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       this.syncMainFolderLabel();
     }
 
-    // A diff, not just a start: whatever an earlier load watched and polled
-    // that is no longer in this set — another repository after the window
+    // A diff, not just a start: whatever an earlier load watched that is no longer in this set — another repository after the window
     // switched, a worktree gone missing, one forgotten elsewhere — is stopped
     // instead of running until the window closes.
     const wanted = new Set(mine.map((w) => w.id));
@@ -1462,29 +1286,23 @@ export class WorktreeApplicationService implements DiffPanelHost {
     this.settled = true;
     this.ui.pushWebview();
     this.refreshDecorations();
-    this.syncSearchScoping();
   }
 
-  /** Watch and poll a worktree (idempotent), remembering it so it can be stopped. */
+  /** Watch a worktree (idempotent), remembering it so it can be stopped. */
   private startMonitoring(wt: Worktree): void {
     const before = this.monitored.get(wt.id);
-    // Same id under a new path: the old watcher and poll would otherwise be
-    // keyed by something nothing will ever stop again.
+    // Same id under a new path: the old watcher would otherwise be keyed by
+    // something nothing will ever stop again.
     if (before && before.path !== wt.path) {
       this.stopMonitoring(before);
     }
-    this.deps.gitWatcher.watch(wt.path, this.driftBaseFor(wt));
-    this.deps.prMonitor.startPolling(wt.branch, wt.id, wt.path, () => this.ui.pushWebview());
+    this.deps.gitWatcher.watch(wt.path, this.baseFor(wt));
     this.monitored.set(wt.id, wt);
   }
 
   private stopMonitoring(wt: Worktree): void {
     this.monitored.delete(wt.id);
     this.deps.gitWatcher.unwatch(wt.path);
-    // Nothing stopped the PR poll: every deleted worktree left a `gh pr list`
-    // running against a branch that no longer exists, every 5 minutes, until
-    // the window was reloaded.
-    this.deps.prMonitor.stopPolling(wt.id);
   }
 
   /** Drop tab and breakpoint stashes of worktrees the store no longer has. */
@@ -1729,7 +1547,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
     if (!createdWt) return { ok: true };
     const wt = createdWt;
     // The new worktree is what the user is about to work in: select its card,
-    // scope search and breakpoints to it, and in focus mode clear the rest —
+    // scope breakpoints to it, and in focus mode clear the rest —
     // exactly what clicking the card would do. Its viewer does not exist yet,
     // so this reveals nothing; launch() below brings the terminal up.
     if (opts?.select !== false) await this.switchToWorktree(wt.id);
@@ -1801,10 +1619,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
       return;
     }
 
-    // Fresh numbers: the card's can be minutes old, and this is the moment
-    // they decide whether work is thrown away.
-    if (pathExists) await this.deps.gitWatcher.refreshNow(wt.path);
-    const plan = this.deletePlan(wt);
+    const plan = await this.deletePlan(wt);
     const confirm = await this.deps.notify.confirm(`Delete worktree "${wt.branch}"?`, plan.detail, ...plan.choices);
     if (!confirm) return;
     const deleteBranch = confirm !== plan.choices[plan.keepBranch];
@@ -1815,8 +1630,7 @@ export class WorktreeApplicationService implements DiffPanelHost {
    * The same teardown as the sidebar's "Delete", for a caller that already
    * decided — no confirm dialog, no "keep the branch?" prompt. Used by the
    * stack_delete_task MCP tool: a manager agent that has already looked at
-   * stack_status (diff, PR state) and knows whether the branch is safe to
-   * drop.
+   * stack_status (the diff) and knows whether the branch is safe to drop.
    */
   async deleteWorktreeById(id: string, opts: { deleteBranch: boolean }): Promise<{ ok: boolean; error?: string }> {
     const wt = this.findWorktree(id);
@@ -1880,8 +1694,16 @@ export class WorktreeApplicationService implements DiffPanelHost {
     return result;
   }
 
-  private deletePlan(wt: Worktree): DeletePlan {
-    return planDelete(this.deps.gitWatcher.getStatus(wt.path), this.deps.prMonitor.getStatus(wt.id) ?? undefined);
+  /**
+   * The delete confirm's words for a worktree, from its git state read now —
+   * the moment they decide whether work is thrown away. Also what stackd's
+   * `deletePlan` answers the desktop app's confirm with.
+   */
+  async deletePlan(wt: Worktree): Promise<DeletePlan> {
+    const work = this.deps.host.exists(wt.path)
+      ? await this.deps.git.workAtRisk(wt.path, this.baseFor(wt)).catch(() => undefined)
+      : undefined;
+    return planDelete(work);
   }
 
   // ── Rename ─────────────────────────────────────────────────────────────────
@@ -1958,16 +1780,13 @@ export class WorktreeApplicationService implements DiffPanelHost {
       this.deps.notify.showInfo(`Setup for "${displayLabel(wt)}" is already running.`);
       return;
     }
-    // A re-init can happen long after the slot was allocated — re-check before
-    // paying for the whole script again.
-    const ready = await this.ensurePortsFree(wt);
     if (setupInTerminal) {
-      this.runScriptTerminal(ready, setupScript, 'Init');
+      this.runScriptTerminal(wt, setupScript, 'Init');
       return;
     }
     // Not awaited: the command returns, the row shows the run. A success
     // releases an agent a failed first setup was still holding.
-    void this.runSetup(ready, setupScript).then((ok) => { if (ok) this.releaseHeldLaunch(ready.id); });
+    void this.runSetup(wt, setupScript).then((ok) => { if (ok) this.releaseHeldLaunch(wt.id); });
   }
 
   openTerminal(worktree?: Worktree): void {

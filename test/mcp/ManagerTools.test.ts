@@ -8,7 +8,7 @@ import type { SessionItem, WorktreeItem } from '../../src/webview/types';
 import type { StartOutcome } from '../../src/application/WorktreeApplicationService';
 
 const wt = (over: Partial<Worktree> = {}): Worktree => ({
-  id: 'a', branch: 'feat/a', path: '/repo/.worktrees/feat-a', repoRoot: '/repo', debugPort: 9899,
+  id: 'a', branch: 'feat/a', path: '/repo/.worktrees/feat-a', repoRoot: '/repo',
   createdAt: 1, ...over,
 });
 
@@ -19,8 +19,8 @@ const session = (over: Partial<SessionItem> = {}): SessionItem => ({
 const item = (over: Partial<WorktreeItem> = {}): WorktreeItem => ({
   id: 'a', branch: 'feat/a', path: '/repo/.worktrees/feat-a', isMain: false, deleting: false, agent: 'waiting',
   agentCount: 1, terminalCount: 0, sessions: [session()],
-  git: { hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 },
-  ports: [], pr: null, ...over,
+  git: { hasChanges: false, staged: 0, unstaged: 0, untracked: 0 },
+  ...over,
 });
 
 function harness(o: { worktrees?: Worktree[]; items?: WorktreeItem[]; root?: string | null } = {}) {
@@ -40,7 +40,7 @@ function harness(o: { worktrees?: Worktree[]; items?: WorktreeItem[]; root?: str
     launchAgent: vi.fn(async () => true),
     requestReview: vi.fn(async () => true),
     clearReview: vi.fn(async () => {}),
-    taskEnv: vi.fn((id: string) => ({ task_id: id, name: 'x', path: '/p', branch: 'b', repo_root: '/repo', ports: {} })),
+    taskEnv: vi.fn((id: string) => ({ task_id: id, name: 'x', path: '/p', branch: 'b', repo_root: '/repo' })),
     sendPrompt: vi.fn(async () => true),
     capturePane: vi.fn(async () => 'one\ntwo\n\n'),
     agentState: vi.fn((id: string) => states.get(id) ?? 'waiting'),
@@ -149,14 +149,12 @@ describe('stack_status', () => {
             session({ index: 1, state: 'permission', attention: 'Bash: rm -rf x', title: 'Doing' }),
             session({ index: 2, kind: 'shell', provider: undefined, name: 'shell', alias: 'redis', state: 'idle' }),
           ],
-          git: { hasChanges: true, staged: 0, unstaged: 1, untracked: 0, ahead: 0, behind: 0, base: { ref: 'origin/develop', ahead: 1, behind: 0 }, lines: { added: 4, removed: 2 } },
-          pr: { number: 7, state: 'OPEN', url: 'https://gh/7', ci: 'pass' },
-          ports: [{ name: 'HTTP_PORT', port: 20001, openable: true }],
+          git: { hasChanges: true, staged: 0, unstaged: 1, untracked: 0, lines: { added: 4, removed: 2 } },
           ticket: { source: 'jira', key: 'AS-1' },
           review: { summary: 'done', at: 1 },
           setup: { state: 'failed', startedAt: 1, error: 'exited with code 2' },
         }),
-        item({ id: 'main', branch: 'main', isMain: true, sessions: [], git: { hasChanges: true, staged: 1, unstaged: 0, untracked: 2, ahead: 0, behind: 0 }, pr: { number: 8, state: 'MERGED' }, setup: { state: 'running', startedAt: 1 } }),
+        item({ id: 'main', branch: 'main', isMain: true, sessions: [], git: { hasChanges: true, staged: 1, unstaged: 0, untracked: 2 }, setup: { state: 'running', startedAt: 1 } }),
         item({ id: 'gone', missing: true, sessions: [], setup: { state: 'failed', startedAt: 1 } }),
       ],
     });
@@ -165,21 +163,21 @@ describe('stack_status', () => {
       repo: '/repo',
       tasks: [
         {
-          id: 'a', name: 'Login', branch: 'feat/a', base: 'origin/develop', group: 'needs',
+          id: 'a', name: 'Login', branch: 'feat/a', group: 'needs',
           sessions: [
             { index: 1, name: 'claude', kind: 'agent', provider: 'claude', state: 'permission', title: 'Doing', question: 'Bash: rm -rf x' },
             { index: 2, name: 'redis', kind: 'shell', state: 'idle' },
           ],
-          diff: '+4 −2', pr: { number: 7, state: 'OPEN', url: 'https://gh/7', ci: 'pass' }, ports: { HTTP_PORT: 20001 },
+          diff: '+4 −2',
           ticket: { source: 'jira', key: 'AS-1' }, review: 'done', setup: 'failed: exited with code 2',
         },
-        { id: 'main', name: 'main', branch: 'main', main: true, group: 'idle', sessions: [], diff: '~3 files', pr: { number: 8, state: 'MERGED' }, setup: 'running' },
+        { id: 'main', name: 'main', branch: 'main', main: true, group: 'idle', sessions: [], diff: '~3 files', setup: 'running' },
         { id: 'gone', name: 'feat/a', branch: 'feat/a', group: 'missing', sessions: [], setup: 'failed: see the Stack output', missing: true },
       ],
     });
   });
 
-  it('falls back to the stored base, and filters to one task', async () => {
+  it('names the base the task recorded, and filters to one task', async () => {
     const h = harness({ worktrees: [wt({ baseBranch: 'release/3' })], items: [item(), item({ id: 'b' })] });
     const res = await h.ok('stack_status', { task_id: 'a' });
     expect((res.tasks as unknown[]).length).toBe(1);

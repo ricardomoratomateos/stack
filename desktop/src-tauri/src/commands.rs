@@ -723,7 +723,7 @@ mod repo_config_tests {
     }
 }
 
-/// Only these may reach the browser: https links and localhost ports (PR, ticket, dev servers).
+/// Only these may reach the browser: https links and localhost ports (a ticket, a link in a terminal, dev servers).
 pub fn openable(url: &str) -> bool {
     let rest = if let Some(r) = url.strip_prefix("https://") {
         !r.is_empty()

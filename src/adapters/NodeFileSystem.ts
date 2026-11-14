@@ -7,18 +7,6 @@ export class NodeFileSystem implements IFileSystem {
     return fs.existsSync(path);
   }
 
-  readFile(path: string): string {
-    return fs.readFileSync(path, 'utf8');
-  }
-
-  writeFile(path: string, content: string, options?: { mode?: number }): void {
-    if (options?.mode !== undefined) {
-      fs.writeFileSync(path, content, { mode: options.mode });
-    } else {
-      fs.writeFileSync(path, content);
-    }
-  }
-
   mkdir(path: string): void {
     fs.mkdirSync(path, { recursive: true });
   }

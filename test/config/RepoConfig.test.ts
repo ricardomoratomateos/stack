@@ -46,11 +46,6 @@ describe('readRepoConfig', () => {
       setupScript: '.stack/setup.sh',
       setupInTerminal: true,
       teardownScript: '.stack/teardown.sh',
-      ports: ['HTTP_PORT', 'DB_PORT'],
-      basePort: 31000,
-      portStride: 20,
-      debugBasePort: 9001,
-      debugTemplate: { type: 'php', request: 'launch', name: 'x', port: '{{PORT}}' },
     });
 
     expect(result.problems).toEqual([]);
@@ -61,11 +56,6 @@ describe('readRepoConfig', () => {
       setupScript: '.stack/setup.sh',
       setupInTerminal: true,
       teardownScript: '.stack/teardown.sh',
-      ports: ['HTTP_PORT', 'DB_PORT'],
-      basePort: 31000,
-      portStride: 20,
-      debugBasePort: 9001,
-      debugTemplate: { type: 'php', request: 'launch', name: 'x', port: '{{PORT}}' },
     });
   });
 
@@ -127,44 +117,6 @@ describe('readRepoConfig', () => {
       expect(read({ setupInTerminal: false }).values).toEqual({ setupInTerminal: false });
     });
 
-    it('rejects ports outside 1..65535 and non-integers', () => {
-      expect(read({ debugBasePort: 0 }).problems[0]).toContain('between 1 and 65535');
-      expect(read({ debugBasePort: 70000 }).problems[0]).toContain('between 1 and 65535');
-      expect(read({ debugBasePort: 98.6 }).problems[0]).toContain('whole number');
-      expect(read({ debugBasePort: '9898' }).problems[0]).toContain('got string');
-      expect(read({ debugBasePort: 9898 }).values.debugBasePort).toBe(9898);
-    });
-
-    it('requires ports to be strings all the way down', () => {
-      expect(read({ ports: ['HTTP_PORT', 8080] }).problems[0])
-        .toBe('"ports" must be an array of strings, got an array');
-      expect(read({ ports: 'HTTP_PORT' }).problems[0]).toContain('must be an array of strings');
-    });
-
-    it('rejects a basePort or portStride outside 1..65535', () => {
-      expect(read({ basePort: 'high' }).problems[0]).toContain('"basePort"');
-      expect(read({ portStride: -1 }).problems[0]).toContain('"portStride"');
-    });
-
-    it('requires a debugTemplate to at least name a debugger', () => {
-      expect(read({ debugTemplate: { name: 'x' } }).problems[0])
-        .toContain('needs at least a string "type" and "request"');
-      expect(read({ debugTemplate: { type: 'php' } }).problems[0]).toContain('"type" and "request"');
-      expect(read({ debugTemplate: 'php' }).problems[0]).toBe('"debugTemplate" must be an object, got string');
-    });
-
-    it('passes debugger-specific debugTemplate keys through untouched', () => {
-      // We are not the authority on what a launch configuration may contain.
-      const template = {
-        type: 'php',
-        request: 'launch',
-        name: 'debug',
-        port: '{{PORT}}',
-        pathMappings: { '/var/www': '${workspaceFolder}' },
-        xdebugSettings: { max_children: 128 },
-      };
-      expect(read({ debugTemplate: template }).values.debugTemplate).toEqual(template);
-    });
   });
 
   describe('the retired docker block', () => {
@@ -174,20 +126,38 @@ describe('readRepoConfig', () => {
       expect(result.values).toEqual({});
     });
 
-    it('still lends its named-port keys to a file written before they moved to the top level', () => {
+    it('no longer lends its named-port keys to anything', () => {
       const result = read({ docker: { composeFile: 'compose.yaml', ports: ['HTTP_PORT'], basePort: 31000, portStride: 20 } });
       expect(result.problems).toEqual([]);
-      expect(result.values).toEqual({ ports: ['HTTP_PORT'], basePort: 31000, portStride: 20 });
-    });
-
-    it('loses to the top-level keys, and drops what does not validate', () => {
-      const result = read({ ports: ['A'], docker: { ports: ['B'], basePort: 'high', portStride: 5 } });
-      expect(result.problems).toEqual([]);
-      expect(result.values).toEqual({ ports: ['A'], portStride: 5 });
+      expect(result.values).toEqual({});
     });
 
     it('is ignored when it is not an object', () => {
       expect(read({ docker: 'compose.yaml' })).toMatchObject({ values: {}, problems: [] });
+    });
+  });
+
+  describe('keys of removed features', () => {
+    // A file written for an older Stack — or kept for a teammate still on one —
+    // must load: the keys are skipped, the rest of the file still applies.
+    it('skips ports, basePort, portStride, debugBasePort, debugTemplate and scopeSearchToActiveWorktree quietly', () => {
+      const result = read({
+        defaultBaseBranch: 'trunk',
+        ports: ['HTTP_PORT'],
+        basePort: 31000,
+        portStride: 20,
+        debugBasePort: 9001,
+        debugTemplate: { type: 'php', request: 'launch', name: 'x', port: '{{PORT}}' },
+        scopeSearchToActiveWorktree: false,
+      });
+      expect(result.problems).toEqual([]);
+      expect(result.values).toEqual({ defaultBaseBranch: 'trunk' });
+    });
+
+    it('skips them whatever shape they have', () => {
+      const result = read({ ports: 'nope', basePort: 'high', debugTemplate: 7, setupScript: 'make setup' });
+      expect(result.problems).toEqual([]);
+      expect(result.values).toEqual({ setupScript: 'make setup' });
     });
   });
 
@@ -228,14 +198,8 @@ describe('renderRepoConfig', () => {
     claudeCommand: 'claude',
     opencodeCommand: 'opencode',
     notifyOnAttention: false,
-    scopeSearchToActiveWorktree: false,
     focusMode: true,
-    ports: ['HTTP_PORT'],
-    basePort: 31000,
-    portStride: 20,
-    debugBasePort: 9001,
-    debugTemplate: { type: 'php', request: 'launch', name: 'x', port: '{{PORT}}' },
-  };
+  } as StackConfig;
 
   it('writes the repo-scoped settings currently in effect', () => {
     const parsed = JSON.parse(renderRepoConfig(effective));
@@ -246,11 +210,6 @@ describe('renderRepoConfig', () => {
       setupScript: '.stack/setup.sh',
       setupInTerminal: false,
       teardownScript: '.stack/teardown.sh',
-      ports: ['HTTP_PORT'],
-      basePort: 31000,
-      portStride: 20,
-      debugBasePort: 9001,
-      debugTemplate: effective.debugTemplate,
     });
   });
 
@@ -266,7 +225,7 @@ describe('renderRepoConfig', () => {
     const result = readRepoConfig(ROOT, fsWith({ [FILE]: renderRepoConfig(effective) }));
     expect(result.problems).toEqual([]);
     expect(result.values.defaultBaseBranch).toBe('trunk');
-    expect(result.values.ports).toEqual(effective.ports);
+    expect(result.values.teardownScript).toBe('.stack/teardown.sh');
   });
 
   it('ends with a newline, for the diff of whoever commits it', () => {
@@ -277,10 +236,16 @@ describe('renderRepoConfig', () => {
 describe('updateRepoConfig', () => {
   const values = {
     worktreesDirectory: '../wt',
-    ports: ['HTTP_PORT'],
-    basePort: 31000,
-    portStride: 20,
+    defaultBaseBranch: 'trunk',
+    setupInTerminal: true,
   };
+
+  it('keeps the keys of removed features a file still carries', () => {
+    const existing = JSON.stringify({ version: 1, ports: ['HTTP_PORT'], debugBasePort: 9001 });
+    const parsed = JSON.parse(updateRepoConfig(existing, values)) as Record<string, unknown>;
+    expect(parsed['ports']).toEqual(['HTTP_PORT']);
+    expect(parsed['debugBasePort']).toBe(9001);
+  });
 
   it('keeps keys this build does not know, where they were', () => {
     // A teammate on a newer Stack added `agentsDirectory`; saving from this
@@ -333,7 +298,7 @@ describe('updateRepoConfig', () => {
     const existing = JSON.stringify({ version: 1, futureKey: true });
     const result = readRepoConfig(ROOT, fsWith({ [FILE]: updateRepoConfig(existing, values) }));
     expect(result.values.worktreesDirectory).toBe('../wt');
-    expect(result.values.ports).toEqual(values.ports);
+    expect(result.values.setupInTerminal).toBe(true);
     expect(result.problems).toEqual(['unknown key "futureKey"']);
   });
 });

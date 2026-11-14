@@ -151,6 +151,13 @@ describe.skipIf(!hasTmux)('stackd serve (real tmux on an isolated socket)', () =
     expect(target.session).toBe(`stack-${id}`);
     expect(target.command).toEqual(['tmux', '-L', SOCKET, 'attach', '-t', `=stack-${id}`]);
 
+    // deletePlan reads the worktree's git state at that moment: what deleting it would lose.
+    fs.writeFileSync(path.join(worktree.path, 'wip.txt'), 'x\n');
+    const plan = await cmd<{ detail: string; choices: string[]; keepBranch: number }>('deletePlan', { worktreeId: id });
+    expect(plan.detail).toContain('Uncommitted changes (1 untracked) are lost with the worktree.');
+    expect(plan.choices[plan.keepBranch]).toBe('Delete');
+    await expect(cmd('deletePlan', { worktreeId: 'nope' })).rejects.toThrow(/No worktree/);
+
     // deleteTask tears down the session and the worktree.
     await cmd('deleteTask', { worktreeId: id });
     s = await state();

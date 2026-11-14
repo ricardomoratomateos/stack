@@ -13,6 +13,3 @@ export const OPENCODE_PLUGIN_PATH = '.config/opencode/plugin/stack-notify.js';
  * worktree and the one the review panel diffs against.
  */
 export const MAIN_BRANCH_CANDIDATES = ['main', 'master', 'develop'];
-
-export const LAUNCH_JSON_PATH = '.vscode/launch.json';
-export const SETTINGS_JSON_PATH = '.vscode/settings.json';

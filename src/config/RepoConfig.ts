@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { StackConfig, DebugTemplate } from '../types';
+import { StackConfig } from '../types';
 
 /** Where a repository declares how Stack should treat it. */
 export const REPO_CONFIG_RELATIVE = path.join('.stack', 'config.json');
@@ -20,14 +20,13 @@ export const REPO_CONFIG_VERSION = 1;
  * whoever is sitting in front of it.
  *
  * The split is the whole point of the file. Where the worktrees go, which
- * ports each worktree gets, which branch work starts from, what the setup script is
- * called — those are facts about the project, identical for everyone who clones
+ * branch work starts from, what the setup script is called — those are facts about the project, identical for everyone who clones
  * it, and until now every one of them lived in one person's settings.json. A
  * new teammate cloned the repo and got an extension that did nothing useful
  * until they were handed a paste of somebody else's config.
  *
  * Deliberately absent: defaultProvider, the per-agent commands, notifyOnAttention,
- * focusMode, scopeSearchToActiveWorktree, sessionTabs. Which agent you reach for and where
+ * focusMode, sessionTabs. Which agent you reach for and where
  * its binary lives are properties of your machine, and a cloned repository has
  * no business overriding them.
  */
@@ -37,11 +36,6 @@ export type RepoScopedKey =
   | 'setupScript'
   | 'setupInTerminal'
   | 'teardownScript'
-  | 'ports'
-  | 'basePort'
-  | 'portStride'
-  | 'debugBasePort'
-  | 'debugTemplate'
   | 'phpNavigation'
   | 'phpIndexDirs'
   | 'phpExcludeDirs'
@@ -84,12 +78,6 @@ const asBoolean: Validator = (raw, problems, key) => {
   return undefined;
 };
 
-const asPositiveInt: Validator = (raw, problems, key) => {
-  if (typeof raw === 'number' && Number.isInteger(raw) && raw > 0 && raw <= 65535) return raw;
-  problems.push(`"${key}" must be a whole number between 1 and 65535, got ${describe(raw)}`);
-  return undefined;
-};
-
 const asStringArray: Validator = (raw, problems, key) => {
   if (Array.isArray(raw) && raw.every((v) => typeof v === 'string')) return raw as string[];
   problems.push(`"${key}" must be an array of strings, got ${describe(raw)}`);
@@ -108,30 +96,12 @@ const asObject: Validator = (raw, problems, key) => {
   return undefined;
 };
 
-const asDebugTemplate: Validator = (raw, problems, key) => {
-  const obj = asObject(raw, problems, key);
-  if (!obj) return undefined;
-  // Passed through beyond the required shape: a launch configuration carries
-  // arbitrary debugger-specific keys and we are not the authority on them.
-  const t = obj as Record<string, unknown>;
-  if (typeof t['type'] !== 'string' || typeof t['request'] !== 'string') {
-    problems.push(`"${key}" needs at least a string "type" and "request"`);
-    return undefined;
-  }
-  return t as unknown as DebugTemplate;
-};
-
 const validators: Record<RepoScopedKey, Validator> = {
   worktreesDirectory: asString,
   defaultBaseBranch: asString,
   setupScript: asString,
   setupInTerminal: asBoolean,
   teardownScript: asString,
-  ports: asStringArray,
-  basePort: asPositiveInt,
-  portStride: asPositiveInt,
-  debugBasePort: asPositiveInt,
-  debugTemplate: asDebugTemplate,
   phpNavigation: asBoolean,
   phpIndexDirs: asStringArray,
   phpExcludeDirs: asStringArray,
@@ -147,28 +117,19 @@ const validators: Record<RepoScopedKey, Validator> = {
 /**
  * Keys an older Stack understood and this one does not: skipped without a
  * complaint, since the file is shared with teammates who may still be on it.
- * `docker` is the old compose integration; its port keys (ports, basePort,
- * portStride) now live at the top level — see legacyPorts.
+ * `docker` is the old compose integration; the per-worktree ports (`ports`,
+ * `basePort`, `portStride`), the debug port and its launch.json template, and
+ * search scoping went the same way.
  */
-const RETIRED = new Set(['docker']);
-
-/**
- * The named-port keys out of a retired `docker` object, for a file written
- * before they moved to the top level. Silent: whatever is wrong with the old
- * block was already reported by the Stack that understood it.
- */
-export function legacyPorts(docker: unknown): Partial<Pick<StackConfig, 'ports' | 'basePort' | 'portStride'>> {
-  if (!isPlainObject(docker)) return {};
-  const quiet: string[] = [];
-  const out: Partial<Pick<StackConfig, 'ports' | 'basePort' | 'portStride'>> = {};
-  const ports = docker['ports'] === undefined ? undefined : asStringArray(docker['ports'], quiet, 'ports');
-  const basePort = docker['basePort'] === undefined ? undefined : asPositiveInt(docker['basePort'], quiet, 'basePort');
-  const portStride = docker['portStride'] === undefined ? undefined : asPositiveInt(docker['portStride'], quiet, 'portStride');
-  if (ports !== undefined) out.ports = ports as string[];
-  if (basePort !== undefined) out.basePort = basePort as number;
-  if (portStride !== undefined) out.portStride = portStride as number;
-  return out;
-}
+const RETIRED = new Set([
+  'docker',
+  'ports',
+  'basePort',
+  'portStride',
+  'debugBasePort',
+  'debugTemplate',
+  'scopeSearchToActiveWorktree',
+]);
 
 /** Keys that exist in StackConfig but are the user's, not the repository's. */
 const USER_SCOPED = new Set([
@@ -177,7 +138,6 @@ const USER_SCOPED = new Set([
   'opencodeCommand',
   'notifyOnAttention',
   'focusMode',
-  'scopeSearchToActiveWorktree',
   'sessionTabs',
   'phpBaseOnStart',
   'codeIdleMinutes',
@@ -232,8 +192,7 @@ export function readRepoConfig(
     }
   }
 
-  // Top-level keys win over the retired block they were lifted out of.
-  const values: RepoConfigValues = { ...legacyPorts(parsed['docker']) };
+  const values: RepoConfigValues = {};
   for (const [key, raw] of Object.entries(parsed)) {
     if (key === 'version' || key === '$schema' || RETIRED.has(key)) continue;
     if (USER_SCOPED.has(key)) {
@@ -267,11 +226,6 @@ export function renderRepoConfig(effective: StackConfig): string {
     setupScript: effective.setupScript,
     setupInTerminal: effective.setupInTerminal,
     teardownScript: effective.teardownScript,
-    ports: effective.ports,
-    basePort: effective.basePort,
-    portStride: effective.portStride,
-    debugBasePort: effective.debugBasePort,
-    debugTemplate: effective.debugTemplate,
   });
 }
 

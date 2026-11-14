@@ -18,14 +18,11 @@ import { ConfigFileError } from '../providers/shared/configFile';
 import { removeLegacyCodexHooks } from '../providers/legacyCodexHooks';
 import { HookServer } from '../server/HookServer';
 import { GitWatcher } from '../git/GitWatcher';
-import { PrMonitor } from '../pr/PrMonitor';
 import { GitCliAdapter } from '../adapters/GitCliAdapter';
 import { OsaNotifyAdapter } from '../adapters/OsaNotifyAdapter';
 import { NodeFileSystem } from '../adapters/NodeFileSystem';
 import { WorktreeStore } from '../worktree/WorktreeStore';
 import { WorktreeManager } from '../worktree/WorktreeManager';
-import { PortAllocator } from '../worktree/portAllocator';
-import { PortReservationFile } from '../worktree/portReservations';
 import { worktreesInRepo, canonicalPath } from '../worktree/worktreesInRepo';
 import { buildControlSession } from '../worktree/controlSession';
 import { WorktreeApplicationService } from '../application/WorktreeApplicationService';
@@ -110,7 +107,7 @@ export class CommandError extends Error {
 type Body = Record<string, unknown>;
 
 /** The sidebar messages the daemon runs itself (see the `message` command). */
-const DAEMON_MESSAGES = ['reorderSessions', 'reorderWorktrees', 'setupAction', 'refreshDrift', 'forgetWorktree'];
+const DAEMON_MESSAGES = ['reorderSessions', 'reorderWorktrees', 'setupAction', 'forgetWorktree'];
 
 const str = (b: Body, k: string): string | undefined => {
   const v = b[k];
@@ -135,7 +132,7 @@ const windowIndex = (b: Body): number | undefined => {
  * `stackd serve`: the single owner of Stack's state for one user, all repos.
  *
  * Composes the core (session manager, hook server, MCP tools, git watcher,
- * PR monitor, one WorktreeApplicationService per repository) over
+ * one WorktreeApplicationService per repository) over
  * Node adapters, keeps its state in `<configDir>/state.json`, and answers the
  * agents' hooks. The HTTP/SSE API in front of it lives in api.ts; everything
  * it can do is here, as `snapshot()` and `command()`.
@@ -149,7 +146,6 @@ export class StackDaemon {
   readonly registry: WindowRegistry;
   private readonly providers: ProviderFactory;
   private readonly git = new GitWatcher();
-  private readonly pr = new PrMonitor();
   private readonly worktreeStore: WorktreeStore;
   private readonly attention: AttentionNotifier;
   private readonly repos = new Map<string, RepoContext>();
@@ -283,7 +279,6 @@ export class StackDaemon {
     this.attention.dispose();
     this.agents.dispose();
     this.git.dispose();
-    this.pr.dispose();
     try { this.routes.release(this.hookUrl); } catch { /* best effort */ }
     this.registry.dispose();
     this.hooks.dispose();
@@ -321,11 +316,7 @@ export class StackDaemon {
     const config = new NodeConfig(() => repoRoot, this.settingsPath, () => this.pushed);
     // The window-scoped parts of the service, kept per repository in the one store.
     const scoped = stateLike(this.store, `repo:${key}:`);
-    const portAllocator = new PortAllocator(this.worktreeStore, () => config.get().debugBasePort, {
-      config: () => config.get(),
-      shared: new PortReservationFile(this.opts.configDir),
-    });
-    const manager = new WorktreeManager(this.worktreeStore, portAllocator, config, this.agents, new GitCliAdapter(), new NodeFileSystem());
+    const manager = new WorktreeManager(this.worktreeStore, config, this.agents, new GitCliAdapter(), new NodeFileSystem());
     const service = new WorktreeApplicationService({
       manager,
       agentManager: this.agents,
@@ -337,7 +328,6 @@ export class StackDaemon {
       host: new HeadlessHost(repoRoot, this.log),
       git: new GitCliAdapter(),
       gitWatcher: this.git,
-      prMonitor: this.pr,
       globalState: stateLike(this.store),
       workspaceState: scoped,
     });
@@ -655,11 +645,7 @@ export class StackDaemon {
         const msg = b['message'] as { type?: string; worktreeId?: string } | undefined;
         if (!msg || typeof msg.type !== 'string' || !DAEMON_MESSAGES.includes(msg.type)) throw new CommandError('Not a daemon message.');
         const ctx = typeof msg.worktreeId === 'string' ? this.findWorktree(msg.worktreeId).ctx : this.repoFor(b);
-        if (msg.type === 'refreshDrift' && typeof msg.worktreeId === 'string') {
-          // The one fetch of the base branch: once it is in, the repo's PHP base may have a new commit to catch up with.
-          await ctx.service.refreshDrift(msg.worktreeId);
-          this.prepareCodeBase(ctx, 'refresh');
-        } else await ctx.service.handleMessage(msg as never);
+        await ctx.service.handleMessage(msg as never);
         return {};
       }
       case 'renameTask': {
@@ -679,6 +665,11 @@ export class StackDaemon {
         const { wt, ctx } = this.findWorktree(need(b, 'worktreeId'));
         await ctx.service.initWorktree(wt);
         return {};
+      }
+      case 'deletePlan': {
+        // The delete confirm's words, from the worktree's git state read now (see planDelete).
+        const { wt, ctx } = this.findWorktree(need(b, 'worktreeId'));
+        return await ctx.service.deletePlan(wt);
       }
       case 'refreshGit': {
         const { wt } = this.findWorktree(need(b, 'worktreeId'));

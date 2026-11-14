@@ -6,11 +6,10 @@ import { execSync } from 'node:child_process';
 import {
   GitWatcher,
   parseStatus,
-  parseAheadBehind,
   shouldIgnore,
   isGitIndexChange,
   fetchStatus,
-  baseDrift,
+  mergeBase,
   parseNumstat,
   diffLines,
   DEFAULT_STATUS,
@@ -59,7 +58,7 @@ function makeRealRepo(): string {
   return dir;
 }
 
-const STATUS_A: GitStatus = { hasChanges: true, staged: 1, unstaged: 2, untracked: 3, ahead: 4, behind: 5 };
+const STATUS_A: GitStatus = { hasChanges: true, staged: 1, unstaged: 2, untracked: 3, lines: { added: 4, removed: 5 } };
 
 const activeWatchers: GitWatcher[] = [];
 function makeWatcher(fetchFn?: (worktreePath: string) => Promise<GitStatus>): GitWatcher {
@@ -108,7 +107,7 @@ describe('parseStatus', () => {
       'M  staged-only.txt', //  staged
       'MM both.txt', //          staged + unstaged
       'A  added.txt', //         staged
-      ' M unstaged.txt', //      unstaged (not first line — see quirk test)
+      ' M unstaged.txt', //      unstaged
       '?? new.txt', //           untracked
       '?? other.txt', //         untracked
     ].join('\n') + '\n';
@@ -120,25 +119,9 @@ describe('parseStatus', () => {
     expect(parseStatus('\n')).toEqual({ staged: 0, unstaged: 0, untracked: 0, hasChanges: false });
   });
 
-  it('quirk: trim() strips the leading space of the FIRST line, misclassifying a leading unstaged-only entry as staged', () => {
-    // real behavior of the original code: ' M a.txt\n'.trim() → 'M a.txt'
-    expect(parseStatus(' M a.txt\n')).toEqual({ staged: 1, unstaged: 0, untracked: 0, hasChanges: true });
-  });
-});
-
-describe('parseAheadBehind', () => {
-  it('parses "N\\tM" left-right counts', () => {
-    expect(parseAheadBehind('2\t3\n')).toEqual({ ahead: 2, behind: 3 });
-    expect(parseAheadBehind('0\t0')).toEqual({ ahead: 0, behind: 0 });
-  });
-
-  it('returns zeros on empty output and defaults a missing right count to 0', () => {
-    expect(parseAheadBehind('')).toEqual({ ahead: 0, behind: 0 }); // Number('') === 0
-    expect(parseAheadBehind('5')).toEqual({ ahead: 5, behind: 0 });
-  });
-
-  it('quirk: non-numeric tokens yield NaN (original code did not guard against this)', () => {
-    expect(parseAheadBehind('foo\tbar')).toEqual({ ahead: NaN, behind: NaN });
+  it('reads an unstaged-only FIRST line as unstaged: its leading space is its status', () => {
+    // It used to be trimmed away, so ' M a.txt' read as 'M a.txt' — staged.
+    expect(parseStatus(' M a.txt\n')).toEqual({ staged: 0, unstaged: 1, untracked: 0, hasChanges: true });
   });
 });
 
@@ -202,20 +185,20 @@ describe('fetchStatus (real git repos)', () => {
   it('returns all-zeros DEFAULT status when the path is not a git repo', async () => {
     const dir = makeTmpDir();
     expect(await fetchStatus(dir)).toEqual({
-      hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0,
+      hasChanges: false, staged: 0, unstaged: 0, untracked: 0,
     });
   });
 
   it('returns zeros with hasChanges=false for a clean repo without upstream', async () => {
     const repo = makeRealRepo();
     expect(await fetchStatus(repo)).toEqual({
-      hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0,
+      hasChanges: false, staged: 0, unstaged: 0, untracked: 0,
     });
   });
 
   it('counts staged / unstaged / untracked from a dirty repo', async () => {
     const repo = makeRealRepo();
-    // tracked file we will modify (name sorts last so the trim quirk is not hit)
+    // tracked file we will modify
     fs.writeFileSync(path.join(repo, 'zzz.txt'), 'one\n');
     git(repo, 'add zzz.txt');
     git(repo, 'commit -m tracked');
@@ -229,31 +212,18 @@ describe('fetchStatus (real git repos)', () => {
 
     const status = await fetchStatus(repo);
     expect(status).toEqual({
-      hasChanges: true, staged: 1, unstaged: 1, untracked: 1, ahead: 0, behind: 0,
+      hasChanges: true, staged: 1, unstaged: 1, untracked: 1,
       // The staged file (1 line, new to HEAD) and the edit to zzz.txt (1 in, 1 out).
       lines: { added: 2, removed: 1 },
     });
   });
 
-  it('computes ahead/behind against @{upstream} when one exists', async () => {
+  it('reports no ahead/behind, upstream or base drift: only the work in the tree', async () => {
     const repo = makeRealRepo();
     git(repo, 'branch up');
     git(repo, 'branch --set-upstream-to=up main');
     git(repo, 'commit --allow-empty -m ahead-1');
-    // `upstream` says the numbers mean something: without one they are 0 by default.
-    expect(await fetchStatus(repo)).toMatchObject({ ahead: 1, behind: 0, upstream: true });
-
-    git(repo, 'branch -f up HEAD');
-    git(repo, 'reset --hard HEAD~1');
-    expect(await fetchStatus(repo)).toMatchObject({ ahead: 0, behind: 1 });
-  });
-
-  it('falls back to ahead/behind zeros on detached HEAD', async () => {
-    const repo = makeRealRepo();
-    git(repo, 'branch up');
-    git(repo, 'branch --set-upstream-to=up main');
-    git(repo, 'checkout --detach');
-    expect(await fetchStatus(repo)).toMatchObject({ ahead: 0, behind: 0 });
+    expect(Object.keys(await fetchStatus(repo, 'up')).sort()).toEqual(['hasChanges', 'staged', 'unstaged', 'untracked']);
   });
 });
 
@@ -530,7 +500,7 @@ describe('lifecycle', () => {
   it('getStatus is a synchronous cache read (DEFAULT all-zeros when unknown)', () => {
     const w = makeWatcher(vi.fn(async () => STATUS_A));
     expect(w.getStatus('/unknown')).toEqual({
-      hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0,
+      hasChanges: false, staged: 0, unstaged: 0, untracked: 0,
     });
   });
 
@@ -582,10 +552,11 @@ describe('lifecycle', () => {
 });
 
 // ---------------------------------------------------------------------------
-// baseDrift — how far a branch has slid behind the one it was cut from
+// mergeBase — where a branch left the one it was cut from
 // ---------------------------------------------------------------------------
 
-describe('baseDrift', () => {
+describe('mergeBase', () => {
+  const SHA = 'b'.repeat(40);
   /** Records the commands and answers from a table, throwing for absent refs. */
   const runner = (answers: Record<string, string>) => {
     const seen: string[] = [];
@@ -599,91 +570,22 @@ describe('baseDrift', () => {
   };
 
   it('prefers the remote ref over the local branch', async () => {
-    // The local develop is usually the stale one — nobody checks it out just to
-    // pull it — so origin's is the honest comparison.
-    const { run, seen } = runner({
-      'git rev-list --left-right --count HEAD..."origin/develop"': '3\t12\n',
-      'git rev-list --left-right --count HEAD..."develop"': '3\t0\n',
-    });
-
-    await expect(baseDrift('/wt', 'develop', run)).resolves.toEqual({
-      ref: 'origin/develop',
-      ahead: 3,
-      behind: 12,
-    });
+    const { run, seen } = runner({ 'git merge-base HEAD "origin/develop"': `${SHA}\n`, 'git merge-base HEAD "develop"': 'c'.repeat(40) });
+    await expect(mergeBase('/wt', 'develop', run)).resolves.toBe(SHA);
     expect(seen).toHaveLength(1); // the local branch was never asked
   });
 
-  it('falls back to the local branch when there is no remote ref', async () => {
-    const { run } = runner({ 'git rev-list --left-right --count HEAD..."develop"': '1\t4\n' });
-
-    await expect(baseDrift('/wt', 'develop', run)).resolves.toEqual({
-      ref: 'develop',
-      ahead: 1,
-      behind: 4,
-    });
-  });
-
-  it('gives up when neither ref exists', async () => {
-    const { run } = runner({});
-    await expect(baseDrift('/wt', 'gone', run)).resolves.toBeUndefined();
-  });
-
-  it('treats unparseable counts as no answer rather than NaN on the card', async () => {
-    const { run } = runner({
-      'git rev-list --left-right --count HEAD..."origin/develop"': 'not numbers\n',
-      'git rev-list --left-right --count HEAD..."develop"': '0\t7\n',
-    });
-
-    // Moves on to the local branch instead of reporting NaN behind.
-    await expect(baseDrift('/wt', 'develop', run)).resolves.toEqual({
-      ref: 'develop',
-      ahead: 0,
-      behind: 7,
-    });
-  });
-
-  it('reports zero drift rather than hiding it', async () => {
-    // "up to date with origin/develop" is an answer worth showing; the caller
-    // decides not to ask at all when the worktree IS the base.
-    const { run } = runner({ 'git rev-list --left-right --count HEAD..."origin/main"': '0\t0\n' });
-    await expect(baseDrift('/wt', 'main', run)).resolves.toEqual({ ref: 'origin/main', ahead: 0, behind: 0 });
+  it('falls back to the local branch, then gives up', async () => {
+    await expect(mergeBase('/wt', 'develop', runner({ 'git merge-base HEAD "develop"': SHA }).run)).resolves.toBe(SHA);
+    await expect(mergeBase('/wt', 'gone', runner({}).run)).resolves.toBeUndefined();
   });
 
   it('refuses a base branch that is not ref-shaped', async () => {
     // The name arrives from .stack/config.json, which is a file in the repo, and
-    // it ends up in a shell command. Refused for both candidate refs, so the
-    // result is no drift rather than an executed injection.
+    // it ends up in a shell command.
     const { run, seen } = runner({});
-    await expect(baseDrift('/wt', 'main; touch /tmp/pwned', run)).resolves.toBeUndefined();
+    await expect(mergeBase('/wt', 'main; touch /tmp/pwned', run)).resolves.toBeUndefined();
     expect(seen).toEqual([]);
-  });
-
-  it('measures real drift in real repos', async () => {
-    const repo = makeRealRepo();
-    git(repo, 'branch develop');
-    git(repo, 'checkout -b feature');
-    git(repo, 'commit --allow-empty -m mine');
-    git(repo, 'commit --allow-empty -m mine-2');
-    git(repo, 'checkout develop');
-    git(repo, 'commit --allow-empty -m theirs');
-    git(repo, 'checkout feature');
-
-    await expect(baseDrift(repo, 'develop')).resolves.toEqual({
-      ref: 'develop',
-      ahead: 2,
-      behind: 1,
-    });
-  });
-
-  it('is folded into fetchStatus only when a base is given', async () => {
-    const repo = makeRealRepo();
-    git(repo, 'branch develop');
-    git(repo, 'checkout -b feature');
-    git(repo, 'commit --allow-empty -m mine');
-
-    expect((await fetchStatus(repo)).base).toBeUndefined();
-    expect((await fetchStatus(repo, 'develop')).base).toEqual({ ref: 'develop', ahead: 1, behind: 0 });
   });
 });
 
@@ -715,7 +617,7 @@ describe('GitWatcher base branch', () => {
 
   it('updates the base of an already-watched worktree', async () => {
     // watch() returns early when the path is already watched, so recording the
-    // base after that check would pin the drift to whatever base the worktree
+    // base after that check would pin the lines to whatever base the worktree
     // was first seen with — through every reconcile, until a window reload.
     const repo = makeFakeRepo();
     const { calls, fetchFn } = recorder();
@@ -1031,23 +933,42 @@ describe('diffLines', () => {
       seen.push(cmd);
       return cmd.startsWith('git merge-base') ? `${SHA}\n` : '4\t2\tx.ts\n';
     };
-    await expect(diffLines('/wt', { ref: 'origin/develop', ahead: 1, behind: 9 }, run)).resolves.toEqual({ added: 4, removed: 2 });
+    await expect(diffLines('/wt', 'develop', true, run)).resolves.toEqual({ added: 4, removed: 2 });
     expect(seen).toEqual(['git merge-base HEAD "origin/develop"', `git diff --numstat ${SHA}`]);
   });
 
   it('diffs against HEAD in the main checkout, which has no base', async () => {
     const seen: string[] = [];
-    await diffLines('/wt', undefined, async (cmd) => { seen.push(cmd); return '1\t0\tx.ts\n'; });
+    await diffLines('/wt', undefined, true, async (cmd) => { seen.push(cmd); return '1\t0\tx.ts\n'; });
     expect(seen).toEqual(['git diff --numstat HEAD']);
   });
 
+  it('compares commits only on a clean tree, which keeps git off the index', async () => {
+    const seen: string[] = [];
+    const run = async (cmd: string) => {
+      seen.push(cmd);
+      return cmd.startsWith('git merge-base') ? `${SHA}\n` : '4\t2\tx.ts\n';
+    };
+    await diffLines('/wt', 'develop', false, run);
+    expect(seen).toEqual(['git merge-base HEAD "origin/develop"', `git diff --numstat ${SHA} HEAD`]);
+    // No base and a clean tree: nothing to count, nothing run.
+    seen.length = 0;
+    await expect(diffLines('/wt', undefined, false, run)).resolves.toBeUndefined();
+    expect(seen).toEqual([]);
+  });
+
   it('answers nothing when there is nothing to count, or git cannot say', async () => {
-    await expect(diffLines('/wt', undefined, async () => '')).resolves.toBeUndefined();
-    await expect(diffLines('/wt', undefined, async () => { throw new Error('bad revision'); })).resolves.toBeUndefined();
-    // A merge base that is not a hash (an error message on stdout, say) is not trusted.
-    await expect(diffLines('/wt', { ref: 'develop', ahead: 0, behind: 0 }, async () => 'fatal: nope')).resolves.toBeUndefined();
+    await expect(diffLines('/wt', undefined, true, async () => '')).resolves.toBeUndefined();
+    await expect(diffLines('/wt', undefined, true, async () => { throw new Error('bad revision'); })).resolves.toBeUndefined();
+    // A merge base that is not a hash (an error message on stdout, say) is not
+    // trusted: the base is dropped and the tree is diffed against HEAD instead.
+    const seen: string[] = [];
+    await diffLines('/wt', 'develop', true, async (cmd) => { seen.push(cmd); return cmd.startsWith('git merge-base') ? 'fatal: nope' : ''; });
+    expect(seen.at(-1)).toBe('git diff --numstat HEAD');
     // And a base ref that is not ref-shaped never reaches a shell.
-    await expect(diffLines('/wt', { ref: 'x; rm -rf', ahead: 0, behind: 0 }, async () => SHA)).resolves.toBeUndefined();
+    const asked: string[] = [];
+    await diffLines('/wt', 'x; rm -rf', true, async (cmd) => { asked.push(cmd); return ''; });
+    expect(asked.some((c) => c.includes('rm -rf'))).toBe(false);
   });
 
   it('counts a branch\'s committed and uncommitted work together in a real repo', async () => {
@@ -1070,6 +991,16 @@ describe('diffLines', () => {
 
     const status = await fetchStatus(repo, 'develop');
     expect(status.lines).toEqual({ added: 3, removed: 1 });
+  });
+
+  it('counts a clean branch\'s commits since its base', async () => {
+    const repo = makeRealRepo();
+    git(repo, 'branch develop');
+    git(repo, 'checkout -b feature');
+    fs.writeFileSync(path.join(repo, 'b.txt'), 'x\ny\n');
+    git(repo, 'add b.txt');
+    git(repo, 'commit -m mine');
+    expect(await fetchStatus(repo, 'develop')).toEqual({ hasChanges: false, staged: 0, unstaged: 0, untracked: 0, lines: { added: 2, removed: 0 } });
   });
 
   it('is left out of the status when the tree is clean', async () => {

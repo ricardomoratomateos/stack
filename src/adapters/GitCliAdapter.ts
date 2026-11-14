@@ -1,8 +1,9 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
-import { GitWorktreeEntry, GitWorktreePath, IGitPort, DiffOptions, DiffError } from '../ports/IGitPort';
+import { GitWorktreeEntry, GitWorktreePath, IGitPort, DiffOptions, DiffError, type WorkAtRisk } from '../ports/IGitPort';
 import { MAIN_BRANCH_CANDIDATES } from '../constants';
 import { gitEnv } from '../git/gitEnv';
+import { parseStatus } from '../git/GitWatcher';
 
 // Every git call here is an argument array run WITHOUT a shell (execFile).
 //
@@ -232,15 +233,6 @@ export class GitCliAdapter implements IGitPort {
     return gitSync(['branch', '--show-current'], cwd).trim();
   }
 
-  isTracked(cwd: string, file: string): boolean {
-    try {
-      gitSync(['ls-files', '--error-unmatch', '--', file], cwd);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   /** First candidate that resolves to a real ref (local or origin/), else undefined. */
   private resolveMainBranch(cwd: string, candidates: string[]): string | undefined {
     for (const name of candidates) {
@@ -302,14 +294,29 @@ export class GitCliAdapter implements IGitPort {
     return out;
   }
 
-  async fetchBranch(cwd: string, remote: string, branch: string): Promise<void> {
-    // Both come from git's own output or a validated ref. There is no shell in
-    // the way any more, but anything that is not ref-shaped is still refused: a
-    // value starting with `-` would be read by git fetch as an option, and a
-    // remote can also be spelled as a URL or a path, which is not what this is for.
-    for (const part of [remote, branch]) {
-      if (!/^[\w./][\w./-]*$/.test(part)) throw new Error(`refusing to fetch "${part}"`);
+  async workAtRisk(cwd: string, baseBranch?: string): Promise<WorkAtRisk | undefined> {
+    let porcelain: string;
+    try {
+      porcelain = await git(['status', '--porcelain'], cwd);
+    } catch {
+      return undefined;
     }
-    await git(['fetch', remote, branch], cwd);
+    const { staged, unstaged, untracked } = parseStatus(porcelain);
+    const count = async (range: string): Promise<number | undefined> => {
+      try {
+        const n = Number((await git(['rev-list', '--count', '--end-of-options', range], cwd)).trim());
+        return Number.isInteger(n) ? n : undefined;
+      } catch {
+        return undefined; // no upstream, or a ref that does not resolve here
+      }
+    };
+    const pushed = await count('@{upstream}..HEAD');
+    if (pushed !== undefined) return { staged, unstaged, untracked, upstream: true, unpushed: pushed };
+    // Never pushed (or its remote branch deleted after a merge): what it added over its base exists only here.
+    for (const ref of baseBranch ? [`origin/${baseBranch}`, baseBranch] : []) {
+      const n = await count(`${ref}..HEAD`);
+      if (n !== undefined) return { staged, unstaged, untracked, upstream: false, unpushed: n, against: ref };
+    }
+    return { staged, unstaged, untracked, upstream: false, unpushed: 0 };
   }
 }

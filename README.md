@@ -37,12 +37,12 @@ You can also run stackd without the app: `node dist/stackd.js serve`. `node dist
 2. Watch the sidebar. Each task is in one of these groups: *working*, *needs you* (a permission prompt or a question, with the command shown), *ready for review*, or *idle*. `⌘⇧J` jumps to the next task that needs you.
 3. Answer in the agent's terminal, or click **Allow** in the Float list or the menu-bar menu. Allow only sends the answer while that exact prompt is still on the agent's screen.
 4. Open **Review** on a finished task. Leave comments on lines, then **Send to agent**.
-5. Merge the PR as usual, then delete the task. Stack first lists anything you would lose (uncommitted files, unpushed commits).
+5. Merge your branch as usual, then delete the task. Stack first checks the worktree and lists anything you would lose (uncommitted files, commits not pushed, or not in the base branch when the branch was never pushed).
 6. After a reboot, a task whose tmux session is gone shows **Resume**, which reopens the agent's conversation.
 
 ## Manager agent (MCP)
 
-stackd provides an MCP server with these tools: `stack_status`, `stack_create_task`, `stack_delete_task`, `stack_send_to_agent`, `stack_read_agent`, `stack_wait`, and for workers `stack_env` and `stack_request_review`. With them, one Claude Code session can turn tickets into tasks, follow the tasks, and answer their agents. The app's Manager is a standing session that already has these tools. Every Claude Code worker that Stack starts gets them for its own task.
+stackd provides an MCP server with these tools: `stack_status`, `stack_create_task`, `stack_delete_task`, `stack_send_to_agent`, `stack_read_agent`, `stack_wait`, and for workers `stack_env` and `stack_request_review`. `stack_status` reports each task's group, sessions (with any pending question), diff (+added −removed), ticket and review summary; `stack_env` gives a worker its worktree path, branch, base branch, setup/teardown scripts and test command. With them, one Claude Code session can turn tickets into tasks, follow the tasks, and answer their agents. The app's Manager is a standing session that already has these tools. Every Claude Code worker that Stack starts gets them for its own task.
 
 To use the tools from any Claude Code session, go to **Settings → "Stack tools in Claude Code" → Register**. This registers `~/.config/stack/stack-mcp.js` at user scope with the node that stackd runs on. It also installs the `stack-manager` skill and the `/stack`, `/stack-task`, `/stack-task-remove` and `/stack-next` commands into `~/.claude`, and it only overwrites files that Stack wrote. If the registration points at another copy, the row says so. Then start a new Claude Code session. To remove it, run `claude mcp remove --scope user stack`.
 
@@ -58,10 +58,8 @@ Your own settings are in `~/.config/stack/settings.json` (Settings in the app, `
 | `claudeCommand` / `opencodeCommand` | `claude` / `opencode` | Command that launches each agent |
 | `promptPrefix` | `""` | Text prepended to every agent's first prompt (personal, not for `.stack/config.json`) |
 | `notifyOnAttention` | `true` | Native notification when an agent finishes or asks for permission |
-| `setupScript` / `teardownScript` | `""` | Script run when a task's worktree is created / before it is deleted. Gets `STACK_REPO_ROOT`, `STACK_WORKTREE_PATH`, `STACK_BRANCH` and the task's ports |
+| `setupScript` / `teardownScript` | `""` | Script run when a task's worktree is created / before it is deleted. Gets `STACK_REPO_ROOT`, `STACK_WORKTREE_PATH` and `STACK_BRANCH` |
 | `setupInTerminal` | `false` | Run the setup script in a terminal you can type into, and start the agent without waiting for it |
-| `ports` / `basePort` / `portStride` | `[]` / `20000` / `100` | Env var names to allocate a port per worktree for (e.g. `HTTP_PORT`), from a block of `portStride` ports per worktree starting at `basePort` |
-| `debugBasePort` / `debugTemplate` | `9898` / node attach | Debug port per worktree and the `launch.json` template written into each one (`{{PORT}}`, `{{WORKTREE_PATH}}`) |
 
 ### Code tab
 
@@ -85,7 +83,7 @@ The Code tab browses a task's worktree read-only. PHP navigation uses [Phpactor]
 
 Changes apply on the next Code tab start. Changing `phpIndexDirs`, `phpExcludeDirs` or `phpExtensions` rebuilds the base index.
 
-`.stack/config.json` accepts the project keys only: `worktreesDirectory`, `defaultBaseBranch`, `setupScript`, `setupInTerminal`, `teardownScript`, `ports`, `basePort`, `portStride`, `debugBasePort`, `debugTemplate`, and the Code tab's settings that aren't marked *(yours)*. If the file has bad JSON, an unknown key or a wrong type, Stack falls back to your own settings and tells you what is wrong.
+`.stack/config.json` accepts the project keys only: `worktreesDirectory`, `defaultBaseBranch`, `setupScript`, `setupInTerminal`, `teardownScript`, and the Code tab's settings that aren't marked *(yours)*. If the file has bad JSON, an unknown key or a wrong type, Stack falls back to your own settings and tells you what is wrong. Keys of removed features (`ports`, `basePort`, `portStride`, `debugBasePort`, `debugTemplate`, `docker`) are skipped without a warning, so a file shared with teammates on an older Stack keeps working; in `settings.json` they are ignored.
 
 **Codex CLI is no longer supported.** A `codexCommand` setting is ignored, and a `defaultProvider` of `codex` falls back to Claude. stackd removes the hook entries earlier versions added to `~/.codex/hooks.json` when it starts, and leaves the rest of that file as it is.
 
@@ -108,7 +106,7 @@ Changes apply on the next Code tab start. Changing `phpIndexDirs`, `phpExcludeDi
 1. Uninstall the Stack extension from VS Code.
 2. Open Stack.app. Your tasks are imported once from the extension's state. The hooks that the extension wrote to `~/.claude/settings.json` are replaced automatically (and removed from `~/.codex/hooks.json`).
 3. Register the MCP again: **Settings → "Stack tools in Claude Code" → Register**. The old registration points at the extension's copy.
-4. The `docker` config block is ignored. Its `ports`/`basePort`/`portStride` moved to top-level keys; the old values are still read when the new keys are unset.
+4. The `docker` config block is ignored, and so are the per-worktree ports, the debug port and its `launch.json` template. `.vscode/launch.json` and `.vscode/settings.json` files written into existing worktrees by earlier versions are left where they are.
 
 ## License
 

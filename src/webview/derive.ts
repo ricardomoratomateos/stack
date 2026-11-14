@@ -1,6 +1,6 @@
 /**
  * What the sidebar makes of a worktree's raw state: which group it belongs to,
- * what its one-line summary says, how its stack and drift read.
+ * what its one-line summary says, how its changes read.
  *
  * Pure, with no DOM or React: the sidebar reads from here (so it can never
  * disagree about what "needs you" means), and the extension host imports
@@ -31,17 +31,12 @@ export const GROUP_SHORT: Record<WorktreeGroup, string> = {
   missing: 'Missing',
 };
 
-export type Tone = 'ok' | 'warn' | 'bad' | 'muted' | 'plain';
-
 const isAgent = (s: SessionItem) => s.kind === 'agent' && s.state !== 'terminated';
 
-/** Whether there is something to look at: uncommitted work, or commits beyond the base or the upstream. */
+/** Whether there is something to look at: uncommitted work, or lines the branch changed since its base. */
 export function hasWork(wt: WorktreeItem): boolean {
-  return wt.git.hasChanges || wt.git.ahead > 0 || (wt.git.base?.ahead ?? 0) > 0;
-}
-
-export function hasOpenPr(wt: WorktreeItem): boolean {
-  return !!wt.pr && wt.pr.state.toLowerCase() === 'open';
+  const lines = wt.git.lines;
+  return wt.git.hasChanges || (!!lines && lines.added + lines.removed > 0);
 }
 
 /**
@@ -53,8 +48,8 @@ export function hasOpenPr(wt: WorktreeItem): boolean {
  *   typing is not ready to be reviewed whatever the diff says.
  * - ready for review: the agent asked for it (stack_request_review), an agent
  *   finished a turn and is waiting on your reply (`turned`), or an agent is
- *   idle or waiting AND there is work to look at (changes, commits beyond the
- *   base, or an open PR). A freshly launched agent on a clean tree is just idle.
+ *   idle or waiting AND there is work to look at (changes, or lines changed
+ *   since the base). A freshly launched agent on a clean tree is just idle.
  * - idle: everything else.
  */
 export function groupOf(wt: WorktreeItem): WorktreeGroup {
@@ -67,7 +62,7 @@ export function groupOf(wt: WorktreeItem): WorktreeGroup {
   // It answered and is waiting on you, even if it changed nothing.
   if (agents.some((s) => s.state === 'waiting' && s.turned)) return 'review';
   const resting = agents.some((s) => s.state === 'waiting' || s.state === 'idle');
-  if (resting && (hasWork(wt) || hasOpenPr(wt))) return 'review';
+  if (resting && hasWork(wt)) return 'review';
   return 'idle';
 }
 
@@ -189,36 +184,6 @@ export interface Described {
   attention?: ParsedAttention;
   /** Lines when git could count them, else the number of files touched. */
   diff?: { added: number; removed: number } | { files: number };
-  base: { text: string; tone: Tone; title: string };
-  /** "http :8082" style, in the order the settings name them. */
-  ports: Array<{ label: string; port: number; openable: boolean }>;
-  pr?: DescribedPr;
-}
-
-export interface DescribedPr {
-  number: number;
-  state: 'open' | 'merged' | 'closed';
-  /** Open, but marked as a draft. */
-  draft: boolean;
-  /** A reviewer asked for changes and nobody has re-approved since. */
-  changesRequested: boolean;
-  /** The checks summed up; absent when the PR has none. */
-  ci?: 'pass' | 'fail' | 'pending';
-}
-
-/** The PR in the words the badge uses. */
-export function describePr(pr: WorktreeItem['pr']): DescribedPr | undefined {
-  if (!pr) return undefined;
-  const raw = pr.state.toLowerCase();
-  const state = raw === 'open' || raw === 'merged' ? raw : 'closed';
-  return {
-    number: pr.number,
-    state,
-    draft: state === 'open' && !!pr.isDraft,
-    // Only while it is open: on a merged PR it is history, not a to-do.
-    changesRequested: state === 'open' && pr.reviewDecision === 'CHANGES_REQUESTED',
-    ...(pr.ci ? { ci: pr.ci } : {}),
-  };
 }
 
 function describeDiff(wt: WorktreeItem): Described['diff'] {
@@ -226,14 +191,6 @@ function describeDiff(wt: WorktreeItem): Described['diff'] {
   if (lines && lines.added + lines.removed > 0) return lines;
   const files = wt.git.staged + wt.git.unstaged + wt.git.untracked;
   return wt.git.hasChanges && files > 0 ? { files } : undefined;
-}
-
-function describeBase(wt: WorktreeItem): Described['base'] {
-  const base = wt.git.base;
-  if (!base) return { text: wt.isMain ? 'main checkout' : '—', tone: 'muted', title: 'No base branch to compare against' };
-  const title = `${base.behind} commit${base.behind === 1 ? '' : 's'} behind ${base.ref}, ${base.ahead} ahead — click to fetch and check again`;
-  if (base.behind > 0) return { text: `↓${base.behind} behind ${base.ref}`, tone: 'warn', title };
-  return { text: `up to date with ${base.ref}`, tone: 'ok', title };
 }
 
 export function describe(wt: WorktreeItem): Described {
@@ -248,10 +205,6 @@ export function describe(wt: WorktreeItem): Described {
     line: lineFor(wt, group, agent),
     attention: group === 'needs' ? attentionOf(wt) : undefined,
     diff: describeDiff(wt),
-    base: describeBase(wt),
-    // HTTP_PORT reads as "http".
-    ports: wt.ports.map((p) => ({ label: p.name.replace(/_PORT$/, '').toLowerCase(), port: p.port, openable: p.openable })),
-    pr: describePr(wt.pr),
   };
 }
 

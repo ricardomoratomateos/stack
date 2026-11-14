@@ -65,19 +65,26 @@ export interface IGitPort {
    */
   diff(worktreePath: string, opts: DiffOptions): Promise<string>;
   /**
-   * `git fetch <remote> <branch>` — refreshes one remote-tracking ref.
-   *
-   * Explicit and narrow. Stack never fetches on its own (see baseDrift), so
-   * this only ever runs because the user asked, and it fetches the single branch
-   * the answer depends on rather than the whole remote. Rejects on failure so
-   * the caller can say why nothing changed.
+   * What deleting this worktree would lose, read on demand — one
+   * `git status --porcelain` and one count of the commits only this branch
+   * has: against its upstream, or without one against `baseBranch` (its
+   * `origin/` ref first). Resolves `undefined` when git could not answer, so
+   * "could not check" is never read as "nothing to lose".
    */
-  fetchBranch(cwd: string, remote: string, branch: string): Promise<void>;
-  /**
-   * Whether git tracks `file` (relative to `cwd`) — `git ls-files --error-unmatch`.
-   * False when it does not, and when git could not answer.
-   */
-  isTracked(cwd: string, file: string): boolean;
+  workAtRisk(cwd: string, baseBranch?: string): Promise<WorkAtRisk | undefined>;
+}
+
+/** A worktree's uncommitted changes and unpushed commits; see IGitPort.workAtRisk. */
+export interface WorkAtRisk {
+  staged: number;
+  unstaged: number;
+  untracked: number;
+  /** The branch has an upstream, and `unpushed` counts the commits it does not have. */
+  upstream: boolean;
+  /** Commits that exist only here: not on the upstream, or (without one) not in `against`. */
+  unpushed: number;
+  /** Without an upstream: the base ref `unpushed` was counted against, when one resolved. */
+  against?: string;
 }
 
 export type DiffBase = 'working' | 'branch';

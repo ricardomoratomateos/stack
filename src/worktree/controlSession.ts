@@ -22,7 +22,6 @@ export function buildControlSession(repoRoot: string): Worktree {
     branch: 'manager',
     path: repoRoot,
     repoRoot,
-    debugPort: 0,
     createdAt: 0,
     isControl: true,
   };

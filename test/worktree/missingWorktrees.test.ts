@@ -6,7 +6,7 @@ import { findMissingWorktrees, nodePathProbe, resolveReal, type PathProbe } from
 import type { Worktree } from '../../src/types';
 
 function wt(id: string, p: string, repoRoot: string): Worktree {
-  return { id, branch: id, path: p, repoRoot, debugPort: 0, createdAt: 0 };
+  return { id, branch: id, path: p, repoRoot, createdAt: 0 };
 }
 
 let tmp: string;

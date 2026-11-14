@@ -21,6 +21,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { SettingsHost } from './settings/SettingsHost';
 import { Dialog, type DialogSpec } from './ui/Dialog';
 import type { WebMessage } from '@core/webview/types';
+import type { DeletePlan } from '@core/application/deletePlan';
 import { SessionView } from './ui/Pane';
 import { useSessionPane } from './ui/useSessionPane';
 import { Splitter } from './ui/Splitter';
@@ -511,6 +512,16 @@ export function App() {
         case 'confirm':
           setDialog({ kind: 'confirm', title: a.title, detail: a.detail, choices: a.choices, onChoose: (i) => { const c = a.then(i); void runCommand(c.name, c.body); } });
           break;
+        case 'confirmDelete':
+          // Asked of stackd now, not taken from the snapshot: these words decide whether work is thrown away.
+          void api.command<DeletePlan>('deletePlan', { worktreeId: a.worktreeId }).then(
+            (plan) => setDialog({
+              kind: 'confirm', title: a.title, detail: plan.detail, choices: plan.choices,
+              onChoose: (i) => void runCommand('deleteTask', { worktreeId: a.worktreeId, deleteBranch: i !== plan.keepBranch }),
+            }),
+            (e: unknown) => setNotice(String(e instanceof Error ? e.message : e)),
+          );
+          break;
         case 'newTask':
           setNewTaskOpen(true);
           break;
@@ -545,7 +556,7 @@ export function App() {
       }
     };
     act(translate(msg, ctx));
-  }, [view, select, runCommand]);
+  }, [view, select, runCommand, api]);
 
   // The extension's new-task panel; what NewTaskPanelManager does for it in VS Code happens here.
   const onNewTaskMessage = useCallback(async (msg: NewTaskMessage) => {

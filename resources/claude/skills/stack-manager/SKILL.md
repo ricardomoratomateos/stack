@@ -9,7 +9,7 @@ description: Use when the user asks how their coding agents, Stack tasks or work
 Stack runs coding agents in parallel git worktrees ("tasks") in the user's Stack app. You manage them through the `stack_*` tools. The user never names the tools — map what they ask to them, and answer in their language, briefly.
 
 ## How are things going
-- `stack_status` → summarise by urgency: first agents that need the user (say what they ask), then tasks ready for review (with their summary and PR/CI), then the ones working, then idle. One line each; skip the noise.
+- `stack_status` → summarise by urgency: first agents that need the user (say what they ask), then tasks ready for review (with their summary and diff), then the ones working, then idle. One line each; skip the noise.
 - If the user asks what one agent is doing or asking, `stack_read_agent` on it and explain in plain words.
 
 ## New task from a ticket, a thread or an idea
@@ -26,8 +26,8 @@ Stack runs coding agents in parallel git worktrees ("tasks") in the user's Stack
 
 ## Cleaning up / deleting tasks
 `stack_delete_task` is irreversible and kills everything for that task: agent session, tmux windows, teardown script, docker stack, the git worktree, and — only with `delete_branch: true` — its local branch (never the remote). Never target the task marked `main`.
-1. `stack_status` first, always — you need each candidate's PR state and diff before touching it.
-2. A task is safe to fully retire (`delete_branch: true`) when its PR is merged, or it has an upstream and nothing ahead of it: that work exists elsewhere.
+1. `stack_status` first, always — you need each candidate's group and diff before touching it.
+2. A task is safe to fully retire (`delete_branch: true`) when the user says its work is merged, or that they no longer want it: Stack does not know where a branch's commits went.
 3. Otherwise delete the worktree but leave `delete_branch` unset (keeps the branch) — setting it would drop commits that exist nowhere else. Only override this when the user explicitly says to discard the work.
 4. Skip anything `working` or with an agent that `needs` a reply; a running task is not a cleanup candidate.
 5. Deleting more than one task, or any task with an unmerged/unpushed branch, without the user having named it: list the candidates and why, and wait for a yes before calling the tool — this is the one `stack_*` action that cannot be undone.

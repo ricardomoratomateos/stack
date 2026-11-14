@@ -17,7 +17,7 @@ export interface ManagerDeps {
   repoRoot(): string | undefined;
   /** This window's worktrees, as stored. */
   worktrees(): Worktree[];
-  /** The same, as the sidebar sees them (sessions, git, PR, ports). */
+  /** The same, as the sidebar sees them (sessions, git). */
   items(): WorktreeItem[];
   createWorktree(opts: {
     branch: string; title: string; description: string; baseBranch?: string;
@@ -243,7 +243,7 @@ export class ManagerTools {
     const diff = lines && lines.added + lines.removed > 0
       ? `+${lines.added} −${lines.removed}`
       : item.git.hasChanges && files > 0 ? `~${files} files` : undefined;
-    const base = item.git.base?.ref ?? wt?.baseBranch;
+    const base = wt?.baseBranch;
     const out: Record<string, unknown> = {
       id: item.id,
       name: item.alias ?? item.branch,
@@ -263,10 +263,6 @@ export class ManagerTools {
       })),
     };
     if (diff) out.diff = diff;
-    if (item.pr) {
-      out.pr = { number: item.pr.number, state: item.pr.state, ...(item.pr.url ? { url: item.pr.url } : {}), ...(item.pr.ci ? { ci: item.pr.ci } : {}) };
-    }
-    if (item.ports.length > 0) out.ports = Object.fromEntries(item.ports.map((p) => [p.name, p.port]));
     if (item.ticket) out.ticket = item.ticket;
     if (item.review) out.review = item.review.summary;
     if (item.setup) out.setup = item.setup.state === 'failed' ? `failed: ${item.setup.error ?? 'see the Stack output'}` : 'running';

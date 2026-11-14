@@ -11,7 +11,6 @@
  */
 import { PROVIDER_IDS, PROVIDER_INSTALL, type ProviderId } from '@core/ports/IAgentProvider';
 import type { StackState, WebMessage, WorktreeItem } from '@core/webview/types';
-import { planDelete } from '@core/application/deletePlan';
 import type { Snapshot } from '../stackd/api';
 
 /** The state message the extension posts to its webview. */
@@ -46,6 +45,11 @@ export type Action =
   | { kind: 'newTask' }
   /** Ask yes/no (or one of `choices`) before a command. */
   | { kind: 'confirm'; title: string; detail: string; choices: string[]; then: (choice: number) => { name: string; body: Record<string, unknown> } }
+  /**
+   * Ask before deleting a task. The words come from stackd's `deletePlan`, which reads the worktree's
+   * git state at that moment (uncommitted changes, unpushed commits); the choice runs `deleteTask`.
+   */
+  | { kind: 'confirmDelete'; worktreeId: string; title: string }
   /** Open a link in the default browser. */
   | { kind: 'open'; url: string }
   /** Choose the agent the main button launches. */
@@ -61,9 +65,9 @@ export type Action =
   | { kind: 'none' };
 
 /** Messages stackd runs itself (`DAEMON_MESSAGES` in src/daemon/StackDaemon.ts). */
-const DAEMON_MESSAGES = ['reorderSessions', 'reorderWorktrees', 'setupAction', 'refreshDrift', 'forgetWorktree'];
+const DAEMON_MESSAGES = ['reorderSessions', 'reorderWorktrees', 'setupAction', 'forgetWorktree'];
 
-/** What may be handed to the browser: https links (PR, ticket) and localhost ports. */
+/** What may be handed to the browser: https links (a ticket's). */
 export function safeUrl(url: string | undefined): string | undefined {
   return url && /^https:\/\/[^\s]+$/.test(url) ? url : undefined;
 }
@@ -112,12 +116,7 @@ export function translate(msg: WebMessage, ctx: Context): Action {
     }
     case 'deleteWorktree': {
       const wt = find(msg.worktreeId);
-      if (!wt) return { kind: 'none' };
-      const plan = planDelete(wt.git, wt.pr);
-      return {
-        kind: 'confirm', title: `Delete ${label(wt)}?`, detail: plan.detail, choices: plan.choices,
-        then: (choice) => ({ name: 'deleteTask', body: { worktreeId: msg.worktreeId, deleteBranch: choice !== plan.keepBranch } }),
-      };
+      return wt ? { kind: 'confirmDelete', worktreeId: msg.worktreeId, title: `Delete ${label(wt)}?` } : { kind: 'none' };
     }
     case 'initWorktree':
       return { kind: 'command', name: 'initTask', body: { worktreeId: msg.worktreeId } };
@@ -128,7 +127,6 @@ export function translate(msg: WebMessage, ctx: Context): Action {
         kind: 'command', name: 'createTask',
         body: { repo: ctx.repoRoot, branch: msg.branch, title: msg.title, description: msg.description, baseBranch: msg.baseBranch, provider: msg.provider },
       };
-    case 'refreshDrift':
     case 'setupAction':
     case 'reorderSessions':
     case 'reorderWorktrees':
@@ -138,14 +136,10 @@ export function translate(msg: WebMessage, ctx: Context): Action {
       return find(msg.worktreeId) ? { kind: 'review', worktreeId: msg.worktreeId } : { kind: 'none' };
     case 'openCode':
       return find(msg.worktreeId) ? { kind: 'code', worktreeId: msg.worktreeId } : { kind: 'none' };
-    case 'openPr':
     case 'openTicket': {
-      const wt = find(msg.worktreeId);
-      const url = safeUrl(msg.type === 'openPr' ? wt?.pr?.url : wt?.ticket?.url);
+      const url = safeUrl(find(msg.worktreeId)?.ticket?.url);
       return url ? { kind: 'open', url } : { kind: 'none' };
     }
-    case 'openPort':
-      return Number.isInteger(msg.port) && msg.port > 0 && msg.port < 65536 ? { kind: 'open', url: `http://localhost:${msg.port}` } : { kind: 'none' };
     case 'pickDefaultProvider':
       return { kind: 'pickProvider', choices: [...PROVIDER_IDS] };
     case 'showProviderInstall':

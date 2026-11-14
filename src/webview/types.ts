@@ -9,46 +9,8 @@ export interface GitStatus {
   staged: number;
   unstaged: number;
   untracked: number;
-  /** Against the branch's own upstream: "have I pushed?". */
-  ahead: number;
-  behind: number;
-  /** The branch has an upstream; without one ahead/behind are 0 and mean nothing. */
-  upstream?: true;
-  /** Against the branch this worktree was cut from: "should I rebase?". */
-  base?: BaseDrift;
   /** Lines added/removed since the branch left its base; see src/types.ts. */
   lines?: { added: number; removed: number };
-}
-
-export interface BaseDrift {
-  /** What was compared against, e.g. "origin/develop". */
-  ref: string;
-  ahead: number;
-  behind: number;
-}
-
-/** One of the worktree's own auto-generated ports. */
-export interface PortMapping {
-  /** Env var name from `stack.ports`, e.g. HTTP_PORT. */
-  name: string;
-  port: number;
-  /**
-   * Whether opening `http://localhost:<port>` in a browser makes sense. False
-   * for the debug port, which is a debugger listener and not a server.
-   */
-  openable: boolean;
-}
-
-export interface PrStatus {
-  number: number;
-  /** OPEN, MERGED or CLOSED, as GitHub spells it. */
-  state: string;
-  url?: string;
-  isDraft?: boolean;
-  /** APPROVED, CHANGES_REQUESTED or REVIEW_REQUIRED; absent when no review is required. */
-  reviewDecision?: string;
-  /** The checks summed up; absent when the PR has none. */
-  ci?: 'pass' | 'fail' | 'pending';
 }
 
 export interface SessionItem {
@@ -98,9 +60,6 @@ export interface WorktreeItem {
   terminalCount: number;
   sessions: SessionItem[];
   git: GitStatus;
-  /** Ports this worktree owns — empty unless `stack.ports` is set. */
-  ports: PortMapping[];
-  pr?: PrStatus | null;
   /** The setup script, while it runs headless or after it failed; absent once it succeeded. */
   setup?: SetupItem;
   /** The tracker ticket the worktree was created for: a chip beside its name. */
@@ -172,12 +131,8 @@ export type WebMessage =
   | { type: 'reorderSessions'; worktreeId: string; orderedIndexes: number[] }
   | { type: 'reorderWorktrees'; orderedIds: string[] }
   | { type: 'renameSession'; worktreeId: string; index: number }
-  | { type: 'openPort'; port: number }
-  /** Open the worktree's pull request in the browser. The URL is looked up on the host side. */
-  | { type: 'openPr'; worktreeId: string }
-  /** Open the worktree's ticket in the browser; the URL is looked up on the host side too. */
+  /** Open the worktree's ticket in the browser. The URL is looked up on the host side. */
   | { type: 'openTicket'; worktreeId: string }
-  | { type: 'refreshDrift'; worktreeId: string }
   | { type: 'deleteWorktree'; worktreeId: string }
   | { type: 'renameWorktree'; worktreeId: string }
   | { type: 'initWorktree'; worktreeId: string }

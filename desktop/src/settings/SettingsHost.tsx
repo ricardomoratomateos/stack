@@ -82,7 +82,7 @@ export function SettingsHost({ repo, onClose }: { repo?: { name: string; root: s
         {!inRepo && <ManagerRow />}
         {!inRepo && <div className="setting-item">
           <div className="setting-title">Other settings</div>
-          <div className="setting-desc">The rest are objects or advanced options (phpactorOptions, ports, debugTemplate…): edit them in the file.</div>
+          <div className="setting-desc">The rest are objects or advanced options (phpactorOptions…): edit them in the file.</div>
           <button type="button" className="secondary" onClick={() => invoke('open_settings_file').catch((e) => setError(String(e)))}>Open settings.json</button>
         </div>}
         {!inRepo && <Diagnostics />}

@@ -11,13 +11,13 @@ const session = (state: AgentState, over: Partial<SessionItem> = {}): SessionIte
 function wt(over: Partial<WorktreeItem> = {}): WorktreeItem {
   return {
     id: 'a', branch: 'feat/a', path: '/r/a', isMain: false, deleting: false, agent: 'idle',
-    agentCount: 0, terminalCount: 0, sessions: [], ports: [],
-    git: { hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 },
+    agentCount: 0, terminalCount: 0, sessions: [],
+    git: { hasChanges: false, staged: 0, unstaged: 0, untracked: 0 },
     ...over,
   };
 }
 
-const dirty = { hasChanges: true, staged: 0, unstaged: 3, untracked: 1, ahead: 0, behind: 0 };
+const dirty = { hasChanges: true, staged: 0, unstaged: 3, untracked: 1 };
 
 describe('groupOf', () => {
   it('puts a worktree whose folder is gone under missing, whatever else is true', () => {
@@ -47,11 +47,10 @@ describe('groupOf', () => {
   it('ready for review: an agent at rest and something to look at', () => {
     expect(groupOf(wt({ sessions: [session('waiting')], git: dirty }))).toBe('review');
     expect(groupOf(wt({ sessions: [session('idle')], git: dirty }))).toBe('review');
-    // Commits beyond the base count, as do unpushed ones and an open PR.
-    const committed = { ...dirty, hasChanges: false, base: { ref: 'develop', ahead: 2, behind: 0 } };
+    // Committed work counts too: lines the branch changed since its base.
+    const committed = { ...dirty, hasChanges: false, staged: 0, unstaged: 0, untracked: 0, lines: { added: 5, removed: 1 } };
     expect(groupOf(wt({ sessions: [session('waiting')], git: committed }))).toBe('review');
-    expect(groupOf(wt({ sessions: [session('waiting')], git: { ...dirty, hasChanges: false, ahead: 1 } }))).toBe('review');
-    expect(groupOf(wt({ sessions: [session('waiting')], pr: { number: 4, state: 'OPEN' } }))).toBe('review');
+    expect(groupOf(wt({ sessions: [session('waiting')], git: { ...committed, lines: { added: 0, removed: 0 } } }))).toBe('idle');
   });
 
   it('ready for review: an agent that answered and waits on you, with nothing changed yet', () => {
@@ -62,11 +61,10 @@ describe('groupOf', () => {
     expect(groupOf(wt({ sessions: [session('active', { turned: true })] }))).toBe('working');
   });
 
-  it('idle: no agent, a clean agent, a shell only, a merged PR or a dead agent', () => {
+  it('idle: no agent, a clean agent, a shell only or a dead agent', () => {
     expect(groupOf(wt())).toBe('idle');
     expect(groupOf(wt({ git: dirty }))).toBe('idle');
     expect(groupOf(wt({ sessions: [session('waiting')] }))).toBe('idle');
-    expect(groupOf(wt({ sessions: [session('waiting')], pr: { number: 4, state: 'MERGED' } }))).toBe('idle');
     expect(groupOf(wt({ sessions: [{ ...session('waiting'), kind: 'shell' }], git: dirty }))).toBe('idle');
     expect(groupOf(wt({ sessions: [session('terminated')], git: dirty }))).toBe('idle');
   });
@@ -152,39 +150,6 @@ describe('describe', () => {
     expect(describeWt(wt({ git: dirty })).diff).toEqual({ files: 4 });
     expect(describeWt(wt({ git: { ...dirty, hasChanges: false, staged: 0, unstaged: 0, untracked: 0 } })).diff).toBeUndefined();
     expect(describeWt(wt()).diff).toBeUndefined();
-  });
-
-  it('reads drift against the base', () => {
-    const base = (behind: number, ahead = 0) => describeWt(wt({ git: { ...dirty, base: { ref: 'origin/develop', ahead, behind } } })).base;
-    expect(base(3)).toMatchObject({ text: '↓3 behind origin/develop', tone: 'warn' });
-    expect(base(0)).toMatchObject({ text: 'up to date with origin/develop', tone: 'ok' });
-    expect(base(1).title).toContain('1 commit behind');
-    expect(base(2).title).toContain('2 commits behind');
-    expect(describeWt(wt()).base).toMatchObject({ text: '—', tone: 'muted' });
-    expect(describeWt(wt({ isMain: true })).base.text).toBe('main checkout');
-  });
-
-  it('names the ports the way the settings do, and the PR by state', () => {
-    const d = describeWt(wt({
-      ports: [{ name: 'HTTP_PORT', port: 8082, openable: true }, { name: 'DEBUG_PORT', port: 9902, openable: false }],
-      pr: { number: 41, state: 'OPEN' },
-    }));
-    expect(d.ports).toEqual([
-      { label: 'http', port: 8082, openable: true },
-      { label: 'debug', port: 9902, openable: false },
-    ]);
-    expect(d.pr).toEqual({ number: 41, state: 'open', draft: false, changesRequested: false });
-    expect(describeWt(wt({ pr: { number: 2, state: 'MERGED' } })).pr?.state).toBe('merged');
-    expect(describeWt(wt({ pr: { number: 2, state: 'CLOSED' } })).pr?.state).toBe('closed');
-    expect(describeWt(wt({ pr: null })).pr).toBeUndefined();
-  });
-
-  it('marks a draft, requested changes and the checks — the last two only while it is open', () => {
-    expect(describeWt(wt({ pr: { number: 5, state: 'OPEN', isDraft: true, reviewDecision: 'CHANGES_REQUESTED', ci: 'fail' } })).pr)
-      .toEqual({ number: 5, state: 'open', draft: true, changesRequested: true, ci: 'fail' });
-    expect(describeWt(wt({ pr: { number: 5, state: 'MERGED', isDraft: true, reviewDecision: 'CHANGES_REQUESTED', ci: 'pass' } })).pr)
-      .toEqual({ number: 5, state: 'merged', draft: false, changesRequested: false, ci: 'pass' });
-    expect(describeWt(wt({ pr: { number: 5, state: 'OPEN', reviewDecision: 'APPROVED' } })).pr?.changesRequested).toBe(false);
   });
 
   it('says the setup is running, or that it failed and why, before anything the agent says', () => {

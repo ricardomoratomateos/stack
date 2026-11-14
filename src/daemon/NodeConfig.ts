@@ -6,7 +6,7 @@ import type { ConfigSource } from '../config/ConfigSource';
 import { isProviderId } from '../ports/IAgentProvider';
 import { PROJECT_DEFAULTS } from '../config/defaults';
 import { CODE_USER_DEFAULTS } from '../code/config';
-import { legacyPorts, readRepoConfig } from '../config/RepoConfig';
+import { readRepoConfig } from '../config/RepoConfig';
 
 /** `~/.config/stack/settings.json`: the user's own settings for `stackd`. */
 export const DEFAULT_SETTINGS_PATH = path.join(os.homedir(), '.config', 'stack', 'settings.json');
@@ -51,9 +51,6 @@ export class NodeConfig implements ConfigSource {
       }
       return (repo[key] as (typeof PROJECT_DEFAULTS)[K] | undefined) ?? PROJECT_DEFAULTS[key];
     };
-    // Named ports from before they left the retired `docker` block; a top-level value wins.
-    const userLegacy = legacyPorts(user('docker'));
-    const portNames = user('ports');
     const provider = user('defaultProvider');
     return {
       worktreesDirectory: pick('worktreesDirectory'),
@@ -67,16 +64,8 @@ export class NodeConfig implements ConfigSource {
       claudeCommand: str(user('claudeCommand'), 'claude'),
       opencodeCommand: str(user('opencodeCommand'), 'opencode'),
       notifyOnAttention: bool(user('notifyOnAttention'), true),
-      scopeSearchToActiveWorktree: bool(user('scopeSearchToActiveWorktree'), true),
       focusMode: bool(user('focusMode'), false),
       sessionTabs: user('sessionTabs') === 'single' ? 'single' : 'perSession',
-      ports: Array.isArray(portNames) && portNames.every((n) => typeof n === 'string')
-        ? (portNames as string[])
-        : userLegacy.ports ?? repo.ports ?? PROJECT_DEFAULTS.ports,
-      basePort: user('basePort') === undefined && userLegacy.basePort !== undefined ? userLegacy.basePort : pick('basePort'),
-      portStride: user('portStride') === undefined && userLegacy.portStride !== undefined ? userLegacy.portStride : pick('portStride'),
-      debugBasePort: pick('debugBasePort'),
-      debugTemplate: pick('debugTemplate'),
       phpNavigation: pick('phpNavigation'),
       phpIndexDirs: pick('phpIndexDirs'),
       phpExcludeDirs: pick('phpExcludeDirs'),

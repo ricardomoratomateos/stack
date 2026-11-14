@@ -43,15 +43,12 @@ describe('translate', () => {
     expect(a).toMatchObject({ kind: 'ask', initial: 'fix-payments', then: { name: 'renameTask', body: { worktreeId: 'ask' }, field: 'alias' } });
     expect(translate({ type: 'renameSession', worktreeId: 'rev', index: 1 }, ctx)).toMatchObject({ kind: 'ask', initial: '', then: { name: 'renameSession', body: { worktreeId: 'rev', windowIndex: 1 }, field: 'name' } });
   });
-  it('delete confirms with the extension\'s own plan, then deletes (keeping the branch when chosen)', () => {
-    const a = translate({ type: 'deleteWorktree', worktreeId: 'ask' }, ctx);
-    if (a.kind !== 'confirm') throw new Error('expected confirm');
-    expect(a.detail).toContain('Uncommitted changes');
-    expect(a.then(0)).toMatchObject({ name: 'deleteTask', body: { worktreeId: 'ask' } });
+  it('delete asks stackd for the plan at that moment (not the snapshot) before deleting', () => {
+    expect(translate({ type: 'deleteWorktree', worktreeId: 'ask' }, ctx)).toEqual({ kind: 'confirmDelete', worktreeId: 'ask', title: 'Delete fix-payments?' });
     expect(translate({ type: 'deleteWorktree', worktreeId: 'zzz' }, ctx)).toEqual({ kind: 'none' });
   });
   it('messages stackd runs itself go through the `message` command', () => {
-    const msg = { type: 'refreshDrift', worktreeId: 'ask' } as const;
+    const msg = { type: 'setupAction', worktreeId: 'ask', action: 'retry' } as const;
     expect(translate(msg, ctx)).toEqual({ kind: 'command', name: 'message', body: { message: msg, repo: '/r' } });
     expect(translate({ type: 'reorderWorktrees', orderedIds: ['a'] }, ctx)).toMatchObject({ name: 'message' });
     expect(translate({ type: 'forgetWorktree', worktreeId: 'gone' }, ctx)).toMatchObject({ name: 'message' });
@@ -68,22 +65,17 @@ describe('translate', () => {
     expect(translate({ type: 'openCode', worktreeId: 'rev' }, ctx)).toEqual({ kind: 'code', worktreeId: 'rev' });
     expect(translate({ type: 'openCode', worktreeId: 'nope' }, ctx).kind).toBe('none');
   });
-  it('PR, ticket and port links open in the browser, https and localhost only', () => {
+  it('ticket links open in the browser, https only', () => {
     const withLinks: Context = {
       repoRoot: '/r',
       worktrees: [
-        { ...state.worktrees[0], id: 'l', pr: { number: 1, state: 'OPEN', url: 'https://github.com/a/b/pull/1' }, ticket: { source: 'jira', key: 'A-1', url: 'https://x.atlassian.net/browse/A-1' } },
-        { ...state.worktrees[0], id: 'bad', pr: { number: 2, state: 'OPEN', url: 'file:///etc/passwd' }, ticket: { source: 'jira', key: 'A-2', url: 'javascript:alert(1)' } },
+        { ...state.worktrees[0], id: 'l', ticket: { source: 'jira', key: 'A-1', url: 'https://x.atlassian.net/browse/A-1' } },
+        { ...state.worktrees[0], id: 'bad', ticket: { source: 'jira', key: 'A-2', url: 'javascript:alert(1)' } },
       ],
     };
-    expect(translate({ type: 'openPr', worktreeId: 'l' }, withLinks)).toEqual({ kind: 'open', url: 'https://github.com/a/b/pull/1' });
     expect(translate({ type: 'openTicket', worktreeId: 'l' }, withLinks)).toEqual({ kind: 'open', url: 'https://x.atlassian.net/browse/A-1' });
-    expect(translate({ type: 'openPr', worktreeId: 'bad' }, withLinks)).toEqual({ kind: 'none' });
     expect(translate({ type: 'openTicket', worktreeId: 'bad' }, withLinks)).toEqual({ kind: 'none' });
-    expect(translate({ type: 'openPr', worktreeId: 'nope' }, withLinks)).toEqual({ kind: 'none' });
-    expect(translate({ type: 'openPort', port: 3000 }, ctx)).toEqual({ kind: 'open', url: 'http://localhost:3000' });
-    expect(translate({ type: 'openPort', port: 0 }, ctx)).toEqual({ kind: 'none' });
-    expect(translate({ type: 'openPort', port: 70000 }, ctx)).toEqual({ kind: 'none' });
+    expect(translate({ type: 'openTicket', worktreeId: 'nope' }, withLinks)).toEqual({ kind: 'none' });
   });
   it('default-provider picker offers every agent; the install hint is the extension\'s', () => {
     expect(translate({ type: 'pickDefaultProvider' }, ctx)).toEqual({ kind: 'pickProvider', choices: ['claude', 'opencode'] });

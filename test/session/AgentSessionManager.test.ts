@@ -37,7 +37,6 @@ const wt: Worktree = {
   branch: 'feat/login',
   path: '/nonexistent/wt-1',
   repoRoot: '/nonexistent/repo',
-  debugPort: 9898,
  
   createdAt: 0,
 };
@@ -48,7 +47,6 @@ const wt2: Worktree = {
   branch: 'other',
   path: '/nonexistent/wt-2',
   repoRoot: '/nonexistent/repo',
-  debugPort: 9899,
  
   createdAt: 0,
 };

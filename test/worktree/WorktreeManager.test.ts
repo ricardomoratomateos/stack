@@ -7,8 +7,7 @@ import { parseWorktreeList } from '../../src/adapters/GitCliAdapter';
 import { IGitPort, GitWorktreeEntry } from '../../src/ports/IGitPort';
 import { IFileSystem } from '../../src/ports/IFileSystem';
 import { IWorktreeRepository } from '../../src/ports/IWorktreeRepository';
-import { Worktree, DebugTemplate, StackConfig } from '../../src/types';
-import type { PortAllocator } from '../../src/worktree/portAllocator';
+import { Worktree, StackConfig } from '../../src/types';
 import type { ConfigSource } from '../../src/config/ConfigSource';
 import type { AgentSessionManager } from '../../src/session/AgentSessionManager';
 
@@ -17,8 +16,6 @@ import type { AgentSessionManager } from '../../src/session/AgentSessionManager'
 /** In-memory stub of IWorktreeRepository (deliberately NOT WorktreeStore). */
 function makeStoreStub(initial: Worktree[] = []) {
   let worktrees: Worktree[] = initial.map((w) => ({ ...w }));
-  const portRegistry: Record<string, number> = {};
-  for (const w of initial) portRegistry[w.path] = w.debugPort;
   const calls: string[] = [];
   const store: IWorktreeRepository & { calls: string[] } = {
     calls,
@@ -27,7 +24,6 @@ function makeStoreStub(initial: Worktree[] = []) {
     add: async (w: Worktree) => {
       calls.push(`add:${w.branch}`);
       worktrees.push({ ...w });
-      portRegistry[w.path] = w.debugPort;
     },
     patch: async (id: string, fields: Partial<Worktree>) => {
       calls.push(`patch:${id}:${JSON.stringify(fields)}`);
@@ -41,31 +37,18 @@ function makeStoreStub(initial: Worktree[] = []) {
     },
     remove: async (id: string) => {
       calls.push(`remove:${id}`);
-      const wt = worktrees.find((w) => w.id === id);
-      if (wt) delete portRegistry[wt.path];
       worktrees = worktrees.filter((w) => w.id !== id);
     },
-    getPortRegistry: () => ({ ...portRegistry }),
   };
   return store;
 }
 
 /** In-memory IFileSystem. */
 function makeFsStub() {
-  const files = new Map<string, string>();
   const dirs = new Set<string>();
-  const fsStub: IFileSystem & { files: Map<string, string>; dirs: Set<string> } = {
-    files,
+  const fsStub: IFileSystem & { dirs: Set<string> } = {
     dirs,
-    exists: (p: string) => files.has(p) || dirs.has(p),
-    readFile: (p: string) => {
-      const c = files.get(p);
-      if (c === undefined) throw new Error(`ENOENT: ${p}`);
-      return c;
-    },
-    writeFile: (p: string, content: string) => {
-      files.set(p, content);
-    },
+    exists: (p: string) => dirs.has(p),
     mkdir: (p: string) => {
       dirs.add(p);
     },
@@ -82,7 +65,6 @@ function makeGitStub(entries: GitWorktreeEntry[] = []): IGitPort & {
   branchExists: ReturnType<typeof vi.fn>;
   remoteBranch: ReturnType<typeof vi.fn>;
   currentBranch: ReturnType<typeof vi.fn>;
-  isTracked: ReturnType<typeof vi.fn>;
 } {
   return {
     listWorktrees: vi.fn(() => entries),
@@ -97,8 +79,6 @@ function makeGitStub(entries: GitWorktreeEntry[] = []): IGitPort & {
     remoteBranch: vi.fn(() => undefined),
     currentBranch: vi.fn(() => 'main'),
     listBranches: vi.fn(() => []),
-    // Nothing is versioned unless a test says so.
-    isTracked: vi.fn(() => false),
   };
 }
 
@@ -109,28 +89,9 @@ function makeConfigStub(overrides: Partial<StackConfig> = {}): ConfigSource {
       setupScript: '',
       teardownScript: '',
       claudeCommand: 'claude',
-      debugBasePort: 9898,
-      debugTemplate: {
-        type: 'php',
-        request: 'launch',
-        name: 'Stack: Debug',
-        port: '{{PORT}}',
-        pathMappings: { '/var/www/html': '{{WORKTREE_PATH}}' },
-      } as DebugTemplate,
       ...overrides,
-      // deep-copy the template each call, like vscode config does
-      ...(overrides.debugTemplate
-        ? { debugTemplate: JSON.parse(JSON.stringify(overrides.debugTemplate)) }
-        : {}),
     }),
   } as ConfigSource;
-}
-
-function makePortAllocatorStub(port = 9899): PortAllocator {
-  return {
-    allocate: vi.fn(() => port),
-    release: vi.fn(),
-  } as unknown as PortAllocator;
 }
 
 function makeWorktree(overrides: Partial<Worktree> = {}): Worktree {
@@ -139,8 +100,6 @@ function makeWorktree(overrides: Partial<Worktree> = {}): Worktree {
     branch: 'feat/x',
     path: '/repo/zer/feat-x',
     repoRoot: '/repo',
-    debugPort: 9899,
-   
     createdAt: 1,
     ...overrides,
   };
@@ -209,7 +168,7 @@ describe('list', () => {
       makeWorktree({ id: 'main', branch: 'main', path: '/repo', isMain: true }),
       makeWorktree({ id: 'b', branch: 'feat/b', path: '/repo/zer/b', isMain: false }),
     ]);
-    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, makeGitStub(), makeFsStub());
+    const mgr = new WorktreeManager(store, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
     const list = mgr.list();
     expect(list).toHaveLength(3);
     expect(list[0].id).toBe('main');
@@ -222,19 +181,17 @@ describe('create', () => {
   let store: ReturnType<typeof makeStoreStub>;
   let git: ReturnType<typeof makeGitStub>;
   let fsStub: ReturnType<typeof makeFsStub>;
-  let allocator: PortAllocator;
 
   beforeEach(() => {
     store = makeStoreStub();
     git = makeGitStub();
     fsStub = makeFsStub();
-    allocator = makePortAllocatorStub(9899);
     // Simulate git actually materializing the worktree directory on add.
     git.createWorktree.mockImplementation((wtPath: string) => { fsStub.dirs.add(wtPath); });
   });
 
   function mgr(config = makeConfigStub()) {
-    return new WorktreeManager(store, allocator, config, undefined, git, fsStub);
+    return new WorktreeManager(store, config, undefined, git, fsStub);
   }
 
   it('uses git worktree add -b when branch does not exist', async () => {
@@ -255,7 +212,7 @@ describe('create', () => {
 
   it('records the base branch on the worktree, because git will not', async () => {
     // git keeps no note of what a branch was cut from, and the setting this came
-    // from will have moved on by the time anyone asks how far behind we are.
+    // from will have moved on by the time anyone diffs against it.
     git.branchExists.mockReturnValue(false);
     const wt = await mgr().create('feat/x', REPO, undefined, 'release/3.2');
     expect(wt.baseBranch).toBe('release/3.2');
@@ -299,21 +256,10 @@ describe('create', () => {
       expect(store.getAll()).toHaveLength(1);
     });
 
-    it('generates launch/settings on attach only when missing (never clobbers)', async () => {
-      const existingPath = path.join(REPO, 'zer', 'feat-x');
-      git.listWorktrees.mockReturnValue([{ path: existingPath, branch: 'feat/x', head: 'abc' }]);
-      // Pre-seed an existing settings.json → must be left untouched.
-      fsStub.files.set(path.join(existingPath, '.vscode/settings.json'), '{"pre":"existing"}');
-      await mgr().create('feat/x', REPO);
-      expect(fsStub.files.get(path.join(existingPath, '.vscode/settings.json'))).toBe('{"pre":"existing"}');
-      expect(fsStub.files.has(path.join(existingPath, '.vscode/launch.json'))).toBe(true);
-    });
-
     it('returns the already-tracked entry without registering a duplicate', async () => {
       const existingPath = path.join(REPO, 'zer', 'feat-x');
       const tracked: Worktree = {
-        id: 'existing-id', branch: 'feat/x', path: existingPath, repoRoot: REPO,
-        debugPort: 9950, createdAt: 1,
+        id: 'existing-id', branch: 'feat/x', path: existingPath, repoRoot: REPO, createdAt: 1,
       };
       store = makeStoreStub([tracked]);
       git.listWorktrees.mockReturnValue([{ path: existingPath, branch: 'feat/x', head: 'abc' }]);
@@ -354,54 +300,21 @@ describe('create', () => {
     expect(wt.path).toBe(path.join('/abs/wts', 'a'));
   });
 
-  it('generates launch.json and settings.json', async () => {
-    fsStub.files.set(path.join(REPO, 'zer', 'feat-x', 'composer.json'), '{}');
+  it('writes nothing into the worktree: no .vscode files', async () => {
     const wt = await mgr().create('feat/x', REPO);
-    const launchPath = path.join(wt.path, '.vscode/launch.json');
-    const settingsPath = path.join(wt.path, '.vscode/settings.json');
-    expect(fsStub.files.has(launchPath)).toBe(true);
-    expect(fsStub.files.has(settingsPath)).toBe(true);
-    expect(fsStub.dirs.has(path.dirname(launchPath))).toBe(true);
-    expect(JSON.parse(fsStub.files.get(settingsPath)!)).toEqual({
-      'files.watcherExclude': { '**/vendor/**': true, '**/var/cache/**': true },
-      'files.exclude': { '**/vendor': true },
-      'intelephense.files.exclude': ['**/vendor/**', '**/var/cache/**'],
-    });
+    expect([...fsStub.dirs].filter((d) => d.startsWith(wt.path + path.sep))).toEqual([]);
   });
 
-  it('never overwrites the .vscode files the checkout already carries', async () => {
-    // A repository that versions .vscode/: git worktree add checks both out,
-    // and overwriting them dirtied the tree before the agent did anything.
-    const launch = path.join(REPO, 'zer', 'feat-x', '.vscode/launch.json');
-    const settings = path.join(REPO, 'zer', 'feat-x', '.vscode/settings.json');
-    git.createWorktree.mockImplementation((wtPath: string) => {
-      fsStub.dirs.add(wtPath);
-      fsStub.files.set(launch, 'team launch');
-      fsStub.files.set(settings, 'team settings');
-      fsStub.files.set(path.join(wtPath, 'package.json'), '{}');
-    });
-    await mgr().create('feat/x', REPO);
-    expect(fsStub.files.get(launch)).toBe('team launch');
-    expect(fsStub.files.get(settings)).toBe('team settings');
-  });
-
-  it('writes no settings.json when no ecosystem it knows needs excluding', async () => {
-    const wt = await mgr().create('feat/x', REPO);
-    expect(fsStub.files.has(path.join(wt.path, '.vscode/settings.json'))).toBe(false);
-    expect(fsStub.files.has(path.join(wt.path, '.vscode/launch.json'))).toBe(true);
-  });
-
-  it('persists to repository (worktree + port registry keyed by path)', async () => {
+  it('persists to repository', async () => {
     const wt = await mgr().create('feat/x', REPO);
     expect(store.getAll()).toHaveLength(1);
     expect(store.get(wt.id)?.branch).toBe('feat/x');
-    expect(store.getPortRegistry()[wt.path]).toBe(9899);
+    expect(wt).not.toHaveProperty('debugPort');
   });
 
-  it('allocates a port', async () => {
-    const wt = await mgr().create('feat/x', REPO);
-    expect(allocator.allocate).toHaveBeenCalledTimes(1);
-    expect(wt.debugPort).toBe(9899);
+  it('propagates a store failure', async () => {
+    store.add = async () => { throw new Error('globalState write failed'); };
+    await expect(mgr().create('feat/x', REPO)).rejects.toThrow('globalState write failed');
   });
 });
 
@@ -420,7 +333,7 @@ describe('delete', () => {
 
   function mgr() {
     return new WorktreeManager(
-      store, makePortAllocatorStub(), makeConfigStub(),
+      store, makeConfigStub(),
       claude as unknown as AgentSessionManager, git, makeFsStub(),
     );
   }
@@ -437,7 +350,6 @@ describe('delete', () => {
     await mgr().delete('wt-1');
     expect(git.deleteWorktree).toHaveBeenCalledWith('/repo/zer/feat-x', '/repo');
     expect(store.getAll()).toHaveLength(0);
-    expect(store.getPortRegistry()['/repo/zer/feat-x']).toBeUndefined();
   });
 
   it('deletes branch only when deleteBranch=true; branch-delete failure tolerated', async () => {
@@ -467,7 +379,7 @@ describe('delete', () => {
 
   it('works without a agentManager (optional dependency)', async () => {
     const m = new WorktreeManager(
-      store, makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub(),
+      store, makeConfigStub(), undefined, git, makeFsStub(),
     );
     await m.delete('wt-1');
     expect(store.getAll()).toHaveLength(0);
@@ -483,7 +395,7 @@ describe('reconcile', () => {
   it('adopts new worktrees found by git', async () => {
     const store = makeStoreStub();
     const git = makeGitStub([MAIN, LINKED]);
-    const mgr = new WorktreeManager(store, makePortAllocatorStub(9899), makeConfigStub(), undefined, git, makeFsStub());
+    const mgr = new WorktreeManager(store, makeConfigStub(), undefined, git, makeFsStub());
     const { adopted, missing, current } = await mgr.reconcile(REPO);
     expect(missing).toEqual([]);
     expect(adopted).toHaveLength(2);
@@ -503,7 +415,7 @@ describe('reconcile', () => {
     const existing = makeWorktree();
     const store = makeStoreStub([existing]);
     const git = makeGitStub([]);
-    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+    const mgr = new WorktreeManager(store, makeConfigStub(), undefined, git, makeFsStub());
     const result = await mgr.reconcile(REPO);
     expect(result).toEqual({ adopted: [], missing: [], current: [existing] });
     expect(store.calls).toEqual([]); // no add/patch/remove
@@ -517,7 +429,7 @@ describe('reconcile', () => {
       makeWorktree({ id: 'x', branch: 'feat/x', path: '/repo/zer/feat-x', isMain: true }), // wrongly marked main
     ]);
     const git = makeGitStub([MAIN, LINKED]);
-    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+    const mgr = new WorktreeManager(store, makeConfigStub(), undefined, git, makeFsStub());
     await mgr.reconcile(REPO);
     expect(store.get('m')?.isMain).toBe(true);
     expect(store.get('x')?.isMain).toBe(false);
@@ -528,7 +440,7 @@ describe('reconcile', () => {
       makeWorktree({ id: 'x', branch: 'old-branch', path: '/repo/zer/feat-x', isMain: false }),
     ]);
     const git = makeGitStub([MAIN, LINKED]);
-    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+    const mgr = new WorktreeManager(store, makeConfigStub(), undefined, git, makeFsStub());
     await mgr.reconcile(REPO);
     expect(store.get('x')?.branch).toBe('feat/x');
   });
@@ -537,20 +449,9 @@ describe('reconcile', () => {
     const stale = makeWorktree({ id: 'gone', branch: 'old', path: '/repo/zer/gone', isMain: false });
     const store = makeStoreStub([stale]);
     const git = makeGitStub([MAIN]);
-    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+    const mgr = new WorktreeManager(store, makeConfigStub(), undefined, git, makeFsStub());
     await mgr.reconcile(REPO);
     expect(store.get('gone')).toEqual(stale); // still there, branch untouched
-  });
-
-  it('skips generating settings.json on adoption when it already exists', async () => {
-    const fsStub = makeFsStub();
-    fsStub.files.set(path.join(LINKED.path, '.vscode/settings.json'), 'preexisting-settings');
-    const store = makeStoreStub();
-    const git = makeGitStub([MAIN, LINKED]);
-    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, fsStub);
-    await mgr.reconcile(REPO);
-    expect(fsStub.files.get(path.join(LINKED.path, '.vscode/settings.json'))).toBe('preexisting-settings');
-    expect(fsStub.files.has(path.join(LINKED.path, '.vscode/launch.json'))).toBe(true); // still generated
   });
 
   it('does not patch stored worktrees that are already in sync', async () => {
@@ -559,55 +460,26 @@ describe('reconcile', () => {
       makeWorktree({ id: 'm', branch: 'main', path: '/repo', isMain: true }),
     ]);
     const git = makeGitStub([MAIN, LINKED]);
-    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+    const mgr = new WorktreeManager(store, makeConfigStub(), undefined, git, makeFsStub());
     await mgr.reconcile(REPO);
     expect(store.calls.filter((c) => c.startsWith('patch:'))).toEqual([]);
   });
 
-  it('main worktree gets port 0; others get allocated ports', async () => {
+  it('writes nothing into adopted worktrees', async () => {
+    const fsStub = makeFsStub();
     const store = makeStoreStub();
-    const allocator = makePortAllocatorStub(9901);
     const git = makeGitStub([MAIN, LINKED]);
-    const mgr = new WorktreeManager(store, allocator, makeConfigStub(), undefined, git, makeFsStub());
+    const mgr = new WorktreeManager(store, makeConfigStub(), undefined, git, fsStub);
     const { current } = await mgr.reconcile(REPO);
-    expect(current.find((w) => w.isMain)?.debugPort).toBe(0);
-    expect(current.find((w) => !w.isMain)?.debugPort).toBe(9901);
-    expect(allocator.allocate).toHaveBeenCalledTimes(1); // never called for main
-  });
-
-  it('generates .vscode files on adoption only when missing and not main', async () => {
-    const fsStub = makeFsStub();
-    // launch.json already present for the linked worktree → only settings.json generated
-    fsStub.files.set(path.join(LINKED.path, '.vscode/launch.json'), 'preexisting');
-    fsStub.files.set(path.join(LINKED.path, 'package.json'), '{}');
-    const store = makeStoreStub();
-    const git = makeGitStub([MAIN, LINKED]);
-    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, fsStub);
-    await mgr.reconcile(REPO);
-    // main: nothing generated
-    expect(fsStub.files.has(path.join(MAIN.path, '.vscode/launch.json'))).toBe(false);
-    expect(fsStub.files.has(path.join(MAIN.path, '.vscode/settings.json'))).toBe(false);
-    // linked: existing launch.json untouched, missing settings.json generated
-    expect(fsStub.files.get(path.join(LINKED.path, '.vscode/launch.json'))).toBe('preexisting');
-    expect(fsStub.files.has(path.join(LINKED.path, '.vscode/settings.json'))).toBe(true);
-  });
-
-  it('generates both .vscode files on adoption when neither exists', async () => {
-    const fsStub = makeFsStub();
-    fsStub.files.set(path.join(LINKED.path, 'package.json'), '{}');
-    const store = makeStoreStub();
-    const git = makeGitStub([MAIN, LINKED]);
-    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, fsStub);
-    await mgr.reconcile(REPO);
-    expect(fsStub.files.has(path.join(LINKED.path, '.vscode/launch.json'))).toBe(true);
-    expect(fsStub.files.has(path.join(LINKED.path, '.vscode/settings.json'))).toBe(true);
+    expect(fsStub.dirs.size).toBe(0);
+    expect(current.every((w) => !('debugPort' in w))).toBe(true);
   });
 
   it('returns current list', async () => {
     const existing = makeWorktree({ id: 'x', branch: 'feat/x', path: '/repo/zer/feat-x', isMain: false });
     const store = makeStoreStub([existing]);
     const git = makeGitStub([MAIN, LINKED]);
-    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+    const mgr = new WorktreeManager(store, makeConfigStub(), undefined, git, makeFsStub());
     const { adopted, current } = await mgr.reconcile(REPO);
     expect(adopted).toHaveLength(1); // only main adopted
     expect(current).toHaveLength(2);
@@ -615,17 +487,15 @@ describe('reconcile', () => {
   });
 
   it('does not adopt a worktree git itself reports as prunable (directory gone)', async () => {
-    // Adopting it wrote launch.json into it — mkdir -p bringing back an empty
-    // ghost of a directory the user had deleted.
+    // Adopting it would undo a forget() of a directory the user had deleted.
     const fsStub = makeFsStub();
     const store = makeStoreStub();
     const git = makeGitStub([MAIN, { ...LINKED, prunable: true }]);
-    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, fsStub);
+    const mgr = new WorktreeManager(store, makeConfigStub(), undefined, git, fsStub);
 
     const { adopted } = await mgr.reconcile(REPO);
 
     expect(adopted.map((w) => w.path)).toEqual(['/repo']);
-    expect(fsStub.dirs.has(path.join(LINKED.path, '.vscode'))).toBe(false);
   });
 });
 
@@ -661,7 +531,7 @@ describe('missing worktrees', () => {
     const git = makeGitStub([{ path: repo, head: 'a', branch: 'main' }]);
     git.listWorktreePaths.mockImplementation(async () =>
       gitPaths?.map((g) => ({ path: g.path, prunable: g.prunable ?? false })));
-    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+    const mgr = new WorktreeManager(store, makeConfigStub(), undefined, git, makeFsStub());
     return { store, git, mgr };
   }
 
@@ -773,173 +643,9 @@ describe('listFromGit', () => {
   it('delegates to the git port', () => {
     const entries: GitWorktreeEntry[] = [{ path: '/repo', head: 'aaa', branch: 'main' }];
     const git = makeGitStub(entries);
-    const mgr = new WorktreeManager(makeStoreStub(), makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+    const mgr = new WorktreeManager(makeStoreStub(), makeConfigStub(), undefined, git, makeFsStub());
     expect(mgr.listFromGit(REPO)).toEqual(entries);
     expect(git.listWorktrees).toHaveBeenCalledWith(REPO);
-  });
-});
-
-// ---------- generateLaunchJson (observed through create) ----------
-
-describe('generateLaunchJson', () => {
-  it('substitutes {{PORT}} (quoted → number, unquoted → string) and {{WORKTREE_PATH}}', async () => {
-    const config = makeConfigStub({
-      debugTemplate: {
-        type: 'php',
-        request: 'launch',
-        name: 'My Debug',
-        port: '{{PORT}}', // quoted in JSON → becomes a number
-        pathMappings: { '/var/www/html': '{{WORKTREE_PATH}}' },
-        log: 'listening on {{PORT}}', // embedded → stays a string
-      } as DebugTemplate,
-    });
-    const fsStub = makeFsStub();
-    const git = makeGitStub();
-    git.createWorktree.mockImplementation((p: string) => { fsStub.dirs.add(p); });
-    const mgr = new WorktreeManager(
-      makeStoreStub(), makePortAllocatorStub(9899), config, undefined, git, fsStub,
-    );
-    const wt = await mgr.create('feat/x', REPO);
-    const written = JSON.parse(fsStub.files.get(path.join(wt.path, '.vscode/launch.json'))!);
-    expect(written.version).toBe('0.2.0');
-    expect(written.configurations).toHaveLength(1);
-    const cfg = written.configurations[0];
-    expect(cfg.port).toBe(9899); // number, not string
-    expect(cfg.pathMappings['/var/www/html']).toBe(wt.path);
-    expect(cfg.log).toBe('listening on 9899'); // string with substitution
-    expect(cfg.name).toBe('My Debug');
-  });
-
-  it('defaults template name to "Stack: Debug (<branch>)"', async () => {
-    const config = makeConfigStub({
-      debugTemplate: {
-        type: 'php',
-        request: 'launch',
-        name: '',
-        port: '{{PORT}}',
-      } as DebugTemplate,
-    });
-    const fsStub = makeFsStub();
-    const git = makeGitStub();
-    git.createWorktree.mockImplementation((p: string) => { fsStub.dirs.add(p); });
-    const mgr = new WorktreeManager(
-      makeStoreStub(), makePortAllocatorStub(), config, undefined, git, fsStub,
-    );
-    const wt = await mgr.create('feat/x', REPO);
-    const written = JSON.parse(fsStub.files.get(path.join(wt.path, '.vscode/launch.json'))!);
-    expect(written.configurations[0].name).toBe('Stack: Debug (feat/x)');
-  });
-});
-
-// ---------- ensureFreePorts ----------
-
-/**
- * Allocator double that answers like the real one: `firstBusyPort` reports the
- * first port of the slot's block that is held, `allocate` hands out the next
- * slot. `busy` is keyed by debug port.
- */
-function makeReallocatingAllocatorStub(busy: Record<number, number>, nextPort = 9900) {
-  const allocate = vi.fn(async () => nextPort);
-  const firstBusyPort = vi.fn(async (debugPort: number) => busy[debugPort]);
-  return { stub: { allocate, firstBusyPort, release: vi.fn() } as unknown as PortAllocator, allocate, firstBusyPort };
-}
-
-describe('ensureFreePorts', () => {
-  it('leaves the worktree alone when its whole port block is still bindable', async () => {
-    const wt = makeWorktree({ debugPort: 9899 });
-    const store = makeStoreStub([wt]);
-    const { stub, allocate } = makeReallocatingAllocatorStub({});
-    const mgr = new WorktreeManager(store, stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
-
-    const result = await mgr.ensureFreePorts(wt);
-
-    expect(result).toEqual({ worktree: wt });
-    expect(allocate).not.toHaveBeenCalled();
-    expect(store.calls).not.toContain(`patch:${wt.id}:{"debugPort":9900}`);
-  });
-
-  it('moves the worktree to a new slot and reports which port was taken', async () => {
-    const wt = makeWorktree({ debugPort: 9901 });
-    const store = makeStoreStub([wt]);
-    // 8083 held by a foreign container — exactly the reported failure.
-    const { stub } = makeReallocatingAllocatorStub({ 9901: 8083 }, 9903);
-    const mgr = new WorktreeManager(store, stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
-
-    const result = await mgr.ensureFreePorts(wt);
-
-    expect(result.movedFrom).toBe(8083);
-    expect(result.worktree.debugPort).toBe(9903);
-  });
-
-  it('passes the worktree\'s own ports to the probe, so its running stack does not count as a squatter', async () => {
-    const wt = makeWorktree({ debugPort: 9901 });
-    const { stub, firstBusyPort, allocate } = makeReallocatingAllocatorStub({});
-    const mgr = new WorktreeManager(makeStoreStub([wt]), stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
-    const own = new Set([9901, 8083]);
-
-    await mgr.ensureFreePorts(wt, own);
-
-    expect(firstBusyPort).toHaveBeenCalledWith(9901, own);
-    expect(allocate).not.toHaveBeenCalled();
-  });
-
-  it('persists the new port so the move survives a reload', async () => {
-    const wt = makeWorktree({ debugPort: 9901 });
-    const store = makeStoreStub([wt]);
-    const { stub } = makeReallocatingAllocatorStub({ 9901: 8083 }, 9903);
-    const mgr = new WorktreeManager(store, stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
-
-    await mgr.ensureFreePorts(wt);
-
-    expect(store.calls).toContain(`patch:${wt.id}:{"debugPort":9903}`);
-    expect(store.get(wt.id)!.debugPort).toBe(9903);
-  });
-
-  it('regenerates launch.json so the debug listener follows the new port', async () => {
-    const wt = makeWorktree({ debugPort: 9901 });
-    const fsStub = makeFsStub();
-    const { stub } = makeReallocatingAllocatorStub({ 9901: 8083 }, 9903);
-    const mgr = new WorktreeManager(makeStoreStub([wt]), stub, makeConfigStub(), undefined, makeGitStub(), fsStub);
-
-    await mgr.ensureFreePorts(wt);
-
-    const written = JSON.parse(fsStub.files.get(path.join(wt.path, '.vscode/launch.json'))!);
-    // A stale launch.json would leave the debugger listening on the dead port.
-    expect(written.configurations[0].port).toBe(9903);
-  });
-
-  it('leaves a launch.json the repository versions alone', async () => {
-    const wt = makeWorktree({ debugPort: 9901 });
-    const fsStub = makeFsStub();
-    const launch = path.join(wt.path, '.vscode/launch.json');
-    fsStub.files.set(launch, 'team launch');
-    const git = makeGitStub();
-    git.isTracked.mockImplementation((cwd: string, file: string) => cwd === wt.path && file === '.vscode/launch.json');
-    const { stub } = makeReallocatingAllocatorStub({ 9901: 8083 }, 9903);
-    const mgr = new WorktreeManager(makeStoreStub([wt]), stub, makeConfigStub(), undefined, git, fsStub);
-
-    const result = await mgr.ensureFreePorts(wt);
-
-    expect(result.worktree.debugPort).toBe(9903);
-    expect(fsStub.files.get(launch)).toBe('team launch');
-  });
-
-  it('does not touch the main worktree, whose port 0 means "no stack of its own"', async () => {
-    const main = makeWorktree({ id: 'main', debugPort: 0, isMain: true });
-    const { stub, firstBusyPort } = makeReallocatingAllocatorStub({});
-    const mgr = new WorktreeManager(makeStoreStub([main]), stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
-
-    await expect(mgr.ensureFreePorts(main)).resolves.toEqual({ worktree: main });
-    expect(firstBusyPort).not.toHaveBeenCalled();
-  });
-
-  it('skips a non-main worktree that has no port allocated yet', async () => {
-    const wt = makeWorktree({ debugPort: 0 });
-    const { stub, firstBusyPort } = makeReallocatingAllocatorStub({});
-    const mgr = new WorktreeManager(makeStoreStub([wt]), stub, makeConfigStub(), undefined, makeGitStub(), makeFsStub());
-
-    await expect(mgr.ensureFreePorts(wt)).resolves.toEqual({ worktree: wt });
-    expect(firstBusyPort).not.toHaveBeenCalled();
   });
 });
 
@@ -955,7 +661,7 @@ describe('create with a branch that exists only on the remote', () => {
     git.remoteBranch.mockReturnValue('origin/feat/x');
     const fsStub = makeFsStub();
     fsStub.dirs.add('/repo/zer/feat-x');
-    const mgr = new WorktreeManager(makeStoreStub(), makePortAllocatorStub(), makeConfigStub(), undefined, git, fsStub);
+    const mgr = new WorktreeManager(makeStoreStub(), makeConfigStub(), undefined, git, fsStub);
 
     await mgr.create('feat/x', REPO, undefined, 'develop');
 
@@ -969,7 +675,7 @@ describe('create with a branch that exists only on the remote', () => {
     git.branchExists.mockReturnValue(true);
     const fsStub = makeFsStub();
     fsStub.dirs.add('/repo/zer/feat-x');
-    const mgr = new WorktreeManager(makeStoreStub(), makePortAllocatorStub(), makeConfigStub(), undefined, git, fsStub);
+    const mgr = new WorktreeManager(makeStoreStub(), makeConfigStub(), undefined, git, fsStub);
 
     await mgr.create('feat/x', REPO);
 
@@ -983,44 +689,13 @@ describe('create with a branch that exists only on the remote', () => {
     const git = makeGitStub();
     const fsStub = makeFsStub();
     fsStub.dirs.add('/repo/zer/feat-x');
-    const mgr = new WorktreeManager(makeStoreStub(), makePortAllocatorStub(), makeConfigStub(), undefined, git, fsStub);
+    const mgr = new WorktreeManager(makeStoreStub(), makeConfigStub(), undefined, git, fsStub);
 
     await mgr.create('feat/x', REPO, undefined, 'develop');
 
     expect(git.createWorktree).toHaveBeenCalledWith(
       '/repo/zer/feat-x', 'feat/x', REPO, true, 'develop', undefined,
     );
-  });
-});
-
-describe('create hands the port back when it fails after allocating', () => {
-  it('releases the slot if the store rejects, and still propagates the error', async () => {
-    // The slot is held from the moment allocate() returns until it reaches the
-    // store. A creation that dies in between would otherwise sterilise that
-    // port for the rest of the session.
-    const allocator = makePortAllocatorStub(9899);
-    const store = makeStoreStub();
-    store.add = async () => { throw new Error('globalState write failed'); };
-    const git = makeGitStub();
-    const fsStub = makeFsStub();
-    fsStub.dirs.add('/repo/zer/feat-x');
-    const mgr = new WorktreeManager(store, allocator, makeConfigStub(), undefined, git, fsStub);
-
-    await expect(mgr.create('feat/x', REPO)).rejects.toThrow('globalState write failed');
-
-    expect(allocator.release).toHaveBeenCalledWith(9899);
-  });
-
-  it('does not release the slot when creation succeeds', async () => {
-    const allocator = makePortAllocatorStub(9899);
-    const git = makeGitStub();
-    const fsStub = makeFsStub();
-    fsStub.dirs.add('/repo/zer/feat-x');
-    const mgr = new WorktreeManager(makeStoreStub(), allocator, makeConfigStub(), undefined, git, fsStub);
-
-    await mgr.create('feat/x', REPO);
-
-    expect(allocator.release).not.toHaveBeenCalled();
   });
 });
 
@@ -1035,7 +710,7 @@ describe('delete does not purge the store behind git\'s back', () => {
     const store = makeStoreStub([wt]);
     const git = makeGitStub(stillListed(wt));
     git.deleteWorktree.mockRejectedValue(new Error('is locked'));
-    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+    const mgr = new WorktreeManager(store, makeConfigStub(), undefined, git, makeFsStub());
 
     await expect(mgr.delete('a')).rejects.toThrow('is locked');
 
@@ -1048,7 +723,7 @@ describe('delete does not purge the store behind git\'s back', () => {
     const store = makeStoreStub([wt]);
     const git = makeGitStub([]); // git does not know this path any more
     git.deleteWorktree.mockRejectedValue(new Error('is not a working tree'));
-    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+    const mgr = new WorktreeManager(store, makeConfigStub(), undefined, git, makeFsStub());
 
     await mgr.delete('a');
 
@@ -1059,7 +734,7 @@ describe('delete does not purge the store behind git\'s back', () => {
     const wt = makeWorktree({ id: 'a' });
     const git = makeGitStub(stillListed(wt));
     git.deleteWorktree.mockRejectedValue(new Error('is locked'));
-    const mgr = new WorktreeManager(makeStoreStub([wt]), makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+    const mgr = new WorktreeManager(makeStoreStub([wt]), makeConfigStub(), undefined, git, makeFsStub());
 
     await expect(mgr.delete('a', true)).rejects.toThrow();
 
@@ -1073,7 +748,7 @@ describe('delete with a non-Error rejection', () => {
     const store = makeStoreStub([wt]);
     const git = makeGitStub([{ path: wt.path, branch: wt.branch, head: 'abc' }]);
     git.deleteWorktree.mockRejectedValue('just a string');
-    const mgr = new WorktreeManager(store, makePortAllocatorStub(), makeConfigStub(), undefined, git, makeFsStub());
+    const mgr = new WorktreeManager(store, makeConfigStub(), undefined, git, makeFsStub());
 
     await expect(mgr.delete('a')).rejects.toThrow('just a string');
     expect(store.get('a')).toBeDefined();
@@ -1093,7 +768,7 @@ describe('reconcile leaves other repositories alone', () => {
     // store is shared across every window the extension runs in.
     const store = makeStoreStub([foreign]);
     const mgr = new WorktreeManager(
-      store, makePortAllocatorStub(9899), makeConfigStub(), undefined, makeGitStub([MAIN]), makeFsStub(),
+      store, makeConfigStub(), undefined, makeGitStub([MAIN]), makeFsStub(),
     );
 
     await mgr.reconcile(REPO);
@@ -1105,7 +780,7 @@ describe('reconcile leaves other repositories alone', () => {
     const mine = makeWorktree({ id: 'mine', branch: 'stale', path: '/repo', repoRoot: REPO, isMain: false });
     const store = makeStoreStub([mine]);
     const mgr = new WorktreeManager(
-      store, makePortAllocatorStub(9899), makeConfigStub(), undefined, makeGitStub([MAIN]), makeFsStub(),
+      store, makeConfigStub(), undefined, makeGitStub([MAIN]), makeFsStub(),
     );
 
     await mgr.reconcile(REPO);

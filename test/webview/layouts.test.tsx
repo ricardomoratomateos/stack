@@ -15,12 +15,12 @@ import { describeAll } from '../../src/webview/derive';
 const session = (over: Partial<SessionItem>): SessionItem =>
   ({ name: 'claude', kind: 'agent', provider: 'claude', state: 'waiting', index: 1, ...over });
 
-const clean = { hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 };
+const clean = { hasChanges: false, staged: 0, unstaged: 0, untracked: 0 };
 
 function wt(over: Partial<WorktreeItem>): WorktreeItem {
   return {
     id: 'a', branch: 'feat/a', path: '/r/a', isMain: false, deleting: false, agent: 'idle',
-    agentCount: 0, terminalCount: 0, sessions: [], ports: [], git: clean, pr: null,
+    agentCount: 0, terminalCount: 0, sessions: [], git: clean,
     since: 0, ...over,
   };
 }
@@ -33,12 +33,11 @@ const state: StackState = {
     wt({
       id: 'ask', branch: 'fix/pay', alias: 'fix-payments', agent: 'permission',
       sessions: [session({ state: 'permission', attention: 'Bash: composer test' })],
-      git: { ...clean, hasChanges: true, unstaged: 2, lines: { added: 12, removed: 3 }, base: { ref: 'origin/develop', ahead: 1, behind: 2 } },
-      ports: [{ name: 'HTTP_PORT', port: 8082, openable: true }, { name: 'DEBUG_PORT', port: 9902, openable: false }],
+      git: { ...clean, hasChanges: true, unstaged: 2, lines: { added: 12, removed: 3 } },
     }),
     wt({
       id: 'rev', branch: 'feat/csv', agent: 'waiting', sessions: [session({ title: 'CSV export' }), session({ name: 'zsh', kind: 'shell', provider: undefined, index: 2, title: 'npm run dev' })],
-      git: { ...clean, hasChanges: true, staged: 1 }, pr: { number: 41, state: 'OPEN' },
+      git: { ...clean, hasChanges: true, staged: 1 },
     }),
     wt({ id: 'work', branch: 'feat/work', agent: 'active', sessions: [session({ state: 'active', provider: 'opencode' })] }),
     wt({ id: 'gone', branch: 'spike/old', missing: true }),
@@ -86,12 +85,11 @@ describe('aside layout', () => {
     expect(html).toContain('Review diff');
   });
 
-  it('shows the selected worktree\'s ports and PR somewhere', () => {
+  it('shows the selected worktree\'s changes, and no ports, PR or drift', () => {
     const html = render(props({ selectedId: 'ask' }));
-    expect(html).toContain(':8082');
-    expect(html).toContain('Ports');
-    const rev = render(props({ selectedId: 'rev' }));
-    expect(rev).toContain('#41');
+    expect(html).toContain('2 unstaged');
+    expect(html).toContain('+12');
+    for (const gone of ['Ports', ':8082', 'PR', 'behind', 'Base']) expect(html).not.toContain(gone);
   });
 
   it('offers a way to launch an agent, open a terminal and review for the selected worktree', () => {

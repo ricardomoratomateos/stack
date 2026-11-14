@@ -73,7 +73,6 @@ export class HeadlessHost implements IWorkspaceHost {
   showScriptOutput(): void {}
   showInputBox(): Promise<string | undefined> { return Promise.resolve(undefined); }
   showQuickPick(): Promise<string | undefined> { return Promise.resolve(undefined); }
-  updateFolderSetting(): Promise<void> { return Promise.resolve(); }
   activeTerminal(): unknown { return undefined; }
   exists(p: string): boolean { return fs.existsSync(p); }
   isDirectory(p: string): boolean {

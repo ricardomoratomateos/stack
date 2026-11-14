@@ -321,22 +321,6 @@ describe('GitCliAdapter (integration, real temp git repo)', () => {
     });
   });
 
-  describe('isTracked', () => {
-    it('is true for a committed file and false for an untracked or absent one', () => {
-      fs.writeFileSync(path.join(repo, 'untracked-it.txt'), 'x\n');
-      expect(adapter.isTracked(repo, 'README.md')).toBe(true);
-      expect(adapter.isTracked(repo, 'untracked-it.txt')).toBe(false);
-      expect(adapter.isTracked(repo, '.vscode/settings.json')).toBe(false);
-      fs.rmSync(path.join(repo, 'untracked-it.txt'));
-    });
-
-    it('is false outside a git repo', () => {
-      const notARepo = path.join(tmp, 'not-a-repo-tracked');
-      fs.mkdirSync(notARepo, { recursive: true });
-      expect(adapter.isTracked(notARepo, 'README.md')).toBe(false);
-    });
-  });
-
   describe('diff', () => {
     it('working: shows tracked modifications vs HEAD', async () => {
       const wtPath = path.join(tmp, 'wt-diff-working');
@@ -483,22 +467,6 @@ describe('NodeFileSystem (integration, temp dir)', () => {
     nfs.mkdir(nested); // no throw on existing
     expect(fs.statSync(nested).isDirectory()).toBe(true);
   });
-
-  it('writeFile + readFile round-trips utf8 content', () => {
-    const p = path.join(tmp, 'roundtrip.txt');
-    nfs.writeFile(p, 'héllo wörld');
-    expect(nfs.readFile(p)).toBe('héllo wörld');
-  });
-
-  it('writeFile applies the given mode', () => {
-    const p = path.join(tmp, 'script.sh');
-    nfs.writeFile(p, '#!/bin/sh\n', { mode: 0o755 });
-    expect(fs.statSync(p).mode & 0o777).toBe(0o755);
-  });
-
-  it('readFile throws for a missing file', () => {
-    expect(() => nfs.readFile(path.join(tmp, 'nope.txt'))).toThrow();
-  });
 });
 
 // A branch that lives only on a remote is the "pick up the task I started on
@@ -615,40 +583,77 @@ describe('GitCliAdapter.mainBranch (integration)', () => {
 
 });
 
-describe('GitCliAdapter.fetchBranch (integration)', () => {
-  it('updates the remote-tracking ref from a real remote', async () => {
-    // Two real repos, one added as the other's origin: the only way to prove a
-    // fetch moved a ref is to move the ref on the far side first.
-    const upstream = path.join(tmp, 'upstream');
-    fs.mkdirSync(upstream);
-    git('init -b main', upstream);
-    git('config user.email "test@stack.dev"', upstream);
-    git('config user.name "Stack Test"', upstream);
-    git('config commit.gpgsign false', upstream);
-    fs.writeFileSync(path.join(upstream, 'a.txt'), 'one\n');
-    git('add .', upstream);
-    git('commit -m one', upstream);
+// The delete confirm's facts, read on demand: what `git worktree remove
+// --force` and `git branch -D` would throw away.
+describe('GitCliAdapter.workAtRisk (integration)', () => {
+  /** A fresh repo with `main`, and a clone of it whose `feature` branch tests can shape. */
+  function setup(name: string): { clone: string; g: (c: string) => string } {
+    const origin = path.join(tmp, `${name}-origin`);
+    fs.mkdirSync(origin);
+    git('init -b main', origin);
+    git('config user.email "test@stack.dev"', origin);
+    git('config user.name "Stack Test"', origin);
+    git('config commit.gpgsign false', origin);
+    fs.writeFileSync(path.join(origin, 'a.txt'), 'one\n');
+    git('add .', origin);
+    git('commit -m one', origin);
+    const clone = path.join(tmp, `${name}-clone`);
+    execSync(`git clone -q "${origin}" "${clone}"`, { stdio: 'pipe' });
+    const g = (c: string) => git(c, clone);
+    g('config user.email "test@stack.dev"');
+    g('config user.name "Stack Test"');
+    g('config commit.gpgsign false');
+    g('checkout -q -b feature');
+    return { clone, g };
+  }
 
-    const clone = path.join(tmp, 'clone');
-    execSync(`git clone "${upstream}" "${clone}"`, { stdio: 'pipe' });
-    const before = git('rev-parse origin/main', clone).trim();
-
-    fs.writeFileSync(path.join(upstream, 'a.txt'), 'two\n');
-    git('commit -am two', upstream);
-
-    await adapter.fetchBranch(clone, 'origin', 'main');
-
-    expect(git('rev-parse origin/main', clone).trim()).not.toBe(before);
+  it('counts uncommitted files the way the confirm words them', async () => {
+    const { clone, g } = setup('risk-dirty');
+    fs.writeFileSync(path.join(clone, 'staged.txt'), 's\n');
+    g('add staged.txt');
+    fs.writeFileSync(path.join(clone, 'a.txt'), 'changed\n');
+    fs.writeFileSync(path.join(clone, 'new.txt'), 'n\n');
+    await expect(adapter.workAtRisk(clone, 'main')).resolves.toMatchObject({ staged: 1, unstaged: 1, untracked: 1 });
   });
 
-  it('rejects when the remote does not exist', async () => {
-    await expect(adapter.fetchBranch(repo, 'origin', 'main')).rejects.toThrow();
+  it('with an upstream, counts the commits not pushed to it', async () => {
+    const { clone, g } = setup('risk-upstream');
+    g('commit -q --allow-empty -m pushed');
+    g('push -q -u origin feature');
+    g('commit -q --allow-empty -m local-1');
+    g('commit -q --allow-empty -m local-2');
+    await expect(adapter.workAtRisk(clone, 'main')).resolves.toEqual({
+      staged: 0, unstaged: 0, untracked: 0, upstream: true, unpushed: 2,
+    });
   });
 
-  it('refuses a remote or branch that is not ref-shaped', async () => {
-    // The values reach here from a config file and git output, and they land in
-    // a shell command. Refused rather than escaped.
-    await expect(adapter.fetchBranch(repo, 'origin; rm -rf /', 'main')).rejects.toThrow(/refusing to fetch/);
-    await expect(adapter.fetchBranch(repo, 'origin', 'main$(id)')).rejects.toThrow(/refusing to fetch/);
+  it('without one, counts what the branch added over its base, origin/ first', async () => {
+    const { clone, g } = setup('risk-never-pushed');
+    g('commit -q --allow-empty -m mine-1');
+    g('commit -q --allow-empty -m mine-2');
+    g('commit -q --allow-empty -m mine-3');
+    await expect(adapter.workAtRisk(clone, 'main')).resolves.toEqual({
+      staged: 0, unstaged: 0, untracked: 0, upstream: false, unpushed: 3, against: 'origin/main',
+    });
+  });
+
+  it('falls back to the local base, and to nothing when there is none', async () => {
+    const { clone, g } = setup('risk-local-base');
+    g('branch develop');
+    g('commit -q --allow-empty -m mine');
+    await expect(adapter.workAtRisk(clone, 'develop')).resolves.toMatchObject({ upstream: false, unpushed: 1, against: 'develop' });
+    await expect(adapter.workAtRisk(clone, 'gone')).resolves.toEqual({ staged: 0, unstaged: 0, untracked: 0, upstream: false, unpushed: 0 });
+    await expect(adapter.workAtRisk(clone)).resolves.toEqual({ staged: 0, unstaged: 0, untracked: 0, upstream: false, unpushed: 0 });
+  });
+
+  it('a base that reads as an option is a ref name, not a flag', async () => {
+    const { clone } = setup('risk-hostile');
+    await expect(adapter.workAtRisk(clone, '--all')).resolves.toMatchObject({ unpushed: 0 });
+  });
+
+  it('resolves undefined outside a git repo: "could not check", never "nothing to lose"', async () => {
+    const notARepo = path.join(tmp, 'not-a-repo-risk');
+    fs.mkdirSync(notARepo, { recursive: true });
+    await expect(adapter.workAtRisk(notARepo, 'main')).resolves.toBeUndefined();
   });
 });

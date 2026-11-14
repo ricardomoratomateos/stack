@@ -158,25 +158,7 @@ body.vscode-light .fm-dot { --sd-review: var(--fm-review, #2563eb); --sd-working
   margin: 0; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 3px 8px;
   font-family: var(--fm-mono); font-size: 11px; color: var(--fm-text);
 }
-.fm-det [data-tone='ok'] { color: var(--fm-ok); }
-.fm-det [data-tone='warn'] { color: var(--fm-warn); }
-.fm-det [data-tone='bad'] { color: var(--fm-bad); }
 .fm-det [data-tone='muted'] { color: var(--fm-text-dim); }
-.fm-link {
-  display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 0; border: 0; background: none;
-  font: inherit; color: inherit; text-align: left;
-}
-.fm-link:hover:not(:disabled) { text-decoration: underline; }
-.fm-ports { gap: 4px 6px; }
-.fm-port {
-  display: inline-flex; gap: 3px; padding: 0 5px; height: 18px; align-items: center;
-  border: 1px solid var(--fm-border-strong); border-radius: 3px; background: transparent;
-  font-family: var(--fm-mono); font-size: 10.5px; color: var(--fm-text);
-}
-button.fm-port:hover { background: var(--fm-hover); border-color: var(--fm-accent-border); }
-.fm-port[data-static] { color: var(--fm-text-dim); border-style: dashed; }
-.fm-port-label { color: var(--fm-text-dim); }
-.fm-chip-text { font-family: var(--fm-mono); font-size: 10.5px; }
 /** The control session's row/card: pinned above the task list, visually set apart. */
 .fm-control { border-color: var(--fm-accent-border); }
 
@@ -184,21 +166,6 @@ button.fm-port:hover { background: var(--fm-hover); border-color: var(--fm-accen
 .fm-diff[data-files] { color: var(--fm-text-dim); }
 .fm-add { color: var(--fm-add); }
 .fm-del { color: var(--fm-del); }
-.fm-pr {
-  display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none;
-  font-family: var(--fm-mono); font-size: 11px; color: var(--fm-text); cursor: pointer;
-}
-.fm-pr:hover .fm-pr-num { text-decoration: underline; }
-.fm-pr-state { color: var(--fm-text-dim); }
-.fm-pr[data-state='open'] .fm-pr-state { color: var(--fm-ok); }
-.fm-pr[data-state='open'][data-draft] .fm-pr-state { color: var(--fm-text-dim); }
-.fm-pr[data-state='merged'] .fm-pr-state { color: var(--vscode-charts-purple, #b180d7); }
-/* The checks, as one dot: green passed, red failed, amber still running. */
-.fm-pr-ci { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--fm-idle); }
-.fm-pr-ci[data-ci='pass'] { background: var(--fm-ok); }
-.fm-pr-ci[data-ci='fail'] { background: var(--fm-bad); }
-.fm-pr-ci[data-ci='pending'] { background: var(--fm-warn); }
-.fm-pr-mark { font-size: 11px; color: var(--fm-warn); }
 /* A worktree's name with its ticket chip after it; the name gives way first. */
 .fm-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .fm-name-row > .fm-ellipsis { flex: 0 1 auto; }

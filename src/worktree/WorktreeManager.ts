@@ -3,7 +3,6 @@ import { canonicalPath, worktreesInRepo } from './worktreesInRepo';
 import { findMissingWorktrees, nodePathProbe, type PathProbe } from './missingWorktrees';
 import { randomUUID } from 'node:crypto';
 import { Worktree } from '../types';
-import { PortAllocator } from './portAllocator';
 import type { ConfigSource } from '../config/ConfigSource';
 import { AgentSessionManager } from '../session/AgentSessionManager';
 import { IGitPort, GitWorktreeEntry } from '../ports/IGitPort';
@@ -11,13 +10,10 @@ import { IFileSystem } from '../ports/IFileSystem';
 import { IWorktreeRepository } from '../ports/IWorktreeRepository';
 import { GitCliAdapter } from '../adapters/GitCliAdapter';
 import { NodeFileSystem } from '../adapters/NodeFileSystem';
-import { LAUNCH_JSON_PATH, SETTINGS_JSON_PATH } from '../constants';
-import { worktreeSettings } from './worktreeSettings';
 
 export class WorktreeManager {
   constructor(
     private store: IWorktreeRepository,
-    private portAllocator: PortAllocator,
     private config: ConfigSource,
     private agentManager?: AgentSessionManager,
     private git: IGitPort = new GitCliAdapter(),
@@ -81,23 +77,17 @@ export class WorktreeManager {
     for (const wt of gitWorktrees) {
       if (storedPaths.has(canonicalPath(wt.path))) continue;
       // Git keeps listing a worktree whose directory was deleted by hand until
-      // it is pruned. Adopting one wrote launch.json into it — mkdir -p
-      // resurrecting an empty ghost directory — and undid any forget().
+      // it is pruned. Adopting one would undo any forget().
       if (wt.prunable) continue;
 
-      const isMain = canonicalPath(wt.path) === normalizedRepoRoot;
-      const debugPort = isMain ? 0 : await this.portAllocator.allocate();
       const worktree: Worktree = {
         id: randomUUID(),
         branch: wt.branch,
         path: wt.path,
         repoRoot,
-        debugPort,
         createdAt: Date.now(),
-        isMain,
+        isMain: canonicalPath(wt.path) === normalizedRepoRoot,
       };
-
-      if (!isMain) this.writeMissingConfig(worktree);
 
       await this.store.add(worktree);
       adopted.push(worktree);
@@ -171,38 +161,20 @@ export class WorktreeManager {
       throw new Error(`git worktree add did not create the directory: ${worktreePath}`);
     }
 
-    const debugPort = await this.portAllocator.allocate();
-    try {
-      const worktree: Worktree = {
-        id: randomUUID(),
-        branch,
-        alias: alias || undefined,
-        path: worktreePath,
-        repoRoot,
-        debugPort,
-        createdAt: Date.now(),
-        // Recorded now, because it is unknowable later: git keeps no note of
-        // what a branch was cut from, and the setting this came from will have
-        // moved on by the time anyone asks how far behind we are.
-        baseBranch: baseBranch || undefined,
-      };
-
-      // Only what the checkout does not already carry. A repository that
-      // versions its .vscode/ used to have both files overwritten right after
-      // `git worktree add`: a dirty tree before the agent had typed a thing,
-      // counted in the review diff and the +N −M, and one `git add -A` away
-      // from being committed by the agent.
-      this.writeMissingConfig(worktree);
-      await this.store.add(worktree);
-
-      return worktree;
-    } catch (e) {
-      // The slot is held from the moment it is handed out until it reaches the
-      // store. If we never get there, hand it back rather than sterilise it for
-      // the rest of the session.
-      this.portAllocator.release(debugPort);
-      throw e;
-    }
+    const worktree: Worktree = {
+      id: randomUUID(),
+      branch,
+      alias: alias || undefined,
+      path: worktreePath,
+      repoRoot,
+      createdAt: Date.now(),
+      // Recorded now, because it is unknowable later: git keeps no note of
+      // what a branch was cut from, and the setting this came from will have
+      // moved on by the time anyone diffs against it.
+      baseBranch: baseBranch || undefined,
+    };
+    await this.store.add(worktree);
+    return worktree;
   }
 
   /** Register a Stack entry for a git worktree that already exists on disk. */
@@ -213,49 +185,10 @@ export class WorktreeManager {
       alias: alias || undefined,
       path: worktreePath,
       repoRoot,
-      debugPort: await this.portAllocator.allocate(),
       createdAt: Date.now(),
     };
-
-    // The worktree may have been created outside Stack — only add our config
-    // files if they're missing, never clobber existing ones.
-    this.writeMissingConfig(worktree);
-
     await this.store.add(worktree);
     return worktree;
-  }
-
-  /**
-   * Re-check the ports this worktree is about to bind and move it to a free
-   * slot if something grabbed them since it was allocated. Worth doing right
-   * before a setup script: the slot may have been picked minutes (or days)
-   * earlier, and the thief is usually invisible to the port registry —
-   * another project's server, or a leftover process from a deleted worktree.
-   *
-   * Regenerates launch.json so the debug listener follows the new port.
-   * Returns the worktree unchanged when its block is still free.
-   */
-  async ensureFreePorts(
-    worktree: Worktree,
-    ownPorts: ReadonlySet<number> = new Set(),
-  ): Promise<{ worktree: Worktree; movedFrom?: number }> {
-    if (worktree.isMain || worktree.debugPort <= 0) return { worktree };
-
-    // Ports the worktree itself already holds are busy by definition;
-    // counting them would move it to a fresh slot on every re-check.
-    const busyPort = await this.portAllocator.firstBusyPort(worktree.debugPort, ownPorts);
-    if (busyPort === undefined) return { worktree };
-
-    // allocate() skips ports in the registry, and this worktree is still in it,
-    // so it can only come back with a different slot.
-    const debugPort = await this.portAllocator.allocate();
-    const updated: Worktree = { ...worktree, debugPort };
-    await this.store.patch(worktree.id, { debugPort });
-    // A launch.json the repository versions is the team's, not ours to point
-    // at this worktree's port: rewriting it dirtied the tree. Debugging then
-    // needs the port set by hand, which beats a commit nobody meant to make.
-    if (!this.git.isTracked(worktree.path, LAUNCH_JSON_PATH)) this.generateLaunchJson(updated);
-    return { worktree: updated, movedFrom: busyPort };
   }
 
   async delete(id: string, deleteBranch = false): Promise<void> {
@@ -302,36 +235,4 @@ export class WorktreeManager {
     const dir = this.config.get().worktreesDirectory;
     return path.isAbsolute(dir) ? dir : path.join(repoRoot, dir);
   }
-
-  /** Stack's launch.json and settings.json, for whichever of the two the worktree does not have. */
-  private writeMissingConfig(worktree: Worktree): void {
-    if (!this.fs.exists(path.join(worktree.path, LAUNCH_JSON_PATH))) this.generateLaunchJson(worktree);
-    if (!this.fs.exists(path.join(worktree.path, SETTINGS_JSON_PATH))) this.generateSettingsJson(worktree);
-  }
-
-  private generateLaunchJson(worktree: Worktree): void {
-    const template = this.config.get().debugTemplate;
-    if (!template.name) template.name = `Stack: Debug (${worktree.branch})`;
-
-    const config = JSON.parse(
-      JSON.stringify(template)
-        .replace(/"\{\{PORT\}\}"/g, String(worktree.debugPort))
-        .replace(/\{\{WORKTREE_PATH\}\}/g, worktree.path)
-        .replace(/\{\{PORT\}\}/g, String(worktree.debugPort)),
-    );
-
-    const launchJson = { version: '0.2.0', configurations: [config] };
-    const launchPath = path.join(worktree.path, LAUNCH_JSON_PATH);
-    this.fs.mkdir(path.dirname(launchPath));
-    this.fs.writeFile(launchPath, JSON.stringify(launchJson, null, 4));
-  }
-
-  private generateSettingsJson(worktree: Worktree): void {
-    const settings = worktreeSettings((relative) => this.fs.exists(path.join(worktree.path, relative)));
-    if (!settings) return;
-    const settingsPath = path.join(worktree.path, SETTINGS_JSON_PATH);
-    this.fs.mkdir(path.dirname(settingsPath));
-    this.fs.writeFile(settingsPath, JSON.stringify(settings, null, 4));
-  }
-
 }

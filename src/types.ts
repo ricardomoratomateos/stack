@@ -2,42 +2,11 @@ import type { ProviderId } from './ports/IAgentProvider';
 
 export type AgentSessionState = 'active' | 'waiting' | 'permission' | 'idle' | 'terminated';
 
-/** The PR's checks, summed up: any failure fails, else anything unfinished is pending. */
-export type PrCi = 'pass' | 'fail' | 'pending';
-
-export type PrStatus = {
-  number: number;
-  state: 'OPEN' | 'CLOSED' | 'MERGED';
-  url: string;
-  isDraft?: boolean;
-  /** GitHub's own verdict; absent when the repository requires no review. */
-  reviewDecision?: 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED';
-  /** Absent when the PR has no checks at all. */
-  ci?: PrCi;
-} | null;
-
 export interface GitStatus {
   hasChanges: boolean;
   staged: number;
   unstaged: number;
   untracked: number;
-  /** Against the branch's own upstream: "have I pushed?". */
-  ahead: number;
-  behind: number;
-  /**
-   * The branch has an upstream to be ahead or behind of. Only ever present,
-   * and then true: without one, ahead/behind are 0 and mean nothing — every
-   * commit on the branch is local.
-   */
-  upstream?: true;
-  /**
-   * Against the branch this worktree was cut from: "should I rebase?".
-   *
-   * A different question from ahead/behind, and the one that actually goes
-   * stale while you work. Absent when there is no base to compare to — the main
-   * worktree, a base branch that no longer exists, a comparison git refused.
-   */
-  base?: BaseDrift;
   /**
    * Lines added and removed since the branch left its base (the main worktree:
    * since HEAD), uncommitted tracked changes included. Absent when there is
@@ -46,22 +15,12 @@ export interface GitStatus {
   lines?: { added: number; removed: number };
 }
 
-export interface BaseDrift {
-  /** What was compared against, e.g. "origin/develop" or "develop". */
-  ref: string;
-  /** Commits on this branch that the base does not have. */
-  ahead: number;
-  /** Commits on the base that this branch does not have. */
-  behind: number;
-}
-
 export interface Worktree {
   id: string;
   branch: string;
   alias?: string;
   path: string;
   repoRoot: string;
-  debugPort: number;
   createdAt: number;
   isMain?: boolean;
   /**
@@ -75,7 +34,7 @@ export interface Worktree {
    * Branch this worktree was cut from, recorded at creation.
    *
    * Kept per worktree rather than read from the setting at display time: a
-   * worktree started off release/3.2 must keep measuring against release/3.2
+   * worktree started off release/3.2 must keep being compared with release/3.2
    * after the setting moves on. Absent for worktrees adopted from git, which
    * carry no record of it — those fall back to the configured base.
    */
@@ -99,25 +58,8 @@ export interface WorktreeTicket {
   title?: string;
 }
 
-export interface WorktreeState {
-  worktree: Worktree;
-  agent: AgentSessionState;
-  git: GitStatus;
-  pr?: PrStatus | null;
-}
-
 export interface WorktreeStoreData {
   worktrees: Worktree[];
-  portRegistry: Record<string, number>;
-}
-
-export interface DebugTemplate {
-  type: string;
-  request: string;
-  name: string;
-  port: string | number;
-  pathMappings?: Record<string, string>;
-  [key: string]: unknown;
 }
 
 export interface StackConfig {
@@ -149,8 +91,6 @@ export interface StackConfig {
   opencodeCommand: string;
   /** Toast when an agent finishes or asks for permission while unattended. */
   notifyOnAttention: boolean;
-  /** Hide non-active worktree folders from search and Quick Open. */
-  scopeSearchToActiveWorktree: boolean;
   /**
    * Clean-slate switching: close the other worktrees' editor tabs and viewer
    * terminals so only the active worktree is on screen. Off (the default) makes
@@ -164,14 +104,6 @@ export interface StackConfig {
    * switches between them (`single`, the behaviour before tabs).
    */
   sessionTabs: 'perSession' | 'single';
-  /** Env var names to allocate a per-worktree port for (e.g. HTTP_PORT); DEBUG_PORT is the debug port itself. */
-  ports: string[];
-  /** First port of the named-port range (kept clear of the debug range). */
-  basePort: number;
-  /** Ports owned by each worktree = one contiguous block of this size. */
-  portStride: number;
-  debugBasePort: number;
-  debugTemplate: DebugTemplate;
   // ── The Code tab (see src/code/config.ts). The project's: ──
   phpNavigation: boolean;
   phpIndexDirs: string[];

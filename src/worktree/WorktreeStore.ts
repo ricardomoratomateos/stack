@@ -3,6 +3,13 @@ import { Worktree, WorktreeStoreData } from '../types';
 import { STORE_KEY } from '../constants';
 import { IWorktreeRepository } from '../ports/IWorktreeRepository';
 
+/**
+ * Fields older versions kept on each worktree for features since removed: the
+ * debug port (and the per-worktree ports derived from it). Dropped on load, so
+ * the next save writes the store without them.
+ */
+const RETIRED_WORKTREE_KEYS = ['debugPort'] as const;
+
 export class WorktreeStore implements IWorktreeRepository {
   private ctx: { globalState: KeyValueStore };
 
@@ -10,11 +17,20 @@ export class WorktreeStore implements IWorktreeRepository {
     this.ctx = ctx;
   }
 
+  /**
+   * The stored worktrees, shed of what older versions kept beside them — the
+   * retired per-worktree fields above and the store's old `portRegistry`.
+   */
   private load(): WorktreeStoreData {
-    return this.ctx.globalState.get<WorktreeStoreData>(STORE_KEY, {
-      worktrees: [],
-      portRegistry: {},
-    });
+    const stored = this.ctx.globalState.get<Partial<WorktreeStoreData>>(STORE_KEY, { worktrees: [] });
+    const worktrees = Array.isArray(stored?.worktrees) ? stored.worktrees : [];
+    return {
+      worktrees: worktrees.map((wt) => {
+        const copy = { ...wt } as Worktree & Record<string, unknown>;
+        for (const key of RETIRED_WORKTREE_KEYS) delete copy[key];
+        return copy;
+      }),
+    };
   }
 
   private async save(data: WorktreeStoreData): Promise<void> {
@@ -32,21 +48,13 @@ export class WorktreeStore implements IWorktreeRepository {
   async add(worktree: Worktree): Promise<void> {
     const data = this.load();
     data.worktrees.push(worktree);
-    data.portRegistry[worktree.path] = worktree.debugPort;
     await this.save(data);
   }
 
   async patch(id: string, fields: Partial<Worktree>): Promise<void> {
     const data = this.load();
     const wt = data.worktrees.find((w) => w.id === id);
-    if (wt) {
-      Object.assign(wt, fields);
-      // Keep the stored registry honest for anyone reading the blob directly.
-      // It is no longer what the allocator consults (see getPortRegistry), but
-      // a copy that silently disagreed with the worktrees is exactly how a
-      // reassigned port ended up unreserved.
-      data.portRegistry[wt.path] = wt.debugPort;
-    }
+    if (wt) Object.assign(wt, fields);
     await this.save(data);
   }
 
@@ -61,35 +69,16 @@ export class WorktreeStore implements IWorktreeRepository {
 
   async remove(id: string): Promise<void> {
     const data = this.load();
-    const worktree = data.worktrees.find((w) => w.id === id);
-    if (worktree) {
-      delete data.portRegistry[worktree.path];
-    }
     data.worktrees = data.worktrees.filter((w) => w.id !== id);
     await this.save(data);
-  }
-
-  /**
-   * Derived from the worktrees, not read from the stored copy.
-   *
-   * The allocator builds its "taken" set from this, and the stored registry was
-   * only written by add() and remove() — never by patch(). So reassigning a
-   * port (ensureFreePorts) left the NEW port unreserved and the OLD one
-   * reserved forever, which is precisely the collision the port work set out to
-   * remove. Deriving makes the two impossible to disagree.
-   */
-  getPortRegistry(): Record<string, number> {
-    return Object.fromEntries(this.load().worktrees.map((w) => [w.path, w.debugPort]));
   }
 
   async pruneNonExistent(): Promise<Worktree[]> {
     const fs = await import('node:fs');
     const data = this.load();
     const alive = data.worktrees.filter((w) => fs.existsSync(w.path));
-    const removed = data.worktrees.filter((w) => !fs.existsSync(w.path));
-    if (removed.length > 0) {
+    if (alive.length < data.worktrees.length) {
       data.worktrees = alive;
-      removed.forEach((w) => delete data.portRegistry[w.path]);
       await this.save(data);
     }
     return alive;

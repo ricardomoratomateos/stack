@@ -1,6 +1,6 @@
 import React from 'react';
 import { send } from '../vscode';
-import type { Described, DescribedPr } from '../derive';
+import type { Described } from '../derive';
 import type { TicketItem } from '../types';
 
 function changesText(d: Described): string {
@@ -13,106 +13,16 @@ function changesText(d: Described): string {
   return parts.length > 0 ? parts.join(' · ') : 'clean';
 }
 
-/**
- * What the selected worktree is sitting on: drift against its base, local
- * changes, the ports it owns and its PR. The sidebar shows this for the
- * selected worktree.
- */
+/** The selected worktree's local changes. The sidebar shows this for the selected worktree. */
 export function Details({ d }: { d: Described }) {
-  const wt = d.wt;
-
   return (
     <dl className="fm-det" aria-label={`Details of ${d.name}`}>
-      <dt>Base</dt>
-      <dd>
-        {wt.git.base ? (
-          <button
-            type="button"
-            className="fm-link"
-            data-tone={d.base.tone}
-            title={d.base.title}
-            onClick={() => send({ type: 'refreshDrift', worktreeId: wt.id })}
-          >
-            {d.base.text}
-          </button>
-        ) : (
-          <span data-tone="muted">{d.base.text}</span>
-        )}
-      </dd>
-
       <dt>Changes</dt>
       <dd>
-        <span data-tone={wt.git.hasChanges ? 'plain' : 'muted'}>{changesText(d)}</span>
-        {wt.git.ahead > 0 && <span className="fm-chip-text" data-tone="ok" title="Commits not pushed yet">↑{wt.git.ahead}</span>}
-        {wt.git.behind > 0 && <span className="fm-chip-text" data-tone="bad" title="Commits upstream you do not have">↓{wt.git.behind}</span>}
+        <span data-tone={d.wt.git.hasChanges ? 'plain' : 'muted'}>{changesText(d)}</span>
       </dd>
-
-      {d.ports.length > 0 && (
-        <>
-          <dt>Ports</dt>
-          <dd className="fm-ports">
-            {d.ports.map((p) => p.openable ? (
-              <button
-                key={p.label}
-                type="button"
-                className="fm-port"
-                title={`Open http://localhost:${p.port}`}
-                onClick={() => send({ type: 'openPort', port: p.port })}
-              >
-                <span className="fm-port-label">{p.label}</span> :{p.port}
-              </button>
-            ) : (
-              // The debug port: a debugger listener answers nothing a browser can
-              // render, so there is no click to offer.
-              <span key={p.label} className="fm-port" data-static title="Debug port">
-                <span className="fm-port-label">{p.label}</span> :{p.port}
-              </span>
-            ))}
-          </dd>
-        </>
-      )}
-
-      {d.pr && (
-        <>
-          <dt>PR</dt>
-          <dd><PrBadge worktreeId={wt.id} pr={d.pr} /></dd>
-        </>
-      )}
     </dl>
   );
-}
-
-const CI_TEXT: Record<NonNullable<DescribedPr['ci']>, string> = {
-  pass: 'checks passed',
-  fail: 'checks failed',
-  pending: 'checks running',
-};
-
-/**
- * The PR as one clickable token — "#42 open", with a dot for its checks and a
- * mark when a reviewer asked for changes — that opens it on GitHub.
- */
-export function PrBadge({ worktreeId, pr }: { worktreeId: string; pr: DescribedPr }) {
-  const label = pr.draft ? 'draft' : pr.state;
-  const title = [
-    `Pull request #${pr.number} is ${label}`,
-    ...(pr.ci ? [CI_TEXT[pr.ci]] : []),
-    ...(pr.changesRequested ? ['changes requested'] : []),
-  ].join(' · ') + ' — open on GitHub';
-  const open = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    send({ type: 'openPr', worktreeId });
-  };
-  const body = (
-    <>
-      {pr.ci && <span className="fm-pr-ci" data-ci={pr.ci} aria-hidden="true" />}
-      <span className="fm-pr-num">#{pr.number}</span>
-      <span className="fm-pr-state">{label}</span>
-      {pr.changesRequested && <i className="codicon codicon-request-changes fm-pr-mark" aria-hidden="true" />}
-    </>
-  );
-  const attrs = { className: 'fm-pr', 'data-state': pr.state, 'data-draft': pr.draft || undefined, title, onClick: open };
-  return <button type="button" {...attrs} aria-label={title}>{body}</button>;
 }
 
 /**

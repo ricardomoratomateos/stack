@@ -1,22 +1,6 @@
-import type { StackConfig, DebugTemplate } from '../types';
+import type { StackConfig } from '../types';
 import type { RepoScopedKey } from './RepoConfig';
 import { CODE_DEFAULTS } from '../code/config';
-
-/**
- * The launch configuration written into each worktree, with its own port in it.
- *
- * Node because the default has to be something and node is the likeliest, not
- * because any of this knows what node is: the template is passed through whole,
- * so a repo that debugs PHP, Python or Go replaces it with its own and every
- * part downstream — the port slot, the collision probe, the regenerated
- * launch.json — behaves identically. The README carries an Xdebug example.
- */
-export const DEBUG_TEMPLATE_DEFAULT: DebugTemplate = {
-  type: 'node',
-  request: 'attach',
-  name: 'Stack: Debug',
-  port: '{{PORT}}',
-};
 
 /**
  * What a repository gets when neither its file nor the user says otherwise.
@@ -29,10 +13,5 @@ export const PROJECT_DEFAULTS: Pick<StackConfig, RepoScopedKey> = {
   setupScript: '',
   setupInTerminal: false,
   teardownScript: '',
-  ports: [],
-  basePort: 20000,
-  portStride: 100,
-  debugBasePort: 9898,
-  debugTemplate: DEBUG_TEMPLATE_DEFAULT,
   ...CODE_DEFAULTS,
 };

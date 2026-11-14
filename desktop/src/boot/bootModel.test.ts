@@ -5,7 +5,7 @@ import type { Snapshot } from '../stackd/api';
 const wt = (id: string, extra: Record<string, unknown> = {}) => ({
   id, branch: id, path: `/r/${id}`, isMain: false, deleting: false, agent: 'idle', agentCount: 0, terminalCount: 0,
   sessions: [], ports: [], pr: null, since: 0,
-  git: { hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 }, ...extra,
+  git: { hasChanges: false, staged: 0, unstaged: 0, untracked: 0 }, ...extra,
 });
 const snap = (worktrees: unknown[]): Snapshot => ({
   seq: 1, tmux: {}, repos: [{ repoRoot: '/Users/me/big-app', state: { worktrees } as never }],

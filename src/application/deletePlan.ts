@@ -1,4 +1,4 @@
-import type { GitStatus, PrStatus } from '../webview/types';
+import type { WorkAtRisk } from '../ports/IGitPort';
 
 /** The words of the delete confirm and the buttons that go with them. `keepBranch` indexes `choices`. */
 export interface DeletePlan {
@@ -9,8 +9,8 @@ export interface DeletePlan {
 
 /**
  * What deleting a worktree would throw away, in the confirm's own words, and
- * the buttons to match — from what Stack already knows: the git status, the
- * drift against the base, the PR.
+ * the buttons to match — from its git state read at the moment the delete is
+ * asked for (IGitPort.workAtRisk), never from numbers minutes old.
  *
  * The confirm used to say nothing at all, over a `git worktree remove
  * --force` that discards uncommitted work and a `git branch -D` that
@@ -18,42 +18,35 @@ export interface DeletePlan {
  * option counts the commits it would take with it. Those are the ones that
  * exist nowhere else: with an upstream, the unpushed ones; without one (never
  * pushed, or deleted on the remote after a merge), everything the branch
- * added over its base — unless its PR was merged, which carried the work.
+ * added over its base.
  *
- * A merged PR with nothing uncommitted and nothing unpushed is the end of
- * a task, not a risk, and the primary button says so: "Clean up", worktree
- * and branch both.
+ * `undefined` is git not answering, which is said as such: "could not check"
+ * must not read as "nothing to lose".
  *
  * `keepBranch` is the index in `choices` of the one that keeps the branch.
  */
-export function planDelete(git: GitStatus, pr: PrStatus | null | undefined): DeletePlan {
-  const merged = pr?.state === 'MERGED';
-  const beyondBase = git.base?.ahead ?? 0;
-  const unsaved = git.upstream ? git.ahead : merged ? 0 : beyondBase;
-  const commits = (n: number) => `${n} commit${n === 1 ? '' : 's'}`;
-
-  const lines: string[] = [];
-  if (git.hasChanges) {
-    const parts = [
-      git.staged > 0 ? `${git.staged} staged` : '',
-      git.unstaged > 0 ? `${git.unstaged} unstaged` : '',
-      git.untracked > 0 ? `${git.untracked} untracked` : '',
-    ].filter(Boolean);
-    lines.push(`Uncommitted changes (${parts.join(', ')}) are lost with the worktree.`);
-  }
-  if (git.upstream && git.ahead > 0) lines.push(`${commits(git.ahead)} not pushed.`);
-  if (git.base && beyondBase > 0) {
-    lines.push(`${commits(beyondBase)} not in ${git.base.ref}${git.upstream ? '' : ', and the branch was never pushed'}.`);
-  }
-  if (pr) lines.push(`PR #${pr.number} is ${pr.state === 'OPEN' && pr.isDraft ? 'a draft' : pr.state.toLowerCase()}.`);
-  if (unsaved > 0) lines.push(`Deleting the branch too discards ${unsaved === 1 ? 'that commit' : `those ${commits(unsaved)}`}; "Delete" keeps it.`);
-
-  if (merged && !git.hasChanges && unsaved === 0) {
+export function planDelete(work: WorkAtRisk | undefined): DeletePlan {
+  if (!work) {
     return {
-      detail: `${lines.join('\n')}\nNothing here is uncommitted or unpushed: clean up removes the worktree and its branch.`,
-      choices: ['Clean up', 'Delete, keep branch'],
-      keepBranch: 1,
+      detail: 'Could not check for uncommitted changes or unpushed commits.',
+      choices: ['Delete', 'Delete + branch'],
+      keepBranch: 0,
     };
+  }
+  const commits = (n: number) => `${n} commit${n === 1 ? '' : 's'}`;
+  const lines: string[] = [];
+  const parts = [
+    work.staged > 0 ? `${work.staged} staged` : '',
+    work.unstaged > 0 ? `${work.unstaged} unstaged` : '',
+    work.untracked > 0 ? `${work.untracked} untracked` : '',
+  ].filter(Boolean);
+  if (parts.length > 0) lines.push(`Uncommitted changes (${parts.join(', ')}) are lost with the worktree.`);
+  const unsaved = work.unpushed;
+  if (unsaved > 0) {
+    lines.push(work.upstream
+      ? `${commits(unsaved)} not pushed.`
+      : `${commits(unsaved)} not in ${work.against ?? 'the base branch'}, and the branch was never pushed.`);
+    lines.push(`Deleting the branch too discards ${unsaved === 1 ? 'that commit' : `those ${commits(unsaved)}`}; "Delete" keeps it.`);
   }
   if (lines.length === 0) lines.push('No uncommitted changes and no unpushed commits.');
   return {
@@ -62,4 +55,3 @@ export function planDelete(git: GitStatus, pr: PrStatus | null | undefined): Del
     keepBranch: 0,
   };
 }
-

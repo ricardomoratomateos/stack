@@ -31,7 +31,7 @@ export const TOOLS: ToolDef[] = [
     title: 'Stack: status',
     description:
       'Every task (git worktree) in Stack: id, name, branch, base, group (needs = an agent is asking you, review = done and ready for review, working, idle, missing), '
-      + 'its sessions with state and any pending question, diff (+added −removed), PR with CI, ports, linked ticket and review summary. Pass task_id for one task. '
+      + 'its sessions with state and any pending question, diff (+added −removed), linked ticket and review summary. Pass task_id for one task. '
       + 'Use it whenever the user asks how their agents or tasks are doing, who needs them, what is ready to review, or what an agent is working on '
       + '("¿cómo van mis agentes?", "¿alguno me necesita?", "qué hay para revisar", "how are my agents doing").',
     inputSchema: { task_id: taskId.optional(), repo },
@@ -73,8 +73,8 @@ export const TOOLS: ToolDef[] = [
       'Tear down a task completely: kills its agent session(s) and tmux windows, runs its teardown script if any, '
       + 'removes the git worktree, and — only if `delete_branch` is true — deletes its local branch too (never touches the remote). '
       + 'Irreversible: uncommitted changes are always lost with the worktree, and with `delete_branch` so are any commits that exist only on that branch. '
-      + 'Check stack_status first (diff, PR state) before setting `delete_branch` on one that was never merged or pushed. Refuses the main worktree. '
-      + 'Use it to clean up finished or abandoned tasks — "borra esta tarea", "limpia los worktrees ya mergeados", "quita el de X", "elimina todos los que ya tienen PR mergeada".',
+      + 'Check stack_status first (diff), and set `delete_branch` only when the user says the work is merged or no longer wanted. Refuses the main worktree. '
+      + 'Use it to clean up finished or abandoned tasks — "borra esta tarea", "limpia los worktrees ya mergeados", "quita el de X".',
     inputSchema: {
       task_id: taskId,
       delete_branch: z.boolean().optional()
@@ -130,7 +130,7 @@ export const TOOLS: ToolDef[] = [
     name: 'stack_env',
     title: 'Stack: task environment',
     description:
-      'For the agent working in a Stack task: its worktree path, branch and base, its ports by name with URLs, '
+      'For the agent working in a Stack task: its worktree path, branch and base, '
       + 'the setup/teardown scripts, and the test command when the repository has one. task_id defaults to this agent\'s own task.',
     inputSchema: { task_id: taskId.optional(), repo },
     annotations: { readOnlyHint: true, openWorldHint: false },
@@ -153,4 +153,4 @@ export const INSTRUCTIONS =
   + '("¿cómo van mis agentes?", "crea una tarea para AS-1234", "dile al de X que…") to them, and answer in the user\'s language. '
   + 'Typical manager loop: read the ticket elsewhere (Jira, Linear…), stack_create_task with the ticket, stack_wait on the task ids, '
   + 'then stack_status / stack_read_agent to see where they are and stack_send_to_agent to answer questions or give feedback. '
-  + 'Workers inside a task: stack_env for ports, logs and test commands; stack_request_review when done.';
+  + 'Workers inside a task: stack_env for its paths, scripts and test command; stack_request_review when done.';

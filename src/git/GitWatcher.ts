@@ -2,27 +2,22 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import { BaseDrift, GitStatus } from '../types';
+import { GitStatus } from '../types';
 import { gitEnv } from './gitEnv';
 
 const execAsync = promisify(exec);
 
 type ChangeHandler = (worktreePath: string, status: GitStatus) => void;
 
-export const DEFAULT_STATUS: GitStatus = { hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 };
+export const DEFAULT_STATUS: GitStatus = { hasChanges: false, staged: 0, unstaged: 0, untracked: 0 };
 
 export function parseStatus(porcelainOutput: string): { staged: number; unstaged: number; untracked: number; hasChanges: boolean } {
-  const lines = porcelainOutput.trim().split('\n').filter(Boolean);
+  // Not trimmed: the first line's leading space is its status (' M' is unstaged, not staged).
+  const lines = porcelainOutput.split('\n').filter(Boolean);
   const staged = lines.filter((l) => l[0] !== ' ' && l[0] !== '?').length;
   const unstaged = lines.filter((l) => l[1] !== ' ' && l[1] !== '?').length;
   const untracked = lines.filter((l) => l[0] === '?' && l[1] === '?').length;
   return { staged, unstaged, untracked, hasChanges: lines.length > 0 };
-}
-
-export function parseAheadBehind(revListOutput: string): { ahead: number; behind: number } {
-  const [a, b] = revListOutput.trim().split('\t').map(Number);
-  // `a` can never be undefined: String.split() always yields >= 1 element, so index 0 exists (possibly NaN, which `??` keeps)
-  return { ahead: a ?? /* v8 ignore next */ 0, behind: b ?? 0 };
 }
 
 export function shouldIgnore(filename: string): boolean {
@@ -60,34 +55,24 @@ export function isGitIndexChange(filename: string): boolean {
 export type FetchStatusFn = (worktreePath: string, baseBranch?: string) => Promise<GitStatus>;
 
 /**
- * How far this branch has drifted from the branch it was cut from.
+ * Where the branch left its base: the merge base of HEAD and `origin/<base>`,
+ * else the local `<base>`. The remote ref first, because the local one is
+ * usually stale — nobody checks out develop just to pull it.
  *
- * Prefers `origin/<base>` over the local `<base>`, because the local one is
- * itself usually stale — nobody checks out develop just to pull it — and the
- * remote ref is what the rest of the team is working from.
- *
- * **No fetch of our own.** This runs on a filesystem watch, so fetching here
- * would put a network round trip behind every file save, on repositories whose
- * remotes may be slow or want credentials. The remote ref is refreshed by
- * whatever the user already has doing that — VS Code's own `git.autofetch`, a
- * terminal `git pull`, or the explicit refresh on the card — and the ref being
- * compared is reported alongside the numbers so the answer is never presented as
- * fresher than it is.
+ * No fetch: this runs on a filesystem watch, and a network round trip behind
+ * every save is not something to inflict on anyone. Undefined when neither ref
+ * resolves here.
  */
-export async function baseDrift(
+export async function mergeBase(
   worktreePath: string,
   baseBranch: string,
   run: (cmd: string) => Promise<string> = async (cmd) =>
     (await execAsync(cmd, { cwd: worktreePath, env: gitEnv() })).stdout,
-): Promise<BaseDrift | undefined> {
+): Promise<string | undefined> {
   for (const ref of [`origin/${baseBranch}`, baseBranch]) {
     try {
-      // --count with --left-right gives "<ahead>\t<behind>" in one call; three
-      // dots, so a merge base is found rather than a raw range.
-      const out = await run(`git rev-list --left-right --count HEAD...${quoteRef(ref)}`);
-      const { ahead, behind } = parseAheadBehind(out);
-      if (Number.isNaN(ahead) || Number.isNaN(behind)) continue;
-      return { ref, ahead, behind };
+      const sha = (await run(`git merge-base HEAD ${quoteRef(ref)}`)).trim();
+      if (/^[0-9a-f]{40,64}$/.test(sha)) return sha;
     } catch {
       // Ref does not exist here — try the local branch, then give up.
     }
@@ -114,26 +99,28 @@ export function parseNumstat(output: string): { added: number; removed: number }
  * Lines added and removed since the branch left its base, uncommitted tracked
  * changes included — the "+40 −9" on a row. Measured from the merge base rather
  * than the base's tip, so commits the base gained since do not show up as work
- * this branch deleted. Without a base (the main checkout) it is the working
- * tree against HEAD. Untracked files are not counted: git has no diff for them.
+ * this branch deleted. Without a base (the main checkout, or a base that does
+ * not resolve) it is the working tree against HEAD. Untracked files are not
+ * counted: git has no diff for them.
+ *
+ * `workingTree` false (a clean tree) compares commits only, `<merge base>
+ * HEAD`: a diff against the working tree refreshes the index, even with
+ * optional locks off, and a clean tree has nothing there to count.
  *
  * Undefined when there is nothing to count or git could not say; the sidebar
  * falls back to the number of files then.
  */
 export async function diffLines(
   worktreePath: string,
-  base: BaseDrift | undefined,
+  baseBranch: string | undefined,
+  workingTree = true,
   run: (cmd: string) => Promise<string> = async (cmd) =>
     (await execAsync(cmd, { cwd: worktreePath, env: gitEnv(), maxBuffer: 16 * 1024 * 1024 })).stdout,
 ): Promise<{ added: number; removed: number } | undefined> {
   try {
-    let from = 'HEAD';
-    if (base) {
-      const mergeBase = (await run(`git merge-base HEAD ${quoteRef(base.ref)}`)).trim();
-      if (!/^[0-9a-f]{40,64}$/.test(mergeBase)) return undefined;
-      from = mergeBase;
-    }
-    const lines = parseNumstat(await run(`git diff --numstat ${from}`));
+    const from = (baseBranch ? await mergeBase(worktreePath, baseBranch, run) : undefined) ?? 'HEAD';
+    if (!workingTree && from === 'HEAD') return undefined;
+    const lines = parseNumstat(await run(`git diff --numstat ${from}${workingTree ? '' : ' HEAD'}`));
     return lines.added + lines.removed > 0 ? lines : undefined;
   } catch {
     return undefined;
@@ -154,32 +141,11 @@ function quoteRef(ref: string): string {
 
 export async function fetchStatus(worktreePath: string, baseBranch?: string): Promise<GitStatus> {
   try {
-    // status, the upstream ahead/behind count, and the base's ahead/behind
-    // count are three independent reads — none needs another's result — so
-    // they run concurrently instead of one git subprocess after another.
-    // Only diffLines() below genuinely depends on what comes out of these.
-    const [{ stdout: statusOutput }, upstreamResult, base] = await Promise.all([
-      execAsync('git status --porcelain', { cwd: worktreePath, env: gitEnv() }),
-      execAsync('git rev-list --left-right --count HEAD...@{upstream}', { cwd: worktreePath, env: gitEnv() })
-        .catch(() => undefined), // no upstream or detached HEAD
-      baseBranch ? baseDrift(worktreePath, baseBranch) : Promise.resolve(undefined),
-    ]);
-    const { staged, unstaged, untracked, hasChanges } = parseStatus(statusOutput);
-
-    let ahead = 0;
-    let behind = 0;
-    const upstream = upstreamResult !== undefined;
-    if (upstreamResult) ({ ahead, behind } = parseAheadBehind(upstreamResult.stdout));
-
-    // Only worth a process when there is something to count.
-    const lines = hasChanges || (base?.ahead ?? 0) > 0 ? await diffLines(worktreePath, base) : undefined;
-
-    return {
-      hasChanges, staged, unstaged, untracked, ahead, behind,
-      ...(upstream ? { upstream: true as const } : {}),
-      base,
-      ...(lines ? { lines } : {}),
-    };
+    const { stdout } = await execAsync('git status --porcelain', { cwd: worktreePath, env: gitEnv() });
+    const { staged, unstaged, untracked, hasChanges } = parseStatus(stdout);
+    // A clean tree has nothing to count, unless it carries commits beyond a base.
+    const lines = hasChanges || baseBranch ? await diffLines(worktreePath, baseBranch, hasChanges) : undefined;
+    return { hasChanges, staged, unstaged, untracked, ...(lines ? { lines } : {}) };
   } catch {
     return DEFAULT_STATUS;
   }
@@ -200,7 +166,7 @@ export class GitWatcher {
   private readTokens = new Map<string, object>();
 
   /**
-   * Base branch to measure each worktree against, by path.
+   * Base branch each worktree's lines are counted from, by path.
    *
    * Held here rather than passed to refresh() because refresh is also reached
    * from a debounced watcher callback that has nothing but the path.
@@ -224,14 +190,14 @@ export class GitWatcher {
   ) {}
 
   /**
-   * @param baseBranch Branch to report drift against. Omit for the main
-   * worktree, or when the worktree is itself on the base — comparing a branch
-   * to itself is a row of zeroes nobody needs.
+   * @param baseBranch Branch the worktree's lines are counted from. Omit for
+   * the main worktree, or when the worktree is itself on the base: its lines
+   * are then its uncommitted changes.
    */
   watch(worktreePath: string, baseBranch?: string): void {
     // Recorded before the early return: an already-watched worktree may have
     // been reconciled with a different base since, and dropping it here would
-    // leave the drift measured against the old one until the next reload.
+    // leave its lines counted from the old one until the next reload.
     if (baseBranch) this.bases.set(worktreePath, baseBranch);
     else this.bases.delete(worktreePath);
 
@@ -383,9 +349,8 @@ export class GitWatcher {
   /**
    * Recomputes now and resolves when the cache holds the answer.
    *
-   * The awaitable half of refresh(), for the explicit "check again" on the card:
-   * the caller has just fetched and needs the new numbers on screen, not on the
-   * next filesystem event.
+   * The awaitable half of refresh(), for a caller that needs the new numbers
+   * now rather than on the next filesystem event (stackd's `refreshGit`).
    *
    * Handlers hear about it only when the status actually changed: each one
    * rebuilds and re-sends the whole sidebar, and most refreshes — a save that

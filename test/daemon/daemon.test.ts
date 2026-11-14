@@ -16,8 +16,7 @@ describe('NodeConfig', () => {
     const c = new NodeConfig(() => dir, path.join(dir, 'none.json')).get();
     expect(c.defaultProvider).toBe('claude');
     expect(c.worktreesDirectory).toBe('.worktrees');
-    expect(c.basePort).toBe(20000);
-    expect(c.ports).toEqual([]);
+    expect(c.defaultBaseBranch).toBe('develop');
   });
 
   it('layers user settings over the repo config over defaults', () => {
@@ -45,23 +44,31 @@ describe('NodeConfig', () => {
     const settings = path.join(dir, 'settings.json');
     fs.writeFileSync(settings, '{nope');
     expect(new NodeConfig(() => undefined, settings).get().defaultProvider).toBe('claude');
-    fs.writeFileSync(settings, JSON.stringify({ defaultProvider: 'bogus', debugBasePort: 'x' }));
+    fs.writeFileSync(settings, JSON.stringify({ defaultProvider: 'bogus', setupInTerminal: 'x' }));
     const c = new NodeConfig(() => undefined, settings).get();
     expect(c.defaultProvider).toBe('claude');
-    expect(c.debugBasePort).toBe(9898);
+    expect(c.setupInTerminal).toBe(false);
   });
 
-  it('takes named ports from the top level, or from a retired docker block, without choking on its compose keys', () => {
+  it('loads settings and a repo file of an older version: the keys of removed features are ignored', () => {
+    // Per-worktree ports, the debug port and its launch.json template, search
+    // scoping and the docker block: all gone, and none of them may stop loading.
     fs.mkdirSync(path.join(dir, '.stack'));
-    fs.writeFileSync(path.join(dir, '.stack', 'config.json'), JSON.stringify({ version: 1, docker: { composeFile: 'c.yml', ports: ['HTTP_PORT'], basePort: 31000 } }));
+    fs.writeFileSync(path.join(dir, '.stack', 'config.json'), JSON.stringify({
+      version: 1, defaultBaseBranch: 'main', ports: ['HTTP_PORT'], basePort: 31000, portStride: 20, debugBasePort: 9001,
+      debugTemplate: { type: 'php', request: 'launch' }, docker: { composeFile: 'c.yml', ports: ['DB_PORT'] },
+    }));
     const settings = path.join(dir, 'settings.json');
-    fs.writeFileSync(settings, JSON.stringify({ 'stack.docker': { overrideFile: 'o.yml', portStride: 7 } }));
-    let c = new NodeConfig(() => dir, settings).get();
-    expect(c).toMatchObject({ ports: ['HTTP_PORT'], basePort: 31000, portStride: 7 });
-    expect(c).not.toHaveProperty('docker');
-    fs.writeFileSync(settings, JSON.stringify({ ports: ['API_PORT'], portStride: 3, docker: { portStride: 7 } }));
-    c = new NodeConfig(() => dir, settings).get();
-    expect(c).toMatchObject({ ports: ['API_PORT'], basePort: 31000, portStride: 3 });
+    fs.writeFileSync(settings, JSON.stringify({
+      'stack.ports': ['API_PORT'], basePort: 1, portStride: 3, debugBasePort: 9898, debugTemplate: {},
+      scopeSearchToActiveWorktree: false, 'stack.docker': { portStride: 7 }, claudeCommand: 'c',
+    }));
+    const c = new NodeConfig(() => dir, settings).get();
+    expect(c.defaultBaseBranch).toBe('main');
+    expect(c.claudeCommand).toBe('c');
+    for (const key of ['ports', 'basePort', 'portStride', 'debugBasePort', 'debugTemplate', 'scopeSearchToActiveWorktree', 'docker']) {
+      expect(c).not.toHaveProperty(key);
+    }
   });
 });
 
@@ -91,6 +98,7 @@ describe('collectStatus', () => {
   } as unknown as ISessionManager);
 
   it('lists this repo\'s worktrees only, main first, with sessions and missing flag', async () => {
+    // As an older version wrote the store: a debug port per worktree, and a port registry.
     const store = new MemoryStore({
       'stack.store': {
         worktrees: [wt('a'), wt('main', { isMain: true, path: '/r' }), { ...wt('other'), repoRoot: '/elsewhere' }],

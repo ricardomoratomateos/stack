@@ -6,7 +6,7 @@ import type { Snapshot } from './stackd/api';
 const session = (o: Partial<SessionItem> & { index: number }): SessionItem => ({ name: 'claude', kind: 'agent', provider: 'claude', state: 'idle', ...o });
 const wt = (id: string, sessions: SessionItem[] = [], o: Partial<WorktreeItem> = {}): WorktreeItem => ({
   id, branch: id, path: `/r/${id}`, isMain: false, deleting: false, agent: 'idle', agentCount: 0, terminalCount: 0, sessions,
-  git: { hasChanges: false, staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 }, ports: [], ...o,
+  git: { hasChanges: false, staged: 0, unstaged: 0, untracked: 0 }, ...o,
 });
 const snap = (worktrees: WorktreeItem[], controlSession?: WorktreeItem): Snapshot => ({
   seq: 1, tmux: {}, repos: [{ repoRoot: '/home/me/shop', state: { worktrees, controlSession } as StackState }],

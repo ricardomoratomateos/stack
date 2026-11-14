@@ -32,9 +32,6 @@ export function worktreeActions(wt: WorktreeItem, browse = false): Action[] {
   if (!wt.isMain) {
     actions.push({ id: 'setup', icon: 'zap', label: 'Run setup script', run: () => send({ type: 'initWorktree', worktreeId: wt.id }) });
   }
-  if (wt.git.base) {
-    actions.push({ id: 'drift', icon: 'refresh', label: 'Fetch the base branch and check drift', run: () => send({ type: 'refreshDrift', worktreeId: wt.id }) });
-  }
   actions.push(
     { id: 'rename', icon: 'edit', label: 'Rename / set title', run: () => send({ type: 'renameWorktree', worktreeId: wt.id }) },
     { id: 'delete', icon: 'trash', label: 'Delete task', danger: true, run: () => send({ type: 'deleteWorktree', worktreeId: wt.id }) },

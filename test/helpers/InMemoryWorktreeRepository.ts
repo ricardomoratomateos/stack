@@ -3,17 +3,12 @@ import { IWorktreeRepository } from '../../src/ports/IWorktreeRepository';
 
 /**
  * In-memory IWorktreeRepository for tests. Mirrors WorktreeStore semantics:
- * - add() registers the worktree's debug port in the registry keyed by PATH
- * - remove() drops both the worktree and its port-registry entry
  * - patch() merges partial fields into an existing worktree (no-op on unknown id)
- * - getPortRegistry() DERIVES from the worktrees, like the real store: a stored
- *   copy that patch() never updated is what let a reassigned port go unreserved
  * - setAlias() no-ops on unknown id
  * - getAll() returns [] when empty
  */
 export class InMemoryWorktreeRepository implements IWorktreeRepository {
   private worktrees = new Map<string, Worktree>();
-  private portRegistry: Record<string, number> = {};
 
   getAll(): Worktree[] {
     return [...this.worktrees.values()];
@@ -25,7 +20,6 @@ export class InMemoryWorktreeRepository implements IWorktreeRepository {
 
   async add(worktree: Worktree): Promise<void> {
     this.worktrees.set(worktree.id, worktree);
-    this.portRegistry[worktree.path] = worktree.debugPort;
   }
 
   async patch(id: string, fields: Partial<Worktree>): Promise<void> {
@@ -39,12 +33,6 @@ export class InMemoryWorktreeRepository implements IWorktreeRepository {
   }
 
   async remove(id: string): Promise<void> {
-    const wt = this.worktrees.get(id);
-    if (wt) delete this.portRegistry[wt.path];
     this.worktrees.delete(id);
-  }
-
-  getPortRegistry(): Record<string, number> {
-    return Object.fromEntries([...this.worktrees.values()].map((w) => [w.path, w.debugPort]));
   }
 }
