@@ -5,6 +5,7 @@ import { MANAGER_ID, buildView, floatRows, managerIndex, managerSession, mruTouc
 import { StartStackd } from './stackd/StartStackd';
 import { useStackd } from './stackd/useStackd';
 import { useTerminals } from './terminals';
+import { resolveFile } from './terminals/links';
 import { SidebarHost } from './sidebar/SidebarHost';
 import { installHint, toSidebarState, translate, type Action } from './sidebar/bridge';
 import { loadDefaultProvider, saveDefaultProvider } from './sidebar/prefs';
@@ -427,6 +428,24 @@ export function App() {
     onNotice: setNotice,
   });
 
+  // ⌘-click on a file an agent printed: that worktree's Code tab, at the line. Relative paths are the pane's
+  // worktree (the Manager's is the main checkout); absolute ones whichever worktree holds them, in any repo.
+  useEffect(() => {
+    registry.onFile = (pane, file) => {
+      const repos = snapshot?.repos ?? [];
+      const all = repos.flatMap((r) => r.state.worktrees.map((wt) => ({ id: wt.id, path: wt.path, repoRoot: r.repoRoot, isMain: wt.isMain })));
+      const here = all.filter((w) => w.repoRoot === view?.repoRoot);
+      const cwd = pane === centre.pane ? here.find((w) => w.id === selected?.wt.id)
+        : pane === manager.pane ? here.find((w) => w.isMain) : undefined;
+      const hit = resolveFile(file.path, cwd, all);
+      if (!hit) { setNotice(`${file.path} is outside this repository's worktrees`); return; }
+      const owner = all.find((w) => w.id === hit.worktreeId)!;
+      if (owner.repoRoot !== view?.repoRoot) setRepoRoot(owner.repoRoot);
+      select(hit.worktreeId);
+      openCode(hit.worktreeId, hit.path, file.line);
+    };
+    return () => { registry.onFile = null; };
+  }, [registry, snapshot, view?.repoRoot, selected?.wt.id, centre.pane, manager.pane, select, openCode]);
   useEffect(() => {
     if (focusTick > 0 && manager.pane) registry.focus(manager.pane);
   }, [focusTick, manager.pane, registry]);

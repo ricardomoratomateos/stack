@@ -1,5 +1,5 @@
 import { Terminal, type ILink } from '@xterm/xterm';
-import { findUrls, opensLink } from './links';
+import { findFiles, findUrls, opensLink, type FoundFile } from './links';
 import { documentVar, terminalOptions, xtermTheme } from '../theme/terminalTheme';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { FitAddon } from '@xterm/addon-fit';
@@ -16,7 +16,9 @@ export const SCROLLBACK = 2000;
  * URL that wraps onto the next row is one link. Each string offset maps back to
  * its cell, so wide characters before the URL don't shift the range.
  */
-function plainLinks(term: Terminal, y: number, activate: (e: MouseEvent, url: string) => void): ILink[] | undefined {
+function plainLinks(
+  term: Terminal, y: number, activate: (e: MouseEvent, url: string) => void, openFile?: (e: MouseEvent, file: FoundFile) => void,
+): ILink[] | undefined {
   const buf = term.buffer.active;
   let first = y - 1;
   while (first > 0 && buf.getLine(first)?.isWrapped) first--;
@@ -35,13 +37,19 @@ function plainLinks(term: Terminal, y: number, activate: (e: MouseEvent, url: st
       text += chars;
     }
   }
-  const links = findUrls(text)
-    .map(({ url, start, end }): ILink => ({
+  const links = [
+    ...findUrls(text).map(({ url, start, end }): ILink => ({
       text: url,
       range: { start: cells[start], end: cells[end - 1] },
       activate: (e) => activate(e, url),
-    }))
-    .filter((l) => l.range.start.y <= y && l.range.end.y >= y);
+    })),
+    // File paths the agent printed: ⌘-click opens them in the task's Code tab.
+    ...(openFile ? findFiles(text).map((f): ILink => ({
+      text: text.slice(f.start, f.end),
+      range: { start: cells[f.start], end: cells[f.end - 1] },
+      activate: (e) => openFile(e, f),
+    })) : []),
+  ].filter((l) => l.range.start && l.range.end && l.range.start.y <= y && l.range.end.y >= y);
   return links.length ? links : undefined;
 }
 
@@ -86,6 +94,9 @@ export class TerminalRegistry {
   private scheduled = false;
 
   constructor(private api: TmuxApi, private scheduler: Scheduler = rafScheduler) {}
+
+  /** Opens a file a pane printed (set by the app, which knows which worktree a pane belongs to). */
+  onFile: ((pane: string, file: FoundFile) => void) | null = null;
 
   /** Re-reads the theme (the chrome palette just landed on <html>) into every open terminal. */
   refreshTheme(): void {
@@ -298,7 +309,8 @@ export class TerminalRegistry {
       // OSC 8 hyperlinks: xterm's default asks with confirm() and window.open, neither of which works here.
       linkHandler: { activate: open },
     });
-    term.registerLinkProvider({ provideLinks: (y, cb) => cb(plainLinks(term, y, open)) });
+    const openFile = (e: MouseEvent, file: FoundFile) => { if (opensLink(e)) this.onFile?.(pane, file); };
+    term.registerLinkProvider({ provideLinks: (y, cb) => cb(plainLinks(term, y, open, openFile)) });
     const fit = new FitAddon();
     term.loadAddon(fit);
     e = { term, fit, pending: null, queue: [], queued: 0, stale: false, loaded: 0, count: 0, loadingHistory: false };
