@@ -90,3 +90,34 @@ export function pushPlace(h: History, p: Place, max = 50): History {
 }
 export const canGo = (h: History, delta: number): boolean => h.at + delta >= 0 && h.at + delta < h.places.length;
 export const go = (h: History, delta: number): History => (canGo(h, delta) ? { places: h.places, at: h.at + delta } : h);
+
+/** What one status pill says: a short name, what it is doing, and how far along when that is known (0–1). */
+export interface Pill { label: string; detail: string; progress?: number; busy: boolean; failed: boolean }
+
+const PILL_NAMES: Record<string, string> = { phpactor: 'PHP', 'js/ts': 'JS/TS', oxlint: 'lint' };
+
+/** "1200/33000", "12 of 40 files" → 0.036, 0.3. */
+export function progressOf(text: string): number | undefined {
+  const m = /(\d[\d,]*)\s*(?:\/|of)\s*(\d[\d,]*)/.exec(text);
+  if (!m) return undefined;
+  const [done, total] = [m[1], m[2]].map((n) => Number(n.replace(/,/g, '')));
+  return total > 0 ? Math.min(1, done / total) : undefined;
+}
+
+/** A language server's (or the repo's PHP base's) state, as the Code bar shows it. */
+export function pillOf(s: { server: string; state: 'starting' | 'indexing' | 'ready' | 'dead'; message: string }): Pill {
+  const busy = s.state === 'starting' || s.state === 'indexing';
+  const failed = s.state === 'dead';
+  const progress = s.state === 'indexing' ? progressOf(s.message) : undefined;
+  const pct = progress === undefined ? '' : ` ${Math.floor(progress * 100)}%`;
+  if (s.server === 'php base') {
+    // "Preparing develop… sources 1200/33000" · "develop @ 1a2b3c4" · "develop: <why it failed>"
+    const ref = /^(?:Preparing\s+)?([^\s…:@]+)/.exec(s.message)?.[1] ?? 'base';
+    if (busy) return { label: ref, detail: `preparing${pct}`, progress, busy, failed };
+    if (failed) return { label: ref, detail: 'failed', busy, failed };
+    return { label: s.message, detail: '', busy, failed };
+  }
+  const label = PILL_NAMES[s.server] ?? s.server;
+  const detail = s.state === 'starting' ? 'starting' : s.state === 'indexing' ? `indexing${pct}` : failed ? 'stopped' : '';
+  return { label, detail, progress, busy, failed };
+}

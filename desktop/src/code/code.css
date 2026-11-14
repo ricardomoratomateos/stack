@@ -25,17 +25,49 @@
 .code-path { flex: 1; min-width: 0; height: 24px; padding: 0 8px; border-radius: 6px; font-size: 12px; color: var(--app-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .code-path:hover { background: var(--app-hover); color: var(--app-text); }
 .code-status { display: flex; gap: 6px; flex: none; }
-.code-pill { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--app-border-strong); color: var(--app-text-dim); white-space: nowrap; }
+/* One pill per server: a dot for its state, its name, and while busy what it is doing, filling as it goes. */
+.code-pill { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 9px 0 8px; border-radius: 999px; border: 1px solid var(--app-border-strong); font-size: 11px; color: var(--app-text-dim); white-space: nowrap; overflow: hidden; font-variant-numeric: tabular-nums; }
+.code-pill-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--app-text-faint); }
+.code-pill-detail { color: var(--app-text-faint); }
 .code-pill.is-ready { color: var(--app-accent-text); }
-/* The repo's PHP base: there to be glanced at, not read. */
-.code-pill.is-base { border-color: transparent; color: var(--app-text-faint); padding: 1px 2px; }
+.code-pill.is-ready .code-pill-dot { background: var(--app-accent-text); }
+.code-pill.is-starting, .code-pill.is-indexing { color: var(--app-text); border-color: var(--app-border-strong); }
+.code-pill.is-starting .code-pill-dot, .code-pill.is-indexing .code-pill-dot { background: var(--app-accent-text); animation: code-pill-breathe 1.2s ease-in-out infinite; }
+/* Progress, when the server says how far along it is: a fill under the text. */
+.code-pill[style*="--p"]::before { content: ''; position: absolute; inset: 0; width: calc(var(--p) * 100%); background: var(--app-selected); transition: width .6s ease; z-index: -1; }
+.code-pill[style*="--p"] { isolation: isolate; }
+/* No progress known: a light sweeping across, so it never looks stuck. */
+.code-pill.is-starting:not([style*="--p"])::before, .code-pill.is-indexing:not([style*="--p"])::before { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, var(--app-hover), transparent); transform: translateX(-100%); animation: code-pill-sweep 1.8s ease-in-out infinite; z-index: -1; }
+.code-pill.is-starting, .code-pill.is-indexing { isolation: isolate; }
+/* ⌘-click before the index is ready: the busy pill answers instead of a message. */
+.code-pill.is-nudged { animation: code-pill-nudge .5s ease; }
+/* The repo's PHP base: there to be glanced at, not read — unless it is being prepared. */
+.code-pill.is-base { border-color: transparent; color: var(--app-text-faint); padding: 0 2px; }
+.code-pill.is-base.is-ready .code-pill-dot { display: none; }
+.code-pill.is-base.is-indexing { border-color: var(--app-border-strong); color: var(--app-text); padding: 0 9px 0 8px; }
 .code-pill.is-dead { color: var(--app-error); border-color: var(--app-error); }
-.code-notice { flex: none; padding: 4px 12px; font-size: 12px; color: var(--app-error); background: var(--app-error-bg); }
-.code-notice.is-waiting { color: var(--app-text-dim); background: var(--app-surface); }
+.code-pill.is-dead .code-pill-dot { background: var(--app-error); }
+.code-bar-error { flex: 0 1 auto; min-width: 0; max-width: 45%; display: inline-flex; align-items: center; gap: 5px; height: 22px; margin-right: 6px; padding: 0 8px; border-radius: 6px; font-size: 11px; color: var(--app-error); background: var(--app-error-bg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.code-bar-error .codicon { flex: none; font-size: 13px; }
+@keyframes code-pill-breathe { 50% { opacity: .35; } }
+@keyframes code-pill-sweep { to { transform: translateX(100%); } }
+@keyframes code-pill-nudge { 25% { transform: translateX(-3px); } 50% { transform: translateX(3px); } 75% { transform: translateX(-2px); } }
+@media (prefers-reduced-motion: reduce) { .code-pill, .code-pill::before, .code-pill-dot { animation: none !important; } }
 .code-editor { flex: 1; min-height: 0; }
 .code-empty { position: absolute; inset: 36px 0 0 0; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; font-size: 12px; color: var(--app-text-faint); background: var(--app-bg); }
 .code-palette-scrim { position: absolute; inset: 0; z-index: 50; }
 .code-palette { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: min(640px, calc(100% - 32px)); background: var(--app-surface); border: 1px solid var(--app-border-strong); border-radius: 8px; box-shadow: 0 8px 28px rgba(0, 0, 0, .5); overflow: hidden; }
+.code-palette.is-text { width: min(820px, calc(100% - 32px)); }
+.code-palette-input { display: flex; align-items: center; border-bottom: 1px solid var(--app-border); }
+.code-palette-input input { flex: 1; min-width: 0; border-bottom: 0 !important; }
+.code-palette-toggles { display: flex; gap: 2px; padding-right: 8px; }
+.code-toggle { height: 22px; min-width: 24px; padding: 0 6px; border-radius: 4px; font-size: 11px; font-weight: 600; color: var(--app-text-faint); }
+.code-toggle:hover { background: var(--app-hover); color: var(--app-text); }
+.code-toggle.is-on { background: var(--app-selected); color: var(--app-accent-text); }
+.code-hit.is-text { justify-content: space-between; }
+.code-hit-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--app-text-dim); font-family: var(--vscode-editor-font-family, Menlo, monospace); font-size: 11.5px; }
+.code-hit-line mark { background: var(--app-selected); color: var(--app-accent-text); border-radius: 2px; }
+.code-hit.is-text .code-hit-path { flex: none; }
 .code-palette input { width: 100%; box-sizing: border-box; height: 34px; padding: 0 12px; background: transparent; border: 0; border-bottom: 1px solid var(--app-border); color: var(--app-text); font: inherit; outline: none; }
 .code-palette-list { max-height: 360px; overflow: auto; }
 .code-hit { display: flex; align-items: baseline; gap: 8px; width: 100%; height: 24px; padding: 0 12px; font-size: 12px; white-space: nowrap; }

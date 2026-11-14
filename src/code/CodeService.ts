@@ -8,6 +8,7 @@ import { LspProcess, spawnLsp, type LspSpec, type LspStatus, type SpawnLsp } fro
 import { LightIndex, gitGrep, projectDirOf, type Declaration, type Grep, type Place } from './lightIndex';
 import { dependencyRoots, PathRefused, resolveInWorktree, resolveReadable, type ReadScope } from './pathGuard';
 import { linkView, PhpBase, pipe as realPipe, type BaseInfo, type Pipe } from './phpBase';
+import { textSearch, type TextSearchResult } from './textSearch';
 import { defaultCodeConfig, isPhpFile, phpFilterOf, phpPathspecs, phpTopsOf, phpWanted, type CodeConfig, type PhpFilter } from './config';
 
 /** Something the user should read as is ("indexing…", "Phpactor is not installed"), not a crash. */
@@ -169,6 +170,13 @@ export class CodeService {
     s.files ??= listWorktreeFiles(task.root);
     const all = await s.files;
     return { total: all.length, files: fuzzyFiles(all, query, 60) };
+  }
+
+  /** Find in Path over the worktree, leaving out what the repo's settings exclude from the Code tab. */
+  async search(task: CodeTask, query: string, opts: { caseSensitive?: boolean; wholeWord?: boolean } = {}): Promise<TextSearchResult> {
+    const cfg = this.config(task.repoRoot);
+    const exclude = [...new Set([...cfg.php.exclude, ...cfg.scripts.exclude])];
+    return textSearch(task.root, query, { ...opts, exclude });
   }
 
   /** The quick-open list is cached; the agent adds files. Called when the tab is opened again. */

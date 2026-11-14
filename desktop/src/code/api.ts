@@ -30,7 +30,13 @@ export interface CodeBackend {
   lspStatus(): Promise<LspStatus[]>;
   /** Lint findings for one JS/TS file (oxlint); empty when the backend has no linter. */
   lint(root: string, path: string): Promise<{ ms: number; diagnostics: LintDiagnostic[] }>;
+  /** Find in Path: a fixed-string search over the worktree (paths relative to it). */
+  search(root: string, query: string, opts?: { caseSensitive?: boolean; wholeWord?: boolean }): Promise<TextSearchResult>;
 }
+
+/** One matching line (1-based line and column, path relative to the worktree). */
+export interface TextHit { path: string; line: number; column: number; text: string }
+export interface TextSearchResult { hits: TextHit[]; truncated: boolean }
 
 /** The app's backend: stackd, for one task. Paths are absolute; stackd refuses what lies outside the task's worktree. */
 export function stackdBackend(api: StackdApi, worktreeId: string): CodeBackend {
@@ -43,6 +49,7 @@ export function stackdBackend(api: StackdApi, worktreeId: string): CodeBackend {
       (await call<{ result: T }>('codeLsp', { languageId, method, params })).result,
     lspStatus: () => call('codeStatus'),
     lint: async (_root, path) => ({ ms: 0, ...(await call<{ diagnostics: LintDiagnostic[] }>('codeDiagnostics', { path })) }),
+    search: (_root, query, opts = {}) => call('codeSearch', { query, ...opts }),
   };
 }
 

@@ -52,6 +52,7 @@ async function command(name, b) {
     case 'codeTree': return service.tree(task, b.dir);
     case 'codeRead': return service.read(task, b.path);
     case 'codeFiles': return service.files(task, String(b.query ?? ''));
+    case 'codeSearch': return service.search(task, String(b.query ?? ''), { caseSensitive: b.caseSensitive === true, wholeWord: b.wholeWord === true });
     case 'codeLsp': return { result: await service.lsp(task, String(b.languageId), String(b.method), b.params) };
     case 'codeDiagnostics': return { diagnostics: await service.diagnostics(task, b.path) };
     case 'codeStatus': return service.status(task);

@@ -707,6 +707,10 @@ export class StackDaemon {
         const { task } = this.codeTask(b);
         return this.codeCommand(() => this.code.files(task, str(b, 'query') ?? ''));
       }
+      case 'codeSearch': {
+        const { task } = this.codeTask(b);
+        return this.codeCommand(() => this.code.search(task, str(b, 'query') ?? '', { caseSensitive: b['caseSensitive'] === true, wholeWord: b['wholeWord'] === true }));
+      }
       case 'codeLsp': {
         const { task } = this.codeTask(b);
         return this.codeCommand(async () => ({ result: await this.code.lsp(task, need(b, 'languageId'), need(b, 'method'), b['params']) }));
