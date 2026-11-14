@@ -3,7 +3,7 @@
 [![CI](https://github.com/ricardomoratomateos/stack/actions/workflows/ci.yml/badge.svg)](https://github.com/ricardomoratomateos/stack/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-Stack runs AI coding agents (Claude Code, Codex CLI, opencode) in parallel, one task per git worktree, each agent in its own tmux session, and shows you which one needs you.
+Stack runs AI coding agents (Claude Code, opencode) in parallel, one task per git worktree, each agent in its own tmux session, and shows you which one needs you.
 
 It has two parts:
 
@@ -16,7 +16,7 @@ It has two parts:
 - [tmux](https://github.com/tmux/tmux) (`brew install tmux`)
 - Node 20 or later (stackd runs on your own Node)
 - git, and [Rust](https://rustup.rs) to build the app
-- At least one agent CLI on your login shell's `PATH`: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`), [Codex CLI](https://github.com/openai/codex) (`codex`) or [opencode](https://opencode.ai) (`opencode`)
+- At least one agent CLI on your login shell's `PATH`: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`) or [opencode](https://opencode.ai) (`opencode`)
 
 ## Install and run from a clone
 
@@ -42,7 +42,7 @@ You can also run stackd without the app: `node dist/stackd.js serve`. `node dist
 
 ## Manager agent (MCP)
 
-stackd provides an MCP server with these tools: `stack_status`, `stack_create_task`, `stack_delete_task`, `stack_send_to_agent`, `stack_read_agent`, `stack_wait`, and for workers `stack_env` and `stack_request_review`. With them, one Claude Code session can turn tickets into tasks, follow the tasks, and answer their agents. The app's Manager is a standing session that already has these tools. Every Claude Code or Codex worker that Stack starts gets them for its own task.
+stackd provides an MCP server with these tools: `stack_status`, `stack_create_task`, `stack_delete_task`, `stack_send_to_agent`, `stack_read_agent`, `stack_wait`, and for workers `stack_env` and `stack_request_review`. With them, one Claude Code session can turn tickets into tasks, follow the tasks, and answer their agents. The app's Manager is a standing session that already has these tools. Every Claude Code worker that Stack starts gets them for its own task.
 
 To use the tools from any Claude Code session, go to **Settings → "Stack tools in Claude Code" → Register**. This registers `~/.config/stack/stack-mcp.js` at user scope with the node that stackd runs on. It also installs the `stack-manager` skill and the `/stack`, `/stack-task`, `/stack-task-remove` and `/stack-next` commands into `~/.claude`, and it only overwrites files that Stack wrote. If the registration points at another copy, the row says so. Then start a new Claude Code session. To remove it, run `claude mcp remove --scope user stack`.
 
@@ -55,7 +55,7 @@ Your own settings are in `~/.config/stack/settings.json` (Settings in the app, `
 | `worktreesDirectory` | `.worktrees` | Where worktrees are created (relative to the repository root) |
 | `defaultBaseBranch` | `develop` | Branch new tasks start from. If it doesn't exist, Stack uses the first of `main`/`master`/`develop` it finds, then the current branch |
 | `defaultProvider` | `claude` | The agent that new tasks start |
-| `claudeCommand` / `codexCommand` / `opencodeCommand` | `claude` / `codex` / `opencode` | Command that launches each agent |
+| `claudeCommand` / `opencodeCommand` | `claude` / `opencode` | Command that launches each agent |
 | `promptPrefix` | `""` | Text prepended to every agent's first prompt (personal, not for `.stack/config.json`) |
 | `notifyOnAttention` | `true` | Native notification when an agent finishes or asks for permission |
 | `setupScript` / `teardownScript` | `""` | Script run when a task's worktree is created / before it is deleted. Gets `STACK_REPO_ROOT`, `STACK_WORKTREE_PATH`, `STACK_BRANCH` and the task's ports |
@@ -87,7 +87,7 @@ Changes apply on the next Code tab start. Changing `phpIndexDirs`, `phpExcludeDi
 
 `.stack/config.json` accepts the project keys only: `worktreesDirectory`, `defaultBaseBranch`, `setupScript`, `setupInTerminal`, `teardownScript`, `ports`, `basePort`, `portStride`, `debugBasePort`, `debugTemplate`, and the Code tab's settings that aren't marked *(yours)*. If the file has bad JSON, an unknown key or a wrong type, Stack falls back to your own settings and tells you what is wrong.
 
-**Codex:** its hooks are off by default. Until you enable them with `[features] codex_hooks = true` in `~/.codex/config.toml` and trust them (`/hooks`), Codex sessions never change state.
+**Codex CLI is no longer supported.** A `codexCommand` setting is ignored, and a `defaultProvider` of `codex` falls back to Claude. stackd removes the hook entries earlier versions added to `~/.codex/hooks.json` when it starts, and leaves the rest of that file as it is.
 
 ## Diagnostics
 
@@ -99,14 +99,14 @@ Changes apply on the next Code tab start. Changing `phpIndexDirs`, `phpExcludeDi
 - stackd's socket answers
 - the hooks of every installed agent are in place, with no hook left over from the VS Code extension
 - the MCP registration
-- `claude`, `codex` and `opencode` are on `PATH`
+- `claude` and `opencode` are on `PATH`
 
 **Copy** gives you the results as plain text you can paste into an issue. From a terminal, `node dist/stackd.js doctor` prints the same results. It asks the running stackd, or runs the checks itself when stackd isn't running, and exits with 1 if any check fails.
 
 ## Migrating from the VS Code extension
 
 1. Uninstall the Stack extension from VS Code.
-2. Open Stack.app. Your tasks are imported once from the extension's state. The hooks that the extension wrote to `~/.claude/settings.json` and `~/.codex/hooks.json` are replaced automatically.
+2. Open Stack.app. Your tasks are imported once from the extension's state. The hooks that the extension wrote to `~/.claude/settings.json` are replaced automatically (and removed from `~/.codex/hooks.json`).
 3. Register the MCP again: **Settings → "Stack tools in Claude Code" → Register**. The old registration points at the extension's copy.
 4. The `docker` config block is ignored. Its `ports`/`basePort`/`portStride` moved to top-level keys; the old values are still read when the new keys are unset.
 

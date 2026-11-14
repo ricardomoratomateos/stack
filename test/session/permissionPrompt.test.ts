@@ -8,7 +8,6 @@ describe('permissionPromptOnScreen', () => {
       ' Do you want to proceed?', ' ❯ 1. Yes', '   2. No, and tell Claude what to do differently (esc)', '', '',
     ].join('\n');
     expect(permissionPromptOnScreen(claude)).toBe(true);
-    expect(permissionPromptOnScreen('Would you like to run the following command?\n  $ ls\n› 1. Yes, proceed')).toBe(true);
     expect(permissionPromptOnScreen('△ Permission required\n  $ ls\n  Allow once   Allow always   Reject')).toBe(true);
   });
 

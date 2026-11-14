@@ -35,7 +35,6 @@
       "type": "string",
       "enum": [
         "claude",
-        "codex",
         "opencode"
       ],
       "default": "claude",
@@ -45,11 +44,6 @@
       "type": "string",
       "default": "claude",
       "description": "Command to launch Claude Code"
-    },
-    "stack.codexCommand": {
-      "type": "string",
-      "default": "codex",
-      "description": "Command to launch Codex CLI"
     },
     "stack.opencodeCommand": {
       "type": "string",

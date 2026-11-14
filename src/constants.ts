@@ -5,9 +5,6 @@ export const STORE_KEY = 'stack.store';
 export const NOTIFY_HOOK_SCRIPT = 'notify.sh';
 export const CLAUDE_SETTINGS_PATH = '.claude/settings.json';
 export const OPENCODE_PLUGIN_PATH = '.config/opencode/plugin/stack-notify.js';
-export const CODEX_HOOKS_PATH = '.codex/hooks.json';
-/** Enables Codex's hook system, which is experimental and off by default. */
-export const CODEX_CONFIG_PATH = '.codex/config.toml';
 
 /**
  * Branch names tried, in order, when a repository's main line has to be guessed.

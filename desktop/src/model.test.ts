@@ -50,14 +50,14 @@ describe('sessionRows', () => {
       wt('a', [
         session({ index: 2, name: 'shell', kind: 'shell', state: 'idle' }),
         session({ index: 1, title: 'Fix the login test', state: 'active' }),
-        session({ index: 3, provider: 'codex', state: 'permission' }),
+        session({ index: 3, provider: 'opencode', state: 'permission' }),
       ]),
       { 2: 'npm' },
     );
     expect(rows.map((r) => [r.index, r.name, r.detail])).toEqual([
       [1, 'claude', 'Fix the login test'],
       [2, 'shell', 'npm'],
-      [3, 'codex', 'needs you'],
+      [3, 'opencode', 'needs you'],
     ]);
   });
   it('says "your turn" for an agent that took a turn and waits, "waiting" for a fresh one', () => {

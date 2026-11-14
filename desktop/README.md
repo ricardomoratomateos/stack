@@ -9,7 +9,7 @@ A native macOS window for Stack: worktrees, agent terminals, a Manager strip, no
 - Node 20+ (stackd is built for node20; it runs on your own Node, it is not bundled).
 - Rust via rustup: `curl https://sh.rustup.rs -sSf | sh`, then `. "$HOME/.cargo/env"` (cargo is not on the default PATH).
 - tmux (`brew install tmux`).
-- Agent CLIs on your login shell's PATH: `claude`, `codex` and/or `opencode`.
+- Agent CLIs on your login shell's PATH: `claude` and/or `opencode`.
 
 ## Build from a fresh clone
 

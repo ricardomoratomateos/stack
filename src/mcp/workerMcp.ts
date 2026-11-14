@@ -58,17 +58,3 @@ export function claudeMcpArgs(bridge: BridgeCommand, worktreeId: string): string
   };
   return `--mcp-config ${shellQuote(JSON.stringify(config))}`;
 }
-
-/**
- * Codex's `-c key=value` overrides for the same server. Values are TOML;
- * a JSON string literal is a valid TOML basic string.
- */
-export function codexMcpArgs(bridge: BridgeCommand, worktreeId: string): string {
-  const key = `mcp_servers.${MCP_SERVER_NAME}`;
-  const pairs = [
-    `${key}.command=${JSON.stringify(bridge.command)}`,
-    `${key}.args=[${bridge.args.map((a) => JSON.stringify(a)).join(',')}]`,
-    `${key}.env={${TASK_ENV}=${JSON.stringify(worktreeId)}}`,
-  ];
-  return pairs.map((p) => `-c ${shellQuote(p)}`).join(' ');
-}

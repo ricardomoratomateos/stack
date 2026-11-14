@@ -1842,9 +1842,9 @@ describe('createWorktree', () => {
   it('starts the chosen agent, with the description as its prompt, instead of the default one', async () => {
     vi.useFakeTimers();
     const { h, created } = createHarness();
-    await h.service.createWorktree({ branch: 'feat/x', description: 'Fix the bug', provider: 'codex' });
+    await h.service.createWorktree({ branch: 'feat/x', description: 'Fix the bug', provider: 'opencode' });
     await vi.advanceTimersByTimeAsync(300);
-    expect(h.claude.launchWithPrompt).toHaveBeenCalledWith(created, 'Fix the bug', 'codex');
+    expect(h.claude.launchWithPrompt).toHaveBeenCalledWith(created, 'Fix the bug', 'opencode');
   });
 
   it('starts the chosen agent bare when there is no description', async () => {
@@ -1858,9 +1858,9 @@ describe('createWorktree', () => {
   it('forwards the provider from the webview message', async () => {
     vi.useFakeTimers();
     const { h, created } = createHarness();
-    await h.service.handleMessage({ type: 'createWorktree', branch: 'feat/x', provider: 'codex' });
+    await h.service.handleMessage({ type: 'createWorktree', branch: 'feat/x', provider: 'opencode' });
     await vi.advanceTimersByTimeAsync(300);
-    expect(h.claude.launch).toHaveBeenCalledWith(created, { provider: 'codex' });
+    expect(h.claude.launch).toHaveBeenCalledWith(created, { provider: 'opencode' });
   });
 
   it('resolves ok once the worktree exists', async () => {
@@ -2885,7 +2885,7 @@ describe('handleMessage pickDefaultProvider', () => {
     await h.service.handleMessage({ type: 'pickDefaultProvider' });
 
     expect(h.host.showQuickPick).toHaveBeenCalledWith(
-      ['claude', 'codex', 'opencode'],
+      ['claude', 'opencode'],
       { placeHolder: 'Agent launched by the main button' },
     );
     expect(h.config.setDefaultProvider).toHaveBeenCalledWith('opencode');
@@ -2905,13 +2905,22 @@ describe('handleMessage showProviderInstall', () => {
   it('names the agent and offers to copy a verified install command', async () => {
     const h = makeHarness({ confirmResult: undefined });
 
-    await h.service.handleMessage({ type: 'showProviderInstall', provider: 'codex' });
+    await h.service.handleMessage({ type: 'showProviderInstall', provider: 'opencode' });
 
     expect(h.notify.confirm).toHaveBeenCalledWith(
-      'Codex CLI is not on your PATH',
-      expect.stringContaining('npm i -g @openai/codex'),
+      'opencode is not on your PATH',
+      expect.stringContaining('npm i -g opencode-ai'),
       'Copy command',
     );
+  });
+
+  it('does nothing for a provider this build no longer has (a stale webview naming one)', async () => {
+    const h = makeHarness({ confirmResult: 'Copy command' });
+
+    await h.service.handleMessage({ type: 'showProviderInstall', provider: 'codex' as ProviderId });
+
+    expect(h.notify.confirm).not.toHaveBeenCalled();
+    expect(h.host.writeClipboard).not.toHaveBeenCalled();
   });
 
   it('copies the command when the user accepts', async () => {
@@ -2944,7 +2953,7 @@ describe('installedProviders fallback', () => {
     const h = makeHarness({
       useRealInstalledProviders: true,
       config: {
-        claudeCommand: '/nope/claude', codexCommand: '/nope/codex', opencodeCommand: '/nope/opencode',
+        claudeCommand: '/nope/claude', opencodeCommand: '/nope/opencode',
       },
     });
     expect(h.service.buildState().installedProviders).toEqual([]);
@@ -3281,11 +3290,11 @@ describe('setup runs headless, and the agent waits for it', () => {
   it('"Launch anyway" starts the held agent and clears the failure', async () => {
     vi.useFakeTimers();
     const { h, created, runs, setupOf } = pending();
-    await h.service.createWorktree({ branch: 'feat/x', provider: 'codex' });
+    await h.service.createWorktree({ branch: 'feat/x', provider: 'opencode' });
     runs[0].resolve(1);
     await flushMicrotasks();
     await h.service.handleMessage({ type: 'setupAction', worktreeId: 'new', action: 'launch' });
-    expect(h.claude.launch).toHaveBeenCalledWith(created, { provider: 'codex' });
+    expect(h.claude.launch).toHaveBeenCalledWith(created, { provider: 'opencode' });
     expect(setupOf()).toBeUndefined();
   });
 
@@ -3736,12 +3745,12 @@ describe('new-agent panel', () => {
 describe('new-task panel inputs', () => {
   it('newTaskInit adds the default agent and installed agents to the branch options', () => {
     const h = makeHarness({
-      workspaceFolders: ['/repo'], branches: ['develop'], installedProviders: ['claude', 'codex'],
-      config: { defaultBaseBranch: 'develop', defaultProvider: 'codex' },
+      workspaceFolders: ['/repo'], branches: ['develop'], installedProviders: ['claude', 'opencode'],
+      config: { defaultBaseBranch: 'develop', defaultProvider: 'opencode' },
     });
     expect(h.service.newTaskInit()).toEqual({
       branches: ['develop'], baseBranch: 'develop',
-      defaultProvider: 'codex', installedProviders: ['claude', 'codex'],
+      defaultProvider: 'opencode', installedProviders: ['claude', 'opencode'],
     });
   });
 
@@ -3757,8 +3766,8 @@ describe('new-task panel inputs', () => {
   it('showProviderInstall copies the install command when asked', async () => {
     const h = makeHarness();
     h.notify.confirm.mockResolvedValueOnce('Copy command');
-    await h.service.showProviderInstall('codex');
-    expect(h.host.writeClipboard).toHaveBeenCalledWith('npm i -g @openai/codex');
+    await h.service.showProviderInstall('opencode');
+    expect(h.host.writeClipboard).toHaveBeenCalledWith('npm i -g opencode-ai');
   });
 });
 

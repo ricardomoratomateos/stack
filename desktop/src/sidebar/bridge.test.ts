@@ -28,7 +28,7 @@ describe('translate', () => {
     expect(translate({ type: 'focusSession', worktreeId: 'rev', kind: 'shell', index: 2 }, ctx)).toEqual({ kind: 'select', worktreeId: 'rev', index: 2 });
   });
   it('launching an agent or a shell are stackd commands that then show the new window', () => {
-    expect(translate({ type: 'launchAgent', worktreeId: 'rev', provider: 'codex' }, ctx)).toEqual({ kind: 'command', name: 'spawnAgent', body: { worktreeId: 'rev', provider: 'codex' }, selectNew: 'rev' });
+    expect(translate({ type: 'launchAgent', worktreeId: 'rev', provider: 'opencode' }, ctx)).toEqual({ kind: 'command', name: 'spawnAgent', body: { worktreeId: 'rev', provider: 'opencode' }, selectNew: 'rev' });
     expect(translate({ type: 'launchAgent', worktreeId: 'rev' }, ctx)).toMatchObject({ body: { worktreeId: 'rev' } });
     expect(translate({ type: 'openTerminal', worktreeId: 'rev' }, ctx)).toEqual({ kind: 'command', name: 'spawnShell', body: { worktreeId: 'rev' }, selectNew: 'rev' });
   });
@@ -86,12 +86,12 @@ describe('translate', () => {
     expect(translate({ type: 'openPort', port: 70000 }, ctx)).toEqual({ kind: 'none' });
   });
   it('default-provider picker offers every agent; the install hint is the extension\'s', () => {
-    expect(translate({ type: 'pickDefaultProvider' }, ctx)).toEqual({ kind: 'pickProvider', choices: ['claude', 'codex', 'opencode'] });
-    expect(translate({ type: 'showProviderInstall', provider: 'codex' }, ctx)).toEqual({ kind: 'install', provider: 'codex' });
-    expect(installHint('codex')).toEqual({ title: 'Codex CLI is not on your PATH', detail: 'Install it with:\n\nnpm i -g @openai/codex', command: 'npm i -g @openai/codex' });
+    expect(translate({ type: 'pickDefaultProvider' }, ctx)).toEqual({ kind: 'pickProvider', choices: ['claude', 'opencode'] });
+    expect(translate({ type: 'showProviderInstall', provider: 'opencode' }, ctx)).toEqual({ kind: 'install', provider: 'opencode' });
+    expect(installHint('opencode')).toEqual({ title: 'opencode is not on your PATH', detail: 'Install it with:\n\nnpm i -g opencode-ai', command: 'npm i -g opencode-ai' });
   });
   it('a chosen default provider overrides the snapshot\'s in the sidebar state', () => {
-    expect(toSidebarState(snapshot, { repoRoot: '/r', defaultProvider: 'codex' })!.defaultProvider).toBe('codex');
+    expect(toSidebarState(snapshot, { repoRoot: '/r', defaultProvider: 'opencode' })!.defaultProvider).toBe('opencode');
   });
   it('ready and listBranches need nothing', () => {
     expect(translate({ type: 'ready' }, ctx)).toEqual({ kind: 'none' });

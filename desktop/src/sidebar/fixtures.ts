@@ -19,7 +19,7 @@ export function sampleState(now = Date.now()): StackState {
   const ago = (min: number) => now - min * 60_000;
   return {
     defaultProvider: 'claude',
-    installedProviders: ['claude', 'codex'],
+    installedProviders: ['claude', 'opencode'],
     activeWorktreeId: 'ask',
     controlSession: wt({ id: 'control', branch: 'manager', isControl: true, agent: 'waiting', sessions: [session({ title: 'Manager' })], since: ago(30) }),
     worktrees: [
@@ -36,7 +36,7 @@ export function sampleState(now = Date.now()): StackState {
         git: { ...clean, hasChanges: true, staged: 1 }, pr: { number: 41, state: 'OPEN', ci: 'pass' },
         review: { summary: 'CSV export is ready', at: ago(14) },
       }),
-      wt({ id: 'work', branch: 'feat/work', agent: 'active', since: ago(5), sessions: [session({ state: 'active', provider: 'codex', title: 'Refactoring the importer' })] }),
+      wt({ id: 'work', branch: 'feat/work', agent: 'active', since: ago(5), sessions: [session({ state: 'active', provider: 'opencode', title: 'Refactoring the importer' })] }),
       wt({ id: 'gone', branch: 'spike/old', missing: true, since: ago(3000) }),
       wt({ id: 'bye', branch: 'feat/bye', deleting: true }),
     ],

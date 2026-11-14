@@ -24,12 +24,21 @@ describe('NodeConfig', () => {
     fs.mkdirSync(path.join(dir, '.stack'));
     fs.writeFileSync(path.join(dir, '.stack', 'config.json'), JSON.stringify({ version: 1, defaultBaseBranch: 'main', worktreesDirectory: '.wt' }));
     const settings = path.join(dir, 'settings.json');
-    fs.writeFileSync(settings, JSON.stringify({ 'stack.worktreesDirectory': '.mine', defaultProvider: 'codex', claudeCommand: 'c' }));
+    fs.writeFileSync(settings, JSON.stringify({ 'stack.worktreesDirectory': '.mine', defaultProvider: 'opencode', claudeCommand: 'c' }));
     const c = new NodeConfig(() => dir, settings).get();
     expect(c.defaultBaseBranch).toBe('main');
     expect(c.worktreesDirectory).toBe('.mine');
-    expect(c.defaultProvider).toBe('codex');
+    expect(c.defaultProvider).toBe('opencode');
     expect(c.claudeCommand).toBe('c');
+  });
+
+  it('reads settings from a version with Codex: defaultProvider "codex" falls back to Claude, a stray codexCommand is ignored', () => {
+    const settings = path.join(dir, 'settings.json');
+    fs.writeFileSync(settings, JSON.stringify({ defaultProvider: 'codex', codexCommand: 'my-codex', 'stack.codexCommand': 'x', claudeCommand: 'c' }));
+    const c = new NodeConfig(() => undefined, settings).get();
+    expect(c.defaultProvider).toBe('claude');
+    expect(c.claudeCommand).toBe('c');
+    expect(c).not.toHaveProperty('codexCommand');
   });
 
   it('ignores a malformed settings file and wrongly typed values', () => {

@@ -13,14 +13,15 @@ Stack is now a macOS desktop app over a background daemon, `stackd`. Migration s
 - **The VS Code extension.** The desktop app (`Stack.app`) and `stackd` are the only clients. Features that only existed in VS Code are gone with it: editor tab scoping, search scoping, focus mode, session tabs, the walkthrough, and the `Stack:` commands.
 - **Docker support.** Compose up/down, container badges, `STACK_COMPOSE_PROJECT`/`COMPOSE_*` env and the compose block of `stack_env` are removed. The per-worktree ports move from the `docker` block to the top-level keys `ports`, `basePort` and `portStride` (same meaning, same defaults). A `docker` key is ignored, but its port keys are still read while the top-level ones are unset.
 - **Sidebar styles.** Aside is the only style. `sidebarStyle` is ignored.
+- **Codex support.** Stack runs Claude Code and opencode only. A `codexCommand` setting is ignored, and a `defaultProvider` of `codex` falls back to Claude. State saved by an earlier version loads as before: a task whose agent was Codex is kept, a Codex window that is still running shows as a plain terminal, and a Codex conversation is not offered for resume. On its first start, stackd removes Stack's own hook entries from `~/.codex/hooks.json` (if the file exists) and leaves other tools' hooks and the rest of the file untouched.
 
 ### Added
 
 - **Stack desktop app (macOS).** `Stack.app`, built from `desktop/` with Tauri. It has tasks and agent terminals in one window, the Manager, Full / Half / Float modes, notifications, a menu-bar item and global shortcuts. It starts stackd when it opens. It shows a banner with **Restart** when the running stackd is from another build. "Start stackd at login" installs a launchd user agent.
-- **stackd replaces the extension's hooks.** Hook entries pointing at the extension's `notify.sh` in `~/.claude/settings.json` and `~/.codex/hooks.json` are replaced, not left behind. The extension's tasks are imported once.
+- **stackd replaces the extension's hooks.** Hook entries pointing at the extension's `notify.sh` in `~/.claude/settings.json` are replaced, not left behind. The extension's tasks are imported once.
 - **Settings → "Stack tools in Claude Code".** Shows whether Claude Code's `stack` MCP server is this stackd's, and registers it at user scope, together with the `/stack` skill and commands.
 - **Code tab.** Click a task's title, beside its session tabs, to browse its worktree: the files it changed, a file tree, quick open (⌘P), and go to definition / find references for PHP (Phpactor, set `phpactorPath` or put `phpactor.phar` in `~/.config/stack/tools/`) and JS/TS. A file or a line clicked in the Review opens there. Read-only.
-- **Resume.** A task whose tmux session did not survive a reboot reopens its agent's conversation (`claude --resume`, `codex resume`, `opencode --session`).
+- **Resume.** A task whose tmux session did not survive a reboot reopens its agent's conversation (`claude --resume`, `opencode --session`).
 - **Diagnostics.** Settings → Diagnostics and `node dist/stackd.js doctor` check tmux, Node ≥ 20, the stackd version and socket, the hooks, the MCP registration and the agent CLIs. **Copy** gives the results as text for an issue.
 
 ### Changed

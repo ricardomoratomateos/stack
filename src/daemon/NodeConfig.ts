@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { StackConfig } from '../types';
 import type { ConfigSource } from '../config/ConfigSource';
-import { PROVIDER_IDS, type ProviderId } from '../ports/IAgentProvider';
+import { isProviderId } from '../ports/IAgentProvider';
 import { PROJECT_DEFAULTS } from '../config/defaults';
 import { CODE_USER_DEFAULTS } from '../code/config';
 import { legacyPorts, readRepoConfig } from '../config/RepoConfig';
@@ -61,10 +61,10 @@ export class NodeConfig implements ConfigSource {
       setupScript: pick('setupScript'),
       setupInTerminal: pick('setupInTerminal'),
       teardownScript: pick('teardownScript'),
-      defaultProvider: PROVIDER_IDS.includes(provider as ProviderId) ? (provider as ProviderId) : 'claude',
+      // Not a provider this build has (a removed one, e.g. "codex", or a typo): Claude.
+      defaultProvider: isProviderId(provider) ? provider : 'claude',
       promptPrefix: str(user('promptPrefix'), ''),
       claudeCommand: str(user('claudeCommand'), 'claude'),
-      codexCommand: str(user('codexCommand'), 'codex'),
       opencodeCommand: str(user('opencodeCommand'), 'opencode'),
       notifyOnAttention: bool(user('notifyOnAttention'), true),
       scopeSearchToActiveWorktree: bool(user('scopeSearchToActiveWorktree'), true),

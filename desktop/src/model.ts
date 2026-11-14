@@ -49,7 +49,7 @@ const STATE_WORD: Record<AgentState, string> = {
 export interface SessionRow {
   index: number;
   kind: 'agent' | 'shell';
-  /** "claude", "codex", "shell". */
+  /** "claude", "opencode", "shell". */
   name: string;
   /** Live title / state for an agent, the running command for a shell. */
   detail: string;

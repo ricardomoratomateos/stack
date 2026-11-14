@@ -3,11 +3,9 @@ import * as os from 'node:os';
 import { IAgentProvider, PROVIDER_IDS, ProviderId } from '../ports/IAgentProvider';
 import { ClaudeProvider, ConfigSource, type WorkerMcpSource } from './claude/ClaudeProvider';
 import { ClaudeHookInstaller } from './claude/ClaudeHookInstaller';
-import { CodexProvider } from './codex/CodexProvider';
-import { CodexHookInstaller } from './codex/CodexHookInstaller';
 import { OpenCodeProvider } from './opencode/OpenCodeProvider';
 import { OpenCodeHookInstaller } from './opencode/OpenCodeHookInstaller';
-import { CLAUDE_SETTINGS_PATH, CODEX_HOOKS_PATH, OPENCODE_PLUGIN_PATH } from '../constants';
+import { CLAUDE_SETTINGS_PATH, OPENCODE_PLUGIN_PATH } from '../constants';
 
 /** Builds (and caches) one strategy instance per registered provider. */
 export class ProviderFactory {
@@ -17,7 +15,7 @@ export class ProviderFactory {
     private config: ConfigSource,
     private storagePath: string,
     private homeDir: string = os.homedir(),
-    /** The Stack MCP bridge for workers (Claude, Codex); opencode is started without it. */
+    /** The Stack MCP bridge for workers (Claude); opencode is started without it. */
     private workerMcp: WorkerMcpSource = () => undefined,
   ) {}
 
@@ -47,17 +45,15 @@ export class ProviderFactory {
           new ClaudeHookInstaller(this.storagePath, path.join(this.homeDir, CLAUDE_SETTINGS_PATH)),
           this.workerMcp,
         );
-      case 'codex':
-        return new CodexProvider(
-          this.config,
-          new CodexHookInstaller(this.storagePath, path.join(this.homeDir, CODEX_HOOKS_PATH)),
-          this.workerMcp,
-        );
       case 'opencode':
         return new OpenCodeProvider(
           this.config,
           new OpenCodeHookInstaller(this.storagePath, path.join(this.homeDir, OPENCODE_PLUGIN_PATH)),
         );
+      default:
+        // An id from older persisted state (a removed provider) that slipped
+        // past validation: a clear error instead of an undefined provider.
+        throw new Error(`Unknown provider "${String(id)}".`);
     }
   }
 }

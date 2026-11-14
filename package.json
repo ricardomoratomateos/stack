@@ -1,6 +1,6 @@
 {
   "name": "stack-agents",
-  "description": "Stack's Node side: the stackd daemon and the MCP bridge the desktop app (desktop/) bundles. Runs parallel AI coding agents (Claude Code, Codex CLI, opencode) across git worktrees, each in its own tmux session.",
+  "description": "Stack's Node side: the stackd daemon and the MCP bridge the desktop app (desktop/) bundles. Runs parallel AI coding agents (Claude Code, opencode) across git worktrees, each in its own tmux session.",
   "version": "0.2.1",
   "private": true,
   "license": "MIT",
@@ -19,7 +19,6 @@
     "agents",
     "multi-agent",
     "claude code",
-    "codex",
     "opencode",
     "cursor",
     "tmux",

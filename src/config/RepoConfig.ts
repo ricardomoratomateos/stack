@@ -174,7 +174,6 @@ export function legacyPorts(docker: unknown): Partial<Pick<StackConfig, 'ports' 
 const USER_SCOPED = new Set([
   'defaultProvider',
   'claudeCommand',
-  'codexCommand',
   'opencodeCommand',
   'notifyOnAttention',
   'focusMode',

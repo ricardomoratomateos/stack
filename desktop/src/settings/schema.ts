@@ -6,7 +6,7 @@ import schema from './settings.json';
 /** The settings the desktop app and stackd care about, in display order. */
 export const SHOWN = [
   'worktreesDirectory', 'defaultBaseBranch', 'setupScript', 'setupInTerminal', 'teardownScript', 'promptPrefix',
-  'defaultProvider', 'claudeCommand', 'codexCommand', 'opencodeCommand', 'notifyOnAttention',
+  'defaultProvider', 'claudeCommand', 'opencodeCommand', 'notifyOnAttention',
   // The Code tab
   'phpNavigation', 'phpIndexDirs', 'phpExcludeDirs', 'phpExtensions', 'phpAutoloader', 'phpBaseBranch', 'phpMaxChangedFiles',
   'scriptExcludeDirs', 'oxlintConfig', 'phpBaseOnStart', 'codeIdleMinutes', 'phpactorPath', 'oxlintPath', 'phpPath',

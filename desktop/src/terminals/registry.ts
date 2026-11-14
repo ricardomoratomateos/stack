@@ -319,7 +319,7 @@ export class TerminalRegistry {
     term.onBinary((s) => void this.api.write(pane, [...s].map((c) => c.charCodeAt(0) & 0xff)));
     term.onResize(({ cols, rows }) => void this.api.resize(pane, cols, rows));
     // ⌘V: WKWebView hands a paste event no image data, so ask macOS what is on the clipboard.
-    // An image → Ctrl+V, which is how Claude Code and Codex attach one; text → a normal paste.
+    // An image → Ctrl+V, which is how Claude Code attaches one; text → a normal paste.
     term.attachCustomKeyEventHandler((ev) => {
       if (ev.ctrlKey && !ev.metaKey && !ev.altKey && ev.key === 'Tab') return false; // ⌃Tab is the worktree switcher, not the pane's
       if (ev.type !== 'keydown' || !ev.metaKey || ev.ctrlKey || ev.altKey || ev.key.toLowerCase() !== 'v') return true;

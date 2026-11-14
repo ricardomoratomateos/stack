@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { bridgeCommand, claudeMcpArgs, codexMcpArgs, installBridge } from '../../src/mcp/workerMcp';
+import { bridgeCommand, claudeMcpArgs, installBridge } from '../../src/mcp/workerMcp';
 
 describe('bridgeCommand', () => {
   it('runs node by absolute path when PATH has it, bare node otherwise', () => {
@@ -57,11 +57,5 @@ describe('worker MCP arguments', () => {
     expect(JSON.parse(json)).toEqual({
       mcpServers: { stack: { type: 'stdio', command: '/opt/my node/node', args: ["/it's/stack-mcp.js"], env: { STACK_TASK_ID: 'wt-1' } } },
     });
-  });
-
-  it('codex: TOML values in -c overrides', () => {
-    expect(codexMcpArgs({ command: 'node', args: ['/a', '/b'] }, 'wt-1')).toBe(
-      `-c 'mcp_servers.stack.command="node"' -c 'mcp_servers.stack.args=["/a","/b"]' -c 'mcp_servers.stack.env={STACK_TASK_ID="wt-1"}'`,
-    );
   });
 });

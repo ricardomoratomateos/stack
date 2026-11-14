@@ -52,7 +52,7 @@ export const TOOLS: ToolDef[] = [
       title: z.string().describe('Short name for the task, shown in the sidebar.'),
       prompt: z.string().describe('What the worker agent should do. Self-contained: it has not seen this conversation.'),
       base_branch: z.string().optional().describe('Branch to start from. Defaults to the repository\'s configured base (develop/main).'),
-      agent: z.enum(['claude', 'codex', 'opencode']).optional().describe('Agent to run. Defaults to the user\'s default.'),
+      agent: z.enum(['claude', 'opencode']).optional().describe('Agent to run. Defaults to the user\'s default.'),
       branch: z.string().optional().describe('Branch name. Defaults to <KEY>-<slug> with a ticket, else a slug of the title.'),
       ticket: z.object({
         source: z.string().describe('Tracker: jira, linear, github…'),

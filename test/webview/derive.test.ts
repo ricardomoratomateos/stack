@@ -141,9 +141,9 @@ describe('describe', () => {
   });
 
   it('prefers the alias for the name and carries the provider', () => {
-    const d = describeWt(wt({ alias: 'Export CSV', sessions: [session('active', { provider: 'codex' })] }));
+    const d = describeWt(wt({ alias: 'Export CSV', sessions: [session('active', { provider: 'opencode' })] }));
     expect(d.name).toBe('Export CSV');
-    expect(d.provider).toBe('codex');
+    expect(d.provider).toBe('opencode');
     expect(describeWt(wt()).name).toBe('feat/a');
   });
 

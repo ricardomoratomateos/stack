@@ -146,7 +146,6 @@ export interface StackConfig {
    */
   promptPrefix: string;
   claudeCommand: string;
-  codexCommand: string;
   opencodeCommand: string;
   /** Toast when an agent finishes or asks for permission while unattended. */
   notifyOnAttention: boolean;

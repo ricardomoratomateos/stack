@@ -12,7 +12,7 @@ const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 
 export function NewTaskPanel() {
   const [init, setInit] = useState<NewTaskInit>({
-    branches: [], baseBranch: '', defaultProvider: 'claude', installedProviders: ['claude', 'codex', 'opencode'],
+    branches: [], baseBranch: '', defaultProvider: 'claude', installedProviders: ['claude', 'opencode'],
   });
   // What the user chose; null means "whatever the extension currently suggests".
   const [pickedBase, setPickedBase] = useState<string | null>(null);

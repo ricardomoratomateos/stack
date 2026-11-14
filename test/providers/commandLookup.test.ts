@@ -26,12 +26,12 @@ afterEach(() => fs.rmSync(binDir, { recursive: true, force: true }));
 
 describe('isCommandAvailable', () => {
   it('finds an executable on PATH', () => {
-    put('codex');
-    expect(isCommandAvailable('codex', env)).toBe(true);
+    put('opencode');
+    expect(isCommandAvailable('opencode', env)).toBe(true);
   });
 
   it('does not find a command that is not there', () => {
-    expect(isCommandAvailable('codex', env)).toBe(false);
+    expect(isCommandAvailable('opencode', env)).toBe(false);
   });
 
   it('ignores flags — only the binary is looked up', () => {
@@ -40,13 +40,13 @@ describe('isCommandAvailable', () => {
   });
 
   it('rejects a non-executable file with the right name', () => {
-    put('codex', { executable: false });
-    expect(isCommandAvailable('codex', env)).toBe(false);
+    put('opencode', { executable: false });
+    expect(isCommandAvailable('opencode', env)).toBe(false);
   });
 
   it('rejects a directory with the right name', () => {
-    fs.mkdirSync(path.join(binDir, 'codex'));
-    expect(isCommandAvailable('codex', env)).toBe(false);
+    fs.mkdirSync(path.join(binDir, 'opencode'));
+    expect(isCommandAvailable('opencode', env)).toBe(false);
   });
 
   it('resolves an absolute path without consulting PATH', () => {
@@ -64,14 +64,14 @@ describe('isCommandAvailable', () => {
   });
 
   it('tolerates a missing PATH entirely', () => {
-    expect(isCommandAvailable('codex', {})).toBe(false);
+    expect(isCommandAvailable('opencode', {})).toBe(false);
   });
 
   it('searches every PATH entry, not just the first', () => {
     const second = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-bin2-'));
-    fs.writeFileSync(path.join(second, 'codex'), '#!/bin/sh\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(second, 'opencode'), '#!/bin/sh\n', { mode: 0o755 });
     try {
-      expect(isCommandAvailable('codex', { PATH: `${binDir}${path.delimiter}${second}` })).toBe(true);
+      expect(isCommandAvailable('opencode', { PATH: `${binDir}${path.delimiter}${second}` })).toBe(true);
     } finally {
       fs.rmSync(second, { recursive: true, force: true });
     }
@@ -81,7 +81,7 @@ describe('isCommandAvailable', () => {
 describe('installedProviders', () => {
   const config = (over: Partial<StackConfig> = {}) =>
     ({
-      claudeCommand: 'claude', codexCommand: 'codex', opencodeCommand: 'opencode', ...over,
+      claudeCommand: 'claude', opencodeCommand: 'opencode', ...over,
     }) as StackConfig;
 
   it('reports only the agents actually on PATH', () => {
@@ -95,15 +95,14 @@ describe('installedProviders', () => {
   });
 
   it('honours a custom command for a provider', () => {
-    put('my-codex');
-    expect(installedProviders(config({ codexCommand: 'my-codex' }), env)).toEqual(['codex']);
+    put('my-opencode');
+    expect(installedProviders(config({ opencodeCommand: 'my-opencode' }), env)).toEqual(['opencode']);
   });
 
   it('returns ids in the registered order, so the menu never reshuffles', () => {
     put('opencode');
-    put('codex');
     put('claude');
-    expect(installedProviders(config(), env)).toEqual(['claude', 'codex', 'opencode']);
+    expect(installedProviders(config(), env)).toEqual(['claude', 'opencode']);
   });
 });
 

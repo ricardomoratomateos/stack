@@ -54,12 +54,12 @@ export function notificationState(payload: Record<string, unknown>): AgentSessio
  * One hook event, as received — for consumers that want more than the state.
  *
  * `sessionId`, `transcriptPath` and `message` are lifted out of the agent's own
- * payload when it carries them (Claude Code and Codex send `session_id`,
+ * payload when it carries them (Claude Code sends `session_id`,
  * `transcript_path`, and `message` on Notification); nothing consumes them yet.
  * They are surfaced here so per-window metadata (resuming a session, reading
  * its transcript, showing why an agent wants you) can be built on
- * `HookServer.onHookEvent` without touching the hook script again — changing
- * that script costs every Codex user a re-trust.
+ * `HookServer.onHookEvent` without touching the hook script again (see
+ * JsonHookInstaller for why it stays unchanged).
  */
 export interface HookEvent {
   event: string;
@@ -68,7 +68,7 @@ export interface HookEvent {
   /** Worktree id; '' for an agent running outside any Stack session. */
   workspaceId: string;
   windowIndex?: number;
-  /** Provider id the hook was registered for ('claude', 'codex', 'opencode'), when known. */
+  /** Provider id the hook was registered for ('claude', 'opencode'), when known. */
   agent?: string;
   /** tmux pane id ("%12") the hook ran in, when it ran in one. */
   pane?: string;
@@ -117,8 +117,8 @@ export interface ApiEndpoint {
  * name in Host — the bridge connects to the literal address, so anything else
  * is not the bridge. The token is checked last and in constant time.
  *
- * /hook gets none of this: notify.sh would have to send a token, and changing
- * that script costs every Codex user a re-trust (see JsonHookInstaller).
+ * /hook gets none of this: notify.sh would have to send a token, and that
+ * script is meant to stay unchanged across releases (see JsonHookInstaller).
  */
 export function apiRejection(headers: http.IncomingHttpHeaders, port: number, token: string): number | undefined {
   if (headers.origin !== undefined) return 403;
@@ -276,8 +276,7 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' && v !== 
  *   payload, untouched.
  * - v1: a body of `{ event, terminalId, workspaceId, windowIndex }` and nothing
  *   else. Still accepted, because an agent started under the old script keeps
- *   whatever hook it had until it restarts — and Codex, until the user
- *   re-trusts the new script, runs none at all.
+ *   whatever hook it had until it restarts.
  *
  * Undefined when there is nothing to act on.
  */

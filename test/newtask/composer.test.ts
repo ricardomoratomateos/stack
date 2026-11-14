@@ -66,7 +66,6 @@ describe('resolveBranch', () => {
 describe('providerName', () => {
   it('uses display names, not commands', () => {
     expect(providerName('claude')).toBe('Claude');
-    expect(providerName('codex')).toBe('Codex');
     expect(providerName('opencode')).toBe('opencode');
   });
 });

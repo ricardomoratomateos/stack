@@ -7,11 +7,9 @@ import { AddressInfo } from 'node:net';
 import { ProviderFactory } from '../../src/providers/ProviderFactory';
 import { HookRoutes } from '../../src/providers/shared/HookRoutes';
 import { ClaudeProvider, ConfigSource } from '../../src/providers/claude/ClaudeProvider';
-import { CodexProvider } from '../../src/providers/codex/CodexProvider';
-import { CodexHookInstaller } from '../../src/providers/codex/CodexHookInstaller';
 import { OpenCodeProvider } from '../../src/providers/opencode/OpenCodeProvider';
 import { ConfigFileError } from '../../src/providers/shared/configFile';
-import { PROVIDER_IDS, isAgentWindowName, providerForWindowName } from '../../src/ports/IAgentProvider';
+import { PROVIDER_IDS, isAgentWindowName, isProviderId, providerForWindowName, type ProviderId } from '../../src/ports/IAgentProvider';
 
 describe('ProviderFactory', () => {
   let tmpDir: string;
@@ -20,7 +18,7 @@ describe('ProviderFactory', () => {
 
   const makeConfig = (overrides: Record<string, unknown> = {}): ConfigSource =>
     ({ get: () => ({
-      claudeCommand: 'claude', codexCommand: 'codex',
+      claudeCommand: 'claude',
       opencodeCommand: 'opencode', defaultProvider: 'claude', ...overrides,
     }) }) as unknown as ConfigSource;
 
@@ -59,6 +57,16 @@ describe('ProviderFactory', () => {
     expect(providers.map((p) => p.id)).toEqual([...PROVIDER_IDS]);
   });
 
+  it('refuses an id this build has no provider for (a removed one, from old state) with a clear error', () => {
+    expect(() => makeFactory().create('codex' as ProviderId)).toThrow('Unknown provider "codex".');
+  });
+
+  it('only claude and opencode are registered', () => {
+    expect([...PROVIDER_IDS]).toEqual(['claude', 'opencode']);
+    expect(isProviderId('codex')).toBe(false);
+    expect(isProviderId('opencode')).toBe(true);
+  });
+
   it('defaults homeDir to os.homedir() when not injected', () => {
     const factory = new ProviderFactory(makeConfig(), storageDir);
     expect(factory.create('claude')).toBeInstanceOf(ClaudeProvider);
@@ -75,13 +83,6 @@ describe('ProviderFactory', () => {
       expect(command).not.toContain('--strict-mcp-config');
     });
 
-    it('Codex workers get it as -c mcp_servers.stack.* overrides', () => {
-      expect(factory().create('codex').buildCommand('wt-1')).toBe(
-        'STACK_WORKSPACE_ID="wt-1" codex '
-        + `-c 'mcp_servers.stack.command="/usr/bin/node"' -c 'mcp_servers.stack.args=["/store/stack-mcp.js"]' -c 'mcp_servers.stack.env={STACK_TASK_ID="wt-1"}'`,
-      );
-    });
-
     it('opencode is started without it', () => {
       expect(factory().create('opencode').buildCommand('wt-1')).toBe('STACK_WORKSPACE_ID="wt-1" opencode');
     });
@@ -90,8 +91,6 @@ describe('ProviderFactory', () => {
   it("resumes each agent's conversation with its own CLI's syntax", () => {
     const f = new ProviderFactory(makeConfig(), storageDir, homeDir);
     expect(f.create('claude').resumeArgs?.('3f2a-uuid')).toBe('--resume 3f2a-uuid');
-    // A subcommand: last on the line, after the global -c overrides.
-    expect(f.create('codex').resumeArgs?.('3f2a-uuid')).toBe('resume 3f2a-uuid');
     expect(f.create('opencode').resumeArgs?.('ses_abc')).toBe('--session ses_abc');
   });
 
@@ -304,6 +303,8 @@ describe('ProviderFactory', () => {
       expect(isAgentWindowName('claude-resume')).toBe(true);
       expect(isAgentWindowName('opencode')).toBe(true);
       expect(isAgentWindowName('shell')).toBe(false);
+      // A window an older version launched for the removed Codex provider: a plain terminal now.
+      expect(isAgentWindowName('codex')).toBe(false);
       expect(isAgentWindowName('vim')).toBe(false);
     });
 
@@ -312,121 +313,5 @@ describe('ProviderFactory', () => {
       expect(providerForWindowName('opencode')).toBe('opencode');
       expect(providerForWindowName('zsh')).toBeUndefined();
     });
-  });
-});
-
-// ── Codex ────────────────────────────────────────────────────────────────────
-
-describe('CodexProvider', () => {
-  let tmpDir: string;
-  let storageDir: string;
-  let homeDir: string;
-
-  const config = {
-    get: () => ({ codexCommand: 'codex', claudeCommand: 'claude', opencodeCommand: 'opencode', defaultProvider: 'claude' }),
-  } as unknown as ConfigSource;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stack-codex-'));
-    storageDir = path.join(tmpDir, 'storage');
-    homeDir = path.join(tmpDir, 'home');
-    fs.mkdirSync(homeDir, { recursive: true });
-  });
-  afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
-
-  const make = () => new ProviderFactory(config, storageDir, homeDir).create('codex');
-  const hooksPath = () => path.join(homeDir, '.codex/hooks.json');
-  const readHooks = () => JSON.parse(fs.readFileSync(hooksPath(), 'utf8'));
-
-  it('is built for the "codex" id', () => {
-    const provider = make();
-    expect(provider).toBeInstanceOf(CodexProvider);
-    expect(provider.label).toBe('Codex');
-  });
-
-  it('buildCommand prefixes STACK_WORKSPACE_ID', () => {
-    expect(make().buildCommand('wt-1')).toBe('STACK_WORKSPACE_ID="wt-1" codex');
-  });
-
-
-  it('registers into ~/.codex/hooks.json', () => {
-    make().installHooks('http://127.0.0.1:43110');
-    expect(fs.existsSync(hooksPath())).toBe(true);
-  });
-
-  it('does NOT register SessionEnd — Codex has no end-of-session hook', () => {
-    make().installHooks('http://127.0.0.1:43110');
-    const events = Object.keys(readHooks().hooks);
-    expect(events).toContain('Stop');
-    expect(events).not.toContain('SessionEnd');
-  });
-
-  it('keeps another tool\'s hooks in the same file', () => {
-    // Codex users commonly have a second harness registered here; superset
-    // writes exactly this shape.
-    fs.mkdirSync(path.dirname(hooksPath()), { recursive: true });
-    fs.writeFileSync(hooksPath(), JSON.stringify({
-      hooks: { Stop: [{ hooks: [{ type: 'command', command: '/other/notify.sh' }] }] },
-    }));
-
-    make().installHooks('http://127.0.0.1:43110');
-
-    const commands = readHooks().hooks.Stop.flatMap((g: { hooks: { command: string }[] }) => g.hooks.map((h) => h.command));
-    expect(commands).toContain('/other/notify.sh');
-    // Ours is the quoted script path plus the event name.
-    expect(commands.some((c: string) => c.includes(storageDir) && c.endsWith(' Stop codex'))).toBe(true);
-  });
-
-  it('uninstall removes only our entries, leaving the other tool alone', () => {
-    fs.mkdirSync(path.dirname(hooksPath()), { recursive: true });
-    fs.writeFileSync(hooksPath(), JSON.stringify({
-      hooks: { Stop: [{ hooks: [{ type: 'command', command: '/other/notify.sh' }] }] },
-    }));
-    const provider = make();
-    provider.installHooks('http://127.0.0.1:43110');
-
-    provider.uninstallHooks();
-
-    const commands = readHooks().hooks.Stop.flatMap((g: { hooks: { command: string }[] }) => g.hooks.map((h) => h.command));
-    expect(commands).toEqual(['/other/notify.sh']);
-  });
-
-  it('re-installing does not accumulate duplicates', () => {
-    const provider = make();
-    provider.installHooks('http://127.0.0.1:43110');
-    provider.installHooks('http://127.0.0.1:55555');
-    const entries = readHooks().hooks.Stop.flatMap((g: { hooks: unknown[] }) => g.hooks);
-    expect(entries).toHaveLength(1);
-  });
-
-  it('defaults to ~/.codex/hooks.json when no path is injected', () => {
-    const installer = new CodexHookInstaller(storageDir);
-    expect((installer as unknown as { settingsPath: string }).settingsPath)
-      .toBe(path.join(os.homedir(), '.codex/hooks.json'));
-  });
-
-  it('leaves a read-only config alone, saying why', () => {
-    const provider = make();
-    provider.installHooks('http://127.0.0.1:43110');
-    const before = fs.readFileSync(hooksPath(), 'utf8');
-    // The atomic write renames over the file, which only needs the directory
-    // to be writable — it must still honour a file made read-only on purpose.
-    fs.chmodSync(hooksPath(), 0o444);
-    try {
-      expect(() => provider.uninstallHooks()).toThrow(ConfigFileError);
-      expect(fs.readFileSync(hooksPath(), 'utf8')).toBe(before);
-      expect(fs.statSync(hooksPath()).mode & 0o777).toBe(0o444);
-    } finally {
-      fs.chmodSync(hooksPath(), 0o644);
-    }
-  });
-
-  it('refuses to overwrite a hand-corrupted hooks.json', () => {
-    // Codex users commonly keep another harness's hooks in this file; "starting
-    // fresh" on a syntax error used to delete them along with everything else.
-    fs.mkdirSync(path.dirname(hooksPath()), { recursive: true });
-    fs.writeFileSync(hooksPath(), '{ not json');
-    expect(() => make().installHooks('http://127.0.0.1:43110')).toThrow(/hooks\.json has a syntax error/);
-    expect(fs.readFileSync(hooksPath(), 'utf8')).toBe('{ not json');
   });
 });

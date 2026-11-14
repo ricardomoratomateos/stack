@@ -892,7 +892,7 @@ describe('sendPromptToAgent', () => {
     const { mgr, stub } = create();
     seed(mgr, 'wt-1', [
       [1, { kind: 'agent', provider: 'claude', state: 'waiting', name: 'claude' }],
-      [2, { kind: 'agent', provider: 'codex', state: 'active', name: 'codex' }],
+      [2, { kind: 'agent', provider: 'opencode', state: 'active', name: 'opencode' }],
       [3, { kind: 'shell', state: 'idle', name: 'shell' }],
     ]);
     live(stub, 1, 2);
@@ -1349,8 +1349,8 @@ describe('reconnect', () => {
       expect(stateOf(mgr, 1)).toBe('active');
     });
 
-    it('keeps "working" for an agent with no idle mark of its own (Codex), until its next hook', async () => {
-      const { mgr } = await reloadWith({ 1: 'active' }, { 1: WRAPPER }, { name: 'codex', title: '✳ whatever' });
+    it('keeps "working" for an agent with no idle mark of its own (opencode), until its next hook', async () => {
+      const { mgr } = await reloadWith({ 1: 'active' }, { 1: WRAPPER }, { name: 'opencode', title: '✳ whatever' });
       expect(stateOf(mgr, 1)).toBe('active');
     });
 
@@ -1399,7 +1399,7 @@ describe('agent liveness polling', () => {
   const timer = (mgr: AgentSessionManager) => (mgr as unknown as { shellTimer?: unknown }).shellTimer;
 
   it('marks an agent that died without a word terminated, and stops polling for it', async () => {
-    // SIGKILL, a crash, Codex's missing SessionEnd: no hook says so, and the
+    // SIGKILL, a crash: no hook says so, and the
     // session used to sit on "working" forever.
     const { mgr, stateEvents, getTerminalsChanges } = polled('/bin/zsh');
     await vi.advanceTimersByTimeAsync(2_000);
@@ -1443,7 +1443,7 @@ describe('agent liveness polling', () => {
     stateEvents.length = 0;
     const changes = getTerminalsChanges();
     // A shell the agent left behind, and a window to adopt: both would be news.
-    answer([{ index: 1, name: 'claude', command: 'zsh', pid: 41 }, { index: 2, name: 'codex', command: 'node', pid: 42 }]);
+    answer([{ index: 1, name: 'claude', command: 'zsh', pid: 41 }, { index: 2, name: 'opencode', command: 'node', pid: 42 }]);
     await sync;
     expect(stub.processCommandLine).not.toHaveBeenCalled();
     expect(stateEvents).toEqual([]);
@@ -1811,7 +1811,7 @@ describe('shell polling', () => {
   });
 
   it('polls an agent-only worktree, for an exit no hook reports', () => {
-    // A SIGKILL, a crash, or Codex (no SessionEnd) sends nothing: hook events
+    // A SIGKILL or a crash sends nothing: hook events
     // alone left such a session "working" forever.
     vi.useFakeTimers();
     const { mgr } = create();
@@ -2159,5 +2159,37 @@ describe('resume', () => {
     killed.mgr.noteSession({ workspaceId: 'wt-1', windowIndex: 1, sessionId: ID });
     await killed.mgr.killWorktreeSession('wt-1');
     expect(killed.mgr.resumableProvider('wt-1')).toBeUndefined();
+  });
+
+  describe('state from a version with Codex support', () => {
+    const CODEX = { state: 'waiting', turned: true, provider: 'codex', sessionId: ID };
+
+    it('does not crash on a persisted codex window, and offers no resume for it, keeping the claude one', async () => {
+      const memento = new FakeMemento() as unknown as vscode.Memento;
+      await memento.update('stack.claudeStates', { 'wt-1': { 1: CODEX }, 'wt-2': { 1: CODEX, 2: { state: 'waiting', provider: 'claude', sessionId: ID } } });
+      const { mgr, stub } = create('claude', memento);
+      await mgr.reconnect([wt, wt2]); // no tmux session survived
+
+      expect(mgr.resumableProvider('wt-1')).toBeUndefined();
+      expect(await mgr.resume(wt)).toBe(0);
+      expect(stub.respawnWindow).not.toHaveBeenCalled();
+      expect(mgr.resumableProvider('wt-2')).toBe('claude');
+    });
+
+    it('brings a codex window that is still running back as a plain terminal', async () => {
+      const memento = new FakeMemento() as unknown as vscode.Memento;
+      await memento.update('stack.claudeStates', { 'wt-1': { 2: CODEX } });
+      const { mgr, stub } = create('claude', memento);
+      (stub.hasSession as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+      (stub.listWindows as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { index: 1, name: 'claude' },
+        { index: 2, name: 'codex' },
+      ]);
+      await mgr.reconnect([wt]);
+      expect(mgr.getSessions('wt-1').map((s) => [s.index, s.kind, s.provider])).toEqual([
+        [1, 'agent', 'claude'],
+        [2, 'shell', undefined],
+      ]);
+    });
   });
 });

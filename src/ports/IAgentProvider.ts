@@ -1,15 +1,23 @@
 /** Registered coding-agent providers. Extend this list to add a new provider. */
-export const PROVIDER_IDS = ['claude', 'codex', 'opencode'] as const;
+export const PROVIDER_IDS = ['claude', 'opencode'] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 /**
+ * Whether `v` names a provider this build knows. Persisted state and settings
+ * can carry an id from an older version (a removed provider such as
+ * "codex"); readers check with this and treat anything else as no provider.
+ */
+export function isProviderId(v: unknown): v is ProviderId {
+  return typeof v === 'string' && (PROVIDER_IDS as readonly string[]).includes(v);
+}
+
+/**
  * How to get each agent, shown when its configured command is not on PATH.
- * Package names verified against the npm registry, so all three instructions
- * are one copyable line of the same shape.
+ * Package names verified against the npm registry, so every instruction is
+ * one copyable line of the same shape.
  */
 export const PROVIDER_INSTALL: Record<ProviderId, { label: string; install: string }> = {
   claude:   { label: 'Claude Code', install: 'npm i -g @anthropic-ai/claude-code' },
-  codex:    { label: 'Codex CLI',   install: 'npm i -g @openai/codex' },
   opencode: { label: 'opencode',    install: 'npm i -g opencode-ai' },
 };
 

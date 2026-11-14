@@ -22,18 +22,7 @@ function OpenCodeMark({ size = 10 }: { size?: number }) {
   );
 }
 
-/** OpenAI's knot, reduced to a single loop at this size. */
-function CodexMark({ size = 10 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <circle cx="8" cy="8" r="5.4" stroke="#10A37F" strokeWidth="1.7" />
-      <path d="M8 2.6c2.4 1.6 3.6 3.4 3.6 5.4s-1.2 3.8-3.6 5.4C5.6 11.8 4.4 10 4.4 8S5.6 4.2 8 2.6Z"
-        stroke="#10A37F" strokeWidth="1.4" />
-    </svg>
-  );
-}
-
-/** Stand-in for a provider this build does not know about (an older session's id). */
+/** Stand-in for a provider this build does not know about (an older session's id, or a removed provider's). */
 function UnknownMark({ size = 10 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -47,7 +36,6 @@ export type ProviderVisual = { icon: (props: { size?: number }) => React.ReactEl
 /** Brand icon + display name per provider. */
 const PROVIDER_VISUAL: Record<string, ProviderVisual> = {
   claude:   { icon: ClaudeSpark,  label: 'claude' },
-  codex:    { icon: CodexMark,    label: 'codex' },
   opencode: { icon: OpenCodeMark, label: 'opencode' },
 };
 
@@ -63,7 +51,7 @@ export function visualFor(provider?: string): ProviderVisual {
 }
 
 /** Order shown in the dropdown — stable, so the list never reshuffles under the cursor. */
-export const PROVIDER_ORDER = ['claude', 'codex', 'opencode'] as const;
+export const PROVIDER_ORDER = ['claude', 'opencode'] as const;
 
 export function ProviderMark({ provider, size = 12 }: { provider?: string; size?: number }) {
   const visual = visualFor(provider);

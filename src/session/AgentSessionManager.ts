@@ -7,7 +7,7 @@ import { Emitter } from '../core/Emitter';
 import type { KeyValueStore } from '../core/KeyValueStore';
 import type { ISessionManager, TmuxWindow } from '../ports/ISessionManager';
 import type { ProviderId } from '../ports/IAgentProvider';
-import { isAgentWindowName, providerForWindowName } from '../ports/IAgentProvider';
+import { isAgentWindowName, isProviderId, providerForWindowName } from '../ports/IAgentProvider';
 import type { ProviderFactory } from '../providers/ProviderFactory';
 import type { SessionItem } from '../webview/types';
 import { displayLabel } from '../worktree/displayLabel';
@@ -55,8 +55,8 @@ const tookTurn = (state: AgentSessionState): boolean => state === 'active' || st
 type PersistedWindow = { state: AgentSessionState; turned?: boolean; provider?: ProviderId; sessionId?: string };
 
 /**
- * What a session id may look like to be put on a command line: Claude and Codex
- * use UUIDs, opencode `ses_…`. Anything else is not stored, so a hook payload
+ * What a session id may look like to be put on a command line: Claude uses
+ * UUIDs, opencode `ses_…`. Anything else is not stored, so a hook payload
  * can never smuggle shell syntax into a resume command.
  */
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -210,7 +210,13 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
     if (typeof entry === 'string') return { state: entry as AgentSessionState };
     const value = (entry as Record<number, unknown> | undefined)?.[windowIndex];
     if (typeof value === 'string') return { state: value as AgentSessionState };
-    return value && typeof value === 'object' ? value as PersistedWindow : undefined;
+    if (!value || typeof value !== 'object') return undefined;
+    const w = value as PersistedWindow;
+    // A provider this build no longer has (e.g. "codex", since removed) is
+    // dropped: the window keeps its state, but there is no agent to resume it.
+    if (w.provider === undefined || isProviderId(w.provider)) return w;
+    const { provider: _removed, ...rest } = w;
+    return rest;
   }
 
   /**
@@ -292,7 +298,7 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
    *
    * With `liveness`, also notices agents that are gone (see agentLiveness).
    * State otherwise only moves on hook events, and some exits send none — a
-   * SIGKILL, a crash, Codex (which has no SessionEnd) — so such a session sat
+   * SIGKILL, a crash — so such a session sat
    * on "working" or "permission" forever. The poller asks for it; hook-driven
    * calls do not, an agent that just sent a hook being alive by definition.
    */
@@ -460,11 +466,11 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
   private static readonly SUBMIT_RETRIES = 2;
   /**
    * Providers whose hook fires on submit: UserPromptSubmit, which HookServer
-   * maps to 'active' (see ClaudeHookInstaller / CodexHookInstaller). opencode's
+   * maps to 'active' (see ClaudeHookInstaller). opencode's
    * plugin has no submit event — only a reply to a permission — so it cannot
    * acknowledge one.
    */
-  private static readonly SUBMIT_ACK_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>(['claude', 'codex']);
+  private static readonly SUBMIT_ACK_PROVIDERS: ReadonlySet<ProviderId> = new Set<ProviderId>(['claude']);
   /** Prompt submissions waiting on their window's next hook event, keyed `worktreeId:windowIndex`. */
   private submitWaiters = new Map<string, Set<(state: AgentSessionState) => void>>();
 
@@ -728,7 +734,7 @@ export class AgentSessionManager<T extends { show(): void } = { show(): void }> 
    * Pressing Enter the instant the paste returned often lost the submit:
    * the agent was still taking the paste in and swallowed the
    * keypress. So: paste, let it settle, press Enter, and then — where the
-   * agent can say so — wait for it to confirm. Claude Code and Codex fire
+   * agent can say so — wait for it to confirm. Claude Code fires
    * UserPromptSubmit on a submit, which arrives here as 'active' for this
    * window; no confirmation within SUBMIT_ACK_TIMEOUT_MS means the Enter went
    * nowhere, and it is pressed again, at most SUBMIT_RETRIES times.

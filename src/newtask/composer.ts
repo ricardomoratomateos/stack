@@ -62,7 +62,6 @@ export function resolveBranch(manual: string | null, description: string): Resol
 /** Display names; the lowercase `label` in the sidebar's provider table is a command, not a name. */
 const PROVIDER_NAMES: Record<ProviderId, string> = {
   claude: 'Claude',
-  codex: 'Codex',
   opencode: 'opencode',
 };
 

@@ -606,8 +606,8 @@ mod settings_tests {
         let _ = std::fs::remove_dir_all(&dir);
         let file = dir.join("nested/settings.json");
         write_settings_at(&file, &obj(json!({"claudeCommand": "c"}))).unwrap();
-        let out = write_settings_at(&file, &obj(json!({"codexCommand": "x"}))).unwrap();
-        assert_eq!(out, json!({"claudeCommand": "c", "codexCommand": "x"}));
+        let out = write_settings_at(&file, &obj(json!({"opencodeCommand": "x"}))).unwrap();
+        assert_eq!(out, json!({"claudeCommand": "c", "opencodeCommand": "x"}));
         assert_eq!(read_object(&file).len(), 2);
         assert_eq!(std::fs::read_dir(file.parent().unwrap()).unwrap().count(), 1);
         let _ = std::fs::remove_dir_all(&dir);

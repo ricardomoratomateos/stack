@@ -9,9 +9,8 @@ import { HookRoutes } from './HookRoutes';
  * The notify script, byte-for-byte identical on every install — and meant to
  * stay that way across releases.
  *
- * Codex records hook trust against a hash of the hook definition and silently
- * skips anything that no longer matches, so every change here costs every
- * Codex user a re-trust, with their sidebar frozen until they do it. Hence:
+ * Agents that are already running keep invoking whatever is on disk, so the
+ * script is written to never need a change:
  *
  * - No endpoint baked in. The HookServer binds a random port per window, and
  *   the script finds the right one at send time (see HookRoutes).
@@ -20,17 +19,17 @@ import { HookRoutes } from './HookRoutes';
  *   versions add — and Stack's own ids ride in X-Stack-* headers. What the
  *   extension reads out of an event can grow without the script changing.
  * - A reply channel. A response body starting with `stack-reply:` is printed
- *   to stdout, which is how Claude Code and Codex take a hook's answer (extra
+ *   to stdout, which is how Claude Code takes a hook's answer (extra
  *   context, a permission decision). Nothing uses it yet; it is here so that
  *   using it later does not mean changing this file.
  * - Bounded. A connect timeout and --max-time cap the wait, because a paused
  *   extension host (a debugger, a hung window) accepts the connection and then
  *   never answers, and the agent waits on its hook.
  *
- * $1 is the event name, because the agents disagree on how they announce it
- * (Claude sets HOOK_EVENT_NAME, Codex sends hook_event_name on stdin); $2 the
- * provider the hook was registered for. We register the command ourselves, so
- * explicit arguments sidestep the differences.
+ * $1 is the event name, so the script does not depend on how an agent
+ * announces it (Claude sets HOOK_EVENT_NAME); $2 the provider the hook was
+ * registered for. We register the command ourselves, so explicit arguments
+ * keep the script agent-agnostic.
  */
 const SCRIPT = `#!/bin/bash
 # Stack notify hook — generated, do not edit manually.
@@ -115,9 +114,9 @@ exit 0
  * Registers Stack's notify hook in an agent whose hook config is JSON shaped
  * like `{ "hooks": { "<Event>": [{ "hooks": [{ type, command }] }] } }`.
  *
- * Claude Code and Codex both landed on that same shape, so they share one
- * installer and differ only in which file they read and which events they
- * actually emit.
+ * Claude Code's shape. Kept generic over the file and the events it
+ * registers, so removeLegacyCodexHooks can reuse its uninstall on the
+ * `~/.codex/hooks.json` earlier versions wrote into.
  */
 export class JsonHookInstaller {
   readonly scriptPath: string;
@@ -263,7 +262,7 @@ export class JsonHookInstaller {
       const command = this.commandFor(event);
       // Strip our own previous entries (any shape) before re-adding, so a
       // changed script path or command format never leaves a stale duplicate.
-      // Other tools' entries are left untouched — Codex users commonly have
+      // Other tools' entries are left untouched — users commonly have
       // another harness registered in the very same file.
       hooks[event] = [...this.withoutOurs(hooks[event]), { matcher: '', hooks: [{ type: 'command', command }] }];
     }
@@ -278,10 +277,15 @@ export class JsonHookInstaller {
     const settings = this.readSettings(action);
     if (settings['hooks'] === undefined) return;
     const hooks = this.hooksOf(settings, action);
+    let changed = false;
     for (const event of this.events) {
       if (!hooks[event]) continue;
-      hooks[event] = this.withoutOurs(hooks[event]);
+      const kept = this.withoutOurs(hooks[event]);
+      if (JSON.stringify(kept) !== JSON.stringify(hooks[event])) changed = true;
+      hooks[event] = kept;
     }
+    // Nothing of ours in it: the file is not rewritten (nor backed up).
+    if (!changed) return;
     settings['hooks'] = hooks;
     this.writeSettings(settings);
   }

@@ -15,6 +15,7 @@ import { permissionPromptOnScreen } from '../session/permissionPrompt';
 import { ProviderFactory } from '../providers/ProviderFactory';
 import { HookRoutes } from '../providers/shared/HookRoutes';
 import { ConfigFileError } from '../providers/shared/configFile';
+import { removeLegacyCodexHooks } from '../providers/legacyCodexHooks';
 import { HookServer } from '../server/HookServer';
 import { GitWatcher } from '../git/GitWatcher';
 import { PrMonitor } from '../pr/PrMonitor';
@@ -53,7 +54,7 @@ const IMPORTED_KEY = 'stackd.imported';
 export interface DaemonOptions {
   /** `~/.config/stack`: state.json, settings.json, hook routes, discovery files, the socket. */
   configDir: string;
-  /** Where the agents' own configs live (`~/.claude`, `~/.codex`). Defaults to the user's home. */
+  /** Where the agents' own configs live (`~/.claude`, `~/.config/opencode`). Defaults to the user's home. */
   home?: string;
   /** `tmux -L <name>`: a tmux server of its own. Default: the user's server. */
   tmuxSocket?: string;
@@ -238,6 +239,9 @@ export class StackDaemon {
           this.log(e instanceof ConfigFileError ? e.message : `[stackd] could not install the ${p.label} hooks: ${String(e)}`);
         }
       }
+      // Codex support is gone; take Stack's hooks back out of the file earlier versions wrote them into.
+      const left = removeLegacyCodexHooks(this.opts.configDir, this.opts.home ?? os.homedir());
+      if (left) this.log(left);
     }
 
     this.subscriptions.push(

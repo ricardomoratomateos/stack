@@ -63,7 +63,7 @@ export async function runChecks(d: DoctorDeps): Promise<Check[]> {
     : { id: 'stackd', ok: false, detail: `not running (no answer on ${d.socketPath}).`, fix: START });
 
   const commands: Record<ProviderId, string> = {
-    claude: d.config.claudeCommand, codex: d.config.codexCommand, opencode: d.config.opencodeCommand,
+    claude: d.config.claudeCommand, opencode: d.config.opencodeCommand,
   };
   const found = (id: ProviderId) => isCommandAvailable(commands[id], env);
 

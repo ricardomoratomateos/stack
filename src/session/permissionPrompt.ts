@@ -1,10 +1,9 @@
 /**
  * The question lines of the agents' permission prompts:
  * - Claude Code: "Do you want to proceed?", "Do you want to make this edit to …?"
- * - Codex: "Would you like to run the following command?" (older: "Allow command?")
  * - opencode: "Permission required", with "Allow once" among its choices
  */
-const PROMPT = [/\bDo you want to\b/, /\bWould you like to\b/, /\bAllow command\?/, /\bPermission required\b/i, /\bAllow once\b/];
+const PROMPT = [/\bDo you want to\b/, /\bPermission required\b/i, /\bAllow once\b/];
 
 /** How far up from the bottom of the screen a prompt's question may sit (a long command fills the box above its options). */
 const TAIL = 40;

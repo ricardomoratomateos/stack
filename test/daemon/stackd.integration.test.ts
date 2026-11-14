@@ -87,7 +87,7 @@ describe.skipIf(!hasTmux)('stackd serve (real tmux on an isolated socket)', () =
     const checks = await cmd<Array<{ id: string; ok: boolean }>>('doctor', {});
     expect(checks.find((c) => c.id === 'tmux')?.ok).toBe(true);
     expect(checks.find((c) => c.id === 'stackd')?.ok).toBe(true);
-    expect(checks.map((c) => c.id)).toEqual(expect.arrayContaining(['node', 'mcp', 'cli.claude', 'cli.codex', 'cli.opencode']));
+    expect(checks.map((c) => c.id)).toEqual(expect.arrayContaining(['node', 'mcp', 'cli.claude', 'cli.opencode']));
   });
 
   it('refuses a second daemon on the same socket', async () => {
@@ -213,6 +213,45 @@ describe('stackd hooks', () => {
       const settings = fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8');
       expect(settings).toContain(path.join(dir, 'cfg'));
       expect(fs.readFileSync(path.join(dir, 'cfg', 'hook-url'), 'utf8')).toBe(`http://127.0.0.1:${daemon.hooks.listeningPort}`);
+    } finally {
+      await daemon.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("takes Stack's hooks out of the given home's ~/.codex/hooks.json on start, leaving other tools' alone", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-'));
+    const home = path.join(dir, 'home');
+    const cfg = path.join(dir, 'cfg');
+    const codexHooks = path.join(home, '.codex', 'hooks.json');
+    const other = { type: 'command', command: '/other/harness/notify.sh' };
+    fs.mkdirSync(path.dirname(codexHooks), { recursive: true });
+    fs.writeFileSync(codexHooks, JSON.stringify({
+      hooks: {
+        Stop: [{ matcher: '', hooks: [{ type: 'command', command: `"${path.join(cfg, 'notify.sh')}" Stop codex` }] }, { hooks: [other] }],
+        PreToolUse: [{ hooks: [other] }],
+      },
+    }));
+    const daemon = new StackDaemon({ configDir: cfg, home, installHooks: true, importState: () => Promise.resolve({}), notify: () => {} });
+    try {
+      await daemon.start();
+      expect(JSON.parse(fs.readFileSync(codexHooks, 'utf8'))).toEqual({
+        hooks: { Stop: [{ hooks: [other] }], PreToolUse: [{ hooks: [other] }] },
+      });
+    } finally {
+      await daemon.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('creates no ~/.codex when there was none', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-'));
+    const home = path.join(dir, 'home');
+    fs.mkdirSync(home, { recursive: true });
+    const daemon = new StackDaemon({ configDir: path.join(dir, 'cfg'), home, installHooks: true, importState: () => Promise.resolve({}), notify: () => {} });
+    try {
+      await daemon.start();
+      expect(fs.existsSync(path.join(home, '.codex'))).toBe(false);
     } finally {
       await daemon.stop();
       fs.rmSync(dir, { recursive: true, force: true });

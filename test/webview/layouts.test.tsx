@@ -40,7 +40,7 @@ const state: StackState = {
       id: 'rev', branch: 'feat/csv', agent: 'waiting', sessions: [session({ title: 'CSV export' }), session({ name: 'zsh', kind: 'shell', provider: undefined, index: 2, title: 'npm run dev' })],
       git: { ...clean, hasChanges: true, staged: 1 }, pr: { number: 41, state: 'OPEN' },
     }),
-    wt({ id: 'work', branch: 'feat/work', agent: 'active', sessions: [session({ state: 'active', provider: 'codex' })] }),
+    wt({ id: 'work', branch: 'feat/work', agent: 'active', sessions: [session({ state: 'active', provider: 'opencode' })] }),
     wt({ id: 'gone', branch: 'spike/old', missing: true }),
     wt({ id: 'bye', branch: 'feat/bye', deleting: true }),
   ],

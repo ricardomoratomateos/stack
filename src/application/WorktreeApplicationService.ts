@@ -7,7 +7,7 @@ import type { ConfigSource } from '../config/ConfigSource';
 import { DEFAULT_STATUS, type GitWatcher } from '../git/GitWatcher';
 import type { PrMonitor } from '../pr/PrMonitor';
 import type { IWorktreeRepository } from '../ports/IWorktreeRepository';
-import { PROVIDER_IDS, PROVIDER_INSTALL, type ProviderId } from '../ports/IAgentProvider';
+import { isProviderId, PROVIDER_IDS, PROVIDER_INSTALL, type ProviderId } from '../ports/IAgentProvider';
 import { installedProviders } from '../providers/commandLookup';
 import { computeNamedPorts, portBlockFor, portEnv } from '../worktree/namedPorts';
 import type { IGitPort, DiffBase } from '../ports/IGitPort';
@@ -1275,6 +1275,8 @@ export class WorktreeApplicationService implements DiffPanelHost {
 
   /** Tell the user how to install an agent whose command is not on PATH. */
   async showProviderInstall(provider: ProviderId): Promise<void> {
+    // A provider this build does not have (a stale webview naming a removed one): nothing to install.
+    if (!isProviderId(provider)) return;
     const { label, install } = PROVIDER_INSTALL[provider];
     const copy = await this.deps.notify.confirm(
       `${label} is not on your PATH`,

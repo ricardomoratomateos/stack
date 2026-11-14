@@ -21,7 +21,7 @@ export function paneAt(x: number, y: number, doc: Document = document): string |
 
 /**
  * Files dropped on a terminal are typed into it as paths, the way Terminal.app does — Claude
- * Code and Codex attach an image when its path is pasted. Returns the unlisten function.
+ * Code attaches an image when its path is pasted. Returns the unlisten function.
  */
 export async function watchFileDrops(registry: TerminalRegistry): Promise<() => void> {
   if (!('__TAURI_INTERNALS__' in window)) return () => {};

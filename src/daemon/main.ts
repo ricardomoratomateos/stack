@@ -32,7 +32,7 @@ Usage:
                          runs, checks from here otherwise. Exit 1 on a failure.
 
 Environment: STACKD_CONFIG_DIR (default ~/.config/stack), STACKD_TMUX_SOCKET
-(a tmux -L server of its own), STACKD_HOME (where ~/.claude, ~/.codex live),
+(a tmux -L server of its own), STACKD_HOME (where ~/.claude, ~/.config/opencode live),
 STACKD_DEFER_IMPORT=1 (wait for a client's importState instead of reading VS Code's store).
 `;
 

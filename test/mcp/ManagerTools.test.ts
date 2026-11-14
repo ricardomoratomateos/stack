@@ -194,11 +194,11 @@ describe('stack_create_task', () => {
 
   it('creates a worktree on <KEY>-<slug> with the ticket and the fenced prompt, in the background', async () => {
     const h = harness();
-    const res = await h.ok('stack_create_task', { title: 'Fix payments', prompt: 'Do it', ticket, base_branch: 'develop', agent: 'codex' });
+    const res = await h.ok('stack_create_task', { title: 'Fix payments', prompt: 'Do it', ticket, base_branch: 'develop', agent: 'claude' });
     expect(res).toEqual({ task_id: 'new', worktree: '/repo/.worktrees/AS-9-fix-payments', branch: 'AS-9-fix-payments', status: 'created' });
     const opts = h.deps.createWorktree.mock.calls[0][0];
     expect(opts).toMatchObject({
-      branch: 'AS-9-fix-payments', title: 'Fix payments', baseBranch: 'develop', provider: 'codex',
+      branch: 'AS-9-fix-payments', title: 'Fix payments', baseBranch: 'develop', provider: 'claude',
       ticket: { source: 'jira', key: 'AS-9', url: 'https://jira/AS-9', title: 'Pay' }, silent: true, select: false,
     });
     expect(opts.ticket).not.toHaveProperty('description');
@@ -240,7 +240,9 @@ describe('stack_create_task', () => {
     expect(await h.err('stack_create_task', { prompt: 'P' })).toBe('"title" is required.');
     expect(await h.err('stack_create_task', { title: '  ', prompt: 'P' })).toBe('"title" is required.');
     expect(await h.err('stack_create_task', { title: 'T' })).toBe('"prompt" is required.');
-    expect(await h.err('stack_create_task', { title: 'T', prompt: 'P', agent: 'gpt' })).toBe('"agent" must be one of claude, codex, opencode.');
+    expect(await h.err('stack_create_task', { title: 'T', prompt: 'P', agent: 'gpt' })).toBe('"agent" must be one of claude, opencode.');
+    // Removed: asking for it is an input error, not a task with no agent.
+    expect(await h.err('stack_create_task', { title: 'T', prompt: 'P', agent: 'codex' })).toBe('"agent" must be one of claude, opencode.');
     expect(await h.err('stack_create_task', { title: 'T', prompt: 'P', ticket: 'AS-1' })).toBe('"ticket" must be an object.');
     expect(await h.err('stack_create_task', { title: 'T', prompt: 'P', ticket: [] })).toBe('"ticket" must be an object.');
     expect(await h.err('stack_create_task', { title: 'T', prompt: 'P', ticket: { key: 'K' } })).toBe('"source" is required.');
@@ -350,8 +352,8 @@ describe('stack_send_to_agent', () => {
   });
 
   it('aims at a session by index, index string, alias or name', async () => {
-    const h = harness({ items: [item({ sessions: [session({ index: 1 }), session({ index: 3, name: 'codex', alias: 'reviewer' })] })] });
-    for (const ref of [3, '3', 'reviewer', 'codex']) {
+    const h = harness({ items: [item({ sessions: [session({ index: 1 }), session({ index: 3, name: 'opencode', alias: 'reviewer' })] })] });
+    for (const ref of [3, '3', 'reviewer', 'opencode']) {
       expect(await h.ok('stack_send_to_agent', { task_id: 'a', message: 'm', session: ref })).toEqual({ status: 'delivered', session: 3 });
     }
     expect(await h.ok('stack_send_to_agent', { task_id: 'a', message: 'm', session: 'nobody' })).toEqual({

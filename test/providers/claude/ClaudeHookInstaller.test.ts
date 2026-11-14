@@ -78,9 +78,9 @@ describe('ClaudeHookInstaller', () => {
       expect(content).toContain('""|*[!A-Za-z0-9_-]*) ;;');
     });
 
-    it('is pinned: changing it costs every Codex user a re-trust', () => {
-      // Codex hashes the hook definition and silently skips a hook whose hash
-      // no longer matches. If this fails, the change is a decision, not a
+    it('is pinned: agents already running keep invoking whatever is on disk', () => {
+      // The script is written to never need a change (see JsonHookInstaller).
+      // If this fails, the change is a decision, not a
       // refactor: make it future-proof, mention it in the changelog, update
       // the hash.
       makeHook().install(hookUrl);
@@ -125,9 +125,8 @@ describe('ClaudeHookInstaller', () => {
     });
 
     it('leaves the script byte-identical when only the port changes', () => {
-      // Codex records hook trust against a hash of the definition. A URL baked
-      // into the script would change that hash on every activation (the
-      // HookServer port is random), silently untrusting the hook.
+      // A URL baked into the script would rewrite it on every activation (the
+      // HookServer port is random), under agents that are running it.
       makeHook().install(hookUrl);
       const past = new Date(Date.now() - 60_000);
       fs.utimesSync(scriptPath, past, past);

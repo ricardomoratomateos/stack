@@ -49,10 +49,10 @@ describe('stackd doctor', () => {
     expect(by(checks, 'stackd')?.fix).toMatch(/Stack\.app/);
     expect(by(checks, 'cli.claude')).toMatchObject({ ok: true, detail: `Claude Code: ${path.join(bin, 'claude')}` });
     // Not the default agent: missing is fine.
-    expect(by(checks, 'cli.codex')).toMatchObject({ ok: true });
-    expect(by(checks, 'cli.codex')?.detail).toMatch(/not installed/);
+    expect(by(checks, 'cli.opencode')).toMatchObject({ ok: true });
+    expect(by(checks, 'cli.opencode')?.detail).toMatch(/not installed/);
+    expect(by(checks, 'cli.codex')).toBeUndefined();
     // Hooks only for agents that are installed.
-    expect(by(checks, 'hooks.codex')).toBeUndefined();
     expect(by(checks, 'hooks.opencode')).toBeUndefined();
   });
 

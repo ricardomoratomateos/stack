@@ -42,6 +42,6 @@ export function toNewTaskInit(
     branches: fromStackd?.branches ?? [],
     baseBranch: fromStackd?.baseBranch ?? 'main',
     defaultProvider: prefs.defaultProvider ?? fromStackd?.defaultProvider ?? 'claude',
-    installedProviders: fromStackd?.installedProviders ?? ['claude', 'codex', 'opencode'],
+    installedProviders: fromStackd?.installedProviders ?? ['claude', 'opencode'],
   };
 }
