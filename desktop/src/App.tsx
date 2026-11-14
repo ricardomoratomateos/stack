@@ -100,11 +100,16 @@ export function App() {
   const frames = useRef<Frames>(loadFrames());
   const applying = useRef(0);
   const prevMode = useRef<Mode | null>(null);
+  /** Set when a panel (Review, Code) changes the mode itself: it also sets `maximized`, which must survive. */
+  const modeByPanel = useRef(false);
   useEffect(() => {
     const prev = prevMode.current;
     prevMode.current = mode;
-    setMaximized(null);
-    setStripExpanded(false);
+    if (modeByPanel.current) modeByPanel.current = false;
+    else {
+      setMaximized(null);
+      setStripExpanded(false);
+    }
     let live = true;
     void (async () => {
       applying.current = Date.now();
@@ -182,12 +187,18 @@ export function App() {
   useEffect(() => {
     if (panelId && !beforeReview.current) {
       beforeReview.current = { ...layoutNow.current };
-      if (layoutNow.current.mode !== 'full') setLayout((l) => setMode(l, 'full'));
+      if (layoutNow.current.mode !== 'full') {
+        modeByPanel.current = true;
+        setLayout((l) => setMode(l, 'full'));
+      }
       setMaximized('session');
     } else if (!panelId && beforeReview.current) {
       const b = beforeReview.current;
       beforeReview.current = null;
-      if (b.mode !== 'full') setLayout((l) => setMode(l, b.mode));
+      if (b.mode !== 'full') {
+        modeByPanel.current = true;
+        setLayout((l) => setMode(l, b.mode));
+      }
       setMaximized(b.maximized);
     }
   }, [panelId]);
@@ -286,6 +297,8 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       const sc = shortcutOf(e);
       if (!sc) return;
+      // In the Code tab ⇧⌘F is PhpStorm's Find in Path (code/keymap.ts), not the window mode.
+      if (sc.kind === 'cycle-mode' && (e.target as Element | null)?.closest?.('.code-host')) return;
       e.preventDefault();
       e.stopPropagation();
       if ((sc.kind === 'needs' || sc.kind === 'tab-prev' || sc.kind === 'tab-next' || sc.kind === 'focus-manager') && !dedupeNeeds()) return;
